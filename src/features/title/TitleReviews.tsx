@@ -2,8 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { formatScore } from '@/features/collection/score';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
-import type { TitleReview, ReviewSort } from '@/features/title/use-title-reviews';
+import {
+  REVIEW_LIMIT,
+  type ReviewOrder,
+  type ReviewSort,
+  type TitleReview,
+} from '@/features/title/use-title-reviews';
 import {
   Avatar,
   Button,
@@ -19,8 +25,9 @@ import { theme } from '@/ui/tokens';
 export type TitleReviewsProps = {
   reviews: TitleReview[];
   loading: boolean;
-  sort: ReviewSort;
-  onChangeSort: (sort: ReviewSort) => void;
+  /** The original page only ever passes a server order; the editorial sheet may pass Rating. */
+  sort: ReviewOrder;
+  onChangeSort: (sort: ReviewOrder) => void;
   /** Marks one review helpful, or takes it back. */
   onToggleHelpful: (review: TitleReview) => void;
   /** True when this viewer's spoiler masking should apply to a given note. */
@@ -40,6 +47,42 @@ export type TitleReviewsProps = {
    * button whose only outcome is an error.
    */
   viewerId: string;
+  /**
+   * Show only this many reviews, without the sort control: the immersive title page's
+   * preview (2026-11-04), which expands into the full list in place. Absent, everything
+   * shows, as on the original page.
+   */
+  limit?: number;
+  /**
+   * The immersive page's Reviews tab (Cinematic Editorial, founder phone QA 2026-11-04).
+   *
+   * Your published review leads, in a light "Your review" section with a small
+   * *Edit review* beneath it, and the full-width compose button goes. No score circle on
+   * it — yours is already the emphasis in the title module. Everyone else's follow,
+   * unchanged, with yours left out of the list so it is never shown twice. Without a
+   * published review, a compact *Write a review*. Absent, the tab is the original page's.
+   */
+  variant?: 'editorial';
+  /**
+   * The viewer's own **published** review — their note with public visibility, from their
+   * own row, never a private note. Read by the editorial variant only.
+   */
+  ownReview?: {
+    text: string;
+    hasSpoilers: boolean;
+    updatedAt: string | null;
+    helpfulCount: number;
+  } | null;
+  /**
+   * Editorial only: whether Rating can be offered — true only when the Most Helpful list
+   * it re-orders is complete. See `ReviewOrder`.
+   */
+  ratingAvailable?: boolean;
+  /**
+   * The server stopped at its ceiling, so there may be more reviews than are listed. Said
+   * once at the foot rather than implied by silence.
+   */
+  truncated?: boolean;
 };
 
 /**
@@ -75,16 +118,86 @@ export function TitleReviews({
   onWrite,
   noun,
   viewerId,
+  limit,
+  variant,
+  ownReview = null,
+  ratingAvailable = false,
+  truncated = false,
 }: TitleReviewsProps) {
   // Which review's reason sheet is open, by `user_media.id`.
   const [reporting, setReporting] = useState<string | null>(null);
+  const editorial = variant === 'editorial';
+  // In the editorial tab your own review is drawn above, so it is not listed again.
+  const listed = editorial ? reviews.filter((review) => review.userId !== viewerId) : reviews;
+  // The editorial sheet's four orders; the original page keeps its three, unchanged.
+  const options = editorial
+    ? EDITORIAL_SORT_OPTIONS.filter((option) => option.id !== 'rating' || ratingAvailable)
+    : SORT_OPTIONS;
+  const choose = editorial ? nextEditorialOrder : nextSort;
 
   return (
     <View style={styles.tab}>
+      {editorial ? (
+        <View style={styles.compose}>
+          {ownReview && viewerRanked ? (
+            <View style={styles.own} testID="your-review">
+              <Text variant="caption" tone="tertiary">
+                {['Your review', formatDate(ownReview.updatedAt)].filter(Boolean).join(' \u00b7 ')}
+              </Text>
+              {/* Never masked: it is the reader's own writing. Its spoiler claim still
+                  shows, as the marker every review carries. */}
+              <SpoilerNote
+                text={ownReview.text}
+                hasSpoilers={ownReview.hasSpoilers}
+                masked={false}
+                numberOfLines={6}
+                titleForLabel={noun}
+              />
+              <View style={styles.ownFoot}>
+                {ownReview.helpfulCount > 0 ? (
+                  <Text variant="caption" tone="tertiary" style={styles.ownHelpful}>
+                    {helpfulWords(ownReview.helpfulCount)}
+                  </Text>
+                ) : (
+                  <View style={styles.ownHelpful} />
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit your review"
+                  onPress={onWrite}
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                  style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+                  testID="edit-review"
+                >
+                  <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+                  <Text variant="callout" tone="action">
+                    Edit review
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+              onPress={onWrite}
+              hitSlop={{ top: 12, bottom: 12 }}
+              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+              testID="write-review"
+            >
+              <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Text variant="callout" tone="action">
+                {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      ) : null}
       {/* The control first, because somebody who has just ranked something is more
           likely to be here to write than to read. Absent when they have not ranked
           it — a review of something you have not placed in your list is a review with
           no score, and the founder's route in is to rank first. */}
+      {editorial ? null : (
       <View style={styles.compose}>
         {viewerRanked ? (
           <Button
@@ -100,20 +213,27 @@ export function TitleReviews({
           />
         )}
       </View>
+      )}
 
       {/* Offered once there is an order to choose. Kept while Following is active even
           when it returns nothing, so the reader can see which filter emptied the list
-          rather than meeting a bare empty state with no way back. */}
-      {reviews.length > 1 || sort === 'following' ? (
+          rather than meeting a bare empty state with no way back. In the editorial
+          sheet it also stays while a new order loads, and while any order but the
+          default is chosen: a control that vanishes mid-switch is a control the reader
+          cannot take back (post-QA sprint 2). */}
+      {limit === undefined &&
+      (listed.length > 1 ||
+        sort === 'following' ||
+        (editorial && (loading || sort !== 'top_desc'))) ? (
         <View style={styles.sort}>
           <SegmentedTabs
-            options={SORT_OPTIONS.map((option) => ({
+            options={options.map((option) => ({
               id: option.id,
               label: option.labelFor(sort),
               accessibilityLabel: option.spokenFor(sort),
             }))}
             value={axisOf(sort)}
-            onChange={(axis) => onChangeSort(nextSort(sort, axis))}
+            onChange={(axis) => onChangeSort(choose(sort, axis))}
             accessibilityLabel="Sort reviews"
           />
         </View>
@@ -121,7 +241,7 @@ export function TitleReviews({
 
       {loading ? (
         <SkeletonRow count={2} />
-      ) : reviews.length === 0 ? (
+      ) : listed.length === 0 ? (
         sort === 'following' ? (
           <EmptyState
             kind="nothingYet"
@@ -133,12 +253,16 @@ export function TitleReviews({
           <EmptyState
             kind="nothingYet"
             compact
-            title="No reviews yet"
-            body={`Be the first to leave a review of this ${noun}.`}
+            title={editorial && ownReview ? 'No other reviews yet' : 'No reviews yet'}
+            body={
+              editorial && ownReview
+                ? `Yours is the only review of this ${noun} so far.`
+                : `Be the first to leave a review of this ${noun}.`
+            }
           />
         )
       ) : (
-        reviews.map((review) => (
+        (limit === undefined ? listed : listed.slice(0, limit)).map((review) => (
           <View key={`${review.userId}-${review.updatedAt}`} style={styles.review}>
             <View style={styles.head}>
               <Pressable
@@ -212,36 +336,16 @@ export function TitleReviews({
                   </Text>
                 ) : null
               ) : (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: review.viewerHelpful }}
-                  accessibilityLabel={
-                    review.viewerHelpful
-                      ? `Helpful, marked by you. ${helpfulWords(review.helpfulCount)}`
-                      : `Mark ${review.name}'s review helpful. ${helpfulWords(review.helpfulCount)}`
-                  }
-                  accessibilityHint={
-                    review.viewerHelpful ? 'Takes your mark back' : 'Tells them it helped'
-                  }
-                  onPress={() => onToggleHelpful(review)}
-                  hitSlop={theme.space[2]}
-                  style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
-                >
-                  <Ionicons
-                    name={review.viewerHelpful ? 'thumbs-up' : 'thumbs-up-outline'}
-                    size={theme.layout.icon.sm}
-                    color={review.viewerHelpful ? theme.semantic.action : theme.text.tertiary}
-                  />
-                  <Text variant="caption" tone={review.viewerHelpful ? 'primary' : 'tertiary'}>
-                    {review.helpfulCount > 0 ? `Helpful \u00b7 ${review.helpfulCount}` : 'Helpful'}
-                  </Text>
-                </Pressable>
+                <HelpfulButton review={review} onToggle={onToggleHelpful} />
               )}
 
               {/* Reactions on the ranking this note belongs to. Kept, and kept
                   subordinate: it is a signal about the score rather than about the
                   writing, which is the confusion Helpful exists to end. */}
-              {review.reactionCount > 0 ? (
+              {/* Not in the editorial sheet, where the thumbs-up is the one reaction a
+                  review shows (post-QA sprint 2): a heart beside it read as a second
+                  way to like the writing. */}
+              {!editorial && review.reactionCount > 0 ? (
                 <View style={styles.reactions}>
                   <Ionicons
                     name="heart"
@@ -258,6 +362,17 @@ export function TitleReviews({
         ))
       )}
 
+      {truncated && !loading && listed.length > 0 ? (
+        <Text
+          variant="caption"
+          tone="tertiary"
+          style={styles.truncated}
+          testID="reviews-truncated"
+        >
+          {`Showing the first ${REVIEW_LIMIT} reviews in this order.`}
+        </Text>
+      ) : null}
+
       <ReportSheet
         visible={reporting !== null}
         onClose={() => setReporting(null)}
@@ -266,6 +381,279 @@ export function TitleReviews({
         noun="review"
       />
     </View>
+  );
+}
+
+export type ReviewsPreviewProps = {
+  /** The Most Helpful list, as the server ordered it. */
+  reviews: TitleReview[];
+  loading: boolean;
+  /** The read failed and nothing is cached: say so, rather than "No reviews yet". */
+  failed?: boolean;
+  onRetry?: () => void;
+  maskedFor: (review: TitleReview) => boolean;
+  viewerId: string;
+  viewerRanked: boolean;
+  /** The reader's own published review, from their own row; never a private note. */
+  ownReview: TitleReviewsProps['ownReview'];
+  onWrite: () => void;
+  /** Opens the full Reviews sheet, which is also where a clamped review reads in full. */
+  onSeeAll: () => void;
+  noun: string;
+  /** The thumbs-up on somebody else's review: the same write the sheet makes. */
+  onToggleHelpful?: (review: TitleReview) => void;
+  /** Who "Your review" is: the reader's own name and picture, from their profile. */
+  viewer?: { name: string; avatarUri: string | null };
+};
+
+/** How many reviews the title page shows before See all, the reader's own included. */
+export const REVIEWS_PREVIEW_COUNT = 2;
+
+/**
+ * **Reviews, after Cast** (post-QA sprint 2, 2026-11-05): one or two reviews on the
+ * title page itself, because what other people thought is a core part of bingd.
+ *
+ * Your published review first, in the same quiet "Your review" treatment as the sheet,
+ * with its small Edit; then the most helpful of everybody else's, three lines each. A
+ * whole review, the order controls, Helpful, Report and the rest are one tap away in the
+ * sheet — this is a view of the same server list, not a second one, so it cannot show a
+ * review the sheet would not, and a private note is never in it.
+ */
+export function ReviewsPreview({
+  reviews,
+  loading,
+  failed = false,
+  onRetry,
+  maskedFor,
+  viewerId,
+  viewerRanked,
+  ownReview = null,
+  onWrite,
+  onSeeAll,
+  noun,
+  onToggleHelpful,
+  viewer,
+}: ReviewsPreviewProps) {
+  const showOwn = Boolean(ownReview && viewerRanked);
+  const others = reviews
+    .filter((review) => review.userId !== viewerId)
+    .slice(0, REVIEWS_PREVIEW_COUNT - (showOwn ? 1 : 0));
+
+  if (loading && !showOwn) {
+    return (
+      <View style={styles.preview} testID="reviews-preview">
+        <SkeletonRow count={1} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.preview} testID="reviews-preview">
+      {showOwn && ownReview ? (
+        <View style={styles.own} testID="your-review">
+          <ReviewerHead
+            name="Your review"
+            avatar={viewer ? { uri: viewer.avatarUri, name: viewer.name } : null}
+            subline={[viewer?.name, formatDate(ownReview.updatedAt)].filter(Boolean).join(' · ')}
+            // Never a score here: yours is the module's, a screen above.
+            score={null}
+          />
+          <SpoilerNote
+            text={ownReview.text}
+            hasSpoilers={ownReview.hasSpoilers}
+            masked={false}
+            numberOfLines={3}
+            titleForLabel={noun}
+          />
+          <View style={styles.ownFoot}>
+            {ownReview.helpfulCount > 0 ? (
+              <Text variant="caption" tone="tertiary" style={styles.ownHelpful}>
+                {helpfulWords(ownReview.helpfulCount)}
+              </Text>
+            ) : (
+              <View style={styles.ownHelpful} />
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit your review"
+              onPress={onWrite}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+              testID="edit-review"
+            >
+              <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Text variant="callout" tone="action">
+                Edit review
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      {others.map((review) => (
+        <View key={review.id} style={styles.previewRow} testID="review-preview-row">
+          <Pressable
+            accessibilityRole="button"
+            // One spoken summary for the opinion. A masked review says so and never its
+            // words; its Show control is the sheet's, where each review is its own element.
+            accessibilityLabel={[
+              review.name,
+              review.score !== null ? `${formatScore(review.score)} out of 10` : null,
+              maskedFor(review) ? 'Contains spoilers' : review.text,
+            ]
+              .filter(Boolean)
+              .join('. ')}
+            accessibilityHint="Opens all reviews"
+            onPress={onSeeAll}
+            style={({ pressed }) => [styles.previewBody, pressed && styles.pressed]}
+            testID="review-preview"
+          >
+            <ReviewerHead
+              name={review.name}
+              avatar={{ uri: review.avatarUri, name: review.name }}
+              subline={formatDate(review.updatedAt) ?? `@${review.username}`}
+              score={review.score}
+            />
+            <SpoilerNote
+              text={review.text}
+              hasSpoilers={review.hasSpoilers}
+              masked={maskedFor(review)}
+              numberOfLines={3}
+              titleForLabel={noun}
+            />
+          </Pressable>
+          {/* Its own control, outside the opinion's press, so a screen reader reaches it
+              and a tap on it marks the review rather than opening the sheet. */}
+          {onToggleHelpful ? (
+            <View style={styles.previewFoot}>
+              <HelpfulButton review={review} onToggle={onToggleHelpful} />
+            </View>
+          ) : null}
+        </View>
+      ))}
+
+      {failed && others.length === 0 ? (
+        <View style={styles.previewEmpty} testID="reviews-preview-failed">
+          <Text variant="footnote" tone="secondary">
+            Reviews couldn’t load.
+          </Text>
+          {onRetry ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try loading reviews again"
+              onPress={onRetry}
+              hitSlop={{ top: 12, bottom: 12 }}
+              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+            >
+              <Ionicons name="refresh" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Text variant="callout" tone="action">
+                Try again
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {!failed && !showOwn && others.length === 0 ? (
+        <View style={styles.previewEmpty} testID="reviews-preview-empty">
+          <Text variant="footnote" tone="secondary">
+            No reviews yet
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+            onPress={onWrite}
+            hitSlop={{ top: 12, bottom: 12 }}
+            style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+            testID="write-review"
+          >
+            <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+            <Text variant="callout" tone="action">
+              {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {!failed && showOwn && others.length === 0 ? (
+        <Text variant="footnote" tone="tertiary" testID="reviews-preview-only-yours">
+          {`No other reviews of this ${noun} yet.`}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * **Who wrote it** (UI cohesion pass, 2026-11-06): a face, a name, the date under it and
+ * their number at the right — so a preview reads as a person's opinion, in the same shape
+ * the full sheet gives every review.
+ */
+function ReviewerHead({
+  name,
+  avatar,
+  subline,
+  score,
+}: {
+  name: string;
+  avatar: { uri: string | null; name: string } | null;
+  subline: string | null;
+  score: number | null;
+}) {
+  return (
+    <View style={styles.previewHead} testID="reviewer-head">
+      {avatar ? <Avatar size="sm" uri={avatar.uri} name={avatar.name} /> : null}
+      <View style={styles.personCopy}>
+        <Text variant="callout" numberOfLines={1}>
+          {name}
+        </Text>
+        {subline ? (
+          <Text variant="caption" tone="tertiary" numberOfLines={1}>
+            {subline}
+          </Text>
+        ) : null}
+      </View>
+      {score !== null ? <ScoreBadge score={score} size="sm" /> : null}
+    </View>
+  );
+}
+
+/**
+ * The thumbs-up, the one reaction a review shows: the sheet's and the preview's, so the two
+ * cannot disagree about what it says or what it does. Never drawn on the reader's own
+ * review, because the server refuses a self-vote.
+ */
+function HelpfulButton({
+  review,
+  onToggle,
+}: {
+  review: TitleReview;
+  onToggle: (review: TitleReview) => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: review.viewerHelpful }}
+      accessibilityLabel={
+        review.viewerHelpful
+          ? `Helpful, marked by you. ${helpfulWords(review.helpfulCount)}`
+          : `Mark ${review.name}'s review helpful. ${helpfulWords(review.helpfulCount)}`
+      }
+      accessibilityHint={review.viewerHelpful ? 'Takes your mark back' : 'Tells them it helped'}
+      onPress={() => onToggle(review)}
+      hitSlop={theme.space[2]}
+      style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
+      testID="review-helpful"
+    >
+      <Ionicons
+        name={review.viewerHelpful ? 'thumbs-up' : 'thumbs-up-outline'}
+        size={theme.layout.icon.sm}
+        color={review.viewerHelpful ? theme.semantic.action : theme.text.tertiary}
+      />
+      <Text variant="caption" tone={review.viewerHelpful ? 'primary' : 'tertiary'}>
+        {review.helpfulCount > 0 ? `Helpful \u00b7 ${review.helpfulCount}` : 'Helpful'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -291,19 +679,27 @@ function formatDate(value: string | null) {
  * "in what order", so giving it a second tap would invent a meaning the server does not
  * implement. Inside it the order is Top's: most helpful, then newest.
  */
-type SortAxis = 'top' | 'following' | 'recent';
+type SortAxis = 'top' | 'following' | 'recent' | 'rating';
 
-const axisOf = (sort: ReviewSort): SortAxis =>
-  sort === 'following' ? 'following' : sort.startsWith('top') ? 'top' : 'recent';
+const axisOf = (sort: ReviewOrder): SortAxis =>
+  sort === 'following'
+    ? 'following'
+    : sort.startsWith('top')
+      ? 'top'
+      : sort.startsWith('rating')
+        ? 'rating'
+        : 'recent';
 
 const DOWN = '\u2193';
 const UP = '\u2191';
 
-const SORT_OPTIONS: readonly {
+type SortOption = {
   id: SortAxis;
-  labelFor: (sort: ReviewSort) => string;
-  spokenFor: (sort: ReviewSort) => string;
-}[] = [
+  labelFor: (sort: ReviewOrder) => string;
+  spokenFor: (sort: ReviewOrder) => string;
+};
+
+const SORT_OPTIONS: readonly SortOption[] = [
   {
     id: 'top',
     labelFor: (sort) =>
@@ -334,10 +730,58 @@ const SORT_OPTIONS: readonly {
 ];
 
 /** Rules 2 and 3: press the active axis to flip it, press another to enter its default. */
-function nextSort(current: ReviewSort, pressed: SortAxis): ReviewSort {
+function nextSort(current: ReviewOrder, pressed: SortAxis): ReviewSort {
   if (pressed === 'following') return 'following';
   if (pressed === 'top') return current === 'top_desc' ? 'top_asc' : 'top_desc';
   return current === 'recent_desc' ? 'recent_asc' : 'recent_desc';
+}
+
+/**
+ * **The editorial sheet's orders** (post-QA sprint 2, 2026-11-05), in the founder's
+ * words: Most Helpful (the default), Newest, Rating — and Following kept as the filter it
+ * always was. The same contract as above: pressing the active one reverses it where a
+ * reversal means something. Newest reverses to *Oldest* in words, because "Newest ↑" is a
+ * contradiction a reader has to decode; Helpful and Rating keep the arrow.
+ */
+const EDITORIAL_SORT_OPTIONS: readonly SortOption[] = [
+  {
+    id: 'top',
+    labelFor: (sort) =>
+      sort === 'top_desc' ? `Helpful ${DOWN}` : sort === 'top_asc' ? `Helpful ${UP}` : 'Helpful',
+    spokenFor: (sort) =>
+      sort === 'top_desc'
+        ? 'Most helpful first'
+        : sort === 'top_asc'
+          ? 'Least helpful first'
+          : 'Most helpful',
+  },
+  {
+    id: 'recent',
+    labelFor: (sort) => (sort === 'recent_asc' ? 'Oldest' : 'Newest'),
+    spokenFor: (sort) =>
+      sort === 'recent_desc'
+        ? 'Newest first'
+        : sort === 'recent_asc'
+          ? 'Oldest first'
+          : 'Newest',
+  },
+  {
+    id: 'rating',
+    labelFor: (sort) =>
+      sort === 'rating_desc' ? `Rating ${DOWN}` : sort === 'rating_asc' ? `Rating ${UP}` : 'Rating',
+    spokenFor: (sort) =>
+      sort === 'rating_desc'
+        ? 'Highest rated first'
+        : sort === 'rating_asc'
+          ? 'Lowest rated first'
+          : 'Rating',
+  },
+  { id: 'following', labelFor: () => 'Following', spokenFor: () => 'Only people you follow' },
+];
+
+function nextEditorialOrder(current: ReviewOrder, pressed: SortAxis): ReviewOrder {
+  if (pressed === 'rating') return current === 'rating_desc' ? 'rating_asc' : 'rating_desc';
+  return nextSort(current, pressed);
 }
 
 /** The spoken count, which is where the number gets its noun. */
@@ -365,5 +809,33 @@ const styles = StyleSheet.create({
   foot: { flexDirection: 'row', alignItems: 'center', gap: theme.space[4] },
   helpful: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   reactions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
+  /**
+   * Your review in the editorial tab: a light Parchment surface and no border — set apart
+   * from everybody else's by tone, not by a frame.
+   */
+  own: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.control,
+    paddingHorizontal: theme.space[3],
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[1],
+    gap: theme.space[2],
+  },
+  ownFoot: { flexDirection: 'row', alignItems: 'center' },
+  ownHelpful: { flex: 1 },
+  inlineAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget - 12,
+  },
+  truncated: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
+  preview: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  previewRow: { gap: theme.space[1] },
+  previewBody: { gap: theme.space[2] },
+  previewHead: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  previewFoot: { flexDirection: 'row', paddingTop: 2 },
+  previewEmpty: { gap: theme.space[1] },
 });

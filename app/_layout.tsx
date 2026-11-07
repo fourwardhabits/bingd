@@ -21,6 +21,7 @@ import {
   useAuthRouting,
 } from '@/features/auth';
 import { useResumePendingInvite } from '@/features/invite';
+import { hydrateTitleLayout } from '@/features/title/title-layout';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
 import { useReportDeviceContext } from '@/features/notifications/use-report-device-context';
@@ -68,6 +69,13 @@ function RootLayout() {
 
   const [queryClient] = useState(createQueryClient);
   const navigationRef = useNavigationContainerRef();
+
+  // The title-page choice, read at launch rather than when the first title page asks, so a
+  // reader who chose Original is shown Original from the first page (release pass,
+  // 2026-11-07). The page also waits for it before loading anything from YouTube.
+  useEffect(() => {
+    void hydrateTitleLayout();
+  }, []);
 
   // Gives Sentry the route names behind an error. Paths carry ids rather than
   // titles, and query strings are stripped before send (monitoring.ts).
@@ -295,7 +303,10 @@ function Navigation() {
                 directory name — which here would spell `lists` over the top of a list. */}
               <Stack.Screen
                 name="lists/index"
-                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/index'] }}
+                // No stack header: the page draws the bingd. header with a back chevron and its
+                // own MY LISTS label (founder Preview QA, 2026-11-07). The title stays declared:
+                // it is the back label of a list pushed on top.
+                options={{ headerShown: false, title: ROOT_SCREEN_TITLES['lists/index'] }}
               />
               <Stack.Screen
                 name="lists/[id]"

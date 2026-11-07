@@ -1,6 +1,6 @@
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { SectionHeader, SkeletonRow, Text } from '@/ui/components';
+import { SectionHeader, type SectionHeaderSize, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { AwardBadge } from './AwardBadge';
@@ -17,6 +17,12 @@ export type ProfileAwardsProps = {
   userId: string;
   /** Opens the full twenty. The one interaction this section has. */
   onSeeAll: () => void;
+  /**
+   * The heading's size: `large` on the reader's own Profile tab only (founder final
+   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
+   * standard 12pt heading.
+   */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -59,7 +65,7 @@ export type ProfileAwardsProps = {
  * **See all opens the sheet that already exists.** There is one awards catalogue and
  * this is not it.
  */
-export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps) {
+export function ProfileAwards({ viewerId, userId, onSeeAll, headingSize }: ProfileAwardsProps) {
   const isSelf = viewerId === userId;
   const { width } = useWindowDimensions();
   /**
@@ -102,6 +108,7 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
       <SectionHeader
         title="bingd AWARDS"
         exactCase
+        size={headingSize}
         // Offered even with an empty shelf: the sheet is where the twenty are, and
         // "what could I earn" is the question a new account has.
         actionLabel="See all"

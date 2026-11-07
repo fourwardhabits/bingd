@@ -1,13 +1,19 @@
 import { useMemo } from 'react';
 
 import { posterUri } from '@/lib/images';
-import { PosterShelf } from '@/ui/components';
+import { PosterShelf, type SectionHeaderSize } from '@/ui/components';
 
 import { useProfileWatchlist } from './use-public-profile';
 
 export type ProfileWatchlistProps = {
   userId: string;
   onPressTitle: (mediaItemId: string) => void;
+  /**
+   * The heading's size: `large` on the reader's own Profile tab only (founder final
+   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
+   * standard 12pt heading.
+   */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -47,7 +53,7 @@ export type ProfileWatchlistProps = {
  * mean "add this to my own list" — a different action wearing the same icon. The title
  * page is one tap away and has the real control.
  */
-export function ProfileWatchlist({ userId, onPressTitle }: ProfileWatchlistProps) {
+export function ProfileWatchlist({ userId, onPressTitle, headingSize }: ProfileWatchlistProps) {
   const watchlist = useProfileWatchlist(userId);
 
   const tiles = useMemo(
@@ -63,5 +69,12 @@ export function ProfileWatchlist({ userId, onPressTitle }: ProfileWatchlistProps
     [watchlist.data],
   );
 
-  return <PosterShelf title="Watchlist" tiles={tiles} onPressTile={(tile) => onPressTitle(tile.id)} />;
+  return (
+    <PosterShelf
+      title="Watchlist"
+      headingSize={headingSize}
+      tiles={tiles}
+      onPressTile={(tile) => onPressTitle(tile.id)}
+    />
+  );
 }

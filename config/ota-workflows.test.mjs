@@ -148,6 +148,17 @@ describe('the OTA workflows', () => {
     });
   }
 
+  /**
+   * **Android only until iOS passes QA** (founder, 2026-11-07): no iOS build of this UI has
+   * been tested on a device, so neither lane publishes to iOS. A fixed value in the file,
+   * like the branch, so nothing typed at dispatch can widen it.
+   */
+  it('publishes to Android only, fixed in each file', () => {
+    for (const lane of ['preview', 'production']) {
+      assert.match(job(read(lane), 'publish'), /\n {6}platform: android\n/);
+    }
+  });
+
   it('the two differ only in the lane, once the comments are gone', () => {
     const normal = (lane) => withoutComments(read(lane)).replaceAll(lane, 'LANE');
     assert.equal(normal('production'), normal('preview'));

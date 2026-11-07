@@ -238,7 +238,7 @@ describe('the reactions on the post above the conversation', () => {
 
   /** The control, by the label `ActivityRow` gives it in each of its two states. */
   const control = (view: { getByLabelText: (m: RegExp) => unknown }, reacted: boolean) =>
-    view.getByLabelText(reacted ? /^You reacted to Sinners/ : /^React to Anna's activity/);
+    view.getByLabelText(reacted ? /You reacted to Sinners/ : /^React to Anna's activity/);
 
   it('asks about the activity on screen, and about nothing else', async () => {
     mockReactions.summary = summary();
@@ -263,8 +263,10 @@ describe('the reactions on the post above the conversation', () => {
     mockReactions.summary = summary({ mine: 'love', total: 6 });
     const view = await renderWithProviders(<ActivityScreen />);
 
-    // The label the control uses only when the reader has reacted.
-    await waitFor(() => expect(control(view, true)).toBeTruthy());
+    // The label the control uses only when the reader has reacted, led by its word.
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Liked\. You reacted to Sinners/)).toBeTruthy(),
+    );
   });
 
   it('sets the default reaction on a tap, and clears it on the next one', async () => {
@@ -292,7 +294,7 @@ describe('the reactions on the post above the conversation', () => {
     fireEvent(control(view, false) as never, 'longPress');
 
     // The shared pill, by the label it gives its own default choice.
-    await waitFor(() => expect(view.getByLabelText(/Love/i)).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Liked')).toBeTruthy());
   });
 
   /**
@@ -339,7 +341,7 @@ describe('the reactions on the post above the conversation', () => {
 
     await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
     expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
-    expect(view.queryByLabelText(/^You reacted to Sinners/)).toBeNull();
+    expect(view.queryByLabelText(/You reacted to Sinners/)).toBeNull();
     // And above all: no count claimed.
     expect(view.queryByText('0')).toBeNull();
   });

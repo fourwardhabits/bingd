@@ -343,6 +343,20 @@ describe('the true end', () => {
   });
 });
 
+describe('a first page that fails', () => {
+  /** The message said to try again and there was nothing to press. */
+  it('offers Try again, and pressing it reads the feed again', async () => {
+    mockFeedQueue = [{ error: { message: 'network' } }, { rows: fullPage() }];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load activity')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Try again' }));
+
+    await seeRow(view, 0);
+    expect(view.queryByText('Could not load activity')).toBeNull();
+  });
+});
+
 describe('a page that fails', () => {
   const failSecondPage = async () => {
     mockFeedQueue = [{ rows: fullPage() }, { error: { message: 'network' } }];

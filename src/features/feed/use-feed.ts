@@ -40,6 +40,18 @@ export type FeedItem = {
   year: number | null;
   posterPath: string | null;
   /**
+   * The wide artwork the Feed card leads with (cinematic Feed, 2026-11-04), and the
+   * parent series' pair beside it.
+   *
+   * A season has no backdrop of its own from this provider (`lib/hero.ts` says why), so
+   * the series' is the one a season card actually draws; its poster is the last fallback
+   * before the card falls back to the initials frame. Plain columns on `media_items`,
+   * whose read policy is `using (true)`, so selecting them widens no authorisation.
+   */
+  backdropPath: string | null;
+  parentBackdropPath: string | null;
+  parentPosterPath: string | null;
+  /**
    * The genres to print — the row's own, or the parent series' where a season has
    * none, which is every season the catalogue holds (`lib/media-metadata.ts`).
    *
@@ -177,6 +189,9 @@ type Embedded<T> = T | T[] | null;
  */
 type ParentShape = {
   title: string | null;
+  /** Both for the Feed card's artwork fallback (cinematic Feed, 2026-11-04). */
+  backdrop_path?: string | null;
+  poster_path?: string | null;
   genres: string[] | null;
   original_language: string | null;
   certification: string | null;
@@ -188,6 +203,8 @@ type MediaShape = {
   season_number: number | null;
   release_date: string | null;
   poster_path: string | null;
+  /** Optional: a fixture or an older embed without it reads as no backdrop. */
+  backdrop_path?: string | null;
   genres: string[] | null;
   original_language: string | null;
   certification: string | null;
@@ -489,9 +506,11 @@ const ACTIVITY_SELECT =
   // Named by its column, like `profiles:actor_id` below: feed_events has more than one
   // path to media_items (the grouped post's membership, 20261020000100), and a bare
   // `media_items(` is PGRST201, HTTP 300, whenever a second path exists (#209 QA).
-  'media_items:media_item_id(kind, title,season_number, release_date, poster_path, genres, ' +
-  'original_language, certification, runtime_minutes, episode_count, ' +
-  'parent:parent_id(title, genres, original_language, certification)), ' +
+  // `backdrop_path` on both, for the Feed card's wide artwork (cinematic Feed,
+  // 2026-11-04) — and the parent's poster, which is a season card's last fallback.
+  'media_items:media_item_id(kind, title,season_number, release_date, poster_path, backdrop_path, ' +
+  'genres, original_language, certification, runtime_minutes, episode_count, ' +
+  'parent:parent_id(title, genres, original_language, certification, backdrop_path, poster_path)), ' +
   'profiles:actor_id(username, display_name, avatar_path)';
 
 /**
@@ -797,6 +816,9 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
       posterPath: media?.poster_path ?? null,
+      backdropPath: media?.backdrop_path ?? null,
+      parentBackdropPath: parent?.backdrop_path ?? null,
+      parentPosterPath: parent?.poster_path ?? null,
       genres: subject ? productGenres(subject) : [],
       certification: subject ? effectiveCertification(subject) : null,
       runtimeMinutes: media?.runtime_minutes ?? null,

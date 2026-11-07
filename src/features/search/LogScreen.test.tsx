@@ -93,9 +93,13 @@ const pressSearchTab = () => {
   handler();
 };
 
+// The route's own params: `show: 'users'` is People's "Find people" (`memberSearch()`).
+let mockParams: Record<string, string | string[] | undefined> = {};
+const mockSetParams = jest.fn();
 jest.mock('expo-router', () => ({
   useNavigation: () => mockNavigation,
-  useRouter: () => ({ push: mockPush }),
+  useLocalSearchParams: () => mockParams,
+  useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
 }));
 
 // The wider search, which is a real network call in production and must be a decision
@@ -195,6 +199,8 @@ beforeEach(() => {
   mockSearchCast.mockResolvedValue([]);
   mockRpc.mockReset();
   mockPush.mockReset();
+  mockParams = {};
+  mockSetParams.mockReset();
   mockPrefs.clear();
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   mockRpc.mockImplementation((fn: string) =>
@@ -256,7 +262,7 @@ describe('a series in the results', () => {
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText(SERIES_ROW));
     expect(mockPush).toHaveBeenCalledWith('/title/series-1');
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('starts season logging from the + action', async () => {
@@ -287,7 +293,7 @@ describe('a film in the results', () => {
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
 
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
     await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
@@ -310,7 +316,7 @@ describe('a film in the results', () => {
 
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
@@ -318,6 +324,62 @@ describe('a film in the results', () => {
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
+  });
+});
+
+/**
+ * **Arriving from People's "Find people"** (founder, nav cohesion sprint, 2026-11-06):
+ * Search opens on its Users list, says so before anything is typed, and consumes the
+ * param so a later visit is an ordinary one.
+ */
+describe('arriving on Users', () => {
+  it('opens on Users with a prompt about people, and clears the request', async () => {
+    mockParams = { show: 'users' };
+    const view = await renderWithProviders(<LogScreen />);
+
+    expect(view.getByText('Find people')).toBeTruthy();
+    expect(view.getByText('Search by name or @username.')).toBeTruthy();
+    expect(view.queryByText('What did you watch?')).toBeNull();
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+  });
+
+  it('searches members alone once something is typed', async () => {
+    mockParams = { show: 'users' };
+    mockRpc.mockImplementation((fn: string) =>
+      Promise.resolve({
+        data:
+          fn === 'search_users'
+            ? [{ id: 'user-anna', username: 'anna', display_name: 'Anna Rivers', avatar_path: null, visibility: 'public' }]
+            : fn === 'follow_state_with'
+              ? []
+              : [],
+        error: null,
+      }),
+    );
+    const view = await renderWithProviders(<LogScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Search'), 'ann');
+    await waitFor(() => expect(view.getByText('Anna Rivers')).toBeTruthy());
+    const users = view.getByRole('button', { name: 'Users' });
+    expect(users.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it('takes a repeated param once, rather than re-rendering for ever', async () => {
+    // A new array on every render, as the router hands a repeated query param over
+    // (independent review 1): compared as-is, it set state on every render.
+    let reads = 0;
+    Object.defineProperty(mockParams, 'show', { get: () => { reads += 1; return ['users', 'users']; }, enumerable: true, configurable: true });
+    const view = await renderWithProviders(<LogScreen />);
+
+    expect(view.getByText('Find people')).toBeTruthy();
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+    expect(reads).toBeLessThan(20);
+  });
+
+  it('is an ordinary Search without the param', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    expect(view.getByText('What did you watch?')).toBeTruthy();
+    expect(mockSetParams).not.toHaveBeenCalled();
   });
 });
 
@@ -1857,7 +1919,7 @@ describe('saving from a search result', () => {
     expect(callsTo('recommend')).toHaveLength(0);
     // No navigation, and no log sheet: the reader saves and carries on searching.
     expect(mockPush).not.toHaveBeenCalled();
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('does not open the title underneath it', async () => {
@@ -1877,7 +1939,7 @@ describe('saving from a search result', () => {
     await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
 
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(callsTo('set_watchlist')).toHaveLength(0);
   });
 
@@ -1963,7 +2025,7 @@ describe('the leading action is the reader’s own ranking state', () => {
     await fireEvent.press(view.getByLabelText(/^10\.0 out of 10/));
 
     // The same sheet `+` opens, which is the sheet that knows about rebucket and rerank.
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
   });
 
   /**
@@ -1982,7 +2044,7 @@ describe('the leading action is the reader’s own ranking state', () => {
     expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
 
     await fireEvent.press(view.getByLabelText('Log Inception'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(0);
   });
 
@@ -2005,7 +2067,7 @@ describe('the leading action is the reader’s own ranking state', () => {
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('leads an unlogged title with the ordinary log action', async () => {

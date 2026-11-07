@@ -5,6 +5,7 @@ import {
   Animated,
   Easing,
   Pressable,
+  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -15,6 +16,9 @@ import {
   enqueueCelebrations,
   useCelebrationHandoff,
 } from '@/features/awards/celebration-queue';
+import { awardAnnouncement } from '@/features/awards/announcement';
+import { AwardBadge } from '@/features/awards/AwardBadge';
+import { badgeFor } from '@/features/awards/badges';
 import { useNewUnlocks } from '@/features/awards/use-new-unlocks';
 import { useStreakAdvance } from '@/features/streaks/use-streak-advance';
 import {
@@ -286,6 +290,17 @@ function Session({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
+  /**
+   * What the placement on screen earned, for the reveal to name (post-QA sprint 2,
+   * 2026-11-05). A copy of what the detection already hands the celebration queue — the
+   * queue is unchanged and still plays after the sheet closes; this only lets the reveal
+   * say it too. Empty until the detection answers, and empty for good if it fails.
+   *
+   * `placedToken` ties an answer to the placement that asked for it, so a slow ledger
+   * read can never attach one placement's award to another's reveal.
+   */
+  const [earned, setEarned] = useState<{ awardKey: string; tierKey: string }[]>([]);
+  const placedToken = useRef(0);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
 
@@ -538,6 +553,8 @@ function Session({
          * are independent — one failing must not cost the other its celebration — so
          * they settle separately and each enqueues on its own.
          */
+        const token = ++placedToken.current;
+        setEarned([]);
         void detectNewUnlocks()
           .then((unlocked) => {
             enqueueCelebrations(
@@ -547,6 +564,9 @@ function Session({
                 tierKey: row.tierKey,
               })),
             );
+            if (token === placedToken.current) {
+              setEarned(unlocked.map(({ awardKey, tierKey }) => ({ awardKey, tierKey })));
+            }
           })
           .catch(() => {});
 
@@ -783,6 +803,7 @@ function Session({
             subjectId={subject.id}
             title={subject.title}
             surface={surface}
+            earned={earned}
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
@@ -1569,9 +1590,12 @@ function Reveal({
   subjectId,
   title,
   surface,
+  earned = [],
   onDone,
   onFinishLog,
 }: {
+  /** Awards this placement unlocked, from the ledger diff. Empty is the ordinary case. */
+  earned?: { awardKey: string; tierKey: string }[];
   score: number;
   position: number;
   /** Where it was before, on a re-ranking; null on a first one. */
@@ -1705,6 +1729,20 @@ function Reveal({
    * read. The haptic is in its own mount-only effect for the same reason, and because it
    * is governed by a different switch entirely.
    */
+  /**
+   * **The exits are always on screen** (independent review, post-QA sprint 2). The reveal
+   * grew an award block, and two awards at a large text size on a small phone made the
+   * column taller than the sheet's 90% cap, with Done and Add details below the edge and
+   * nothing to scroll. So everything above the exits scrolls inside a bounded body, the
+   * same explicit-height pattern the title page's cast sheet uses, and the exits sit under
+   * it. On an ordinary phone the body is shorter than its bound and nothing scrolls.
+   */
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  const revealBodyMax = Math.max(
+    REVEAL_BODY_MIN,
+    Math.round(windowHeight * 0.9) - REVEAL_CHROME - Math.round(REVEAL_EXIT_ROW * fontScale),
+  );
+
   const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
   const [entrance] = useState(() => new Animated.Value(0));
   const started = useRef(false);
@@ -1791,6 +1829,16 @@ function Reveal({
    * rather than the interpunct they are drawn with, because a screen reader says the
    * character.
    */
+  /**
+   * What each new award is called, by the one function every award surface names them
+   * with. Two at most: a ranking that crossed more tiers than that still celebrates each
+   * one after the sheet closes, and the reveal is not the place for a list.
+   */
+  const awards = earned.slice(0, REVEAL_AWARDS_SHOWN).map((award) => ({
+    ...award,
+    ...awardAnnouncement({ key: award.awardKey, tierKey: award.tierKey }),
+  }));
+
   const spokenPlacement = [
     `${displayTitle} scored ${formatScore(score)} out of 10.`,
     // Whichever of the two the screen is drawing, in the order it draws them — which
@@ -1807,6 +1855,13 @@ function Reveal({
 
   return (
     <View style={styles.reveal}>
+      <ScrollView
+        style={[styles.revealScroll, { maxHeight: revealBodyMax }]}
+        contentContainerStyle={styles.revealBody}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+        testID="reveal-body"
+      >
       {/* The entrance is on the panel and the identity block together rather than on the
           whole reveal, so the buttons at the bottom of the sheet do not move — a control
           that slides while a thumb is travelling toward it is the one kind of motion that
@@ -1845,44 +1900,49 @@ function Reveal({
         </Text>
 
         {/**
-         * **The placement leads again, directly under the title** (founder, physical
-         * Android, 2026-09-06) — where it was before 2026-09-05 and where the founder
-         * put it back after seeing both on a device.
+         * **The accomplishment, directly under the title, and now the loud line**
+         * (post-QA sprint 2, 2026-11-05 — the founder reversed the 2026-09-06 hierarchy).
          *
-         * What changed between the two is the part that made moving it safe: the line is
-         * now conditional and top-ten only, so it is no longer `#19 in Movies` leading
-         * the block. When it appears it is worth reading, and when it is not worth
-         * reading it is not there.
-         *
-         * It is **muted**, which is the other half of the founder's decision. The
-         * hierarchy is score, then title, then placement, then the names either side —
-         * so this must not arrive at the title's weight. `ordinal` keeps the tabular
-         * figures an ordinal wants; `secondary` is what stops it competing.
+         * The reveal had the two neighbours' names in a larger face than `#9 Thriller`,
+         * so what a reader took away was "below Double Indemnity" rather than "my ninth
+         * best thriller". It is now: score, title, **placement**, the neighbours small,
+         * then anything earned. Which lines are printed is unchanged — the top-ten rule,
+         * the overall-suppresses-genres rule and the movement sentence are exactly as
+         * they were; only their weight moved. Maroon, the accent of the score above it,
+         * in the headline face: a subtitle that is plainly the result.
          */}
-        {placement ? (
-          <Text
-            variant="ordinal"
-            tone="secondary"
-            style={styles.centre}
-            accessibilityElementsHidden
-            testID={moved ? 'reveal-movement' : undefined}
-          >
-            {placement}
-          </Text>
-        ) : null}
-
-        {genreContext ? (
-          <Text
-            variant="footnote"
-            // `secondary`, not `tertiary`: this is the placement line whenever the
-            // overall one is withheld, so it sits at the placement's tier rather than
-            // at the anchors'. The two below it are the quieter thing.
-            tone="secondary"
-            style={styles.centre}
-            accessibilityElementsHidden
-          >
-            {genreContext}
-          </Text>
+        {placement || genreContext ? (
+          <View style={styles.accomplishment} testID="reveal-accomplishment">
+            {placement ? (
+              <Text
+                variant="headline"
+                style={[styles.centre, styles.accomplishmentText]}
+                accessibilityElementsHidden
+                testID={moved ? 'reveal-movement' : undefined}
+              >
+                {placement}
+              </Text>
+            ) : null}
+            {genreContext
+              ? genres.map((entry, index) => (
+                  <View key={entry.genre} style={styles.accomplishmentItem}>
+                    {index > 0 ? (
+                      <Text variant="headline" tone="tertiary" accessibilityElementsHidden>
+                        ·
+                      </Text>
+                    ) : null}
+                    <Text
+                      variant="headline"
+                      style={[styles.centre, styles.accomplishmentText]}
+                      accessibilityElementsHidden
+                      testID="reveal-genre-rank"
+                    >
+                      {formatGenreRank(entry)}
+                    </Text>
+                  </View>
+                ))
+              : null}
+          </View>
         ) : null}
       </Animated.View>
 
@@ -1910,7 +1970,7 @@ function Reveal({
               accessibilityElementsHidden
             >
               Below{' '}
-              <Text variant="subhead" tone="secondary">
+              <Text variant="footnote" tone="secondary">
                 {higher.name}
               </Text>
             </Text>
@@ -1925,11 +1985,58 @@ function Reveal({
               accessibilityElementsHidden
             >
               Above{' '}
-              <Text variant="subhead" tone="secondary">
+              <Text variant="footnote" tone="secondary">
                 {lower.name}
               </Text>
             </Text>
           ) : null}
+        </View>
+      ) : null}
+
+      {/**
+       * **What this ranking earned, if anything** (post-QA sprint 2, 2026-11-05).
+       *
+       * Only real unlocks: the rows the ranking's own transaction wrote to the ledger,
+       * found by the same before-and-after diff that feeds the celebration. Nothing is
+       * reserved while that read is out and nothing is drawn when it finds nothing, so a
+       * ranking that earned nothing ends exactly as it did. Last, so an award that lands
+       * a moment after the reveal pushes nothing above it out of place.
+       */}
+      {awards.length ? (
+        // Each award speaks for itself rather than joining the panel's summary: it can
+        // land after that summary was read, and a label that changes under a screen
+        // reader is re-read or missed.
+        <View style={styles.awards} testID="reveal-awards">
+          {awards.map((award) => (
+            <View
+              key={`${award.awardKey}:${award.tierKey}`}
+              style={styles.award}
+              testID="reveal-award"
+              accessible
+              accessibilityLabel={[`New award: ${award.title}`, award.achievement]
+                .filter(Boolean)
+                .join('. ')}
+            >
+              <AwardBadge
+                badge={badgeFor(award.awardKey, award.tierKey)}
+                earned
+                size={REVEAL_AWARD_BADGE}
+              />
+              <View style={styles.awardCopy}>
+                <Text variant="caption" tone="action">
+                  New award
+                </Text>
+                <Text variant="subhead" numberOfLines={1}>
+                  {award.title}
+                </Text>
+                {award.achievement ? (
+                  <Text variant="caption" tone="secondary" numberOfLines={1}>
+                    {award.achievement}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ))}
         </View>
       ) : null}
 
@@ -1983,6 +2090,8 @@ function Reveal({
        * the placement, exactly as it does for a ranking that met no Too tough at all,
        * and the title stays as movable from Rankings as every other one.
        */}
+
+      </ScrollView>
 
       {/**
        * **Where the reveal stopped being the end.**
@@ -2132,6 +2241,18 @@ export function SkipTitleLink({
   );
 }
 
+/** The reveal names at most two new awards; the celebration after it plays every one. */
+const REVEAL_AWARDS_SHOWN = 2;
+/**
+ * What the sheet spends outside the reveal's scrolling body: the handle, the reveal's
+ * own padding and gap, and a bottom inset — and the exit row, which grows with text.
+ */
+const REVEAL_CHROME = 120;
+const REVEAL_EXIT_ROW = 60;
+/** However small the phone, the body keeps room for the score and the title. */
+const REVEAL_BODY_MIN = 220;
+const REVEAL_AWARD_BADGE = 40;
+
 const styles = StyleSheet.create({
   skipTitle: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
   skipTitleLabel: { textAlign: 'center' },
@@ -2237,7 +2358,33 @@ const styles = StyleSheet.create({
   // The two names, now a sibling of the block above and separated from it by the
   // reveal's own space[6]. Tight inside, so they read as a pair rather than as two
   // more facts.
-  anchors: { alignSelf: 'stretch', gap: theme.space[1] },
+  anchors: { alignSelf: 'stretch', gap: 2 },
+  /** The placement or genre ranks: one centred, wrapping row a line under the title. */
+  accomplishment: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    columnGap: theme.space[2],
+    rowGap: theme.space[1],
+    marginTop: theme.space[1],
+  },
+  accomplishmentItem: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  accomplishmentText: { color: theme.semantic.action, fontVariant: ['tabular-nums'] },
+  awards: { alignSelf: 'stretch', alignItems: 'center', gap: theme.space[2] },
+  /** One earned award: the badge and its name on a quiet sunken pill, not a card. */
+  award: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    maxWidth: '100%',
+    paddingVertical: theme.space[2],
+    paddingLeft: theme.space[2],
+    paddingRight: theme.space[4],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
+  },
+  awardCopy: { flexShrink: 1, gap: 1 },
   centredBox: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -2249,6 +2396,8 @@ const styles = StyleSheet.create({
     gap: theme.space[6],
     padding: theme.layout.gutter,
   },
+  revealScroll: { alignSelf: 'stretch', flexGrow: 0 },
+  revealBody: { alignItems: 'center', gap: theme.space[6] },
   panel: {
     backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,

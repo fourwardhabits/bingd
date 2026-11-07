@@ -52,6 +52,18 @@ describe('score_for', () => {
     assert.equal(await scoreOf('not_for_me', 1, 1), 3.4);
   });
 
+  /**
+   * The six positions, in bands up to 150, where an exact score is a midpoint — 0.85 — and
+   * a floating-point copy of the formula rounds it the other way. The client's `scoreFor`
+   * now rounds as this does (QA corrections, 2026-11-06), and its tests list the same six
+   * (`SCORE_FOR_MIDPOINTS` in src/features/collection/score.test.ts).
+   */
+  it('rounds an exact midpoint up, at the six positions the client must match', async () => {
+    for (const [rank, size] of [[40, 53], [64, 85], [70, 93], [76, 101], [79, 105], [94, 125]]) {
+      assert.equal(await scoreOf('not_for_me', rank, size), 0.9, `not_for_me ${rank}/${size}`);
+    }
+  });
+
   it('lands the last title in a band exactly on the band low', async () => {
     assert.equal(await scoreOf('loved', 5, 5), 7);
     assert.equal(await scoreOf('fine', 5, 5), 3.5);

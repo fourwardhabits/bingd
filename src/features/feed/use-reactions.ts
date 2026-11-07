@@ -14,12 +14,19 @@ import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
  * swapping a thumb for a face is a copy change and never a data migration.
  */
 export const REACTIONS = [
-  { kind: 'love', label: 'Love', glyph: '❤️' },
+  // Labels are each reaction's selected state, said the same way in the picker, on the
+  // card's action, in the reactor list and to a screen reader (founder, nav cohesion
+  // sprint, 2026-11-06): Liked rather than Love, because a plain tap is a Like and the
+  // card has always said Liked after one. The stored kinds never change.
+  { kind: 'love', label: 'Liked', glyph: '❤️' },
   { kind: 'agree', label: 'Agree', glyph: '👍' },
   { kind: 'disagree', label: 'Disagree', glyph: '👎' },
-  { kind: 'funny', label: 'Funny', glyph: '😂' },
+  // Laugh, not Funny (founder, UI cohesion pass, 2026-11-06): the word for what the
+  // reader did. The stored kind stays `funny`, so no row and no notification changes.
+  { kind: 'funny', label: 'Laugh', glyph: '😂' },
   { kind: 'wow', label: 'Wow', glyph: '😮' },
-  { kind: 'moved', label: 'Moved', glyph: '😢' },
+  // Sad, not Moved: the word for the face it draws. The stored kind stays `moved`.
+  { kind: 'moved', label: 'Sad', glyph: '😢' },
 ] as const;
 
 export type ReactionKind = (typeof REACTIONS)[number]['kind'];

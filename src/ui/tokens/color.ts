@@ -192,6 +192,24 @@ export const tier = {
   locked: inkAlpha(0.22),
 } as const;
 
+/**
+ * **The Leaderboard's medals: a filled badge with the rank on it** (founder Preview QA,
+ * 2026-11-07). Unlike `tier`, these fills do carry text, so each is a certified pair
+ * (pinned in `contrast.test.ts`, AA 4.5:1 for normal text):
+ *
+ * - gold — Amber with an Ink numeral, 6.97:1;
+ * - silver — the tier's warm grey with an Ink numeral, 5.70:1;
+ * - bronze — a deeper bronze than the tier dot with a Paper numeral, 5.48:1. The tier's
+ *   own bronze reaches only 3.81:1 with Ink and 3.87:1 with Paper, so the badge cannot
+ *   use it. This is the one value here that is not already in the palette, and it is used
+ *   nowhere else.
+ */
+export const medal = {
+  gold: { fill: tier.gold, numeral: brand.ink },
+  silver: { fill: tier.silver, numeral: brand.ink },
+  bronze: { fill: '#8C5A2E', numeral: brand.paper },
+} as const;
+
 export const color = {
   brand,
   surface,

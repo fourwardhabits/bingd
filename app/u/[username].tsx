@@ -363,19 +363,25 @@ export default function PublicProfileScreen() {
          */
         <ScrollView contentContainerStyle={styles.content}>
           <ProfileIdentity
+            // The owner's card, so a locked profile looks like the same screen (founder,
+            // release pass, 2026-11-07). Follow is centred in it, at the card's size.
+            card
             name={identity.data.name}
             username={identity.data.username}
             bio={null}
             avatarUri={identity.data.avatarUri}
             controls={
-              <FollowControl
-                userId={identity.data.id}
-                name={identity.data.name}
-                viewerId={viewer.id}
-                relationship={relationships.data?.get(identity.data.id)}
-                isSelf={false}
-                surface="profile"
-              />
+              <View style={styles.centredControl}>
+                <FollowControl
+                  userId={identity.data.id}
+                  name={identity.data.name}
+                  viewerId={viewer.id}
+                  relationship={relationships.data?.get(identity.data.id)}
+                  isSelf={false}
+                  surface="profile"
+                  size="compact"
+                />
+              </View>
             }
           />
           <EmptyState
@@ -406,6 +412,10 @@ export default function PublicProfileScreen() {
               `controls` and `badge`, which is exactly the set of things that depend on
               who is looking. */}
           <ProfileIdentity
+            // The owner's card on somebody else's profile too (founder, release pass,
+            // 2026-11-07): identity, bio, links, centred stats and the centred actions on
+            // one raised surface. Nothing owner-only comes with it.
+            card
             name={profile.data.name}
             username={profile.data.username}
             bio={profile.data.bio}
@@ -496,6 +506,7 @@ export default function PublicProfileScreen() {
                * own rule: one filled control, spent on the act the page is for.
                */
               <ProfileActions
+                compact
                 onShare={() => void shareProfile()}
                 /**
                  * Decided here rather than left to `FollowControl`'s own `isSelf`.
@@ -515,6 +526,7 @@ export default function PublicProfileScreen() {
                       relationship={relationships.data?.get(subjectId)}
                       isSelf={isSelf}
                       surface="profile"
+                      size="compact"
                     />
                   )
                 }
@@ -833,6 +845,8 @@ export default function PublicProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Follow, alone on a locked profile's card, centred like the readable profile's pair.
+  centredControl: { flexDirection: 'row', justifyContent: 'center' },
   content: { paddingBottom: theme.space[10] },
   // Taste Match had a style here — centred under the photo, two tight lines — and needs
   // none now that it is one line inside the identity column, which `ProfileIdentity`

@@ -88,6 +88,8 @@ The user lands on an empty Collection with one clear next action, never on an em
 - **As built — 2026-09-13 (founder, preview QA Round 3): Already use Letterboxd?** An optional step of its own between *Your First Five* and People (`app/onboarding/letterboxd.tsx`), replacing a passive card on the payoff that went unnoticed. Heading *Already use Letterboxd?*, one line on what comes over (watched movies, ratings, diary dates, watchlist), the importer's privacy line, then **Import from Letterboxd** (primary, straight to the file picker), **Not now** (secondary) and *Need help getting the file?* (the instructions sheet). The real importer runs in place — preview, upload, refusals — with *Not now* on every state short of the upload. Once the server has the import, the step says it keeps running in the background and that we will say when it is done, and offers **Continue**; it never waits for the result. The payoff keeps its single action. See [`letterboxd-import.md`](../product/letterboxd-import.md) §1.
 - **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on **the Feed tab opened on People** (`peopleDiscovery('onboarding')` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7). *It pointed at For You until 2026-09-08, when §A16 moved People onto the Feed beside Feed and Leaderboard; the constant existing is what made that a one-line change at both call sites.*
 
+**As built — 2026-11-02, the payoff can be shared.** *Your First Five* carries **Share**, outlined and side by side with the filled **Continue**, and every title shows on a standard phone: the footer's height and the 84pt posters were clipping the fifth row, which is the reward. Rows use `poster.xs` and the `sm` score badge, so the screen and the card agree. Share opens a sheet with the card itself, and the reader's own five, built from the same `firstFiveRows` as the screen. If no image can be made, the sheet says so and offers the list as text. The card sends a stranger to `bingd.app` and not to an invite link, because a card is posted publicly and a personal invite would attach every stranger who used it to the sender. Only the first-five flow reaches it, so accounts past onboarding do not see it.
+
 **As built — 2026-09-12, what a placement leaves behind.** Since the pick, rank loop (PR #133) onboarding draws no per-title reveal: a placement returns straight to the picker, and *Your First Five* is the first screen that shows scores together. What replaced the reveal was nothing, and on a device that read as a sheet flashing up and away. Now the picker carries one line under the progress, a small poster and *Inception landed at 8.7*, which stays until the next title is chosen: no Done, no timer, and not a sheet. An empty band, which places outright, never presents the comparison sheet at all (while the answer is on its way the same slot reads *Ranking Inception…*); a sheet that asked a question slides out still showing its last pair rather than an empty strip. The fifth placement goes to *Your First Five* exactly as before. The sheet serialisation that keeps two modals from overlapping (`Sheet`'s `onShown` / `onDismissed`) is unchanged.
 
 ---
@@ -101,6 +103,14 @@ The core of the product. Three surfaces in sequence, and the sequence must feel 
 Opened from **+**, from a title page, or from a search result. A sheet, not a screen, so the context underneath stays visible — this is what makes Beli's version feel light ([`references/beli-224-bucket-prompt.jpg`](./references/beli-224-bucket-prompt.jpg)).
 
 Anatomy: title header with poster and a close control; a category indicator (Movies or TV seasons); **"How was it?"** with the three bucket chips; then optional rows for who you watched it with, a note — one **Note** row since 2026-08-27, private until its *Share as a review* chip publishes it (PRD §22) — and the date.
+
+**Option A, 2026-11-04: the details first, the buckets last.** The optional rows now come first, in the order **Note**, **Watch date**, **Who I watched with**, and the three bucket chips end the sheet. "How was it?" is no longer drawn; the three labelled chips at the foot are the question, and the radiogroup still carries it as its spoken name. Tapping a bucket still goes straight into the comparisons: no Done, no extra step, nothing required. The flow is unchanged otherwise — Rank → optional details and a bucket → comparisons → the score reveal. The post-rank sheet keeps its receipt at the top and Done at the foot, with the same row order. What the order changed underneath, all in `LogSheet.tsx`:
+
+- **Waiting, not refusing.** A bucket tap now waits for any detail write still in flight. It used to be refused while that write ran.
+- **A failed detail holds the first tap.** If a detail write fails during that wait, the first tap stops with the message showing, so a refused un-share is never hidden. The next tap goes on anyway, because nothing above the buckets is required.
+- **A note-first title still gets its date.** A note written first creates the row with no date, as before. The note's write is an upsert and must not overwrite a date recorded elsewhere. After `log_title`, the bucket dates that row `today_default` only if a fresh read that actually succeeded shows it is still undated and the reader neither picked a date nor said Earlier.
+- **The date row does not flip.** It keeps showing Today rather than switching to Earlier once a detail write has created the row.
+- **The first watch still counts.** A title logged details-first still records its first `watch_logged`.
 
 **Built 2026-08-14 without two of those rows.** The tagging picker needs the social graph, which does not exist yet. The date row is not built either, and the consequence is worth stating plainly: the watch date is written only alongside a note, so a user cannot record "I watched this last night" without also typing something. Recorded in [`open-questions.md`](../product/open-questions.md). *Both were built later; the date row's own behaviour is below.*
 
@@ -345,6 +355,15 @@ Two founder passes on a device, recorded together because both move the top of t
 **The hero frame is `status-bar inset + width ÷ (16:9)`.** The visible image box below the transparent header is exactly the backdrop's own 16:9 on every device, so the full artwork — top edge included — shows with no crop on either axis. The fixed frame ratios that preceded it (1.4, then 1.62, then 1.5) were each a different wrong crop on some device, because any frame that is not the image's own shape forces `cover` to choose an edge to lose. `POSTER_LIFT` went 96 → 120 and the heading gap halved (16 → 8), so the title starts sooner and the score cluster sits higher despite the deeper hero; the collapsed no-backdrop band tracks `POSTER_LIFT` at 120, so the two states keep one geometry.
 
 **The personal cluster is the primary action of this page.** The reader's own score circle is the page's largest (`xl`, 64 — a badge size that exists for this cluster alone), the "Your score" caption is gone — a filled Maroon circle with a number in it, above a button named Rank, does not need a caption to say whose score it is — and Rank/Ranked is full 44pt control height with a `headline` label. **Recommend in the action row is outlined**: filled Maroon marks the primary action of the current context ([`design-system.md`](./design-system.md) §8), and on a title page that is this cluster. Recommend is filled again inside its own sheet, where sending is the point; Watchlist is unchanged; never two equally dominant Maroon CTAs in one view.
+
+### As built — 2026-11-02: the action row moves when it cannot fit
+
+Below about 385pt, or at a larger text size, Rank, Save, List and Recommend sit in one row
+under the identity block and poster rather than in the column beside it. A fourth control
+arrived on 2026-09-21 and left the row with no room: on a 375pt phone `flexWrap` put the last
+glyph on a line of its own. The decision is made from the viewport by `titleActionsFit`,
+always measured against `Ranked`, the wider word, so a title does not change layout at the
+moment it is ranked, and only the word scales with the text size. The controls, their order and their sizes do not change.
 
 ### As built — 2026-09-05: where to watch, under the scores and over the tabs
 
@@ -1198,6 +1217,57 @@ rather than by a placeholder.
 *From contacts* is the obvious third list and is deliberately not built. It needs an
 address-book permission, which is a decision about what bingd uploads about people who never
 signed up.
+
+### The modes stay three icons — 2026-11-03
+
+A labelled `Activity · Leaderboard · People` row was tried on 2026-11-02 and set aside by the
+founder's final direction: the three glyphs in the heading row stay, as drawn above, because
+the row cost the busiest screen a second line and printed "Activity" twice. The Feed is
+production's, plus Try again when the first page fails to load.
+
+### One navigation row, one header — 2026-11-04
+
+Founder's final polish, from GPT's specification.
+
+**For You and Collection share one navigation row**, directly under the header's divider:
+the page's dropdown on the left, in DM Serif at `title2` (22pt, `MediumSelector size="nav"`),
+and a `Movies | TV` `CompactSwitch` on the right, in Inter Medium 14 with its 44pt halves.
+The two are at least 12pt apart. Where they do not fit one line (about 330pt on For You, so
+a 320pt phone, or any phone at large text), the switch wraps under the dropdown,
+right-aligned, and neither shrinks.
+
+| Screen | Dropdown | Switch |
+|---|---|---|
+| For You | Recommended / Top Rated | Movies | TV. The pair is still the four walls, and each control keeps the other's value |
+| Collection | Watched / Watchlist / Unranked / Lists. Unranked only while this side has an unranked title, as the tab was | Movies | TV, not drawn on Lists, which mixes media. Leaving Lists returns to the side the reader was on |
+
+The dropdown replaces Collection's Watched / Watchlist tab row and its old Movies / TV Shows /
+Lists dropdown; every state either reached is still one entry away. Filters, Rating, the
+Poster / List control, the poster grid and its scores are unchanged.
+
+**One header on every main tab.** `AppHeader` keeps its 8pt inset above the logo and has 12pt
+below it (4pt more). Its right side reserves the bell's height on every tab, so the logo sits
+at the same height on Feed, For You, Collection, Search and Profile; before, the bell made
+Feed's and Profile's bar 2pt taller. Every tab draws `HeaderBoundary` directly under the
+header, Profile included, and its own navigation beneath that: For You's and Collection's row,
+Search's field, Feed's heading row.
+
+**Eight headings at 15pt, by name.** `SectionHeader size="large"` (`sectionHeaderLarge`: Inter
+Semibold 15/20, 0.7 tracking, uppercase, Maroon) on Feed's TRENDING NOW and ACTIVITY and on
+the Profile tab's YOUR 2026, bingd AWARDS (still lower-case bingd), TOP RANKED, WATCHLIST,
+LISTS and RECENT ACTIVITY. Everything else keeps the 12pt `sectionHeader`, including the
+same sections on somebody else's profile, PEOPLE YOU MAY KNOW and the Leaderboard's
+timeframe beside TRENDING NOW, Settings, Where to Watch and the filter sheets. No icons beside
+headings.
+
+**Leaderboard.** The metrics read All Titles, Movies, TV Shows, Reviews, in one chip row that
+scrolls sideways and never wraps: All Titles is whole on arrival and Reviews is reached by
+scrolling. First place carries a 16pt Amber (`semantic.emphasis`) trophy, drawn out of the
+row's flow in the spare left of the rank column so the row does not grow or shift, on every
+row ranked 1, and silent to a screen reader.
+
+**Deferred, not to be built for this release:** the empty-state poster frames, decorative
+waves, icons beside headings, new Awards artwork and other ornament.
 
 ### Follow activity in the Feed — 2026-09-08
 

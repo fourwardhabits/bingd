@@ -49,8 +49,8 @@ describe('the filters', () => {
     const view = await open();
 
     expect(view.getByLabelText('All, 4')).toBeTruthy();
-    expect(view.getByLabelText('Love, 3')).toBeTruthy();
-    expect(view.getByLabelText('Funny, 1')).toBeTruthy();
+    expect(view.getByLabelText('Liked, 3')).toBeTruthy();
+    expect(view.getByLabelText('Laugh, 1')).toBeTruthy();
   });
 
   it('does not offer a reaction nobody used', async () => {
@@ -62,7 +62,7 @@ describe('the filters', () => {
     const view = await open();
     expect(view.getByText('Raj')).toBeTruthy();
 
-    await fireEvent.press(view.getByLabelText('Love, 3'));
+    await fireEvent.press(view.getByLabelText('Liked, 3'));
 
     expect(view.queryByText('Raj')).toBeNull();
     expect(view.getByText('Zoe')).toBeTruthy();
@@ -70,7 +70,7 @@ describe('the filters', () => {
 
   it('goes back to everyone on All', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText('Love, 3'));
+    await fireEvent.press(view.getByLabelText('Liked, 3'));
     await fireEvent.press(view.getByLabelText('All, 4'));
 
     expect(view.getByText('Raj')).toBeTruthy();
@@ -80,14 +80,14 @@ describe('the filters', () => {
 describe('the people', () => {
   it('names each one and says which reaction they used', async () => {
     const view = await open();
-    expect(view.getByLabelText('Raj, reacted Funny. Open their profile.')).toBeTruthy();
+    expect(view.getByLabelText('Raj, Laugh. Open their profile.')).toBeTruthy();
   });
 
   it('opens a profile when tapped', async () => {
     const onPressPerson = jest.fn();
     const view = await open({}, onPressPerson);
 
-    await fireEvent.press(view.getByLabelText('Anna, reacted Love. Open their profile.'));
+    await fireEvent.press(view.getByLabelText('Anna, Liked. Open their profile.'));
 
     // The username, because that is what the route takes — and the profile it
     // opens applies its own access rules. Appearing here is not a key to anything.

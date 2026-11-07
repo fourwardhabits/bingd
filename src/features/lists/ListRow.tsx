@@ -1,14 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { ChipDot, VisibilityChip } from './ListChips';
-import { ListCover } from './ListCover';
 import { titleCountLabel, updatedLabel, VISIBILITY_CHIP, type MyListSummary } from './types';
 
-const COVER = 64;
+/** One poster of the stack, 2:3. */
+const POSTER_W = 48;
+const POSTER_H = 72;
+/** How far each poster behind the first is set to the right. */
+const STEP = 16;
+/** Up to four posters: the stack's width is fixed so every row's text starts on one line. */
+const STACK_W = POSTER_W + STEP * 3;
 
 export type ListRowProps = {
   list: MyListSummary;
@@ -57,10 +63,10 @@ export function ListRow({ list, onPress }: ListRowProps) {
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
-      <ListCover posterUris={list.posterUris} size={COVER} />
+      <PosterStack uris={list.posterUris} />
 
       <View style={styles.lines}>
-        <Text variant="callout" numberOfLines={2}>
+        <Text variant="headline" numberOfLines={2}>
           {list.title}
         </Text>
 
@@ -94,7 +100,60 @@ export function ListRow({ list, onPress }: ListRowProps) {
   );
 }
 
+/**
+ * **The list's own posters, fanned** (founder, marquee cohesion sprint, 2026-11-07): up to
+ * four, the first in front, each set 16pt to the right of the one before, from the same
+ * four the server already sends for the cover (`my_lists.posters`). One or two posters
+ * make a shorter stack in the same box; a list with none shows one Parchment card with the
+ * list glyph. Decorative: the row's label says everything it shows.
+ */
+function PosterStack({ uris }: { uris: string[] }) {
+  const shown = uris.slice(0, 4);
+  return (
+    <View
+      style={styles.stack}
+      testID="list-stack"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {shown.length === 0 ? (
+        <View style={[styles.poster, styles.empty]} testID="list-stack-empty">
+          <Ionicons name="list-outline" size={theme.layout.icon.md} color={theme.text.tertiary} />
+        </View>
+      ) : (
+        // Drawn back to front, so the first poster is on top.
+        shown
+          .map((uri, index) => (
+            <Image
+              key={`${index}-${uri}`}
+              testID="list-stack-poster"
+              source={{ uri }}
+              contentFit="cover"
+              transition={0}
+              style={[styles.poster, { left: index * STEP }]}
+            />
+          ))
+          .reverse()
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  stack: { width: STACK_W, height: POSTER_H },
+  poster: {
+    position: 'absolute',
+    top: 0,
+    width: POSTER_W,
+    height: POSTER_H,
+    borderRadius: theme.radius.control - 2,
+    // A Paper edge, so each poster reads as its own card over the one behind it.
+    borderWidth: 1.5,
+    borderColor: theme.surface.base,
+    backgroundColor: theme.surface.sunken,
+    overflow: 'hidden',
+  },
+  empty: { left: 0, alignItems: 'center', justifyContent: 'center', borderColor: theme.border.hairline },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -102,6 +161,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],
     minHeight: theme.layout.minTapTarget,
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: theme.border.hairline,
   },
   // `flex: 1` so a long list name wraps inside the row rather than pushing the
   // chevron off the screen — `MediumSelector`'s lesson at a smaller size.

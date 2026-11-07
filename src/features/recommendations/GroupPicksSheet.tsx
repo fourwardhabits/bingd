@@ -141,14 +141,30 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   if (confirmed === null) {
     const groupSize = selected.size + 1;
     return (
-      <Sheet visible onClose={onClose} label="Group Picks">
+      <Sheet visible onClose={onClose} label="Group Recommendations">
+        {/**
+         * **One scroller for everything above the action** (independent review 2,
+         * title-page sprint, 2026-11-06). At a large text size on a short phone the heading
+         * and the sentence take several lines each; with the rows in a bounded list of their
+         * own, the list was squeezed to nothing and the action pushed out of the sheet. Now
+         * the heading, the question, the search, You and the rows scroll together and give
+         * way first, and the action below them always stays in the sheet. Where everything
+         * fits, nothing scrolls and nothing moves.
+         */}
+        <ScrollView
+          style={styles.choosing}
+          keyboardShouldPersistTaps="handled"
+          testID="group-choosing"
+        >
         <View style={styles.header}>
-          <Text variant="headline">Group Picks</Text>
+          <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
+            Group Recommendations
+          </Text>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
            * The sheet opened on a title, a question and a list of faces, which assumes
-           * the reader already knows what Group Picks does. It is one of the few things
+           * the reader already knows what this feature does. It is one of the few things
            * in bingd. that has no equivalent elsewhere, so it is precisely the screen
            * that cannot assume it — and the cost of explaining it is one line.
            *
@@ -156,14 +172,15 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
            * the question rather than replacing it: this line says what will happen, and
            * `Who's watching?` is still the instruction for the control underneath.
            *
-           * The noun follows the wall the sheet was opened from, because a sentence
-           * promising movies over a list of series answers a different question from the
-           * one being asked.
+           * **Find for a Group, and Group Recommendations in here** (founder, title-page
+           * sprint, 2026-11-06), after Group Picks and then Watch Together, which read as
+           * watching in sync rather than recommendations for several people. Only the words
+           * changed; the endpoint, analytics names and selected-person rules are still
+           * `group_picks`. The sentence is the founder's and names no medium; the wall the
+           * sheet was opened from still decides which medium the picks answer for.
            */}
           <Text variant="footnote" tone="secondary">
-            {medium === 'tv'
-              ? 'Pick who’s watching and bingd will find shows you can all agree on.'
-              : 'Pick who’s watching and bingd will find movies you can all agree on.'}
+            Choose who’s watching, and get recommendations based on everyone’s tastes.
           </Text>
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?
@@ -208,9 +225,10 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
             pinned={{ name: 'You' }}
             max={6}
             searchPlaceholder="Search your friends"
-            listMaxHeight={340}
+            inline
           />
         )}
+        </ScrollView>
 
         {people.length > 0 ? (
           <View style={styles.actions}>
@@ -265,9 +283,11 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   ];
 
   return (
-    <Sheet visible onClose={onClose} label="Group Picks">
+    <Sheet visible onClose={onClose} label="Group Recommendations">
       <View style={styles.header}>
-        <Text variant="headline">Group Picks</Text>
+        <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
+          Group Recommendations
+        </Text>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">
@@ -414,7 +434,16 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   );
 }
 
+/**
+ * The sheet's heading grows with the system text size only to 1.5×: at 2× on a 320pt
+ * phone "Recommendations" no longer fits a line and broke mid-word (title-page sprint,
+ * 2026-11-06). Still well above the body text it heads.
+ */
+const HEADING_MAX_SCALE = 1.5;
+
 const styles = StyleSheet.create({
+  // Gives way first when the sheet's 90% runs out, so the action below always shows.
+  choosing: { flexGrow: 0, flexShrink: 1 },
   header: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[3],

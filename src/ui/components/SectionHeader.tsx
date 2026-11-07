@@ -25,7 +25,44 @@ export type SectionHeaderProps = {
    * spelling, which is why `accessibilityLabel` has never been derived from it.
    */
   exactCase?: boolean;
+  /**
+   * `large` — 15pt rather than 12 (`sectionHeaderLarge`), for the Feed and Profile tabs'
+   * own headings only (founder final polish, 2026-11-04). Every other heading, including
+   * the same components drawn on somebody else's profile, keeps the standard size.
+   */
+  size?: SectionHeaderSize;
+  /**
+   * One line, shrinking to fit rather than wrapping. For a one-word heading beside a
+   * control, which cannot wrap at a word: the Feed's LEADERBOARD at a large text size
+   * (nav cohesion sprint, 2026-11-06). Every other heading wraps as before.
+   */
+  fit?: boolean;
+  /**
+   * Let the action drop under the heading when the two do not fit on one line, rather than
+   * running off the screen: the Cinematic title page's sections at a large text size, whose
+   * Trailers action is the reader's one way to ask for previews (title-page sprint,
+   * 2026-11-06). Where both fit, nothing moves.
+   */
+  wrap?: boolean;
+  /**
+   * The heading's own line height rather than a 44pt row, so the content under it starts
+   * about 8pt below the words rather than 14pt plus whatever the content adds: the
+   * Cinematic title page, where the gap under ABOUT read as too large on the phone (final
+   * title refinement, 2026-11-06).
+   *
+   * **An action keeps a 46pt target, over plain views only.** Its slop reaches 20pt up and
+   * 8pt down from its 18pt line, and the row is raised above the body that follows
+   * (`zIndex`), so React picks the action anywhere in that box. The caller owes it that
+   * space as *non-scrolling* view: at least `TIGHT_SLOP.top` of its own seam above the
+   * heading, and `TIGHT_SLOP.bottom` of padding before any scroll view below. Android's
+   * native dispatch ignores slop, and a horizontal rail still coasting from a fling
+   * intercepts any touch inside its own bounds (independent review 2), so the slop must
+   * never sit over one.
+   */
+  tight?: boolean;
 };
+
+export type SectionHeaderSize = 'standard' | 'large';
 
 /**
  * The one way a screen names a section (design-system.md §8).
@@ -45,16 +82,29 @@ export function SectionHeader({
   actionAccessibilityLabel,
   onPressAction,
   exactCase = false,
+  size = 'standard',
+  fit = false,
+  wrap = false,
+  tight = false,
 }: SectionHeaderProps) {
   return (
     <View
-      style={styles.row}
+      style={[styles.row, wrap && styles.wrap, tight && styles.tight]}
       accessibilityRole="header"
       // Uppercasing is a style, not a spelling. Without this a screen reader
       // spells out "T O P  R A N K E D".
       accessibilityLabel={title}
     >
-      <Text variant="sectionHeader" tone="action">
+      <Text
+        variant={size === 'large' ? 'sectionHeaderLarge' : 'sectionHeader'}
+        tone="action"
+        // The token itself uppercases, so printing the title as given is not enough: the
+        // style has to be undone as well, or the exception quietly does nothing.
+        style={[exactCase ? styles.exactCase : undefined, fit && styles.fit]}
+        numberOfLines={fit ? 1 : undefined}
+        adjustsFontSizeToFit={fit}
+        minimumFontScale={fit ? FIT_FLOOR : undefined}
+      >
         {exactCase ? title : title.toUpperCase()}
       </Text>
       {actionLabel && onPressAction ? (
@@ -65,8 +115,8 @@ export function SectionHeader({
           accessibilityRole="button"
           accessibilityLabel={actionAccessibilityLabel}
           onPress={onPressAction}
-          hitSlop={theme.space[2]}
-          style={styles.action}
+          hitSlop={tight ? TIGHT_SLOP : theme.space[2]}
+          style={tight ? undefined : styles.action}
         >
           <Text variant="footnote" tone="action">
             {actionLabel}
@@ -77,7 +127,24 @@ export function SectionHeader({
   );
 }
 
+/** LEADERBOARD at 200% text in the space a 320pt phone leaves it needs about 0.69. */
+const FIT_FLOOR = 0.6;
+
+/**
+ * A footnote line is 18pt; 20pt above and 8pt below it make a 46pt target that lies over the
+ * section's own seam and the body's top padding, never over a rail (see `tight`).
+ */
+export const TIGHT_SLOP = {
+  top: theme.space[5],
+  bottom: theme.space[2],
+  left: theme.space[2],
+  right: theme.space[2],
+} as const;
+
 const styles = StyleSheet.create({
+  tight: { minHeight: 0, zIndex: 1 },
+  fit: { flexShrink: 1 },
+  wrap: { flexWrap: 'wrap', columnGap: theme.space[3] },
   row: {
     minHeight: theme.layout.minTapTarget,
     flexDirection: 'row',
@@ -86,4 +153,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
   },
   action: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  exactCase: { textTransform: 'none' },
 });

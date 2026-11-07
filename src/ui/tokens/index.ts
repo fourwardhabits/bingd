@@ -10,6 +10,7 @@ export {
   surface,
   text,
   tier,
+  medal,
   type BucketKey,
 } from './color';
 export { fontFamily, inputText, typography, type TypographyToken } from './typography';

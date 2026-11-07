@@ -7,6 +7,8 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import TitleScreen from '../../../app/title/[id]';
 
+import { hydrateTitleLayout, setTitleLayout } from './title-layout';
+
 /**
  * The Similar tab.
  *
@@ -93,6 +95,7 @@ jest.mock('@/lib/supabase', () => ({
 
 let mockOpenId = 'film-1';
 jest.mock('expo-router', () => ({
+  useIsFocused: () => true,
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ id: mockOpenId }),
   Stack: { Screen: () => null },
@@ -195,6 +198,14 @@ const facet = (mediaItemId: string, ids: string[]) => ({
 });
 
 const HOUR = 3600_000;
+
+/**
+ * The Cinematic page is the default since the release pass (2026-11-07); this file tests
+ * the Original page unless a block opts into Cinematic itself, so every test starts there.
+ */
+beforeEach(async () => {
+  await setTitleLayout('original');
+});
 
 beforeEach(() => {
   mockOpenId = 'film-1';
@@ -1223,5 +1234,69 @@ describe('coming back to the tab', () => {
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
     expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
     expect(view.queryAllByTestId('skeleton-row', { includeHiddenElements: true })).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Cinematic page
+// ---------------------------------------------------------------------------
+
+/**
+ * **Six at first, then the rest of the same list** (final title refinement, 2026-11-06).
+ * Similar moved above the details and shows two rows of three; See more draws the rest of
+ * the nine `useSimilarTitles` already holds, in the same order, without a second fetch.
+ */
+describe('Similar, on the Cinematic page', () => {
+  beforeEach(async () => {
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+  });
+  afterEach(async () => {
+    await setTitleLayout('original');
+  });
+
+  const withCandidates = (n: number) => {
+    const rows = Array.from({ length: n }, (_, index) => candidate(index + 1));
+    tableRows.media_items = [film, ...rows];
+    tableRows.media_cache = [facet('film-1', rows.map((row) => row.id as string))];
+  };
+  const openCinematic = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByTestId('immersive-section-similar')).toBeTruthy());
+    return view;
+  };
+  const nth = (n: number) => Array.from({ length: n }, (_, index) => `Candidate ${index + 1}`);
+
+  it('shows six, and See more draws the rest of the same nine in order', async () => {
+    withCandidates(12);
+    const view = await openCinematic();
+    await waitFor(() => expect(names(view)).toEqual(nth(6)));
+    const facetCalls = facetReads().length;
+
+    await fireEvent.press(view.getByRole('button', { name: 'See 3 more similar titles' }));
+    expect(names(view)).toEqual(nth(9));
+    // The same list, not a second read.
+    expect(facetReads()).toHaveLength(facetCalls);
+
+    await fireEvent.press(view.getByRole('button', { name: 'Show fewer similar titles' }));
+    expect(names(view)).toEqual(nth(6));
+  });
+
+  it('offers no See more when there are six or fewer', async () => {
+    withCandidates(4);
+    const view = await openCinematic();
+    await waitFor(() => expect(names(view)).toEqual(nth(4)));
+    expect(view.queryByRole('button', { name: /more similar titles/ })).toBeNull();
+  });
+
+  it('opens a candidate as an ordinary title page', async () => {
+    withCandidates(7);
+    const view = await openCinematic();
+    await waitFor(() => expect(names(view)).toHaveLength(6));
+    await fireEvent.press(view.getAllByRole('button').find((node) => String(node.props.accessibilityLabel ?? '').startsWith('Candidate 2,'))!);
+    expect(mockPush).toHaveBeenCalledWith('/title/cand-2');
+    expect(mockTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'similar_title_opened' }),
+    );
   });
 });

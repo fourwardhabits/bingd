@@ -1,5 +1,5 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Share, StyleSheet, type ViewStyle } from 'react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Alert, Share, StyleSheet, type TextStyle } from 'react-native';
 
 import { theme } from '@/ui/tokens';
 
@@ -318,7 +318,7 @@ describe('what this person likes', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Movies: 25')).toBeTruthy());
-    expect(view.getByLabelText('TV: 3')).toBeTruthy();
+    expect(view.getByLabelText('TV Shows: 3')).toBeTruthy();
   });
 
   it('falls back to the ranked count rather than failing the profile', async () => {
@@ -394,7 +394,7 @@ describe('what this person likes', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
-    expect(view.queryByRole('tab', { name: 'TV' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'TV Shows' })).toBeNull();
   });
 
   it('names a ranked season with its show, where a name is rendered at all', async () => {
@@ -1317,39 +1317,21 @@ describe('sharing and awards on somebody else’s profile', () => {
  */
 describe('the shape of somebody else’s profile', () => {
   /**
-   * The row, read off the tree rather than off a prop.
-   *
-   * `ProfileActions` is a row of two `flex: 1` halves; a button reaches its half
-   * directly, and `FollowControl` puts one stretch wrapper in between. Both answers
-   * are the half, which is the thing that has to be shared.
+   * **The owner's compact, centred pair, on somebody else's profile too** (founder, release
+   * pass, 2026-11-07): Share and the relationship side by side at the small size, each a
+   * 44pt target, centred on the profile card — one shape for both profiles.
    */
-  type Node = { parent: unknown; children: unknown[]; props: Record<string, unknown> } | null;
-  const halfOf = (button: Node): Node => {
-    let node = button;
-    while (node) {
-      if ((StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.flex === 1)
-        return node;
-      node = node.parent as Node;
-    }
-    return null;
-  };
-
-  it('puts Share and the relationship in one row, each taking half of it', async () => {
+  it('puts Share and the relationship side by side in one centred row', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
 
-    const share = halfOf(view.getByRole('button', { name: 'Share Profile' }));
-    const follow = halfOf(view.getByRole('button', { name: 'Follow' }));
-
-    // Two halves, and the *same* row: Follow was on a second full-width row underneath,
-    // which is the stacked shape this fix removes.
-    expect(share).not.toBeNull();
-    expect(follow).not.toBeNull();
-    expect(follow?.parent).toBe(share?.parent);
-    const row = share?.parent as Node;
-    expect((StyleSheet.flatten(row?.props.style) as ViewStyle | undefined)?.flexDirection).toBe(
-      'row',
-    );
+    const row = view.getByTestId('profile-actions-compact');
+    expect(StyleSheet.flatten(row.props.style)).toMatchObject({
+      flexDirection: 'row',
+      justifyContent: 'center',
+    });
+    expect(within(row).getByRole('button', { name: 'Share Profile' })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Follow' })).toBeTruthy();
   });
 
   it('orders Share first and the relationship second, as the owner’s profile does', async () => {
@@ -1365,43 +1347,24 @@ describe('the shape of somebody else’s profile', () => {
     expect(controls).toEqual(['Share Profile', 'Follow']);
   });
 
-  it('fills Follow in maroon while there is no relationship', async () => {
+  it('fills Follow in maroon while there is no relationship, a full 44pt target', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
 
     const follow = view.getByRole('button', { name: 'Follow' });
     const style = StyleSheet.flatten(follow.props.style);
     expect(style.backgroundColor).toBe(theme.semantic.action);
-    // It fills the slot it is handed, which is now half a row rather than the screen.
-    expect(StyleSheet.flatten(follow.parent?.props?.style).alignSelf).toBe('stretch');
+    const slop = follow.props.hitSlop as { top: number; bottom: number };
+    expect((style.minHeight as number) + slop.top + slop.bottom).toBe(44);
   });
 
-  it('holds the relationship to the row’s one-line contract, as Share is held', async () => {
-    /**
-     * `Requested` is the long label, and half a gutter row is 140pt at the narrowest
-     * width this app supports. A wrapped label is what grew one button taller than its
-     * neighbour on the founder's iPhone — the defect `ProfileActions` was extracted to
-     * stop, and the relationship is subject to it now that it sits in the row.
-     *
-     * **This asserts the contract, not a measurement**, which is the same thing
-     * `ProfileActions.test.tsx` asserts and for the same reason: jest has no viewport
-     * and no Dynamic Type, so there is no width here for a label to fail to fit. What a
-     * test can hold is that the three props which make `fit` work are all present on
-     * this button — the founder's screenshot came from a button that had none of them —
-     * and that the pair still declares one height. The measured case is a device pass.
-     */
+  it('keeps Requested the same height as Share, each hugging its own label', async () => {
     mockRpcResults.follow_state_with = [
       { user_id: 'anna-id', following: 'pending', followed_by: null, blocked: false },
     ];
     const view = await open();
     await waitFor(() => expect(view.getByText('Requested')).toBeTruthy());
 
-    const label = view.getByText('Requested');
-    expect(label.props.numberOfLines).toBe(1);
-    expect(label.props.adjustsFontSizeToFit).toBe(true);
-    expect(label.props.minimumFontScale).toBe(0.85);
-
-    // The two are still the same height, which is what the wrap used to break.
     const requested = StyleSheet.flatten(
       view.getByRole('button', { name: 'Requested' }).props.style,
     );
@@ -1409,12 +1372,11 @@ describe('the shape of somebody else’s profile', () => {
       view.getByRole('button', { name: 'Share Profile' }).props.style,
     );
     expect(requested.minHeight).toBe(share.minHeight);
+    expect(requested.flex).toBeUndefined();
   });
 
-  it('leaves the trailing half empty on your own profile rather than half a row and a gap', async () => {
-    // `/u/<your own handle>` resolves here, and there is no relationship to offer: you
-    // cannot follow yourself. The slot has to be *absent* rather than filled with a
-    // control that renders nothing, or Share sits at half width beside a gap.
+  it('draws Share alone on your own handle, with no empty slot beside it', async () => {
+    // `/u/<your own handle>` resolves here, and there is no relationship to offer.
     mockViewer = { id: 'anna-id', username: 'anna', display_name: 'Anna' };
     const view = await open();
     await waitFor(() =>
@@ -1422,10 +1384,7 @@ describe('the shape of somebody else’s profile', () => {
     );
 
     expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
-    // One half in the row, which is `ProfileActions` rendering nothing for the slot
-    // rather than an empty box in it.
-    const share = halfOf(view.getByRole('button', { name: 'Share Profile' }));
-    expect((share?.parent as Node)?.children).toHaveLength(1);
+    expect(view.getByTestId('profile-actions-compact').children).toHaveLength(1);
   });
 
   /**
@@ -1580,5 +1539,34 @@ describe('social links', () => {
 
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
     expect(view.queryAllByRole('link')).toHaveLength(0);
+  });
+});
+
+/**
+ * **Somebody else's profile keeps the standard 12pt headings.** The 15pt headings were
+ * scoped to the reader's own Profile tab (founder final polish, 2026-11-04), and the
+ * sections here are the same components, so the size is asserted rather than assumed.
+ */
+describe('the headings on somebody else\'s profile', () => {
+  it('stay at 12pt', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('TOP RANKED')).toBeTruthy());
+
+    const style = StyleSheet.flatten(view.getByText('TOP RANKED').props.style) as TextStyle;
+    expect(style.fontSize).toBe(12);
+  });
+});
+
+/** Somebody else's profile keeps its layout: no owner's card (founder Preview QA, 2026-11-07). */
+describe('the profile card, on somebody else’s profile', () => {
+  /** The owner's card with nothing owner-only in it (founder, release pass, 2026-11-07). */
+  it('draws the same card, with Share and the relationship but no owner controls', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Share Profile')).toBeTruthy());
+    const card = view.getByTestId('profile-card');
+    expect(StyleSheet.flatten(card.props.style).borderRadius).toBeGreaterThan(0);
+    expect(within(card).getByRole('button', { name: 'Follow' })).toBeTruthy();
+    expect(view.queryByText('Invite friends')).toBeNull();
+    expect(view.queryByText('Set a goal')).toBeNull();
   });
 });

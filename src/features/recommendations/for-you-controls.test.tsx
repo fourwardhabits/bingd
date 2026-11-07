@@ -1,4 +1,4 @@
-import { waitFor, within } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -17,14 +17,14 @@ import RecommendationsScreen from '../../../app/(tabs)/recommendations';
  *   1. **No bell.** For You carried one, Collection and Search did not, and the one it
  *      carried did not optically centre against the wordmark. The resolution is
  *      subtractive — the inbox stays on Feed and Profile, where it already was.
- *   2. **Feature, feature, utility.** Sent to you and Group Picks are two of the things
- *      this app has that others do not, and they were drawn in exactly the grey of the
- *      Filters button beside them. They are Maroon now; Filters is not.
+ *   2. **Feature, feature, utility.** Sent to You and Find for a Group (Group Picks, then Watch Together, until
+ *      2026-11-06) are two of the things this app has that others do not. They are Maroon,
+ *      and since the nav cohesion sprint a pair of their own; Filters is a quiet action.
  *   3. **Air under the row.** The first row of posters sat against the chips, so the
  *      controls read as part of the wall rather than as what governs it.
  *
- * And the standing constraint all three had to respect: the row is **one line, always**.
- * It never wraps and it never gets taller.
+ * Since 2026-11-06 that is two rows, each one line: the heading with Filters, then the
+ * two features.
  *
  * `useForYou` is stood in for, as `for-you-categories.test.tsx` does — the engine is not
  * what this file is about.
@@ -144,81 +144,111 @@ describe('the header carries no bell', () => {
     expect(view.queryByLabelText('Settings')).toBeNull();
     expect(view.queryByLabelText(/^Notifications/)).toBeNull();
   });
+
+  /**
+   * **Movies | TV in the header's corner, once** (founder, UI cohesion pass, 2026-11-06).
+   * It sat at the right of the Recommended row; it moved up rather than being repeated.
+   */
+  it('holds the one Movies | TV switch, inside the header', async () => {
+    const view = await open();
+
+    expect(view.getAllByLabelText('Medium')).toHaveLength(1);
+    const header = view.getByTestId('app-header');
+    expect(within(header).getByRole('radio', { name: 'Movies' })).toBeTruthy();
+    expect(within(header).getByRole('radio', { name: 'TV' })).toBeTruthy();
+  });
+
+  it('switches the wall from the header and keeps the choice across Top Rated', async () => {
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+    await waitFor(() =>
+      expect(view.getByRole('radio', { name: 'TV' }).props.accessibilityState).toMatchObject({
+        selected: true,
+      }),
+    );
+  });
 });
 
-describe('the control row', () => {
-  it('keeps its three controls on one line and never wraps', async () => {
-    /**
-     * **The founder's standing lock on this row.** Three chips with counts come to more
-     * than a 360pt phone has between its gutters, so the row is a horizontal scroller
-     * with `nowrap` inside it: when the chips fit, nothing about the layout differs from
-     * a plain row, and when they do not, the row scrolls rather than becoming two lines
-     * and pushing the wall down.
-     *
-     * Compaction was considered first and rejected: every value in the chip is already
-     * on the 4pt scale, and buying back the sixteen points the arithmetic is short would
-     * mean taking the chip off the grid the design system is built on.
-     */
+/**
+ * **Two rows of controls, each saying what kind of control it is** (founder, nav cohesion
+ * sprint, 2026-11-06). The heading row: Recommended / Top Rated, and Filters opposite it
+ * as a quiet text action. Under it, Sent to You and Find for a Group as a pair of features.
+ * The old single chip row drew all three as equivalent pills.
+ */
+describe('the controls', () => {
+  it('puts Filters beside the heading, and the two features on a row of their own', async () => {
     const view = await open();
 
-    const row = flatten(view.getByTestId('for-you-controls').props.style);
-    expect(row.flexDirection).toBe('row');
-    expect(row.flexWrap).toBe('nowrap');
-    // And the thing that makes one row possible at every width.
-    expect(view.getByTestId('for-you-controls-scroller').props.horizontal).toBe(true);
+    const tools = view.getByTestId('for-you-controls');
+    expect(within(tools).getByRole('button', { name: 'Filters' })).toBeTruthy();
+    expect(within(tools).queryByRole('button', { name: /^Sent to You/ })).toBeNull();
+
+    const features = view.getByTestId('for-you-shortcuts');
+    expect(within(features).getByRole('button', { name: /^Sent to You/ })).toBeTruthy();
+    expect(within(features).getByRole('button', { name: 'Find for a Group' })).toBeTruthy();
+    expect(within(features).queryByRole('button', { name: 'Filters' })).toBeNull();
+    // Gone under its old name everywhere on the screen.
+    expect(view.queryByText('Group Picks')).toBeNull();
   });
 
-  it('puts a deliberate seam between the controls and the first posters', async () => {
-    /**
-     * The wall has no top padding of its own, so this padding is the entire gap — and at
-     * `space[2]` the founder's device showed posters touching the chips. `space[4]` is
-     * the top of the design system's *control row → the content it governs* interval.
-     */
-    const row = flatten((await open()).getByTestId('for-you-controls').props.style);
-
-    expect(row.paddingBottom).toBe(theme.space[4]);
-    expect(row.paddingBottom).toBeGreaterThanOrEqual(theme.space[3]);
-  });
-
-  it('marks the two social features and leaves the utility grey', async () => {
-    /**
-     * **Feature, feature, utility** — the founder's hierarchy, and the whole of it. Read
-     * off the border and the label colour together, because those are the two things the
-     * treatment actually changes; the glyph follows the same `action` flag in the
-     * component, so a divergence there would be a divergence in one expression.
-     */
+  /**
+   * **Quieter features** (founder, marquee cohesion sprint, 2026-11-07): a hairline outline,
+   * a 13pt label in ink, 34pt drawn. The Maroon is the glyph's alone.
+   */
+  it('draws the two features quietly on a hairline, and leaves Filters quiet', async () => {
     const view = await open();
 
-    for (const name of ['Sent to you', 'Group Picks']) {
-      const chip = view.getByRole('button', { name });
-      expect(flatten(chip.props.style).borderColor).toBe(theme.semantic.actionSubtle);
-      expect(flatten(within(chip).getByText(name).props.style).color).toBe(
-        theme.semantic.action,
-      );
+    for (const [testID, word] of [
+      ['for-you-shortcut-sent', 'Sent to You'],
+      ['for-you-shortcut-group', 'Find for a Group'],
+    ] as const) {
+      const feature = view.getByTestId(testID);
+      expect(flatten(feature.props.style).borderColor).toBe(theme.border.hairline);
+      expect(flatten(feature.props.style).minHeight).toBe(34);
+      // No card fill: a tinted ground would read as a selected state.
+      expect(flatten(feature.props.style).backgroundColor).toBeUndefined();
+      const label = flatten(within(feature).getByText(word).props.style);
+      expect(label.color).toBe(theme.text.primary);
+      expect(label.fontSize).toBe(13);
     }
 
-    const filters = view.getByRole('button', { name: 'Filters' });
-    expect(flatten(filters.props.style).borderColor).toBe(theme.border.hairline);
+    const filters = view.getByTestId('for-you-filters');
+    expect(flatten(filters.props.style).borderWidth).toBeUndefined();
     expect(flatten(within(filters).getByText('Filters').props.style).color).toBe(
       theme.text.secondary,
     );
   });
 
-  it('spends no extra height on the emphasis', async () => {
-    /**
-     * The founder's constraint was explicit: no giant coloured buttons, no cards, no
-     * second row, no growth. Emphasis is colour and nothing else, so an emphasised chip
-     * and a plain one are the same height to the pixel.
-     */
+  it('gives every control a 44pt target', async () => {
     const view = await open();
 
-    const social = flatten(view.getByRole('button', { name: 'Group Picks' }).props.style);
-    const utility = flatten(view.getByRole('button', { name: 'Filters' }).props.style);
+    for (const testID of ['for-you-shortcut-sent', 'for-you-shortcut-group']) {
+      const feature = view.getByTestId(testID);
+      const slop = feature.props.hitSlop as { top: number; bottom: number };
+      expect((flatten(feature.props.style).minHeight as number) + slop.top + slop.bottom).toBe(
+        theme.layout.minTapTarget,
+      );
+    }
+    expect(flatten(view.getByTestId('for-you-filters').props.style).minHeight).toBe(
+      theme.layout.minTapTarget,
+    );
+  });
 
-    expect(social.minHeight).toBe(utility.minHeight);
-    expect(social.paddingHorizontal).toBe(utility.paddingHorizontal);
-    expect(social.borderWidth).toBe(utility.borderWidth);
-    // No fill either: a tinted ground here would read as a third selected state.
-    expect(social.backgroundColor).toBe(utility.backgroundColor);
+  it('puts a deliberate seam between the features and the first posters', async () => {
+    // The wall has no top padding of its own, so this padding is the whole gap: the
+    // design system's control row → content interval (founder, physical QA, 2026-09-08).
+    const row = flatten((await open()).getByTestId('for-you-shortcuts').props.style);
+    expect(row.paddingBottom).toBe(theme.space[3]);
+  });
+
+  it('opens Find for a Group from its shortcut', async () => {
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Find for a Group' }));
+
+    await waitFor(() =>
+      expect(view.getByText('Choose who’s watching, and get recommendations based on everyone’s tastes.')).toBeTruthy(),
+    );
   });
 });

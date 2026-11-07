@@ -1,5 +1,6 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
+import { memberSearch } from '@/lib/routes';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { PeopleView } from './PeopleView';
@@ -92,18 +93,21 @@ describe('the two modes', () => {
   });
 
   /**
-   * The founder's instruction: concise, and not a nag. One sentence naming the two
-   * things that genuinely improve the answer — and no chips over it, because a control
-   * for choosing which nothing to look at is not a control.
+   * Concise, no chips over it — a control for choosing which nothing to look at is not a
+   * control — and one way out (founder, nav cohesion sprint, 2026-11-06): the app's member
+   * search, Search opened on Users. It promises nothing about ranking more.
    */
-  it('says one thing when there is nothing to suggest', async () => {
+  it('says one thing when there is nothing to suggest, and offers member search', async () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('No suggestions yet')).toBeTruthy());
-    expect(
-      view.getByText('Rank more titles and follow people to improve suggestions.'),
-    ).toBeTruthy();
+    expect(view.getByText('Find people to follow and discover more shared tastes.')).toBeTruthy();
+    expect(view.queryByText(/rank/i)).toBeNull();
     expect(view.queryByText('Mutuals')).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
+    expect(mockPush).toHaveBeenCalledWith(memberSearch());
+    expect(memberSearch()).toEqual({ pathname: '/(tabs)/log', params: { show: 'users' } });
   });
 
   /**

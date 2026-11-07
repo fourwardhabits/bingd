@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -140,6 +140,27 @@ export default function LogScreen() {
       field.current?.focus();
     }, []),
   );
+
+  /**
+   * **Arriving on Users** (`memberSearch()`, People's empty state). Applied during render
+   * against the last request seen and cleared in the effect, as Collection applies
+   * `show: 'unranked'`: Search is a tab and stays mounted, so a second arrival is a second
+   * request rather than a param that never changed. The query is left as it was.
+   */
+  const { show: showRaw } = useLocalSearchParams<{ show?: string | string[] }>();
+  // A repeated param (`?show=users&show=users`) arrives as an array that is new on every
+  // render; compared as-is it would set state on every render (independent review 1). One
+  // string, compared by value.
+  const showParam = Array.isArray(showRaw) ? showRaw[0] : showRaw;
+  const [askedFor, setAskedFor] = useState<string | undefined>(undefined);
+  if (showParam !== askedFor) {
+    setAskedFor(showParam);
+    if (showParam === 'users') setFilter('users');
+  }
+  useEffect(() => {
+    if (showParam !== 'users') return;
+    router.setParams({ show: undefined });
+  }, [showParam, router]);
 
   const queryClient = useQueryClient();
   /** Drains the post-ranking celebration queue when the log flow ends. */
@@ -491,6 +512,7 @@ export default function LogScreen() {
           brand row; the founder's correction is the cross-tab header rhythm:
           row one is who you are looking at, row two is what you do here. */}
       <AppHeader />
+      <HeaderBoundary />
       <View style={styles.searchRow}>
         <SearchField
           ref={field}
@@ -509,7 +531,6 @@ export default function LogScreen() {
           accessibilityHint="Results appear as you type"
         />
       </View>
-      <HeaderBoundary />
 
       {/* Hidden while idle. A filter over nothing is five buttons that do
           nothing, and the recent searches below are not filterable by kind.
@@ -774,7 +795,17 @@ function Results({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {recent.length > 0 ? (
+        {peopleOnly ? (
+          // Arrived on Users with nothing typed, from People's "Find people" (nav cohesion
+          // sprint, 2026-11-06): the prompt is about members, not titles, and the title
+          // searches under Recent are not what was asked for.
+          <EmptyState
+            kind="nothingYet"
+            compact
+            title="Find people"
+            body="Search by name or @username."
+          />
+        ) : recent.length > 0 ? (
           <>
             <SectionHeader
               title="Recent searches"

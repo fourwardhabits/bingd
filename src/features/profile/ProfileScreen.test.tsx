@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Share, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -165,8 +165,9 @@ jest.mock('@/lib/supabase', () => ({
 jest.mock('@/features/awards/ProfileAwards', () => {
   const { Pressable, Text, View } = jest.requireActual('react-native');
   return {
-    ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
-      <View>
+    ProfileAwards: ({ onSeeAll, headingSize }: { onSeeAll: () => void; headingSize?: string }) => (
+      // Carries the heading size the Profile tab asked for, so the 15pt test can read it.
+      <View testID={`awards-heading-${headingSize ?? 'standard'}`}>
         <Text>bingd AWARDS</Text>
         <Pressable accessibilityRole="button" onPress={onSeeAll}>
           <Text>See all</Text>
@@ -369,13 +370,12 @@ describe('the profile controls', () => {
     );
   });
 
-  it('keeps the bell in its corner and puts settings beside it as a gear', async () => {
+  it('offers settings as a gear, and no second bell (UI cohesion pass)', async () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Settings')).toBeTruthy());
-    // The bell sits in the same place on every root tab. A text button next to it was
-    // pushing it out of that corner on this one.
-    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+    // The inbox's door is Feed's bell; Profile's header carries the gear alone.
+    expect(view.queryByLabelText(/^Notifications/)).toBeNull();
   });
 
   it('opens settings from the gear', async () => {
@@ -451,7 +451,7 @@ describe('the stat row', () => {
     await waitFor(async () => expect(await stat(view, 'Movies')).toBe('3'));
     expect(await stat(view, 'Followers')).toBeDefined();
     expect(await stat(view, 'Following')).toBeDefined();
-    expect(await stat(view, 'TV')).toBeDefined();
+    expect(await stat(view, 'TV Shows')).toBeDefined();
     expect(view.queryByLabelText(/^Watchlist: /)).toBeNull();
     expect(view.queryByLabelText(/^Watched: /)).toBeNull();
   });
@@ -1076,5 +1076,56 @@ describe('social links', () => {
       'Open Instagram profile',
       'Open website',
     ]);
+  });
+});
+
+/**
+ * **The Profile tab's six headings are 15pt** (founder final polish, 2026-11-04): YOUR
+ * 2026, bingd AWARDS (bingd still lower-case), TOP RANKED, WATCHLIST, LISTS and RECENT
+ * ACTIVITY. Somebody else's profile draws the same sections at 12pt — see
+ * `PublicProfileScreen.test.tsx`.
+ */
+describe('the Profile headings', () => {
+  it('draws all six at 15pt', async () => {
+    mockTables.watchlist = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'w1',
+        created_at: '2026-08-19T10:00:00Z',
+        media_items: { ...movie('w1', 'Sicario'), season_number: null, parent: null },
+      },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('WATCHLIST')).toBeTruthy());
+
+    // bingd AWARDS is stubbed in this file (see the mock above), so here it is the size
+    // the tab asks for; `ProfileAwards.test.tsx` asserts the section draws it at 15pt.
+    expect(view.getByTestId('awards-heading-large')).toBeTruthy();
+
+    const headings = [/^YOUR \d{4}$/, 'TOP RANKED', 'WATCHLIST', 'LISTS', 'RECENT ACTIVITY'];
+    const sizes = headings.map((heading) => {
+      const style = StyleSheet.flatten(view.getByText(heading).props.style) as TextStyle | undefined;
+      return [String(heading), style?.fontSize];
+    });
+    expect(sizes).toEqual(headings.map((heading) => [String(heading), 15]));
+  });
+});
+
+/**
+ * **One profile card** (founder Preview QA, 2026-11-07): the identity, stats and the two
+ * actions on one raised surface, the actions centred side by side.
+ */
+describe('the profile card', () => {
+  it('holds the identity, the stats and the centred actions on one raised surface', async () => {
+    const view = await open();
+    const card = view.getByTestId('profile-card');
+    const style = StyleSheet.flatten(card.props.style);
+    expect(style.backgroundColor).toBeDefined();
+    expect(style.borderRadius).toBeGreaterThan(0);
+    expect(within(card).getByText('@sai')).toBeTruthy();
+    expect(within(card).getByText('Share Profile')).toBeTruthy();
+    expect(within(card).getByText('Invite friends')).toBeTruthy();
+    const row = StyleSheet.flatten(within(card).getByTestId('profile-actions-compact').props.style);
+    expect(row).toMatchObject({ flexDirection: 'row', justifyContent: 'center' });
   });
 });

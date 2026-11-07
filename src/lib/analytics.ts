@@ -734,7 +734,17 @@ export type AnalyticsEvent =
    */
   | {
       name: 'reviews_sort_changed';
-      props: { sort: 'top_desc' | 'top_asc' | 'following' | 'recent_desc' | 'recent_asc' };
+      // Rating (post-QA sprint 2) is the Cinematic Editorial sheet's client-side order.
+      props: {
+        sort:
+          | 'top_desc'
+          | 'top_asc'
+          | 'following'
+          | 'recent_desc'
+          | 'recent_asc'
+          | 'rating_desc'
+          | 'rating_asc';
+      };
     }
 
   // --- Recommendations ------------------------------------------------------
@@ -1003,6 +1013,16 @@ export type AnalyticsEvent =
       name: 'list_shared';
       props: { visibility: ListVisibilityName; item_count: number; is_owner: boolean };
     }
+  /** The First Five card's preview opened: somebody considered sharing. */
+  | { name: 'first_five_share_opened'; props?: undefined }
+  /**
+   * The system share sheet **opened** for the First Five card, as an image or as words.
+   *
+   * The opening, not a completed share, for the same reason as `list_shared`.
+   */
+  | { name: 'first_five_shared'; props: { kind: 'image' | 'text' } }
+  /** No image could be made, so the sheet offered the words instead. */
+  | { name: 'first_five_share_failed'; props?: undefined }
   /**
    * The list screen resolved a list the reader may see. **Not** the unavailable state.
    *

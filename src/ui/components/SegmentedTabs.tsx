@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
 export type SegmentOption<T extends string> = {
@@ -31,12 +31,22 @@ export type SegmentOption<T extends string> = {
  * it has to hold the position and the weight a screen title held: `title2`, ink when
  * selected, and a 3pt rule.
  *
+ * `nav` — a page's own sections across the full width: Collection's Watched | Watchlist |
+ * Unranked. **One segmented control** (founder, QA corrections, 2026-11-06), replacing the
+ * underlined text tabs of the cohesion pass, which read as quieter than the Filter & Sort
+ * row beneath them. One hairline-outlined track across the gutters, split into equal
+ * segments — halves for two, thirds for three; the chosen segment filled Parchment with
+ * its label in Maroon, the others in secondary Ink on the Paper ground. Inter Medium
+ * throughout, so choosing does not change a word's width. It is `CompactSwitch`'s
+ * grammar (outline, inset fill, `surface.sunken`) at the size of a page's primary
+ * navigation: no separate pills, no heavy border, no new colour.
+ *
  * **The distinction is semantic, not decorative** (founder addendum, 2026-09-06). A
  * reader should be able to tell "take me to this content" from "narrow what I am looking
  * at" without reading the labels, which is also why Search's All/Movies/TV/People stayed
  * filter *chips* and did not become either of these.
  */
-export type SegmentedTabsVariant = 'primary' | 'secondary';
+export type SegmentedTabsVariant = 'primary' | 'secondary' | 'nav';
 
 export type SegmentedTabsProps<T extends string> = {
   options: readonly SegmentOption<T>[];
@@ -49,6 +59,20 @@ export type SegmentedTabsProps<T extends string> = {
   variant?: SegmentedTabsVariant;
   /** Announced to screen readers as the name of the tab set. */
   accessibilityLabel?: string;
+  /**
+   * `nav` only: 14pt labels and tighter padding, for four segments on a 320pt phone (the
+   * Leaderboard's categories, nav cohesion sprint, 2026-11-06). Collection's two or three
+   * keep the 15pt default.
+   */
+  dense?: boolean;
+  /**
+   * `nav` only: the page's primary navigation at full weight (final title refinement,
+   * 2026-11-06). Collection's Watched | Watchlist | Unranked read as secondary to the
+   * Filter & Sort row under it, so the chosen segment is filled Maroon with its word in
+   * Parchment — the Feed mode toggle's grammar — and the others are Ink on Paper, at 16pt
+   * Inter Medium. The Leaderboard's categories keep the quieter default.
+   */
+  solid?: boolean;
 };
 
 /**
@@ -85,8 +109,77 @@ export function SegmentedTabs<T extends string>({
   onChange,
   variant = 'secondary',
   accessibilityLabel,
+  dense = false,
+  solid = false,
 }: SegmentedTabsProps<T>) {
   const primary = variant === 'primary';
+
+  if (variant === 'nav') {
+    return (
+      <View style={styles.navRow}>
+        <View
+          style={styles.navTrack}
+          accessibilityRole="tablist"
+          accessibilityLabel={accessibilityLabel}
+          testID="nav-tabs"
+        >
+          {options.map((option) => {
+            const selected = option.id === value;
+            return (
+              <Pressable
+                key={option.id}
+                accessibilityRole="tab"
+                accessibilityLabel={option.accessibilityLabel}
+                accessibilityState={{ selected }}
+                onPress={() => onChange(option.id)}
+                style={styles.navTab}
+                testID={`nav-tab-${option.id}`}
+              >
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.navFill,
+                      dense && styles.navFillDense,
+                      selected && (solid ? styles.navFillSolid : styles.navFillSelected),
+                      pressed && !selected && styles.navPressed,
+                    ]}
+                    testID={`nav-fill-${option.id}`}
+                  >
+                    <Text
+                      variant="callout"
+                      tone={solid ? 'primary' : selected ? 'action' : 'secondary'}
+                      numberOfLines={1}
+                      /**
+                       * **One line, always.** A long word at a large system text size
+                       * shrinks before it would truncate — three segments on a 320pt
+                       * phone are about 92pt each — and the label's own growth stops at
+                       * 1.3×, the ceiling the type scale already gives display sizes, so
+                       * the control keeps one row and the page keeps its posters. At 1.5×
+                       * the three words needed nearly all of that shrink at 320pt; at 1.3×
+                       * they need about a sixth of it. The tabs' meaning never depends on reading a word at
+                       * 300%: the chosen one is also the filled one.
+                       */
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
+                      maxFontSizeMultiplier={NAV_MAX_SCALE}
+                      style={[
+                        styles.navLabel,
+                        dense && styles.navLabelDense,
+                        solid && styles.navLabelSolid,
+                        solid && selected && styles.navLabelOnFill,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -139,6 +232,11 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
+/** Hairline outline, the inset between the outline and a fill, and the label's ceiling. */
+const NAV_STROKE = StyleSheet.hairlineWidth * 2;
+const NAV_INSET = 3;
+const NAV_MAX_SCALE = 1.3;
+
 const styles = StyleSheet.create({
   // `flexGrow: 0` so the scroll view takes its height from the tabs. A ScrollView
   // otherwise expands into whatever a flexible parent offers it, which on the title
@@ -173,4 +271,41 @@ const styles = StyleSheet.create({
   // heavier of the two when both rows are stacked on Collection.
   underlinePrimary: { height: 3 },
   underlineActive: { backgroundColor: theme.semantic.action },
+
+  /** Full width, the gutters as its edges. */
+  navRow: { paddingHorizontal: theme.layout.gutter },
+  // The one shared control: a hairline outline around every segment, as CompactSwitch
+  // draws its own, and the segments equal however many there are.
+  navTrack: {
+    flexDirection: 'row',
+    paddingHorizontal: NAV_INSET / 2,
+    borderRadius: theme.radius.card,
+    borderWidth: NAV_STROKE,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.base,
+  },
+  // Each segment is its whole slice of the track, 44pt tall, so the target is the fill
+  // and the inset around it; at a large text size it grows with its word.
+  navTab: {
+    flex: 1,
+    flexBasis: 0,
+    minHeight: theme.layout.minTapTarget,
+    paddingVertical: NAV_INSET,
+    paddingHorizontal: NAV_INSET / 2,
+  },
+  navFill: {
+    flexGrow: 1,
+    borderRadius: theme.radius.card - NAV_INSET,
+    paddingHorizontal: theme.space[2],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navFillSelected: { backgroundColor: theme.surface.sunken },
+  navFillSolid: { backgroundColor: theme.semantic.action },
+  navLabelSolid: { fontSize: 16, lineHeight: 20 },
+  navLabelOnFill: { color: theme.semantic.actionText },
+  navFillDense: { paddingHorizontal: theme.space[1] },
+  navLabelDense: { fontSize: 14, lineHeight: 18 },
+  navLabel: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  navPressed: { opacity: 0.6 },
 });

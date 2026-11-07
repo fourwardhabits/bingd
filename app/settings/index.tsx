@@ -17,6 +17,11 @@ import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+import {
+  isTitleLayoutAvailable,
+  setTitleLayout,
+  useStoredTitleLayout,
+} from '@/features/title/title-layout';
 
 /**
  * Settings, as an information architecture rather than a single scroll.
@@ -41,6 +46,7 @@ import { theme } from '@/ui/tokens';
 export default function SettingsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
+  const titleLayout = useStoredTitleLayout();
 
   const leave = async () => {
     await signOut();
@@ -97,7 +103,7 @@ export default function SettingsScreen() {
             {/* **The inbox is not reachable from here, and that is the founder's
                 Preview correction.** There was a Notifications row above this one going
                 to `/settings/notifications`, and it was a second door to a room with a
-                door already: the bell in the Feed and Profile headers opens the same
+                door already: the bell in the Feed header opens the same
                 inbox, from the screens somebody is actually on when they wonder who
                 reacted. Two entry points to one inbox, one of them three taps deep inside
                 Settings, made the pair read as two different features.
@@ -212,6 +218,26 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Labs: one row per alternative, and the row is the whole switch: tap it to swap,
+            and the next title page opens in the other layout. Since the release pass
+            (2026-11-07) the Cinematic title page is the default everywhere, production
+            included, and this row is how somebody returns to the Original one.
+            `title-layout.ts` says how to put Original back for everyone. */}
+        {isTitleLayoutAvailable() ? (
+          <View style={styles.section}>
+            <SectionHeader title="Labs" />
+            <View style={[styles.group, styles.sectionGroup]}>
+              <Row
+                icon="flask-outline"
+                label="Title page"
+                detail={titleLayout === 'immersive' ? 'Cinematic' : 'Original'}
+                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the cinematic title page'}
+                onPress={() => void setTitleLayout(titleLayout === 'immersive' ? 'original' : 'immersive')}
+                last
+              />
+            </View>
+          </View>
+        ) : null}
         {/* Privacy and Terms, under a heading of their own since 2026-09-05.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a

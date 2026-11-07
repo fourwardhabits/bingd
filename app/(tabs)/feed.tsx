@@ -27,6 +27,8 @@ import {
   watchLabel,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
+import { FeedCard } from '@/features/feed/FeedCard';
+import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { useCommentCounts } from '@/features/feed/use-comments';
@@ -43,6 +45,7 @@ import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
+  REACTION_LABEL,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -53,7 +56,6 @@ import {
   DEFAULT_METRIC,
   DEFAULT_TIMEFRAME,
   isLeaderboardTimeframe,
-  LEADERBOARD_TIMEFRAMES,
   useLeaderboard,
   useMyStanding,
   type LeaderboardMetric,
@@ -75,7 +77,6 @@ import {
   EmptyState,
   HeaderBoundary,
   IconToggle,
-  MediumSelector,
   Screen,
   SectionHeader,
   SkeletonRow,
@@ -716,7 +717,7 @@ export default function FeedScreen() {
          * **The content header row** (founder follow-up §1).
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
-         *     THIS MONTH ▼                    [Feed] [Trophy] [People]
+         *     LEADERBOARD                     [Feed] [Trophy] [People]
          *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
@@ -724,7 +725,8 @@ export default function FeedScreen() {
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode, the timeframe selector in Leaderboard mode, and since
+         * name in Feed mode, LEADERBOARD in Leaderboard mode (whose time range has been a
+         * filter under its categories since 2026-11-06), and since
          * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
          * same treatment. In Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
@@ -739,26 +741,20 @@ export default function FeedScreen() {
          * — so the row does not move if a second list ever makes it a selector.
          */}
         <View style={styles.contentHeader}>
-          {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
-              itself and a section-sized `MediumSelector` deliberately does not, so a
-              single inset on the row would double-pad TRENDING NOW while an inset on
-              neither leaves the timeframe flush against the screen edge — which is what
-              the founder photographed. Padding on the existing flex child, so the row's
-              height and the toggle's position are untouched. */}
-          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
+          {/* Every occupant is a `SectionHeader`, which pads itself to the gutter. */}
+          <View style={styles.contentHeaderLeft}>
             {showingBoard ? (
-              <MediumSelector
-                size="section"
-                value={timeframe}
-                onChange={changeTimeframe}
-                options={LEADERBOARD_TIMEFRAMES}
-              />
+              // The section, named like TRENDING NOW (nav cohesion sprint, 2026-11-06). The
+              // time range is a filter under the categories now, in `LeaderboardView`.
+              <SectionHeader title="Leaderboard" size="large" fit />
             ) : showingPeople ? (
-              // `SectionHeader` pads itself, which is why People does not take
-              // `contentHeaderInset` above — the same reason Trending does not.
-              <SectionHeader title="People you may know" />
+              // The Feed's label size, as LEADERBOARD and TRENDING NOW (marquee cohesion
+              // sprint); it shrinks to fit beside the toggle on a narrow phone.
+              <SectionHeader title="People you may know" size="large" fit />
             ) : trendingHasItems ? (
-              <SectionHeader title="Trending now" />
+              // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
+              // heading keeps the standard 12pt, which is what fits beside the toggle.
+              <SectionHeader title="Trending now" size="large" />
             ) : null}
           </View>
 
@@ -782,6 +778,7 @@ export default function FeedScreen() {
             metric={metric}
             onChangeMetric={changeMetric}
             timeframe={timeframe}
+            onChangeTimeframe={changeTimeframe}
             entries={leaderboard.data}
             // Only beside a board that is current. While the rows on screen are the previous
             // metric's, a standing for either metric would be drawn under the wrong list.
@@ -816,24 +813,19 @@ export default function FeedScreen() {
             </View>
 
             {/**
-             * Where discovery ends and the social feed begins.
+             * **Where discovery ends and the social feed begins: one rule, then RECENT
+             * ACTIVITY** (founder, marquee cohesion sprint, 2026-11-07).
              *
-             * The founder's note: Trending stays at the top, must **not** be sticky, and a
-             * reader should scroll naturally past it into activity — but there was nothing
-             * marking the boundary, so the first activity row read as one more thing in
-             * the shelf's section.
-             *
-             * A hairline and a heading, which is the app's existing vocabulary for exactly
-             * this. **ACTIVITY** rather than "From your network": the feed also carries the
-             * reader's own rankings, so "your network" would be false on the row somebody
-             * is most likely to recognise.
-             *
-             * Drawn even while the feed is loading or empty, because its job is to say
-             * what the rest of the screen is — and an empty state under a heading is
-             * legible where the same empty state floating below a shelf is not.
+             * The nav cohesion sprint took the boundary down to whitespace alone, and on the
+             * phone the first post then read as part of the rail. Now: the Feed's own
+             * separator (the hairline between posts) under Trending, 16pt either side of it,
+             * and the heading in the Feed's section-label token, as TRENDING NOW is. The first
+             * post sits 20pt under it (`leading`), so the label belongs to what follows. The
+             * rule is drawn only under a shelf; with no shelf there is nothing to divide.
              */}
-            <View style={styles.boundary}>
-              <SectionHeader title="Activity" />
+            <View style={styles.activityStart} testID="feed-activity-start">
+              {trendingHasItems ? <View style={styles.activityRule} /> : null}
+              <SectionHeader title="Recent activity" size="large" tight />
             </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
@@ -861,6 +853,7 @@ export default function FeedScreen() {
                   kind="couldNotLoad"
                   title="Could not load activity"
                   body="Check your connection and try again."
+                  action={{ label: 'Try again', onPress: () => void feed.refetch() }}
                 />
               </View>
             ) : feed.isPending ? (
@@ -893,7 +886,7 @@ export default function FeedScreen() {
                 />
               </View>
             ) : (
-              events.map((event) =>
+              events.map((event, index) =>
                 /**
                  * **A follow story is a different row** (§§A9, A12), and it is a different
                  * row rather than an `ActivityRow` with six props left off.
@@ -934,6 +927,75 @@ export default function FeedScreen() {
                       track({ name: 'follow_activity_opened' });
                       setFollowStoryFor(event.id);
                     }}
+                  />
+                ) : takesFeedCard(event) ? (
+                  /**
+                   * **A title activity is a cinematic card** (founder-approved direction,
+                   * 2026-11-04). The same values and callbacks the row below is handed —
+                   * the sentence, the live score, the spoiler decision, the watchlist write,
+                   * the Recommend sheet, the reaction gestures — laid out around the title's
+                   * artwork instead of beside a 40pt poster. Awards and goals keep the row.
+                   */
+                  <FeedCard
+                    key={event.id}
+                    leading={index === 0}
+                    actorName={event.actorName}
+                    actorAvatarUri={event.actorAvatarUri}
+                    onPressActor={
+                      event.actorId === profile.id || !event.actorUsername
+                        ? undefined
+                        : () => router.push(`/u/${event.actorUsername}`)
+                    }
+                    verb={verbFor(event.type)}
+                    tail={tailFor(event.type, event.title)}
+                    tailAction={
+                      event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                        ? {
+                            connector: 'and',
+                            label: `${(event.rankedCount ?? 1) - 1} more`,
+                            onPress: () =>
+                              setRankingBatchFor({
+                                id: event.id,
+                                medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                              }),
+                          }
+                        : null
+                    }
+                    companions={event.companions}
+                    title={event.title}
+                    year={event.year}
+                    metadata={metadataFor(event)}
+                    watchLabel={watchLabel(event.watchNumber)}
+                    timeLabel={relativeTime(event.createdAt)}
+                    artwork={feedArtwork(event)}
+                    score={event.score}
+                    bucket={event.bucket}
+                    review={
+                      event.note
+                        ? {
+                            text: event.note.text,
+                            hasSpoilers: event.note.hasSpoilers,
+                            masked: shouldMask({
+                              hasSpoilers: event.note.hasSpoilers,
+                              mediaItemId: event.mediaItemId,
+                              viewerId: profile.id,
+                              authorId: event.actorId,
+                              watched: watched.data,
+                            }),
+                          }
+                        : null
+                    }
+                    onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
+                    reaction={reactionFor(event.id)}
+                    onPressComments={() => setCommentsFor(event.id)}
+                    commentCount={commentCounts.data?.get(event.id) ?? 0}
+                    onPressSave={
+                      event.actorId !== profile.id
+                        ? () => toggleWatchlist(event.mediaItemId!)
+                        : undefined
+                    }
+                    saved={saved.has(event.mediaItemId!)}
+                    onPressShare={event.kind !== 'series' ? () => openRecommend(event) : undefined}
                   />
                 ) : (
                 <ActivityRow
@@ -1181,6 +1243,7 @@ export default function FeedScreen() {
     return {
       count: summary?.total ?? 0,
       mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+      mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
       glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
       onPress: () => void toggleDefault(eventId),
       onLongPress: () => setPickerFor(eventId),
@@ -1219,10 +1282,8 @@ const styles = StyleSheet.create({
   /**
    * The content header row: a heading on the left, the mode toggle on the right.
    *
-   * The gutter lives here rather than on the children, because the two left-hand
-   * occupants are different components — a `SectionHeader`, which pads itself, and a
-   * section-sized `MediumSelector`, which deliberately does not. Padding the row is what
-   * makes them line up with each other and with the list below.
+   * The right gutter lives here; the left one is the `SectionHeader`'s own, which every
+   * mode's heading is.
    */
   contentHeader: {
     flexDirection: 'row',
@@ -1235,20 +1296,13 @@ const styles = StyleSheet.create({
   // Takes the space the toggle leaves, so a long heading truncates rather than pushing
   // the control off the row.
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
-  // Only the timeframe selector carries it — see the call site.
-  contentHeaderInset: { paddingLeft: theme.layout.gutter },
-  /**
-   * The rule between discovery and activity.
-   *
-   * Full-bleed rather than inset to the text column, unlike a row divider: this
-   * separates two *sections*, and a rule that stops short would read as belonging to
-   * whichever one it touched.
-   */
-  boundary: {
-    marginTop: theme.space[4],
-    paddingTop: theme.space[2],
-    borderTopWidth: StyleSheet.hairlineWidth * 2,
-    borderTopColor: theme.border.hairline,
+  /** Trending's end, the rule and RECENT ACTIVITY: 16pt above and below the rule. */
+  activityStart: { paddingTop: theme.space[4] },
+  // The hairline between two posts (`FeedCard`), full width, as the Feed's other rules are.
+  activityRule: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.border.hairline,
+    marginBottom: theme.space[4],
   },
 });
 

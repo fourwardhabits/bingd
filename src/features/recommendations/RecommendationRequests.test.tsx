@@ -159,7 +159,7 @@ describe('the compact alert row', () => {
 
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Sent to you')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Sent to You')).toBeTruthy());
     expect(view.queryByTestId('recommendation-requests-alert')).toBeNull();
   });
 

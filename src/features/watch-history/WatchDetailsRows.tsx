@@ -106,9 +106,12 @@ export function WatchDetailsRows({
         label="Note"
         value={noteValue}
         expanded={open === 'note'}
-        onPress={() => toggle('note')}
+        // Shut until the stored note and the share preference are both read, so the share
+        // state is settled — and on screen — before anything typed can be saved.
+        onPress={titleNote.loaded ? () => toggle('note') : undefined}
+        disabledReason={titleNote.loaded ? undefined : 'Loading'}
       />
-      {open === 'note' ? (
+      {open === 'note' && titleNote.loaded ? (
         <View style={[styles.expanded, styles.noteBox]}>
           <NoteInput
             value={titleNote.note}

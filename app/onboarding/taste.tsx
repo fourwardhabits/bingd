@@ -12,7 +12,6 @@ import {
 
 import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
 import { useRankedCollection } from '@/features/collection/use-collection';
-import { bandSizes, formatScore, scoreFor } from '@/features/collection/score';
 import { OnboardingFooter } from '@/features/onboarding/OnboardingFooter';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import { PICK_TARGET, setRankingOutcome } from '@/features/onboarding/pick-five';
@@ -26,6 +25,8 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { FirstFiveShareSheet } from '@/features/share/FirstFiveShareSheet';
+import { firstFiveRows } from '@/features/share/first-five';
 import { useTrending } from '@/features/trending/use-trending';
 import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
 import { diagnosticsAvailable } from '@/features/diagnostics/availability';
@@ -38,6 +39,7 @@ import {
   type BucketId,
   LoadingScreen,
   Poster,
+  ScoreBadge,
   Screen,
   SearchField,
   SkeletonRow,
@@ -958,18 +960,21 @@ function PickTile({
  *
  * One primary action. There is no competing *Explore For You* or *Find people*: this is
  * still onboarding, and a fork at the payoff is what made the social half optional in the
- * first place.
+ * first place. **Share is not a fork** (2026-11-02): it opens a sheet over this screen and
+ * comes straight back, so outlined beside the filled Continue it offers without competing.
+ * Side by side rather than stacked because the footer's height is what clipped the fifth
+ * row, and all five must show on a standard phone: they are the reward, and what the card
+ * is a picture of.
  */
 function FirstFive({ onContinue }: { onContinue: () => void }) {
   const profile = useCurrentProfile();
   const { data } = useRankedCollection(profile.id, 'movies');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
-  const entries = data ?? [];
-  const sizes = bandSizes(entries);
   // Position is 1-based and ascending within the category, and every row here is the same
   // category, so this is the ranking itself rather than a proxy for it.
-  const top = [...entries].sort((a, b) => a.position - b.position).slice(0, FIRST_FIVE);
+  const rows = firstFiveRows(data ?? [], FIRST_FIVE);
 
   return (
     <>
@@ -991,27 +996,25 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
           </Text>
         </View>
 
-        {top.map((entry, index) => (
-          <View key={entry.mediaItemId} style={styles.rankRow}>
+        {rows.map((row) => (
+          <View key={row.mediaItemId} style={styles.rankRow}>
             <Text variant="title1" style={styles.ordinal}>
-              {index + 1}
+              {row.rank}
             </Text>
             <View style={styles.rankPoster}>
-              <Poster uri={posterUri(entry.posterPath, 'card')} title={entry.title} size="sm" />
+              <Poster uri={posterUri(row.posterPath, 'card')} title={row.title} size="xs" />
             </View>
             <View style={styles.rankTitle}>
               <Text variant="body" numberOfLines={2}>
-                {entry.title}
+                {row.title}
               </Text>
-              {entry.year ? (
+              {row.year ? (
                 <Text variant="footnote" tone="secondary">
-                  {entry.year}
+                  {row.year}
                 </Text>
               ) : null}
             </View>
-            <Text variant="score" tone="secondary">
-              {formatScore(scoreFor(entry.bucket, entry.position, sizes))}
-            </Text>
+            <ScoreBadge score={row.score} bucket={row.bucket} size="sm" />
           </View>
         ))}
 
@@ -1022,9 +1025,35 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
       </ScrollView>
 
       <OnboardingFooter>
-        <Button label="Continue" onPress={onContinue} />
+        <View style={styles.payoffActions}>
+          <View style={styles.payoffAction}>
+            <Button
+              label="Share"
+              kind="secondary"
+              fit
+              accessibilityLabel="Share your First Five"
+              disabled={rows.length < FIRST_FIVE}
+              disabledReason="Your list is still loading."
+              onPress={() => {
+                track({ name: 'first_five_share_opened' });
+                setSharing(true);
+              }}
+            />
+          </View>
+          <View style={styles.payoffAction}>
+            <Button label="Continue" fit onPress={onContinue} />
+          </View>
+        </View>
         <UseDifferentAccountButton />
       </OnboardingFooter>
+
+      {sharing ? (
+        <FirstFiveShareSheet
+          rows={rows}
+          username={profile.username}
+          onClose={() => setSharing(false)}
+        />
+      ) : null}
 
       <DiagnosticsSheet visible={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </>
@@ -1055,7 +1084,9 @@ const styles = StyleSheet.create({
   tileFrame: { borderRadius: theme.radius.control },
   status: { padding: theme.layout.gutter, gap: theme.space[3] },
   results: { paddingBottom: theme.space[8] },
-  payoff: { paddingBottom: theme.space[6] },
+  payoff: { paddingBottom: theme.space[2] },
+  payoffActions: { flexDirection: 'row', gap: theme.space[2] },
+  payoffAction: { flex: 1 },
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1064,6 +1095,6 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[2],
   },
   ordinal: { width: 28, textAlign: 'center', color: theme.semantic.score },
-  rankPoster: { width: theme.poster.sm.width },
+  rankPoster: { width: theme.poster.xs.width },
   rankTitle: { flex: 1, gap: 2 },
 });

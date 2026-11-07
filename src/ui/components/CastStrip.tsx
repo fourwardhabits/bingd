@@ -15,6 +15,17 @@ export type CastStripProps = {
   cast: CastMember[];
   /** Routes to the person page. Omit and the strip is a display, not a control. */
   onPressMember?: (member: CastMember) => void;
+  /**
+   * Narrower columns, so four portraits show at 360pt (the immersive title page's Cast
+   * preview). The Original page keeps the default.
+   */
+  compact?: boolean;
+  /**
+   * Where the first portrait starts, when the page's content line is not the gutter: the
+   * Cinematic title page's sheet (title-page sprint, 2026-11-06). The rail still scrolls
+   * to the screen edge. Absent, the gutter.
+   */
+  gutter?: number;
 };
 
 /**
@@ -30,11 +41,15 @@ export type CastStripProps = {
  * would be half-empty for every title; both forms are the same size and shape, and a
  * row can mix them without looking broken.
  */
-export function CastStrip({ cast, onPressMember }: CastStripProps) {
+export function CastStrip({ cast, onPressMember, compact = false, gutter }: CastStripProps) {
   if (!cast.length) return null;
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} testID="cast-strip" contentContainerStyle={[
+        styles.row,
+        compact && styles.rowCompact,
+        gutter !== undefined && { paddingHorizontal: gutter },
+      ]}>
       {cast.map((member) => {
         const label = member.character
           ? `${member.name}, who plays ${member.character}`
@@ -56,7 +71,7 @@ export function CastStrip({ cast, onPressMember }: CastStripProps) {
 
         if (!onPressMember) {
           return (
-            <View key={member.id} style={styles.item}>
+            <View key={member.id} style={[styles.item, compact && styles.itemCompact]}>
               {content}
             </View>
           );
@@ -68,7 +83,7 @@ export function CastStrip({ cast, onPressMember }: CastStripProps) {
             accessibilityRole="button"
             accessibilityLabel={label}
             onPress={() => onPressMember(member)}
-            style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.item, compact && styles.itemCompact, pressed && styles.pressed]}
           >
             {content}
           </Pressable>
@@ -91,6 +106,12 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
     alignItems: 'center',
   },
+  // 76pt columns with 8pt gaps: four across a 360pt screen with the gutter, the fifth
+  // peeking to say the row scrolls. No padding above or below: the Cinematic page's section
+  // puts its space outside the rail, where a heading action's slop can use it without
+  // reaching into a scroll view (final title refinement, 2026-11-06).
+  rowCompact: { gap: theme.space[2], paddingVertical: 0 },
+  itemCompact: { width: 76 },
   center: { textAlign: 'center' },
   pressed: { opacity: 0.7 },
 });

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { BucketChoices } from './BucketChip';
 
 /**
@@ -129,5 +129,45 @@ describe('the three choices', () => {
     // `notForMe` is the chip's camelCase; the write maps it to the stored
     // `not_for_me`. Both halves of that are asserted where each happens.
     expect(onSelect.mock.calls.map(([bucket]) => bucket)).toEqual(['loved', 'fine', 'notForMe']);
+  });
+});
+
+/**
+ * The restrained polish of post-QA sprint 2 (2026-11-05): the colours carry their meaning
+ * before anything is chosen, and the labels read as the sheet's decision. Layout, order,
+ * the radio semantics and the 44pt circles are exactly as pinned above.
+ */
+describe('the three choices, polished', () => {
+  const circle = (id: string) => flatten(screen.getByTestId(`bucket-circle-${id}`).props.style);
+
+  it('washes each unchosen circle in its own colour, and fills the chosen one', async () => {
+    await draw({ selected: 'fine' });
+
+    expect(circle('loved').backgroundColor).toBe(`${theme.bucket.loved}1F`);
+    expect(circle('notForMe').backgroundColor).toBe(`${theme.bucket.notForMe}1F`);
+    expect(circle('fine').backgroundColor).toBe(theme.bucket.fine);
+    for (const id of ['loved', 'fine', 'notForMe'] as const) {
+      expect(circle(id).borderColor).toBe(theme.bucket[id]);
+      expect(circle(id).width).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  it('sets the labels in Inter Regular, beneath their circles', async () => {
+    await draw();
+    for (const id of ['loved', 'fine', 'notForMe']) {
+      const label = flatten(screen.getByTestId(`bucket-label-${id}`).props.style);
+      expect(label.fontFamily).toBe(fontFamily.sans);
+      expect(label.textAlign).toBe('center');
+    }
+  });
+
+  it('keeps the circles at 44pt and the row at three equal columns', async () => {
+    await draw();
+    for (const id of ['loved', 'fine', 'notForMe'] as const) {
+      expect(circle(id).width).toBe(44);
+      expect(circle(id).height).toBe(44);
+    }
+    const choices = flatten(screen.getByTestId('choices').props.style);
+    expect(choices.flexDirection).toBe('row');
   });
 });

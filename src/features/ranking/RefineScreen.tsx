@@ -13,8 +13,14 @@ import { queryKeys } from '@/lib/query';
 import { Button, Poster, Screen, ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import { RankedSummary, rankedHeading, SessionHeader } from './RankedSummary';
+import {
+  RankedSummary,
+  rankedHeading,
+  SessionHeader,
+  type RankedSummaryTitle,
+} from './RankedSummary';
 import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
+import { useSettledStanding } from './settled-standing';
 import {
   atCheckpoint,
   markShown,
@@ -418,6 +424,28 @@ export function RefineScreen({
    */
   const batchTotal = Math.min(batchAtStart ?? 0, ROUND_TARGETS);
 
+  /**
+   * The round's summary, settled against a read made after its last placement (QA
+   * corrections, 2026-11-06). A move shifts every title between its two ordinals, so a
+   * title checked early in a round can sit elsewhere by the time the round ends.
+   */
+  const finishedTitles: RankedSummaryTitle[] = sitting.finished.map((t) => ({
+    mediaItemId: t.mediaItemId,
+    title: t.title,
+    posterPath: t.posterPath,
+    position: t.position,
+    score: t.score,
+    bucket: t.bucket,
+  }));
+  const standing = useSettledStanding({
+    userId: profile.id,
+    medium,
+    // The round is in the key: the finished count starts again with every round.
+    sitting: `refine:${seed}:${sitting.round}`,
+    titles: finishedTitles,
+    enabled: phase.kind === 'checkpoint',
+  });
+
   return (
     <Screen includeBottomInset>
       {/* The summary draws its own foot; a Done in the header there would be two. */}
@@ -537,14 +565,9 @@ export function RefineScreen({
       ) : phase.kind === 'checkpoint' ? (
         <RankedSummary
           heading={rankedHeading(sitting.finished.length, 'checked')}
-          titles={sitting.finished.map((t) => ({
-            mediaItemId: t.mediaItemId,
-            title: t.title,
-            posterPath: t.posterPath,
-            position: t.position,
-            score: t.score,
-            bucket: t.bucket,
-          }))}
+          titles={standing.titles}
+          standing={standing.state}
+          onRetry={standing.retry}
           medium={medium}
           actions={
             <>

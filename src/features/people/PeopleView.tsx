@@ -6,7 +6,18 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { useRelationships } from '@/features/profile/use-social';
 import { track, type PeopleSuggestionMode } from '@/lib/analytics';
-import { Avatar, Chip, Divider, EmptyState, Sheet, SkeletonRow, Text, UserRow } from '@/ui/components';
+import { memberSearch } from '@/lib/routes';
+import {
+  Avatar,
+  Button,
+  Chip,
+  Divider,
+  EmptyState,
+  Sheet,
+  SkeletonRow,
+  Text,
+  UserRow,
+} from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import {
@@ -105,6 +116,7 @@ const MODES = [
 export const DEFAULT_PEOPLE_MODE: PeopleSuggestionMode = 'mutuals';
 
 export function PeopleView({ viewerId }: { viewerId: string }) {
+  const router = useRouter();
   const [mode, setMode] = useState<PeopleSuggestionMode>(DEFAULT_PEOPLE_MODE);
   // The person whose mutual list is open, or nobody. The sheet is mounted only while
   // open, per the heavy-sheet convention — its query runs when somebody asks.
@@ -190,12 +202,26 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
      * cached array while flagging the error — cached emptiness plus a failure is still
      * a failure, not a quiet nothing.
      */
+    /**
+     * **And one way out** (founder, nav cohesion sprint, 2026-11-06). The sentence alone
+     * left a screen-high dead end, so it is compact now and offers the app's existing
+     * member search: Search, opened on Users. It promises nothing about ranking, because
+     * ranking more does not guarantee a suggestion.
+     */
     return (
-      <View style={styles.padded}>
-        <EmptyState
-          kind="nothingYet"
-          title="No suggestions yet"
-          body="Rank more titles and follow people to improve suggestions."
+      <View style={styles.empty} testID="people-empty">
+        <Text variant="headline" style={styles.emptyText} accessibilityRole="header">
+          No suggestions yet
+        </Text>
+        <Text variant="footnote" tone="secondary" style={styles.emptyText}>
+          Find people to follow and discover more shared tastes.
+        </Text>
+        <Button
+          label="Find people"
+          size="sm"
+          accessibilityHint="Opens Search on Users"
+          hitSlop={(theme.layout.minTapTarget - SMALL_BUTTON) / 2}
+          onPress={() => router.push(memberSearch())}
         />
       </View>
     );
@@ -458,6 +484,9 @@ function MutualsSheet({
   );
 }
 
+/** `Button`'s `sm` height; the hit slop makes up the rest of a 44pt target. */
+const SMALL_BUTTON = 36;
+
 const styles = StyleSheet.create({
   // `LeaderboardView`'s own body padding, so the two modes end the same distance above
   // the tab bar.
@@ -471,6 +500,15 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
   },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  // Compact and near the top: a heading, one line and the action, not a screen-high block.
+  empty: {
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter + theme.space[4],
+    paddingTop: theme.space[8],
+    paddingBottom: theme.space[6],
+  },
+  emptyText: { textAlign: 'center' },
   // The Leaderboard row's metrics, minus the rank column.
   row: {
     flexDirection: 'row',

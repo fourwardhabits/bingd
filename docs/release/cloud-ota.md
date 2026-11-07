@@ -34,6 +34,11 @@ and lane are written into each file, not taken as inputs. `config/ota-workflows.
 the pull request gate and fails if a trigger is added, if the files stop agreeing with `eas.json`,
 or if the two stop being the same workflow apart from the lane.
 
+**Android only since 2026-11-07.** Both workflows publish `platform: android`, fixed in the
+file: the founder released the new UI to Android first and held iOS until an iOS build passes
+QA. The `runtimes` stage still checks both binaries. Publishing to iOS again is a reviewed
+change of that one word back to `all` in both files (and its test).
+
 ### Running one
 
 ```

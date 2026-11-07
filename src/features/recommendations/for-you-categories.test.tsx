@@ -148,15 +148,29 @@ const open = async () => {
   return view;
 };
 
-/** The category control is a dropdown: open it, then choose — as Collection's is. */
+/**
+ * The wall and the medium are two controls (founder final polish, 2026-11-04): the page's
+ * dropdown on the left (Recommended / Top Rated) and the Movies | TV switch on the right,
+ * the same pair Collection uses. `choose` takes the four walls by their full names.
+ */
 const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
-  await fireEvent.press(view.getByLabelText(/^Showing /));
-  await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${category}`) }));
+  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV)$/.exec(category) ?? [];
+  if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
+  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${wall}`) {
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${wall}`) }));
+  }
+  await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
 
-/** What the trigger says it is showing, which is the only place the choice is stated. */
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
+const showing = (view: Awaited<ReturnType<typeof open>>) => {
+  const wall = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const medium = within(view.getByLabelText('Medium'))
+    .getAllByRole('radio')
+    .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
+  return `Showing ${wall} ${medium}`;
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -181,55 +195,35 @@ describe('the one selector', () => {
 
     expect(view.queryByText('Titles')).toBeNull();
     expect(view.queryByLabelText('What to look at')).toBeNull();
-    expect(view.queryAllByRole('radio')).toHaveLength(0);
+    // The only radios on the screen are the Movies | TV switch's two.
+    expect(view.getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Movies',
+      'TV',
+    ]);
   });
 
   it('offers the two personalised walls and the two community ones, and nothing else', async () => {
     const view = await open();
+
+    // Which medium: the compact switch, Movies then TV (founder final polish, 2026-11-04).
+    const medium = view.getByLabelText('Medium');
+    expect(medium.props.accessibilityRole).toBe('radiogroup');
+    expect(within(medium).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Movies',
+      'TV',
+    ]);
+
+    // Which wall: the page's dropdown, a small menu under it since the nav cohesion sprint
+    // (2026-11-06). Exactly two, in this order — presence alone would pass a third entry,
+    // or a swap.
     await fireEvent.press(view.getByLabelText(/^Showing /));
-
-    // Matched at the start rather than exactly: the chosen option carries a checkmark,
-    // and the glyph is a `Text` node that lands in the accessible name behind the label.
-    // Founder physical QA, 2026-09-14: every entry names its list. The bare `Movies` and
-    // `TV shows` are gone, because beside `Top Rated Movies` they did not say which list.
-    expect(view.getByRole('button', { name: /^Recommended Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^Recommended TV/ })).toBeTruthy();
-    expect(view.queryByRole('button', { name: /^Movies/ })).toBeNull();
-    expect(view.queryByRole('button', { name: /^TV shows/ })).toBeNull();
-    // Added 2026-09-09. The community's order is a different answer to "what am I
-    // looking at", which is the question this control asks, so it lives here rather
-    // than as a chip in the row below — see the screen's own note.
-    expect(view.getByRole('button', { name: /^Top Rated Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^Top Rated TV/ })).toBeTruthy();
-    // §A16. People is a mode of the Feed tab now, and the option that used to open it here
-    // is gone rather than hidden — a dropdown row nobody can reach is a dropdown row.
+    const options = (await view.findAllByRole('menuitem')).map(
+      (node) => node.props.accessibilityLabel,
+    );
+    expect(options).toEqual(['Recommended', 'Top Rated']);
+    // §A16. People is a mode of the Feed tab now, gone rather than hidden.
     expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
-
-    /**
-     * Exactly four, in exactly this order.
-     *
-     * The four `getByRole`s above assert presence, which a fifth option — a Lowest Rated
-     * the founder ruled out, say — passes just as happily, and which a swap of the two
-     * Top Rated entries passes too. The founder gave this control as an ordered list of
-     * four, so the list is what gets asserted. Independent review, 2026-09-09.
-     *
-     * Scoped to the sheet by its scrim rather than queried off the whole screen: the
-     * selector is a `Modal`, and RNTL renders a modal's siblings rather than hiding them
-     * the way a real screen reader would, so an unscoped `getAllByRole('button')` picks
-     * up the chip row and the tiles underneath as well.
-     *
-     * The option rows carry their label as a `Text` child rather than an
-     * `accessibilityLabel`, which is why this reads the rendered text.
-     */
-    const sheet = within(view.getByLabelText('Close'));
-    const options = sheet
-      .getAllByRole('button')
-      .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
-      .map((label) => String(label ?? ''));
-    expect(options).toEqual(['Recommended Movies', 'Recommended TV', 'Top Rated Movies', 'Top Rated TV']);
-    // The For You override. Collection lists the rankable unit, which is the season;
-    // the *personalised* wall holds series, and calling them seasons here would name
-    // something that is not on screen.
+    // The For You override: this wall holds series, so it does not say seasons.
     expect(view.queryByRole('button', { name: /^TV seasons/ })).toBeNull();
   });
 
@@ -294,7 +288,7 @@ describe('the title categories', () => {
     await waitFor(() =>
       expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
     );
-    expect(view.getByText(/^Sent to you/)).toBeTruthy();
+    expect(view.getByText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
   });
 
@@ -304,7 +298,7 @@ describe('the title categories', () => {
 
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
-    expect(view.getByText(/^Sent to you/)).toBeTruthy();
+    expect(view.getByText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
   });
 });
@@ -340,7 +334,7 @@ describe('crossing between the two categories', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await open();
 
-    await fireEvent.press(view.getByText(/^Sent to you/));
+    await fireEvent.press(view.getByText(/^Sent to You/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
     await choose(view, 'Recommended TV');
@@ -357,45 +351,33 @@ describe('crossing between the two categories', () => {
  * group to pick over. The flow itself is exercised in `GroupPicksSheet.test.tsx`; what
  * this file owns is the entry point.
  */
-describe('the Group Picks chip', () => {
-  it('sits in the chip row and opens the flow', async () => {
+describe('Find for a Group', () => {
+  it('is a feature shortcut, and opens the flow', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find for a Group')).toBeTruthy());
+    expect(within(view.getByTestId('for-you-shortcuts')).getByText('Find for a Group')).toBeTruthy();
 
-    await fireEvent.press(view.getByText('Group Picks'));
+    await fireEvent.press(view.getByText('Find for a Group'));
     await waitFor(() => expect(view.getByText("Who's watching?")).toBeTruthy());
   });
 
 });
 
 /**
- * **The top controls are one row, and never two** (founder, physical Android, 2026-09-07).
- *
- * `Sent to you · N`, `Group Picks` and `Filters · N` wrapped onto two rows on a 360pt
- * phone, and the arithmetic does not allow them to fit at footnote size with counts. The
- * row is `nowrap` inside a horizontal scroller now — the same arrangement as the tab row —
- * so on every ordinary phone nothing changes and on a narrow one the row scrolls rather
- * than reflows. This test pins the contract rather than a width: no layout engine runs
- * here, so what can be asserted is that wrapping is structurally impossible and that the
- * overflow has somewhere to go.
+ * **The top controls are two rows, each one line** (founder, nav cohesion sprint,
+ * 2026-11-06). Three chips with counts did not fit a 360pt phone, so they scrolled
+ * sideways; now Filters sits opposite the heading and the two features share a row of
+ * equal halves, so nothing scrolls and nothing is hidden off the edge.
  */
 describe('the top controls', () => {
-  it('are one row that scrolls sideways rather than wrapping', async () => {
+  it('fit without scrolling: Filters by the heading, the features under it', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find for a Group')).toBeTruthy());
 
-    const row = view.getByTestId('for-you-controls');
-    const style = Array.isArray(row.props.style)
-      ? Object.assign({}, ...row.props.style)
-      : row.props.style;
-    expect(style.flexDirection).toBe('row');
-    expect(style.flexWrap).toBe('nowrap');
-
-    const scroller = view.getByTestId('for-you-controls-scroller');
-    expect(scroller.props.horizontal).toBe(true);
-    // All three, in the row, in the founder's order.
-    expect(within(row).getByText(/^Sent to you/)).toBeTruthy();
-    expect(within(row).getByText('Group Picks')).toBeTruthy();
-    expect(within(row).getByText(/^Filters/)).toBeTruthy();
+    expect(view.queryByTestId('for-you-controls-scroller')).toBeNull();
+    expect(within(view.getByTestId('for-you-controls')).getByText(/^Filters/)).toBeTruthy();
+    const features = view.getByTestId('for-you-shortcuts');
+    expect(within(features).getByText('Sent to You')).toBeTruthy();
+    expect(within(features).getByText('Find for a Group')).toBeTruthy();
   });
 });

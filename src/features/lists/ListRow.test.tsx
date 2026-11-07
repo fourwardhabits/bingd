@@ -153,3 +153,34 @@ describe('the cover (founder QA, 2026-09-21)', () => {
     expect(hidden(view, 'list-cover')).toHaveLength(1);
   });
 });
+
+/**
+ * **The fanned posters** (founder, marquee cohesion sprint, 2026-11-07): up to four of the
+ * list's own posters, the first in front, from the four the server already sends.
+ */
+describe('the poster stack', () => {
+  const uris = ['a', 'b', 'c', 'd', 'e'].map((x) => `https://image.tmdb.org/t/p/w185/${x}.jpg`);
+
+  it('fans up to four posters, the first drawn last so it sits in front', async () => {
+    const view = await open(summary({ posterUris: uris }));
+    const posters = hidden(view, 'list-stack-poster');
+    expect(posters).toHaveLength(4);
+    const lefts = posters.map((p) => StyleSheet.flatten(p.props.style).left);
+    expect(lefts).toEqual([48, 32, 16, 0]);
+  });
+
+  it('keeps one stack width for one poster or none, so every title starts on one line', async () => {
+    const one = await open(summary({ posterUris: uris.slice(0, 1) }));
+    const none = await open(summary({ posterUris: [] }));
+    const width = (v: typeof one) => StyleSheet.flatten(hidden(v, 'list-stack')[0]!.props.style).width;
+    expect(width(one)).toBe(width(none));
+    expect(hidden(one, 'list-stack-poster')).toHaveLength(1);
+    expect(hidden(none, 'list-stack-empty')).toHaveLength(1);
+  });
+
+  it('is hidden from a screen reader, which hears the row instead', async () => {
+    const view = await open(summary({ posterUris: uris }));
+    expect(view.queryAllByTestId('list-stack-poster')).toHaveLength(0);
+    expect(view.getByRole('button', { name: /^Best breakup movies\. 14 titles/ })).toBeTruthy();
+  });
+});

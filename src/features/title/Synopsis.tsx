@@ -36,7 +36,14 @@ export const COLLAPSED_LINES = 4;
  * What stays here is the part that is about the title page: four lines, the block's
  * inset, and the two labels a synopsis is opened and closed with.
  */
-export function Synopsis({ text }: { text: string }) {
+export function Synopsis({
+  text,
+  flush = false,
+}: {
+  text: string;
+  /** No space above, because a section heading is already there (the Cinematic page). */
+  flush?: boolean;
+}) {
   return (
     <ClampedText
       text={text}
@@ -46,7 +53,7 @@ export function Synopsis({ text }: { text: string }) {
       // A synopsis closes again, which is the one difference from a note in the feed:
       // it is a block on a page the reader stays on rather than a row in a list.
       collapseLabel="Collapse description"
-      style={styles.block}
+      style={[styles.block, flush && styles.flush]}
     />
   );
 }
@@ -78,4 +85,5 @@ const styles = StyleSheet.create({
    * happened to land there.
    */
   block: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  flush: { paddingTop: 0 },
 });

@@ -66,6 +66,10 @@ const KEYS = [
   ['recommendation-requests', 'viewer'],
   ['sent-to-you', 'viewer'],
   ['feed', 'viewer'],
+  // The Feed's latest-comment preview and the counts beside it (cinematic Feed): a block
+  // or unfollow changes which comments this reader may see.
+  ['comments', 'viewer', 'event-1'],
+  ['comment-counts', 'viewer'],
 ];
 
 describe('a follow', () => {

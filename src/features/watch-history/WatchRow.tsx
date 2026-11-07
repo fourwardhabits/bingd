@@ -1,11 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { formatWatchDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 import { Button, ScoreBadge, Text } from '@/ui/components';
 
 import { useTitleNote } from '@/features/collection/use-title-note';
@@ -131,30 +130,35 @@ export function WatchRow({
             </Pressable>
           ) : null}
 
+        </View>
+
+        {/**
+         * **The score and Edit, one column at the right** (founder, marquee cohesion
+         * sprint, 2026-11-07): the watch's facts read down the left, and the two things
+         * about it that are not prose — what it scored then, and the way to change it —
+         * line up on the right edge of every row. Edit is the word alone (founder, device
+         * QA, 2026-09-25), now a full 44pt target rather than a caption with slop.
+         */}
+        <View style={styles.aside}>
+          {score ? (
+            <View testID={`watch-score-${event.id}`}>
+              <ScoreBadge score={score.score} bucket={score.bucket as Bucket | null} size="sm" />
+            </View>
+          ) : null}
           {editing ? null : (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Edit this watch, ${dateLabel}`}
-              hitSlop={theme.space[2]}
               onPress={onEdit}
-              style={styles.edit}
+              style={({ pressed }) => [styles.edit, pressed && styles.editPressed]}
               testID={`watch-edit-${event.id}`}
             >
-              {/* The word alone (founder, device QA, 2026-09-25). An 11pt pencil beside
-                  a four-letter word is a glyph doing nothing the word was not already
-                  doing, at a size where it reads as lint. */}
-              <Text variant="caption" tone="action">
+              <Text variant="footnote" tone="action" style={styles.editLabel}>
                 Edit
               </Text>
             </Pressable>
           )}
         </View>
-
-        {score ? (
-          <View testID={`watch-score-${event.id}`}>
-            <ScoreBadge score={score.score} bucket={score.bucket as Bucket | null} size="sm" />
-          </View>
-        ) : null}
       </View>
 
       {editing ? (
@@ -278,13 +282,17 @@ const styles = StyleSheet.create({
   },
   main: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[3] },
   body: { flex: 1, gap: theme.space[1] },
+  aside: { alignItems: 'flex-end' },
+  // The word on the date's line (or under the score), the rest of its 44pt target below it.
   edit: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[1],
-    alignSelf: 'flex-start',
-    paddingTop: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: 3,
   },
+  editLabel: { fontFamily: fontFamily.sansMedium },
+  editPressed: { opacity: 0.6 },
   // Pulled out to the screen's edges so the log sheet's rows sit at their own gutters.
   editor: { marginTop: theme.space[3], marginHorizontal: -theme.layout.gutter, gap: theme.space[3] },
   actions: {

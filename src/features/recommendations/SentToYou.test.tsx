@@ -190,7 +190,7 @@ const recommendation = (over: Record<string, unknown> = {}) => ({
  * to watch" down to "things people sent me".
  */
 const openSent = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
-  await fireEvent.press(view.getByText(/^Sent to you/));
+  await fireEvent.press(view.getByText(/^Sent to You/));
 };
 
 beforeEach(() => {
@@ -216,21 +216,26 @@ describe('the wall and the list', () => {
     // Asserted on the category control rather than on a heading, because the headings
     // are gone: a screen reached from a tab called For you does not need a band of
     // prose saying For you.
-    await waitFor(() => expect(view.getByText('Recommended Movies')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Showing Recommended')).toBeTruthy());
+    expect(view.getByRole('radio', { name: 'Movies' }).props.accessibilityState?.selected).toBe(true);
     expect(view.queryByText('Inception')).toBeNull();
     expect(view.queryByText('For you')).toBeNull();
     expect(view.queryByText('Based on your taste')).toBeNull();
     expect(view.queryByText(/^Inspired by/)).toBeNull();
   });
 
-  it('counts what has not been opened on the chip itself', async () => {
+  it('counts what has not been opened on the shortcut itself', async () => {
     mockRpcResults.recommendations_to_me = [
       recommendation(),
       recommendation({ id: 'r2', media_item_id: 'film-2', opened_at: '2026-08-16T10:00:00.000Z' }),
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Sent to you · 1')).toBeTruthy());
+    // The count is the shortcut's badge now, and its label says it in full.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+    );
+    expect(view.getByText('1', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {
@@ -429,9 +434,9 @@ describe('the shared filter state', () => {
     // Everything is filtered out, and the empty state points at the control rather
     // than growing a second one beside it.
     await waitFor(() => expect(view.getByText('Nothing matches your filters')).toBeTruthy());
-    expect(view.getAllByText('Clear all')).toHaveLength(1);
+    expect(view.getAllByLabelText('Clear all')).toHaveLength(1);
 
-    await fireEvent.press(view.getByText('Clear all'));
+    await fireEvent.press(view.getByLabelText('Clear all'));
     await waitFor(() => expect(view.getByText('Hereditary (2010)')).toBeTruthy());
   });
 
@@ -604,7 +609,7 @@ describe('re-tapping the For You tab', () => {
     // The list is gone and the chip is off, which together are "back on the wall". The
     // wall itself is stood in for in this file — see the note on `mockSlate`.
     await waitFor(() => expect(view.queryByText('Inception (2010)')).toBeNull());
-    expect(view.getByText(/^Sent to you/).props.accessibilityState?.selected).not.toBe(true);
+    expect(view.getByText(/^Sent to You/).props.accessibilityState?.selected).not.toBe(true);
   });
 
   it('keeps the filters, which are answers the reader gave on purpose', async () => {

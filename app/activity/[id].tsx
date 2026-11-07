@@ -15,6 +15,7 @@ import { useActivityEvent } from '@/features/feed/use-feed';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
+  REACTION_LABEL,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -337,6 +338,7 @@ export default function ActivityScreen() {
                 ? {
                     count: summary?.total ?? 0,
                     mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+                    mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
                     glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
                     onPress: () => void toggleDefault(),
                     onLongPress: () => setPickerOpen(true),

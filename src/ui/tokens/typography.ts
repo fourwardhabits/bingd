@@ -82,6 +82,23 @@ export const typography = {
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
+  /**
+   * The same heading, one step up, for the Feed and Profile tabs only (founder final
+   * polish, 2026-11-04): TRENDING NOW and ACTIVITY on Feed; YOUR 2026, bingd AWARDS,
+   * TOP RANKED, WATCHLIST, LISTS and RECENT ACTIVITY on Profile.
+   *
+   * **A second token rather than a bigger `sectionHeader`**, because the founder scoped
+   * it to those eight headings by name and kept 12pt everywhere else — Settings, Where to
+   * Watch, the filter sheets, the Leaderboard's timeframe. Reached only through
+   * `SectionHeader`'s `size="large"`, never set as a variant by hand.
+   */
+  sectionHeaderLarge: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
 } as const satisfies Record<string, TypeToken>;
 
 export type TypographyToken = keyof typeof typography;

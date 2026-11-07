@@ -386,6 +386,24 @@ Radius 20 top corners, `surface.raised`, `e2`, drag handle, no dimmed backdrop b
 
 The panel is edge to edge and its content brings the gutter. See *Layout invariants* in §5 for the container, content, footer and scroll rules.
 
+### Share card — 2026-11-02
+
+An image a person takes out of the app. `FirstFiveCard` is the first one.
+
+- **Text only.** No poster artwork, because whether artwork may leave an app screenshot is
+  an open licensing question. No image of any kind, the wordmark included, because Android
+  captures to a software canvas that cannot read an image view's hardware bitmap.
+- **4:5, 360 by 450 points, captured at the device's own pixel ratio.** It needs no second
+  version: it fills a feed post, sits whole in a Story, and reads in a message thread.
+  Resizing would soften the type, and the type is the card.
+- **Parchment ground, Maroon invitation band.** Every card ends by telling a stranger what
+  to do and where. Parchment on Maroon is the certified pair, 7.4:1.
+- **Ignores the system text size.** It is an image of fixed proportions.
+- **Shown before it is shared.** The preview is the card itself, scaled, so what somebody
+  approves is exactly what is sent.
+- **Always offered, never pushed.** It sits outlined beside the primary action. It names no
+  platform, and the OS decides where it goes.
+
 ### Empty state
 
 Illustration or large glyph, a `title2` line in DM Serif Display, one `body` line, and exactly one action. Written in the Curious Collector voice: "Nothing here yet" rather than "No results found."

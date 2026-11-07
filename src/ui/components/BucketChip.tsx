@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { BUCKET_LABEL } from '@/features/collection/score';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
 /**
@@ -31,6 +31,11 @@ export type BucketChoicesProps = {
   /** The chosen bucket, or `null` for a question not yet answered. */
   selected: BucketId | null;
   onSelect: (bucket: BucketId) => void;
+  /**
+   * The question the three choices answer, for a screen reader. A surface that no
+   * longer draws it (the log sheet, since Option A) still names the group with it.
+   */
+  accessibilityLabel?: string;
   testID?: string;
 };
 
@@ -87,9 +92,13 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
       <View
         style={[
           styles.circle,
-          { borderColor: bucket.color },
+          // Unchosen, the circle holds a faint wash of its own colour (post-QA sprint 2,
+          // 2026-11-05), so the three read as three meanings before one is picked
+          // rather than as three empty rings. Chosen, it fills, as it always did.
+          { borderColor: bucket.color, backgroundColor: tintOf(bucket.color) },
           selected && { backgroundColor: bucket.color },
         ]}
+        testID={`bucket-circle-${bucket.id}`}
       >
         {selected ? (
           <Text
@@ -101,7 +110,7 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
           </Text>
         ) : null}
       </View>
-      <Text variant="callout" style={styles.label}>
+      <Text variant="callout" style={styles.label} testID={`bucket-label-${bucket.id}`}>
         {bucket.label}
       </Text>
     </Pressable>
@@ -130,9 +139,19 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
  * own content block, and padding it twice is what makes a three-column row too
  * narrow to hold the longest label on a small phone.
  */
-export function BucketChoices({ selected, onSelect, testID }: BucketChoicesProps) {
+export function BucketChoices({
+  selected,
+  onSelect,
+  accessibilityLabel,
+  testID,
+}: BucketChoicesProps) {
   return (
-    <View style={styles.choices} accessibilityRole="radiogroup" testID={testID}>
+    <View
+      style={styles.choices}
+      accessibilityRole="radiogroup"
+      accessibilityLabel={accessibilityLabel}
+      testID={testID}
+    >
       {BUCKETS.map((bucket) => (
         <BucketChip
           key={bucket.id}
@@ -146,6 +165,11 @@ export function BucketChoices({ selected, onSelect, testID }: BucketChoicesProps
 }
 
 const CIRCLE = 44;
+
+/** A bucket colour at about a tenth of its strength — the unchosen circle's wash. */
+export function tintOf(hex: string): string | undefined {
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}1F` : undefined;
+}
 
 const styles = StyleSheet.create({
   chip: {
@@ -173,7 +197,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { textAlign: 'center' },
+  // Inter Regular (founder, UI cohesion pass, 2026-11-06): the tinted circles carry the
+  // choice, and the labels name it without competing with them.
+  label: { textAlign: 'center', fontFamily: fontFamily.sans },
   /**
    * Three equal columns, always. The gap is the sheet's own rhythm rather than a
    * number chosen here, and at a 320pt width it still leaves each column 88pt —

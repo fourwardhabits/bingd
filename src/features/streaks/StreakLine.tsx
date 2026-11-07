@@ -11,6 +11,8 @@ import { useStreak } from './use-streak';
 export type StreakLineProps = {
   /** The owner's own id. This section is not drawn on anybody else's profile. */
   userId: string;
+  /** No padding of its own: it sits in a row beside Set a goal (2026-11-07). */
+  inline?: boolean;
 };
 
 /**
@@ -45,7 +47,7 @@ export type StreakLineProps = {
  * says only the count: no countdown, no nudge, nothing to be behind on. `streak.ts` is
  * where the grace itself lives.
  */
-export function StreakLine({ userId }: StreakLineProps) {
+export function StreakLine({ userId, inline = false }: StreakLineProps) {
   const streak = useStreak(userId);
   const reported = useRef(false);
 
@@ -121,7 +123,7 @@ export function StreakLine({ userId }: StreakLineProps) {
       : null;
 
   return (
-    <View style={styles.row}>
+    <View style={inline ? styles.inline : styles.row}>
       {/**
        * One line, and often only half of one (founder, physical Android, 2026-09-07).
        *
@@ -138,14 +140,15 @@ export function StreakLine({ userId }: StreakLineProps) {
        * grace it runs on still lives in `streak.ts`.
        */}
       <Text
-        variant="callout"
+        // 13pt beside Set a goal, so the two share a row on a standard phone (2026-11-07).
+        variant={inline ? 'footnote' : 'callout'}
         // The flame is decoration beside a number that already says it. Read out, it
         // would be "fire, four week streak".
         accessibilityLabel={state ? `${run}. ${state}` : run}
       >
         {lapsed ? '🔥 0 weeks' : `🔥 ${data.weeks} week streak`}
         {state ? (
-          <Text variant="callout" tone="secondary">
+          <Text variant={inline ? 'footnote' : 'callout'} tone="secondary">
             {` · ${state}`}
           </Text>
         ) : null}
@@ -158,4 +161,5 @@ const styles = StyleSheet.create({
   // Under the goal bars, at the section's own gutter. No top section padding: it
   // belongs to the block above it rather than starting a new one.
   row: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  inline: { flexShrink: 1 },
 });

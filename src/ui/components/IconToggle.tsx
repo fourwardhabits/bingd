@@ -24,6 +24,16 @@ export type IconToggleProps<T extends string> = {
   /** Announced for the group. "View" on Collection, "Feed mode" on the Feed. */
   label: string;
   style?: StyleProp<ViewStyle>;
+  /**
+   * `segmented` — the default, and what the Feed's Feed | Leaderboard | People control
+   * still is: flush cells in one hairline outline, the chosen one filled in Maroon.
+   *
+   * `quiet` — two bare glyphs, the chosen one in Maroon and the other in secondary Ink
+   * (founder, UI cohesion pass, 2026-11-06: Collection's Grid / List, "avoid another
+   * bulky segmented pill"). No outline and no fill; each glyph is its own 44pt target,
+   * so nothing leans on slop and the two never share an edge.
+   */
+  appearance?: 'segmented' | 'quiet';
 };
 
 /**
@@ -88,7 +98,34 @@ export function IconToggle<T extends string>({
   onChange,
   label,
   style,
+  appearance = 'segmented',
 }: IconToggleProps<T>) {
+  if (appearance === 'quiet') {
+    return (
+      <View style={[styles.quietGroup, style]} accessibilityRole="radiogroup" accessibilityLabel={label}>
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              accessibilityLabel={option.label}
+              onPress={() => onChange(option.value)}
+              style={({ pressed }) => [styles.quietCell, pressed && styles.pressed]}
+            >
+              <Ionicons
+                name={option.icon}
+                size={theme.layout.icon.sm}
+                color={selected ? theme.semantic.action : theme.text.secondary}
+              />
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.group, style]} accessibilityRole="radiogroup" accessibilityLabel={label}>
       {options.map((option, index) => {
@@ -157,5 +194,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.raised,
   },
   cellOn: { backgroundColor: theme.semantic.action },
+  quietGroup: { flexDirection: 'row', alignItems: 'center' },
+  quietCell: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   pressed: { opacity: 0.7 },
 });

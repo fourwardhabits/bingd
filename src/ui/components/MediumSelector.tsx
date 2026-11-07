@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
@@ -36,7 +43,12 @@ export type MediumSelectorProps<T extends string = Medium> = {
   /**
    * How large the closed control reads. The open sheet is identical either way.
    *
-   * `title` — DM Serif at `title1`, the screen's actual title. Collection and For You.
+   * `title` — DM Serif at `title1`, the screen's actual title.
+   *
+   * `nav` — DM Serif at `title2` (22pt), the left half of the navigation row on For You
+   *   and Collection, with the Movies | TV `CompactSwitch` on its right (founder final
+   *   polish, 2026-11-04). One step down from `title` so the pair shares a 360pt row; no
+   *   right padding, because the row's own gap is the space before the switch.
    *
    * `section` — the app's section-header treatment: uppercase, Maroon, `sectionHeader`.
    *   Added 2026-08-29 for the Leaderboard's timeframe, which sits in a *content* header
@@ -44,12 +56,33 @@ export type MediumSelectorProps<T extends string = Medium> = {
    *   title there would out-shout the row it belongs to and disagree with `TRENDING NOW`
    *   directly across from it.
    *
+   * `heading` — Inter Semibold at `headline` (17pt), For You's Recommended / Top Rated
+   *   (founder, nav cohesion sprint, 2026-11-06). Still the page's content-mode selector,
+   *   but in the interface face at the size of the controls around it, rather than a 22pt
+   *   serif dropdown standing alone under the header. No gutter of its own.
+   *
+   * `filter` — a compact text-and-chevron, Inter Medium at `subhead` (14pt) in secondary
+   *   ink: the Leaderboard's This month / All time (same sprint). A secondary filter
+   *   under the section's own heading, not a heading itself. No gutter of its own.
+   *
+   * `marquee` — the page's browsing title: Maroon DM Serif Display at about 22pt (21 under
+   *   360pt, 23 from 412pt), with a Maroon chevron (founder, marquee cohesion sprint,
+   *   2026-11-07). Collection's Watched / Watchlist / Unranked and For You's Recommended /
+   *   Top Rated, so the two pages read as siblings. It wraps rather than truncating. No
+   *   gutter of its own: it sits in a `ContentToolbar`.
+   *
+   * `heading`, `filter` and `marquee` open a **small menu under the control** rather than
+   * the bottom sheet: two or three options do not need a sheet's scrim and travel (nav
+   * cohesion sprint). The other sizes keep the sheet.
+   *
    * A prop rather than a second component, for the reason `IconToggle` is one component
-   * with two callers: these are the same interaction — tap, choose from a sheet — and two
-   * implementations of it would drift into two dialects at the next tuning pass. What
-   * changes is type size, not behaviour.
+   * with two callers: these are the same interaction — tap, choose — and two
+   * implementations of it would drift into two dialects at the next tuning pass.
    */
-  size?: 'title' | 'section';
+  size?: 'title' | 'nav' | 'section' | 'heading' | 'filter' | 'marquee';
+  /** What a screen reader hears after the label. Defaults to "Choose a category". */
+  accessibilityHint?: string;
+  testID?: string;
 };
 
 /**
@@ -59,7 +92,7 @@ export type MediumSelectorProps<T extends string = Medium> = {
  */
 export const MEDIUM_OPTIONS: readonly MediumSelectorOption[] = [
   { id: 'movies', label: 'Movies' },
-  { id: 'tv_seasons', label: 'TV' },
+  { id: 'tv_seasons', label: 'TV Shows' },
 ];
 
 const labelFor = <T extends string>(
@@ -88,8 +121,25 @@ export function MediumSelector<T extends string = Medium>({
   options,
   labels,
   size = 'title',
+  accessibilityHint = 'Choose a category',
+  testID,
 }: MediumSelectorProps<T>) {
   const [open, setOpen] = useState(false);
+  const anchored = size === 'heading' || size === 'filter' || size === 'marquee';
+  /** Where the anchored menu opens: just under the control, in window coordinates. */
+  const [anchor, setAnchor] = useState<{ x: number; y: number; height: number } | null>(null);
+  /** The open menu's own height, once laid out, so it can be placed inside the window. */
+  const [menuHeight, setMenuHeight] = useState<number | null>(null);
+  const trigger = useRef<View>(null);
+  const win = useWindowDimensions();
+  /**
+   * A window that changes size while the menu is open (a rotation, split screen) makes the
+   * measured anchor wrong, so the menu closes rather than hanging where the control was
+   * (independent review 1). Adjusted during render, against the size it was opened at.
+   */
+  const windowKey = `${win.width}x${win.height}`;
+  const [openedAt, setOpenedAt] = useState(windowKey);
+  if (open && openedAt !== windowKey) setOpen(false);
   /**
    * The foot of the option sheet, by `Sheet`'s rule (2026-09-07).
    *
@@ -106,21 +156,70 @@ export function MediumSelector<T extends string = Medium>({
    * `Medium`, and a caller who omits `options` leaves `T` inferred as `Medium` — the
    * widened case always supplies its own table, so these two are never mixed.
    */
-  const table = (options ?? (MEDIUM_OPTIONS as readonly MediumSelectorOption<string>[])) as
-    readonly MediumSelectorOption<T>[];
+  const table = (options ??
+    (MEDIUM_OPTIONS as readonly MediumSelectorOption<string>[])) as readonly MediumSelectorOption<T>[];
 
   return (
     <>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Showing ${labelFor(value, table, labels)}`}
-        accessibilityHint="Choose a category"
+        accessibilityHint={accessibilityHint}
         accessibilityState={{ expanded: open }}
-        onPress={() => setOpen(true)}
-        style={size === 'section' ? styles.buttonSection : styles.button}
+        onPress={() => {
+          if (!anchored) {
+            setOpen(true);
+            return;
+          }
+          // Measured on every open, because the row can have scrolled since the last one.
+          // A view that cannot be measured, or whose measurement never answers, still
+          // opens — near the top of the screen — so the control can never go dead.
+          let settled = false;
+          const openAt = (at: { x: number; y: number; height: number } | null) => {
+            if (settled) return;
+            settled = true;
+            setAnchor(at);
+            setMenuHeight(null);
+            setOpenedAt(windowKey);
+            setOpen(true);
+          };
+          const node = trigger.current;
+          if (!node?.measureInWindow) {
+            openAt(null);
+            return;
+          }
+          node.measureInWindow((x, y, _width, height) => openAt({ x, y, height }));
+          setTimeout(() => openAt(null), MEASURE_TIMEOUT_MS);
+        }}
+        style={
+          size === 'section' || anchored
+            ? styles.buttonSection
+            : size === 'nav'
+              ? styles.buttonNav
+              : styles.button
+        }
+        testID={testID}
       >
-        <View style={styles.row}>
-          {size === 'section' ? (
+        <View style={styles.row} ref={trigger} collapsable={false}>
+          {size === 'marquee' ? (
+            <Text
+              variant="title2"
+              tone="action"
+              style={[styles.title, marqueeType(win.width)]}
+              testID={testID ? `${testID}-label` : undefined}
+            >
+              {labelFor(value, table, labels)}
+            </Text>
+          ) : anchored ? (
+            <Text
+              variant={size === 'heading' ? 'headline' : 'subhead'}
+              tone={size === 'heading' ? 'primary' : 'secondary'}
+              numberOfLines={1}
+              style={styles.title}
+            >
+              {labelFor(value, table, labels)}
+            </Text>
+          ) : size === 'section' ? (
             // Uppercased as a *style*, exactly as `SectionHeader` does it — the accessible
             // label on the Pressable carries the readable spelling, so a screen reader is
             // not made to spell out "T H I S  M O N T H".
@@ -131,64 +230,213 @@ export function MediumSelector<T extends string = Medium>({
             // `flexShrink` so a long label (For You's `Recommended Movies`, at a large text
             // size, on a narrow phone) wraps inside the row instead of pushing the chevron
             // off the screen. A label that fits is laid out exactly as before.
-            <Text variant="title1" style={styles.title}>
+            <Text variant={size === 'nav' ? 'title2' : 'title1'} style={styles.title}>
               {labelFor(value, table, labels)}
             </Text>
           )}
           <Ionicons
             name="chevron-down"
-            size={size === 'section' ? theme.layout.icon.sm : theme.layout.icon.md}
-            color={size === 'section' ? theme.semantic.action : theme.text.secondary}
+            size={
+              size === 'title'
+                ? theme.layout.icon.md
+                : size === 'filter'
+                  ? CHEVRON_FILTER
+                  : size === 'heading' || size === 'marquee'
+                    ? CHEVRON_HEADING
+                    : theme.layout.icon.sm
+            }
+            color={
+              size === 'section' || size === 'marquee'
+                ? theme.semantic.action
+                : theme.text.secondary
+            }
+            // Down the title's optical middle rather than its line box, which DM Serif sets
+            // high: the chevron reads as part of the word (marquee only).
+            style={size === 'marquee' ? styles.marqueeChevron : undefined}
           />
         </View>
       </Pressable>
 
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-        /**
-         * `Sheet`'s treatment, and the reason it was missing here was that this modal
-         * predates it. Without it an Android modal is laid out *below* the status bar,
-         * so the scrim stopped short of the top of the screen and the bar kept the
-         * page's colour over a dimmed page — the one sheet in the app that did not dim
-         * the whole screen (pre-GTM audit, 2026-09-07).
-         */
-        statusBarTranslucent
-      >
-        <Pressable style={styles.scrim} onPress={() => setOpen(false)} accessibilityLabel="Close">
-          {/* Stops a tap inside the sheet from closing it. */}
-          <Pressable style={[styles.sheet, { paddingBottom: bottomPadding }]} onPress={() => {}}>
-            {table.map((option) => {
-              const selected = option.id === value;
-              return (
-                <Pressable
-                  key={option.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => {
-                    onChange(option.id);
-                    setOpen(false);
-                  }}
-                  style={[styles.option, selected && styles.optionSelected]}
-                >
-                  <Text variant="title2">{labelFor(option.id, table, labels)}</Text>
-                  {selected ? (
-                    <Ionicons
-                      name="checkmark"
-                      size={theme.layout.icon.md}
-                      color={theme.semantic.action}
-                    />
-                  ) : null}
-                </Pressable>
-              );
-            })}
+      {anchored ? (
+        <Modal
+          visible={open}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setOpen(false)}
+          statusBarTranslucent
+        >
+          {/* A clear scrim: a tap anywhere outside the menu closes it, and the page stays
+              as it was behind a menu this small. */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setOpen(false)}
+            accessibilityLabel="Close"
+          />
+          <View
+            accessibilityRole="menu"
+            testID={testID ? `${testID}-menu` : undefined}
+            onLayout={(event) => setMenuHeight(event.nativeEvent.layout.height)}
+            style={[
+              styles.menu,
+              menuPosition(anchor, win, insets, menuHeight),
+              // Unseen for the one frame before its height is known, so it never shows
+              // in a place it is about to leave.
+              menuHeight === null && styles.unplaced,
+            ]}
+          >
+            <ScrollView bounces={false} contentContainerStyle={styles.menuList}>
+              {table.map((option) => {
+                const selected = option.id === value;
+                return (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="menuitem"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={labelFor(option.id, table, labels)}
+                    onPress={() => {
+                      setOpen(false);
+                      if (!selected) onChange(option.id);
+                    }}
+                    style={({ pressed }) => [
+                      styles.menuOption,
+                      selected && styles.optionSelected,
+                      pressed && styles.menuPressed,
+                    ]}
+                  >
+                    <Text
+                      variant="callout"
+                      tone={selected ? 'action' : 'primary'}
+                      style={styles.title}
+                    >
+                      {labelFor(option.id, table, labels)}
+                    </Text>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark"
+                        size={theme.layout.icon.sm}
+                        color={theme.semantic.action}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Modal>
+      ) : (
+        <Modal
+          visible={open}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setOpen(false)}
+          /**
+           * `Sheet`'s treatment, and the reason it was missing here was that this modal
+           * predates it. Without it an Android modal is laid out *below* the status bar,
+           * so the scrim stopped short of the top of the screen and the bar kept the
+           * page's colour over a dimmed page — the one sheet in the app that did not dim
+           * the whole screen (pre-GTM audit, 2026-09-07).
+           */
+          statusBarTranslucent
+        >
+          <Pressable
+            style={styles.scrim}
+            onPress={() => setOpen(false)}
+            accessibilityLabel="Close"
+          >
+            {/* Stops a tap inside the sheet from closing it. */}
+            <Pressable
+              style={[styles.sheet, { paddingBottom: bottomPadding }]}
+              onPress={() => {}}
+            >
+              {table.map((option) => {
+                const selected = option.id === value;
+                return (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => {
+                      onChange(option.id);
+                      setOpen(false);
+                    }}
+                    style={[styles.option, selected && styles.optionSelected]}
+                  >
+                    <Text variant="title2">{labelFor(option.id, table, labels)}</Text>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark"
+                        size={theme.layout.icon.md}
+                        color={theme.semantic.action}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+      )}
     </>
   );
+}
+
+/** How long an open waits for the control's position before using the fallback. */
+const MEASURE_TIMEOUT_MS = 120;
+const CHEVRON_HEADING = 18;
+const CHEVRON_FILTER = 16;
+
+/**
+ * The marquee's size for the window: 21pt under 360pt, 22pt on a standard phone, 23pt from
+ * 412pt (marquee cohesion sprint). The serif's line height moves with it. A width rule
+ * rather than a font-scale one: the system text size still scales whatever this returns.
+ */
+export function marqueeType(windowWidth: number) {
+  const fontSize = windowWidth < 360 ? 21 : windowWidth >= 412 ? 23 : 22;
+  return { fontSize, lineHeight: fontSize + 6 };
+}
+/** The anchored menu's width, and the space it keeps from the control above it. */
+const MENU_WIDTH = 220;
+const MENU_GAP = theme.space[1];
+
+/**
+ * Where the anchored menu goes: under the control, its left edge on the control's, inside
+ * the gutters — and always inside the window (independent review 1). If it does not fit
+ * below the control it opens above it; if it fits neither way it is pinned to the window's
+ * foot and scrolls, its height capped by the safe area. An unmeasured control (a test
+ * renderer, a view not laid out yet) opens near the top.
+ */
+export function menuPosition(
+  anchor: { x: number; y: number; height: number } | null,
+  window: { width: number; height: number },
+  insets: { top: number; bottom: number },
+  menuHeight: number | null,
+) {
+  const width = Math.min(MENU_WIDTH, window.width - theme.layout.gutter * 2);
+  const topBound = insets.top + MENU_GAP;
+  const bottomBound = window.height - insets.bottom - MENU_GAP;
+  const maxHeight = Math.max(0, bottomBound - topBound);
+  const height = Math.min(menuHeight ?? 0, maxHeight);
+  if (!anchor) {
+    return {
+      top: Math.max(topBound, Math.min(theme.space[10] * 2, bottomBound - height)),
+      left: theme.layout.gutter,
+      width,
+      maxHeight,
+    };
+  }
+  const left = Math.max(
+    theme.layout.gutter,
+    Math.min(anchor.x, window.width - theme.layout.gutter - width),
+  );
+  const below = anchor.y + anchor.height + MENU_GAP;
+  const above = anchor.y - MENU_GAP - height;
+  const top =
+    below + height <= bottomBound
+      ? below
+      : above >= topBound
+        ? above
+        : Math.max(topBound, bottomBound - height);
+  return { top, left, width, maxHeight };
 }
 
 const styles = StyleSheet.create({
@@ -199,8 +447,14 @@ const styles = StyleSheet.create({
   },
   // No gutter of its own: a section-sized control sits inside a row the caller has
   // already padded, where the title-sized one is measuring from the screen edge.
+  buttonNav: {
+    minHeight: theme.layout.minTapTarget,
+    paddingLeft: theme.layout.gutter,
+    justifyContent: 'center',
+  },
   buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  marqueeChevron: { marginTop: 2, marginLeft: -2 },
   title: { flexShrink: 1 },
   scrim: {
     flex: 1,
@@ -228,4 +482,25 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
   },
   optionSelected: { backgroundColor: theme.surface.sunken },
+  menu: {
+    position: 'absolute',
+    overflow: 'hidden',
+    backgroundColor: theme.surface.raised,
+    borderRadius: theme.radius.card,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    ...theme.elevation.e2,
+  },
+  menuList: { padding: theme.space[1], gap: 2 },
+  unplaced: { opacity: 0 },
+  menuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.space[2],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[3],
+    borderRadius: theme.radius.control,
+  },
+  menuPressed: { opacity: 0.7 },
 });

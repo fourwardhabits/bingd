@@ -9,7 +9,11 @@ import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
-import { readNoteVisibilityDefault, rememberNoteVisibility } from './note-visibility-pref';
+import {
+  DEFAULT_NEW_NOTE_VISIBILITY,
+  readNewNoteVisibility,
+  rememberShareChoice,
+} from './note-visibility-pref';
 import { theme } from '@/ui/tokens';
 import {
   BucketChoices,
@@ -285,16 +289,17 @@ function Body({
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
   /**
-   * What a new note opens on for this reader, once the local store answers.
+   * What a new note opens on for this reader: their last explicit *Share as a review*
+   * tap on a new note, or private if they have never made one (`note-visibility-pref`).
    *
-   * Null until it lands, and the fallback while it is null is the product default —
-   * on. A composer that opened private and then flipped to public a beat later would
-   * be worse than either, and the read is local so the gap is a frame.
+   * Null until the local store answers, and the Note row stays shut until it has — see
+   * `notesReady`. A composer that opened private and turned shared a frame later, under
+   * somebody already typing, is exactly the publication this rule exists to prevent.
    */
   const [rememberedVisibility, setRememberedVisibility] = useState<NoteVisibility | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void readNoteVisibilityDefault(profile.id).then((stored) => {
+    void readNewNoteVisibility(profile.id).then((stored) => {
       if (!cancelled) setRememberedVisibility(stored);
     });
     return () => {
@@ -326,6 +331,8 @@ function Body({
    * leaves `existing` defined and must not close the editor under the user.
    */
   const loaded = existing !== undefined;
+  /** The note can be opened: what is stored has been read, and so has the share preference. */
+  const notesReady = loaded && rememberedVisibility !== null;
 
   /**
    * Three states, not two.
@@ -423,26 +430,36 @@ function Body({
     // the reader just finished ranking into.
     postRank ? null : openSection ? openSection : openWriting ? 'notes' : null,
   );
-  const [saving, setSaving] = useState(false);
   /**
-   * How many writes are in flight, because `saving` gates `choose` and `rebucket` and a
-   * boolean stopped being able to keep that gate honest.
+   * A bucket tap is being handled, so a second one is ignored rather than raced.
    *
-   * Date writes share one lane now (`queueDateWrite`), so two of them genuinely overlap:
-   * the second is queued while the first is running. With a plain flag the *first* one
-   * to finish cleared it, so the indicator went away with a write still outstanding and
-   * `choose` — which refuses while saving — was unblocked early. Counting depth and
-   * clearing only at zero is the smallest thing that keeps the sentence true.
+   * This replaced the `saving` flag and its depth counter (Option A, 2026-11-04). That
+   * flag counted *every* write in flight and `choose` refused while it was set, which
+   * was a guard against a bucket racing a date write. The race is now closed by waiting
+   * for the write lanes instead (see `choose`), so the only thing left to refuse is the
+   * bucket's own double tap — and a ref says that without a render per write.
    */
-  const savingDepth = useRef(0);
-  const beginSaving = () => {
-    savingDepth.current += 1;
-    setSaving(true);
-  };
-  const endSaving = () => {
-    savingDepth.current = Math.max(0, savingDepth.current - 1);
-    if (savingDepth.current === 0) setSaving(false);
-  };
+  const choosing = useRef(false);
+  /**
+   * Set when a detail write here — a note, a date or a companion — is what created the
+   * `user_media` row, so `choose` can still count the title's first watch when
+   * `log_title` then finds the row already there. See `watch_logged` in `commitBucket`.
+   */
+  const detailsCreatedRow = useRef(false);
+  /**
+   * The same fact for render. The row this sheet's own detail write created is still the
+   * title being logged for the first time, so the date row keeps showing what the reader
+   * chose (the pending Today, or a carried Earlier) rather than reading the brand-new
+   * dateless row as a deliberate "Earlier". See `existedBefore`.
+   */
+  const [detailsCreated, setDetailsCreated] = useState(false);
+  /**
+   * How many detail writes have been refused, so a bucket tap that waited on one can tell
+   * that it failed while it waited (Codex review, 2026-11-04). See `choose`.
+   */
+  const detailFailures = useRef(0);
+  /** Whether a bucket tap has already been held once for a failure the reader is shown. */
+  const heldForFailure = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const people = useTaggablePeople(profile.id);
@@ -531,22 +548,22 @@ function Body({
    * value to contradict.
    */
   /**
-   * **The remembered default, and it is the last term rather than the first.**
+   * **A new note opens private** (founder, 2026-11-04; `note-visibility-pref.ts`).
    *
-   * The founder's rule (2026-09-06): a first-ever note opens with *Share as a review*
-   * on, and after that a new note opens on whatever they chose last time. What the rule
-   * must never do is republish existing writing — so it sits behind `state.note`, which
-   * is the promise that a saved note opens on its stored value and nothing else.
-   *
-   * `noteIntent === 'review'` still wins over it: arriving through "Write a review" is
-   * an explicit request to publish this one, whatever the habit is.
+   * It becomes a public review only when the reader turns *Share as a review* on for it.
+   * There is no remembered habit any more: a past "shared" would publish the next note
+   * without that note's own act. `noteIntent === 'review'` — the title's "Write a review"
+   * — is that act made before writing, so it still opens shared. Writing that already
+   * exists opens on its stored value whatever happens here.
    */
   const visibility =
     visibilityEdit ??
     (state.note
       ? state.noteVisibility
       : (openWriting ??
-        (noteIntent === 'review' ? 'public' : (rememberedVisibility ?? 'public'))));
+        (noteIntent === 'review'
+          ? 'public'
+          : (rememberedVisibility ?? DEFAULT_NEW_NOTE_VISIBILITY))));
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
@@ -559,7 +576,17 @@ function Body({
    * (or its absence) is what the row shows. And `dateEdit === null`, so a *Today* or a
    * picked date tapped here wins at once.
    */
-  const startsEarlier = carried === 'earlier' && loaded && !state.exists && dateEdit === null;
+  /**
+   * Whether the title was in the collection before this sheet touched it.
+   *
+   * `state.exists` alone stops meaning that once a note, a date or a companion saved
+   * before the bucket (Option A) has created the row: the refetch then reports a row
+   * that exists, has no date, and was made a moment ago by this sheet. Read as
+   * "already logged", it flipped the date row from Today to Earlier under the reader
+   * and made the bucket log the title as undated. It is still a first log.
+   */
+  const existedBefore = state.exists && !detailsCreated;
+  const startsEarlier = carried === 'earlier' && loaded && !existedBefore && dateEdit === null;
   /**
    * Whether the row is deliberately dateless, which is a different thing from having
    * no date *yet*.
@@ -574,7 +601,7 @@ function Body({
    * than waiting for the write and the refetch.
    */
   const datelessOnPurpose =
-    dateCleared || startsEarlier || (state.exists && !state.watchedOn && !dateEdit);
+    dateCleared || startsEarlier || (existedBefore && !state.watchedOn && !dateEdit);
   /**
    * The date a write that *creates* the row should carry: none at all when the reader
    * has said Earlier, however they said it. `effectiveDate` alone falls back to today,
@@ -639,10 +666,12 @@ function Body({
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {
+      detailFailures.current += 1;
       setProblem('Ranking owns this one. Change the bucket to re-rank it.');
       return false;
     }
     if (result.outcome === 'failed') {
+      detailFailures.current += 1;
       setProblem(result.message);
       return false;
     }
@@ -691,8 +720,43 @@ function Body({
    * watch*, a different row with a different sheet (§J.3).
    */
   const choose = async (chosen: BucketId) => {
-    if (saving) return;
+    // One bucket tap at a time. This used to be `if (saving) return`, which also refused
+    // the tap while a *detail* was being written — invisible while the buckets sat above
+    // the rows, and the common case once the rows come first (Option A, 2026-11-04): type
+    // a note, pause long enough for the autosave, tap I liked it, and nothing happened.
+    if (choosing.current) return;
+    choosing.current = true;
+    try {
+      // **Whatever the reader filled in above the buckets lands before the bucket.**
+      // Typed text still waiting out its debounce is handed over now, then both lanes
+      // are waited out, so a note, date or companion that creates the row has done so
+      // before `log_title` asks whether it exists. Resolved lanes cost a microtask.
+      const failuresBefore = detailFailures.current;
+      flushNote();
+      await Promise.all([dateQueue.current, companionQueue.current]);
+      /**
+       * **A detail that failed while the tap waited holds the hand-off, once** (Codex
+       * review, 2026-11-04). Going on would clear its message and open the comparisons
+       * over it — and the failure that matters most is a visibility change: turn Share
+       * off, tap a bucket while that save is in flight, have it refused, and the note
+       * stays public with nothing on screen saying so. So the first such tap stops here
+       * with the message showing. The next tap goes on whatever happens, because nothing
+       * above the buckets is required: a note the server keeps refusing must never be
+       * what stops somebody ranking.
+       */
+      if (detailFailures.current !== failuresBefore && !heldForFailure.current) {
+        heldForFailure.current = true;
+        return;
+      }
+      await commitBucket(chosen);
+    } finally {
+      choosing.current = false;
+    }
+  };
 
+  const commitBucket = async (chosen: BucketId) => {
+    // Read after the lanes settled, so a detail write that landed during the wait counts.
+    const createdByDetails = detailsCreatedRow.current;
     if (state.ranked) {
       setBucketEdit(chosen);
       // One server call, made by the ranking sheet when it opens: `rank_rebucket` for a
@@ -703,7 +767,6 @@ function Body({
     }
 
     setBucketEdit(chosen);
-    beginSaving();
     setProblem(null);
 
     /**
@@ -764,7 +827,6 @@ function Body({
     });
 
     if (!report(result)) {
-      endSaving();
       setBucketEdit(null);
       // **The revert above is a guess, so it is checked rather than trusted.**
       // `set_bucket` creates the `user_media` row, and an unknown outcome means it may
@@ -808,9 +870,74 @@ function Body({
        * `basis` is the reader's own tap, never an inference, and it is the property
        * that makes §C.3.8's defect visible at all.
        */
-      if (result.created) {
+      /**
+       * Or when **this sheet's own detail write** created it a moment earlier. With the
+       * details above the buckets (Option A), a note, a date or a companion is often the
+       * first thing saved, and its `log_watched` is what creates the row — so `log_title`
+       * answers `created: false` for what is, to the reader, the same first log. Without
+       * this the funnel would lose every title logged details-first. Still once per
+       * sheet: the flag is cleared as it is counted.
+       */
+      if (result.created || createdByDetails) {
         track({ name: 'watch_logged', props: { kind: 'first', basis, surface } });
       }
+    }
+    // This call may have created the row, and every later write from this sheet must
+    // treat it as existing rather than wait for the refetch to say so.
+    createdRow.current = true;
+    detailsCreatedRow.current = false;
+
+    /**
+     * ---------------------------------------------------------------------------
+     * **THE ONE STAMP LEFT, AND WHY IT IS GUARDED THE WAY IT IS** (Option A)
+     *
+     * A note written before the bucket creates the row through `log_watched`, which
+     * carries no date when the reader left the row on Today — deliberately: it upserts,
+     * and a date sent on an upsert would overwrite one another device recorded in the
+     * meantime (Codex review, 2026-11-04). `log_title` then finds the row and, rightly,
+     * dates nothing. So the title would end up undated under a row that said Today.
+     *
+     * The fill below dates it the way `log_title` would have, with the basis the reader's
+     * tap earned (`today_default`), and only when all of these hold: this sheet's own
+     * detail write created the row, `log_title` did not, the reader neither chose a date
+     * nor said Earlier, and a fresh read shows the row is **still** undated. The last
+     * check is what keeps a date recorded elsewhere from being replaced; the window
+     * between that read and the write is the residual, the same shape the old stamp's
+     * comment accepted. It runs off the hand-off: the comparisons do not wait for it.
+     *
+     * A date the reader picked before the bucket was already written by that pick, and a
+     * companion tagged first sends the date the row shows — both through `log_watched`,
+     * whose basis is `unattributed`. That is unchanged from before Option A.
+     */
+    if (createdByDetails && !result.created && !undated && dateEdit === null) {
+      const date = effectiveDate;
+      const key = queryKeys.logState(profile.id, title.id);
+      void (async () => {
+        // Only a read that actually completed after this point may authorise the write.
+        // `refetchQueries` resolves even when the fetch fails or is paused offline, and the
+        // cache then still holds the undated row this sheet saw before — which says nothing
+        // about a date recorded elsewhere since (Codex re-check, 2026-11-04).
+        const askedAt = Date.now();
+        await queryClient.refetchQueries({ queryKey: key, exact: true });
+        const read = queryClient.getQueryState<LogState>(key);
+        if (
+          !read ||
+          read.status !== 'success' ||
+          read.fetchStatus !== 'idle' ||
+          read.dataUpdatedAt < askedAt
+        ) {
+          return;
+        }
+        const fresh = read.data;
+        if (!fresh || fresh.watchedOn) return;
+        const stamped = await setWatchDate({
+          operationId: newOperationId(),
+          mediaItemId: title.id,
+          watchedOn: date,
+          basis: 'today_default',
+        });
+        if (stamped.outcome !== 'failed' || mustReconcile(stamped)) refresh();
+      })();
     }
 
     /**
@@ -839,7 +966,6 @@ function Body({
       });
     }
 
-    endSaving();
     refresh();
     onRank?.(chosen, 'start');
   };
@@ -870,7 +996,11 @@ function Body({
     // note, or a decision about one, against a baseline nobody has seen.
     if (!loaded) return;
 
-    const noteChanged = trimmed !== (knownNote.current ?? state.note);
+    // The note and its claims also wait for the remembered Share choice, which decides
+    // the visibility a new note is written with. The date does not: it carries no
+    // visibility, and holding it behind a note preference dropped a date picked in the
+    // instant before that local read landed (Codex review of the combined candidate).
+    const noteChanged = notesReady && trimmed !== (knownNote.current ?? state.note);
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
     // The two claims travel with the note and are meaningless without one, so a
     // toggle flipped against an empty field is held locally and written by the
@@ -884,12 +1014,12 @@ function Body({
     const storedVisibility = knownClaims.current?.visibility ?? state.noteVisibility;
     const storedSpoilers = knownClaims.current?.spoilers ?? state.noteSpoilers;
     const claimsChanged =
+      notesReady &&
       Boolean(trimmed) &&
       (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
 
     if (!noteChanged && !dateChanged && !claimsChanged) return;
 
-    beginSaving();
     setProblem(null);
 
     /**
@@ -953,6 +1083,7 @@ function Body({
         });
         if (result.multiple) {
           // Not an error the reader caused, and not one they can act on from here.
+          detailFailures.current += 1;
           setProblem('This title has more than one watch. Edit them from its watch history.');
           ok = false;
         } else {
@@ -965,6 +1096,8 @@ function Body({
           mediaItemId: title.id,
           // Omitting a field leaves the stored value alone — the server coalesces — so
           // an untouched date is not resent and cannot overwrite one already recorded.
+          // A note written before the bucket (Option A) therefore creates an undated row;
+          // the bucket fills in the default afterwards, guarded. See `commitBucket`.
           watchedOn: dateChanged ? nextDate : null,
           note: writesNoteHere ? trimmed : null,
           // Sent only alongside the text they describe. Passing them on a
@@ -977,23 +1110,12 @@ function Body({
           // path's rule, applied to this writer too. An unknown outcome leaves the
           // flag alone, and `log_watched` upserts, so asking again stores it once.
           createdRow.current = true;
+          detailsCreatedRow.current = true;
+          setDetailsCreated(true);
           if (result.noteVersion) knownNoteVersion.current = result.noteVersion;
           if (writesNoteHere) {
             knownNote.current = trimmed;
             knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
-            /**
-             * **The habit, remembered — and only here.**
-             *
-             * This branch is a note being written on a row that did not exist, which is
-             * the definition of a new composition. The `save_note` branch below is an
-             * edit to writing that already exists, and a decision about *that note* is
-             * not a change of habit — remembering it there is how a reader who unshared
-             * one old private note would find every future note opening private.
-             *
-             * Only on an acknowledged success, for the same reason `createdRow` is:
-             * a save that failed says nothing about what anybody intended.
-             */
-            void rememberNoteVisibility(profile.id, nextVisibility);
           }
         }
         ok = report(result);
@@ -1047,7 +1169,6 @@ function Body({
       }
     });
 
-    endSaving();
     if (touched) refresh();
   };
   /**
@@ -1193,7 +1314,6 @@ function Body({
     // on a title already in the collection: forgetting an old film's date is an edit,
     // and says nothing about what the reader is logging next.
     if (!state.exists || createdRow.current) rememberWhen(profile.id, 'earlier');
-    beginSaving();
     await queueDateWrite(async () => {
       const result = await clearWatchDate({
         operationId: newOperationId(),
@@ -1202,7 +1322,6 @@ function Body({
       report(result);
       if (mustReconcile(result)) refresh();
     });
-    endSaving();
   };
 
   /**
@@ -1254,7 +1373,11 @@ function Body({
           // Only an acknowledged success proves the row is there. An unknown outcome
           // leaves the flag false so the next tap asks again — `log_watched` upserts,
           // so asking twice about the same watch stores it once.
-          if (created.outcome !== 'failed') createdRow.current = true;
+          if (created.outcome !== 'failed') {
+            createdRow.current = true;
+            detailsCreatedRow.current = true;
+            setDetailsCreated(true);
+          }
 
           /**
            * **Reconciled before the staleness check, not after it.**
@@ -1281,6 +1404,7 @@ function Body({
         if (stale()) return;
 
         if (!result.ok) {
+          detailFailures.current += 1;
           // Back to whatever the server last confirmed, rather than to the optimistic
           // list that was just refused — and when the outcome is unknown, "what the
           // server last confirmed" is being refetched underneath this, so the sentence
@@ -1338,7 +1462,7 @@ function Body({
    * The row's value carries the shared state, so a published note says so before
    * the composer is even opened.
    */
-  const noteValue = loaded
+  const noteValue = notesReady
     ? wordCount
       ? visibility === 'public'
         ? `Shared · ${wordCount}`
@@ -1373,10 +1497,44 @@ function Body({
     (onDone ?? onClose)();
   };
 
+  /**
+   * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
+   *
+   * There was a "Saving…" line here, and then a reserved blank slot holding its
+   * height so the rows below did not jump when it mounted. The founder's device
+   * pass says the reservation solved the jump and left the real problem: the label
+   * still appeared and disappeared several times per sentence — the autosave lane
+   * fires on a 1.2s trailing debounce with a 4s cap, so an ordinary paragraph arms
+   * it repeatedly — and a status that flickers while somebody is typing is noise
+   * whether or not it moves the page.
+   *
+   * So the successful path says nothing at all. **The autosave itself is
+   * untouched**: same debounce, same max-wait, same flush on blur, on collapse, on
+   * close, on background and on unmount. (The depth counter behind `saving` that this
+   * once mentioned is gone since Option A: `choose` now waits for the write lanes
+   * rather than refusing while they run.) What has gone is one `Text` and the empty
+   * box that reserved room for it.
+   *
+   * **A failure is still drawn, and it is the only thing this slot can now say.**
+   * Hiding an unresolved save would be the one change this must not make: the
+   * message names what could not be written and what to do about it, and it is
+   * mounted by a real event rather than by a keystroke, so the movement it causes
+   * is information. There is no reserved height any more precisely because nothing
+   * transient competes for it.
+   */
+  const status = problem ? (
+    <View testID="log-status-slot">
+      <Text variant="footnote" tone="action" style={styles.status}>
+        {problem}
+      </Text>
+    </View>
+  ) : null;
+
   return (
     <Sheet visible onClose={close} label={`Log ${heading}`}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        testID="log-sheet-scroll"
+        contentContainerStyle={[styles.content, !postRank && styles.contentBucketFoot]}
         keyboardShouldPersistTaps="handled"
         bounces={false}
       >
@@ -1426,58 +1584,14 @@ function Body({
               </Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.buckets}>
-            <Text variant="title2" style={styles.prompt}>
-              How was it?
-            </Text>
-            {/* The row itself is `BucketChoices`, which is also what the onboarding
-                sheet shows. The radiogroup role travels with it, so the two surfaces
-                cannot drift apart in layout or in what a screen reader is told. */}
-            <BucketChoices
-              selected={bucket}
-              onSelect={(option) => void choose(option)}
-              testID="bucket-choices"
-            />
-          </View>
-        )}
+        ) : null}
 
         {/* There was a "Rank <title> again? / [Re-rank] [Cancel]" card here. It is gone on
             the founder's contract (2026-09-21): a band tap on a ranked title goes straight
             into the comparisons, and cancelling *those* is what leaves the ranking alone.
             See `choose`. */}
 
-        {/**
-         * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
-         *
-         * There was a "Saving…" line here, and then a reserved blank slot holding its
-         * height so the rows below did not jump when it mounted. The founder's device
-         * pass says the reservation solved the jump and left the real problem: the label
-         * still appeared and disappeared several times per sentence — the autosave lane
-         * fires on a 1.2s trailing debounce with a 4s cap, so an ordinary paragraph arms
-         * it repeatedly — and a status that flickers while somebody is typing is noise
-         * whether or not it moves the page.
-         *
-         * So the successful path says nothing at all. **The autosave itself is
-         * untouched**: same debounce, same max-wait, same flush on blur, on collapse, on
-         * close, on background and on unmount, same depth counter behind `saving`, which
-         * still gates `choose` and `rebucket` exactly as it did. What has gone is one
-         * `Text` and the empty box that reserved room for it.
-         *
-         * **A failure is still drawn, and it is the only thing this slot can now say.**
-         * Hiding an unresolved save would be the one change this must not make: the
-         * message names what could not be written and what to do about it, and it is
-         * mounted by a real event rather than by a keystroke, so the movement it causes
-         * is information. There is no reserved height any more precisely because nothing
-         * transient competes for it.
-         */}
-        {problem ? (
-          <View testID="log-status-slot">
-            <Text variant="footnote" tone="action" style={styles.status}>
-              {problem}
-            </Text>
-          </View>
-        ) : null}
+        {postRank ? status : null}
 
         <View style={styles.rows}>
           {/* One line for all three rows, because they share one read and would
@@ -1502,6 +1616,13 @@ function Body({
               </Pressable>
             </View>
           ) : null}
+
+          {/* A "Photos — Coming soon" row used to sit here. It was the last dead
+              control in the app: permanently disabled, in the middle of the primary
+              logging flow, for a feature nothing in the schema, the API or the PRD
+              plans for V1. A row that can never be tapped is worse than no row —
+              it is an invitation with nothing behind it, and it had been read as a
+              promise for long enough. */}
 
           <SheetRow
             icon="people-outline"
@@ -1530,60 +1651,7 @@ function Body({
             </View>
           ) : null}
 
-          {/* Inert until the read lands, rather than absent: the rows are the
-              sheet's shape, and having them appear a beat after the buckets would
-              make the sheet resize under the thumb that just tapped one. What is
-              withheld is the ability to act on a baseline that is not there yet. */}
-          {/* **One row.** See `noteValue` above for what happened to the Review /
-              Private note pair. */}
-          <SheetRow
-            icon="create-outline"
-            label="Note"
-            value={noteValue}
-            expanded={expanded === 'notes'}
-            onPress={loaded ? toggleNotes : undefined}
-            disabledReason={GATE_REASON[fieldState]}
-          />
-          {loaded && expanded === 'notes' ? (
-            <View style={[styles.expanded, styles.noteBox]}>
-              <NoteInput
-                value={note}
-                label="Note"
-                onChangeText={(next) => {
-                  setNoteEdit(next);
-                  // Typing is what saves — see the autosave block. The dirty flag
-                  // and the timer are refs, so this costs no render beyond the
-                  // overlay's own. (Disabled rule: an event handler, not render;
-                  // flagged transitively via the unmount effect.)
-                  // eslint-disable-next-line react-hooks/immutability
-                  dirtyNote.current = true;
-                  scheduleAutosave();
-                }}
-                onBlur={flushNote}
-              />
-              <NoteClaims
-                visibility={visibility}
-                spoilers={spoilers}
-                onSpoilers={(next) => {
-                  setSpoilersEdit(next);
-                  void saveDetails({ spoilers: next });
-                }}
-                onVisibility={(next) => {
-                  setVisibilityEdit(next);
-                  void saveDetails({ visibility: next });
-                }}
-              />
-            </View>
-          ) : null}
-
-          {/* A "Photos — Coming soon" row used to sit here. It was the last dead
-              control in the app: permanently disabled, in the middle of the primary
-              logging flow, for a feature nothing in the schema, the API or the PRD
-              plans for V1. A row that can never be tapped is worse than no row —
-              it is an invitation with nothing behind it, and it had been read as a
-              promise for long enough. */}
-
-          {/* Gated for the same reason, and for one of its own: `log_watched`
+          {/* Gated like the other two rows, and for a reason of its own: `log_watched`
               assigns the watch date rather than coalescing it, so a date picked
               against the default would overwrite a real one already recorded. */}
           {/**
@@ -1669,6 +1737,63 @@ function Body({
               />
             </View>
           ) : null}
+
+          {/**
+           * **Who, then when, then the note** (founder, UI cohesion pass, 2026-11-06): the
+           * optional details in the order the founder fixed, above the buckets. Each row
+           * moved with its own disclosure, so what opens under a row is still the thing it
+           * names; nothing about how they save changed.
+           */}
+          {/* Inert until the read lands, rather than absent: the rows are the
+              sheet's shape, and having them appear a beat after the buckets would
+              make the sheet resize under the thumb that just tapped one. What is
+              withheld is the ability to act on a baseline that is not there yet. */}
+          {/* **One row.** See `noteValue` above for what happened to the Review /
+              Private note pair. */}
+          <SheetRow
+            icon="create-outline"
+            label="Note"
+            value={noteValue}
+            expanded={expanded === 'notes'}
+            onPress={notesReady ? toggleNotes : undefined}
+            disabledReason={loaded && !notesReady ? 'Loading' : GATE_REASON[fieldState]}
+          />
+          {notesReady && expanded === 'notes' ? (
+            <View style={[styles.expanded, styles.noteBox]}>
+              <NoteInput
+                value={note}
+                label="Note"
+                onChangeText={(next) => {
+                  setNoteEdit(next);
+                  // Typing is what saves — see the autosave block. The dirty flag
+                  // and the timer are refs, so this costs no render beyond the
+                  // overlay's own. (Disabled rule: an event handler, not render;
+                  // flagged transitively via the unmount effect.)
+                  // eslint-disable-next-line react-hooks/immutability
+                  dirtyNote.current = true;
+                  scheduleAutosave();
+                }}
+                onBlur={flushNote}
+              />
+              <NoteClaims
+                visibility={visibility}
+                spoilers={spoilers}
+                onSpoilers={(next) => {
+                  setSpoilersEdit(next);
+                  void saveDetails({ spoilers: next });
+                }}
+                onVisibility={(next) => {
+                  setVisibilityEdit(next);
+                  // The reader's explicit act, and the only thing that moves the remembered
+                  // choice. It decides how the next *new* note opens; this note's own
+                  // visibility is the value just chosen, and stored notes open on theirs.
+                  void rememberShareChoice(profile.id, next);
+                  void saveDetails({ visibility: next });
+                }}
+              />
+            </View>
+          ) : null}
+
         </View>
 
         {/**
@@ -1689,7 +1814,34 @@ function Body({
           <View style={styles.done}>
             <Button label="Done" onPress={finish} />
           </View>
-        ) : null}
+        ) : (
+          <>
+            {status}
+            {/**
+             * **The three buckets come last** (founder, Option A, 2026-11-04).
+             *
+             * The optional details sit above them so the screen reads top to bottom:
+             * with whom, when, what you thought, then how it was. The tap that starts
+             * the comparisons is the last thing on it, and it still goes straight into
+             * them: no Done, no extra step, nothing required.
+             *
+             * "How was it?" is no longer drawn: three labelled choices at the foot of a
+             * log are the question. It is still what a screen reader hears for the
+             * group, because a radiogroup with no name is three answers to nothing.
+             *
+             * The row itself is `BucketChoices`, which is also what the onboarding
+             * sheet shows, so the two surfaces cannot drift apart in layout.
+             */}
+            <View style={styles.buckets}>
+              <BucketChoices
+                selected={bucket}
+                onSelect={(option) => void choose(option)}
+                accessibilityLabel="How was it?"
+                testID="bucket-choices"
+              />
+            </View>
+          </>
+        )}
       </ScrollView>
     </Sheet>
   );
@@ -1705,6 +1857,13 @@ export { NoteInput };
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[4], gap: theme.space[4] },
+  /**
+   * **The sheet ends just under the bucket labels** (UI cohesion pass, 2026-11-06). The
+   * sheet already adds the navigation inset and 16pt of its own below everything, so
+   * the content's own 16pt on top of that was a second margin under the last row. 4pt
+   * is left, which keeps the chips' 8pt slop inside the scroll view.
+   */
+  contentBucketFoot: { paddingBottom: theme.space[1] },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1713,8 +1872,17 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   headerText: { flex: 1, gap: 2 },
-  buckets: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
-  prompt: { textAlign: 'center' },
+  /**
+   * The buckets as the sheet's foot (post-QA sprint 2, 2026-11-05): a hairline on the
+   * gutters closes the optional details above, and the three answers sit 12pt under it,
+   * so the decision reads as its own group rather than a fourth row of the form.
+   */
+  buckets: {
+    marginHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
   /**
    * The post-rank receipt: badge left, two lines beside it.
    *

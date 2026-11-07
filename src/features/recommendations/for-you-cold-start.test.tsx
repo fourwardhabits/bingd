@@ -1,7 +1,6 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
-import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -150,9 +149,14 @@ const open = async () => {
   return view;
 };
 
-/** What the category control says it is showing, which is the only place that is stated. */
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
+const showing = (view: Awaited<ReturnType<typeof open>>) => {
+  const wall = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const medium = within(view.getByLabelText('Medium'))
+    .getAllByRole('radio')
+    .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
+  return `Showing ${wall} ${medium}`;
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -177,105 +181,59 @@ afterAll(() => {
   dev.__DEV__ = ORIGINAL_DEV;
 });
 
-describe('why this tile is here, on a long press', () => {
-  const holdInception = async (view: Awaited<ReturnType<typeof open>>) => {
+/**
+ * **No long press on the wall** (founder, final direction, 2026-11-03).
+ *
+ * It used to answer with a native alert: the `headlineFor` sentence in a store or beta
+ * build ("Because you loved Heat"), and in local development the engine's working under
+ * it. The founder ruled the alert out of the design. A tap still opens the title.
+ */
+describe('a long press on a recommendation', () => {
+  it.each([
+    ['a store or beta build', false],
+    ['local development', true],
+  ])('opens no alert in %s', async (_, development) => {
+    dev.__DEV__ = development;
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const view = await open();
+
     await fireEvent(view.getByLabelText(/^Inception/), 'longPress');
-  };
 
-  it('gives a store build the sentence and nothing else', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    const view = await open();
-
-    await holdInception(view);
-
-    expect(alert).toHaveBeenCalledTimes(1);
-    const [title, body] = alert.mock.calls[0] as [string, string];
-    expect(title).toBe('Inception');
-    expect(body).toBe('Because you loved Heat');
+    expect(alert).not.toHaveBeenCalled();
   });
 
-  it('never shows a reader a weight, a score or the engine’s vocabulary', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  it('still opens the title on a tap', async () => {
     const view = await open();
 
-    await holdInception(view);
+    await fireEvent.press(view.getByLabelText(/^Inception/));
 
-    const body = String(alert.mock.calls[0]?.[1]);
-    // The four lines the panel used to print, by the words that made them internal.
-    expect(body).not.toMatch(/score/i);
-    expect(body).not.toMatch(/anchors?:/i);
-    expect(body).not.toMatch(/popularity prior/i);
-    expect(body).not.toMatch(/0\.\d{2,3}/);
-  });
-
-  it('gives a community beta build the sentence too, whatever Diagnostics allows', async () => {
-    // A beta build is a built binary: `__DEV__` false, while the Diagnostics sheet's own
-    // gate (`diagnosticsAvailable`, beta and below) is still open. The long press must
-    // not follow that wider gate — the founder's ruling is that a beta tester holding a
-    // poster is a stranger for this purpose.
-    expect(diagnosticsAvailable).toBe(true);
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    const view = await open();
-
-    await holdInception(view);
-
-    const body = String(alert.mock.calls[0]?.[1]);
-    expect(body).toBe('Because you loved Heat');
-    expect(body).not.toMatch(/score|anchors?:|popularity prior/i);
-  });
-
-  it('keeps the working in local development only', async () => {
-    dev.__DEV__ = true;
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    const view = await open();
-
-    await holdInception(view);
-
-    const body = String(alert.mock.calls[0]?.[1]);
-    // The sentence still leads — the founder reads the same thing a reader would,
-    // and then the arithmetic under it.
-    expect(body.startsWith('Because you loved Heat')).toBe(true);
-    expect(body).toMatch(/score 0\.412/);
-    expect(body).toMatch(/popularity prior/);
+    expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/^\/title\//));
   });
 });
 
+/**
+ * **No line about the reader's taste above the wall** (founder, 2026-11-03: nothing
+ * descriptive under the For You header).
+ *
+ * Until then a thin taste printed one of two sentences above the artwork (Codex review
+ * of #122). Both are gone in every state of the slate, and the wall is drawn as before.
+ */
 describe('a wall that is not yet the reader’s', () => {
   const POPULAR = 'Popular right now while bingd learns your taste.';
   const LEARNING = 'bingd is still learning your taste.';
 
-  it('calls the wall popular only when it genuinely came from the popularity fallback', async () => {
-    // No anchor, and nothing social on the wall: the hook's `popularityOnly`.
-    mockSlate.lowData = true;
-    mockSlate.popularityOnly = true;
-    mockSlate.anchorsUsed = 0;
-    const view = await open();
-
-    expect(view.getByText(POPULAR)).toBeTruthy();
-    expect(view.queryByText(LEARNING)).toBeNull();
-    // The wall itself is untouched: the same tile, drawn the same way.
-    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
-  });
-
-  it('does not call a wall popular when a followed reader’s title is on it', async () => {
-    // Codex review of #122: no anchor resolved, but `social_candidates` contributed a
-    // title that is on screen. Still a thin taste, so still worth a word — but not
-    // "popular", which would name a source the wall does not have.
-    mockSlate.lowData = true;
-    mockSlate.popularityOnly = false;
-    mockSlate.anchorsUsed = 0;
-    const view = await open();
-
-    expect(view.getByText(LEARNING)).toBeTruthy();
-    expect(view.queryByText(POPULAR)).toBeNull();
-    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
-  });
-
-  it('says nothing once an anchor has resolved', async () => {
+  it.each([
+    ['from the popularity fallback alone', { lowData: true, popularityOnly: true, anchorsUsed: 0 }],
+    ['with a followed reader’s title on it', { lowData: true, popularityOnly: false, anchorsUsed: 0 }],
+    ['once an anchor has resolved', { lowData: false, popularityOnly: false, anchorsUsed: 1 }],
+  ])('says nothing above the wall when it came %s', async (_, slate) => {
+    Object.assign(mockSlate, slate);
     const view = await open();
 
     expect(view.queryByText(POPULAR)).toBeNull();
     expect(view.queryByText(LEARNING)).toBeNull();
+    expect(view.queryByText(/learn(s|ing) your taste/)).toBeNull();
+    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
   });
 });
 

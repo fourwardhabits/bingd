@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -62,9 +63,14 @@ jest.mock('@/lib/analytics', () => ({
 
 const mockParams: { entry?: string } = {};
 const mockPush = jest.fn();
+const mockBack = jest.fn();
+const mockReplace = jest.fn();
+let mockCanGoBack = true;
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace, canGoBack: () => mockCanGoBack }),
   useLocalSearchParams: () => mockParams,
+  // The header's right corner is drawn in place, so its New list can be pressed.
+  Stack: { Screen: ({ options }: { options?: { headerRight?: () => unknown } }) => options?.headerRight?.() ?? null },
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -145,6 +151,14 @@ describe('the three states', () => {
     await waitFor(() => view.getByText('Could not load your lists'));
     view.getByRole('button', { name: 'Try again' });
   });
+
+  it('keeps New list working while the read has failed', async () => {
+    mockFails = true;
+    const view = await open();
+    await waitFor(() => view.getByText('Could not load your lists'));
+    await fireEvent.press(view.getByTestId('my-lists-new'));
+    await waitFor(() => view.getByText('Create list'));
+  });
 });
 
 describe('the discoverability tripwire', () => {
@@ -203,5 +217,65 @@ describe('navigation', () => {
     await fireEvent.press(view.getByLabelText(/^Movies for Dad\./));
 
     expect(mockPush).toHaveBeenCalledWith('/lists/a?surface=my_lists');
+  });
+});
+
+/**
+ * **New list in the header's corner** (founder, marquee cohesion sprint, 2026-11-07),
+ * rather than a bordered button heading the rows.
+ */
+describe('creating', () => {
+  it('offers New list in the header, a 44pt target, and not as a row above the lists', async () => {
+    mockRows = [list('a', { title: 'Movies for Dad' })];
+    const view = await open();
+    await waitFor(() => view.getByText('Movies for Dad'));
+    const create = view.getByTestId('my-lists-new');
+    expect(create.props.accessibilityLabel).toBe('New list');
+    const style = StyleSheet.flatten(
+      typeof create.props.style === 'function' ? create.props.style({ pressed: false }) : create.props.style,
+    );
+    expect(style.minHeight).toBe(44);
+    expect(view.getAllByRole('button', { name: 'New list' })).toHaveLength(1);
+  });
+});
+
+/**
+ * **The bingd. header, then MY LISTS** (founder Preview QA, 2026-11-07): the tabs' header
+ * with a back chevron, and the page's own section label with New list opposite.
+ */
+describe('the header', () => {
+  it('draws the bingd. header with Back, and MY LISTS with New list beside it', async () => {
+    mockRows = [list('a', { title: 'Movies for Dad' })];
+    const view = await open();
+    await waitFor(() => view.getByText('Movies for Dad'));
+    expect(view.getByTestId('app-header')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(view.getByText('MY LISTS')).toBeTruthy();
+    expect(view.getByTestId('my-lists-new')).toBeTruthy();
+  });
+});
+
+describe('Back', () => {
+  beforeEach(() => {
+    mockBack.mockClear();
+    mockReplace.mockClear();
+  });
+
+  it('goes back where there is somewhere to go', async () => {
+    mockCanGoBack = true;
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Back' }));
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  /** Opened cold from a link, with nothing behind it (independent review). */
+  it('goes to Collection when the page was opened with nothing behind it', async () => {
+    mockCanGoBack = false;
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Back' }));
+    expect(mockBack).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith('/collection');
+    mockCanGoBack = true;
   });
 });

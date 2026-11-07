@@ -196,58 +196,69 @@ export function useRankedCollection(
   return useQuery({
     enabled: options.enabled ?? true,
     queryKey: queryKeys.rankings(userId, category),
-    queryFn: async (): Promise<RankedEntry[]> => {
-      const { data, error } = await readAllByKey<any>(
-        (cursor, limit) =>
-          after(
-            supabase
-              .from('rankings')
-              .select(
-                'media_item_id, bucket, position, category, created_at, ' +
-                  'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
-              )
-              .eq('user_id', userId)
-              .eq('category', category),
-            'media_item_id',
-            cursor,
-          )
-            // Not `position`, though it is unique per category and is the order this list
-            // is shown in. Inserting a ranking **shifts every position below it**, so a
-            // position cursor can be moved out from under the read by a concurrent
-            // ranking session — the same defect keyset exists to remove, one level down.
-            // `media_item_id` never changes.
-            .order('media_item_id', { ascending: true })
-            .limit(limit),
-        (row) => [row.media_item_id],
-      );
-      if (error) throw error;
-
-      // Position order, applied here now that the request is sorted by the key.
-      return [...((data ?? []) as any[])]
-        .sort((a, b) => a.position - b.position)
-        .map((row: any) => {
-        const shape = media(row.media_items);
-        const meta = descriptive(shape);
-        return {
-          mediaItemId: row.media_item_id,
-          title: shape.title,
-          year: yearOf(shape.release_date),
-          posterPath: shape.poster_path,
-          genres: meta.genres,
-          runtimeMinutes: shape.runtime_minutes,
-          kind: shape.kind,
-          seriesTitle: meta.seriesTitle,
-          seasonNumber: shape.season_number ?? null,
-          seriesId: shape.parent_id ?? null,
-          language: meta.language,
-          bucket: row.bucket,
-          position: row.position,
-          category: row.category,
-          rankedAt: row.created_at ?? null,
-        };
-      });
-    },
+    queryFn: () => readRankedCollection(userId, category),
   });
+}
+
+/**
+ * The read behind {@link useRankedCollection}, on its own so a caller that needs a copy
+ * it knows is fresh can run it under a key of its own. The ranking summary is that
+ * caller: its numbers must come from a read made after the sitting's last placement,
+ * and a shared, cached copy cannot promise that (QA corrections, 2026-11-06).
+ */
+export async function readRankedCollection(
+  userId: string,
+  category: RankingCategory,
+): Promise<RankedEntry[]> {
+  const { data, error } = await readAllByKey<any>(
+    (cursor, limit) =>
+      after(
+        supabase
+          .from('rankings')
+          .select(
+            'media_item_id, bucket, position, category, created_at, ' +
+              'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
+          )
+          .eq('user_id', userId)
+          .eq('category', category),
+        'media_item_id',
+        cursor,
+      )
+        // Not `position`, though it is unique per category and is the order this list
+        // is shown in. Inserting a ranking **shifts every position below it**, so a
+        // position cursor can be moved out from under the read by a concurrent
+        // ranking session — the same defect keyset exists to remove, one level down.
+        // `media_item_id` never changes.
+        .order('media_item_id', { ascending: true })
+        .limit(limit),
+    (row) => [row.media_item_id],
+  );
+  if (error) throw error;
+
+  // Position order, applied here now that the request is sorted by the key.
+  return [...((data ?? []) as any[])]
+    .sort((a, b) => a.position - b.position)
+    .map((row: any) => {
+      const shape = media(row.media_items);
+      const meta = descriptive(shape);
+      return {
+        mediaItemId: row.media_item_id,
+        title: shape.title,
+        year: yearOf(shape.release_date),
+        posterPath: shape.poster_path,
+        genres: meta.genres,
+        runtimeMinutes: shape.runtime_minutes,
+        kind: shape.kind,
+        seriesTitle: meta.seriesTitle,
+        seasonNumber: shape.season_number ?? null,
+        seriesId: shape.parent_id ?? null,
+        language: meta.language,
+        bucket: row.bucket,
+        position: row.position,
+        category: row.category,
+        rankedAt: row.created_at ?? null,
+      };
+    });
 }
 
 /**
@@ -322,28 +333,28 @@ export function useLoggedCollection(userId: string) {
             String(a.media_item_id).localeCompare(String(b.media_item_id)),
         )
         .map((row: any) => {
-        const shape = media(row.media_items);
-        const meta = descriptive(shape);
-        return {
-          entry: {
-            mediaItemId: row.media_item_id,
-            title: shape.title,
-            year: yearOf(shape.release_date),
-            posterPath: shape.poster_path,
-            genres: meta.genres,
-            runtimeMinutes: shape.runtime_minutes,
-            kind: shape.kind,
-            seriesTitle: meta.seriesTitle,
-            seasonNumber: shape.season_number ?? null,
-            seriesId: shape.parent_id ?? null,
-            language: meta.language,
-            bucket: row.bucket,
-            watchedOn: row.watched_on,
-            addedAt: row.created_at ?? null,
-          } satisfies LoggedEntry,
-          ranked: hasPosition.has(row.media_item_id),
-        };
-      });
+          const shape = media(row.media_items);
+          const meta = descriptive(shape);
+          return {
+            entry: {
+              mediaItemId: row.media_item_id,
+              title: shape.title,
+              year: yearOf(shape.release_date),
+              posterPath: shape.poster_path,
+              genres: meta.genres,
+              runtimeMinutes: shape.runtime_minutes,
+              kind: shape.kind,
+              seriesTitle: meta.seriesTitle,
+              seasonNumber: shape.season_number ?? null,
+              seriesId: shape.parent_id ?? null,
+              language: meta.language,
+              bucket: row.bucket,
+              watchedOn: row.watched_on,
+              addedAt: row.created_at ?? null,
+            } satisfies LoggedEntry,
+            ranked: hasPosition.has(row.media_item_id),
+          };
+        });
 
       return {
         entries: rows.map((r) => r.entry),
@@ -392,24 +403,24 @@ export function useWatchlist(userId: string) {
             String(a.media_item_id).localeCompare(String(b.media_item_id)),
         )
         .map((row: any) => {
-        const shape = media(row.media_items);
-        const meta = descriptive(shape);
-        return {
-          mediaItemId: row.media_item_id,
-          title: shape.title,
-          year: yearOf(shape.release_date),
-          posterPath: shape.poster_path,
-          genres: meta.genres,
-          runtimeMinutes: shape.runtime_minutes,
-          kind: shape.kind,
-          seriesTitle: meta.seriesTitle,
-          seasonNumber: shape.season_number ?? null,
-          language: meta.language,
-          bucket: null,
-          watchedOn: null,
-          addedAt: row.created_at ?? null,
-        };
-      });
+          const shape = media(row.media_items);
+          const meta = descriptive(shape);
+          return {
+            mediaItemId: row.media_item_id,
+            title: shape.title,
+            year: yearOf(shape.release_date),
+            posterPath: shape.poster_path,
+            genres: meta.genres,
+            runtimeMinutes: shape.runtime_minutes,
+            kind: shape.kind,
+            seriesTitle: meta.seriesTitle,
+            seasonNumber: shape.season_number ?? null,
+            language: meta.language,
+            bucket: null,
+            watchedOn: null,
+            addedAt: row.created_at ?? null,
+          };
+        });
     },
   });
 }

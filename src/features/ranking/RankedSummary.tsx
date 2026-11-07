@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
@@ -29,6 +29,10 @@ import { theme } from '@/ui/tokens';
  *
  * The position is omitted outright when the server named no valid ordinal. A blank where
  * a number belongs is worse than a row that does not claim one.
+ *
+ * **The numbers are the ranking as it stands when the summary opens** (QA corrections,
+ * 2026-11-06), never what each placement returned at the time: a later placement shifts
+ * and re-scores the titles placed before it. See `settled-standing.ts`.
  */
 export type RankedSummaryTitle = {
   mediaItemId: string;
@@ -101,12 +105,23 @@ export function RankedSummary({
   titles,
   medium,
   actions,
+  standing = 'settled',
+  onRetry,
 }: {
   heading: string;
   titles: readonly RankedSummaryTitle[];
   medium: RankingCategory;
   /** The buttons, pinned below the scroll so a long list cannot bury them. */
   actions: React.ReactNode;
+  /**
+   * Whether `titles` carry the ranking as it stands now. **`settling`** holds the rows
+   * back behind a small indicator, usually for well under a second, rather than drawing
+   * them bare and then growing every row as its numbers arrive. **`failed`** draws the
+   * titles without numbers and offers another read: no number is better than an earlier
+   * one.
+   */
+  standing?: 'settling' | 'settled' | 'failed';
+  onRetry?: () => void;
 }) {
   return (
     <View style={styles.screen}>
@@ -119,11 +134,40 @@ export function RankedSummary({
         <Text variant="title2" accessibilityRole="header">
           {heading}
         </Text>
-        <View style={styles.rows}>
-          {titles.map((title) => (
-            <RankedSummaryRow key={title.mediaItemId} title={title} medium={medium} />
-          ))}
-        </View>
+        {standing === 'settling' ? (
+          <View
+            style={styles.settling}
+            accessible
+            accessibilityLabel="Loading where these titles now stand"
+            accessibilityState={{ busy: true }}
+            testID="ranked-summary-settling"
+          >
+            <ActivityIndicator color={theme.semantic.action} />
+          </View>
+        ) : (
+          <View style={styles.rows}>
+            {titles.map((title) => (
+              <RankedSummaryRow key={title.mediaItemId} title={title} medium={medium} />
+            ))}
+          </View>
+        )}
+        {standing === 'failed' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Couldn't load where these now stand. Try again"
+            onPress={onRetry}
+            hitSlop={theme.space[2]}
+            style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+            testID="ranked-summary-retry"
+          >
+            <Text variant="footnote" tone="secondary">
+              Couldn’t load where these now stand.{' '}
+              <Text variant="footnote" style={styles.done}>
+                Try again
+              </Text>
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
       <View style={styles.actions}>{actions}</View>
     </View>
@@ -148,6 +192,8 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   scroll: { padding: theme.layout.gutter, gap: theme.space[3] },
   rows: { gap: theme.space[1] },
+  settling: { minHeight: 96, alignItems: 'center', justifyContent: 'center' },
+  retry: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -64,5 +64,13 @@ export const peopleDiscovery = (from: 'onboarding' | 'sparse_feed') =>
 export const unrankedMovies = () =>
   ({ pathname: TAB_ROUTES.collection, params: { show: 'unranked' } }) as const;
 
+/**
+ * Search, opened on its Users list: the app's member search, which is where People's
+ * empty state sends somebody with no suggestions yet (founder, nav cohesion sprint,
+ * 2026-11-06). Search applies it and clears it, as Collection does `show: 'unranked'`.
+ */
+export const memberSearch = () =>
+  ({ pathname: TAB_ROUTES.search, params: { show: 'users' } }) as const;
+
 /** Somewhere a screen can send a person: a tab, or the one tab state that has a name. */
 export type Destination = TabRoute | ReturnType<typeof peopleDiscovery>;

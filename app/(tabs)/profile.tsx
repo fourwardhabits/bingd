@@ -14,12 +14,11 @@ import {
 
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
-import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
+import { useReactions, useSetReaction, REACTION_GLYPH, REACTION_LABEL } from '@/features/feed/use-reactions';
 import {
   feedItems,
   trimActorActivityToFirstPage,
@@ -49,6 +48,7 @@ import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
   AppHeader,
+  HeaderBoundary,
   EmptyState,
   Screen,
   SectionHeader,
@@ -82,7 +82,6 @@ export default function ProfileScreen() {
   const feed = useActorActivity(profile.id);
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
-  const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
   const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
@@ -251,15 +250,13 @@ export default function ProfileScreen() {
   return (
     <Screen>
       <AppHeader
-        // A gear rather than the word, and to the left of the bell rather than in
-        // place of it. The bell is meant to sit in the same corner on every root tab;
-        // a text button beside it was pushing it out of that corner on this one.
+        // The gear alone (founder, UI cohesion pass, 2026-11-06). The bell that sat
+        // beside it was a second door to the inbox; the inbox's door is Feed's bell.
         settings={{ onPress: () => router.push('/settings') }}
-        notifications={{
-          count: unreadCount(notifications.data),
-          onPress: () => router.push('/settings/notifications'),
-        }}
       />
+      {/* The divider every main tab draws under its header (founder final polish,
+          2026-11-04). Profile was the one without it. */}
+      <HeaderBoundary />
       <ScrollView
         ref={scroller}
         contentContainerStyle={styles.content}
@@ -307,6 +304,7 @@ export default function ProfileScreen() {
         }
       >
         <ProfileIdentity
+          card
           name={profile.display_name || profile.username}
           username={profile.username}
           bio={profile.bio}
@@ -382,8 +380,9 @@ export default function ProfileScreen() {
              * is about somebody else.
              */
             <ProfileActions
+              compact
               onShare={() => void shareProfile()}
-              trailing={<InviteFriendsButton />}
+              trailing={<InviteFriendsButton size="sm" />}
             />
           }
         />
@@ -408,6 +407,9 @@ export default function ProfileScreen() {
           onPressTitle={(id) => router.push(`/title/${id}`)}
           /* Own profile only. See GoalsSectionProps.streakUserId. */
           streakUserId={profile.id}
+          // The Profile tab's six headings are 15pt (founder final polish, 2026-11-04);
+          // somebody else's profile draws the same sections at the standard size.
+          headingSize="large"
         />
 
         {/* After Your 2026: the settled half of the page, below the half that is still
@@ -416,6 +418,7 @@ export default function ProfileScreen() {
           viewerId={profile.id}
           userId={profile.id}
           onSeeAll={() => setAwardsOpen(true)}
+          headingSize="large"
         />
 
         {/**
@@ -431,6 +434,7 @@ export default function ProfileScreen() {
          */}
         <TopRanked
           userId={profile.id}
+          headingSize="large"
           onPressTitle={(id) => router.push(`/title/${id}`)}
           onSeeAll={(category) =>
             // **Carrying the side they chose.** The Collection tab remembers a medium per
@@ -447,6 +451,7 @@ export default function ProfileScreen() {
         <ProfileWatchlist
           userId={profile.id}
           onPressTitle={(id) => router.push(`/title/${id}`)}
+          headingSize="large"
         />
 
         {/* **Lists, after Watchlist and before Recent activity** (founder, 2026-09-19).
@@ -464,10 +469,11 @@ export default function ProfileScreen() {
           isOwner
           onOpenList={(listId) => router.push(`/lists/${listId}?surface=profile_shelf`)}
           onManage={() => router.push('/lists?entry=profile_manage')}
+          headingSize="large"
         />
 
         <View style={styles.section}>
-          <SectionHeader title="Recent activity" />
+          <SectionHeader title="Recent activity" size="large" />
           {feed.isPending ? (
             <SkeletonRow count={2} />
           ) : feed.isError && recent.length === 0 ? (
@@ -565,6 +571,7 @@ export default function ProfileScreen() {
                 reaction={{
                   count: summary?.total ?? 0,
                   mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+                  mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
                   glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
                   onPress: () => void setReaction(event.id, summary?.mine ? null : 'love'),
                 }}

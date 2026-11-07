@@ -1,8 +1,10 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Dimensions, StyleSheet, type ViewStyle } from 'react-native';
 
+import { rankingOf } from '@/test-utils/ranked-standing';
 import { renderWithProviders } from '@/test-utils/render';
 
-import { RankSessionScreen } from './RankSessionScreen';
+import { askPosterWidth, RankSessionScreen } from './RankSessionScreen';
 
 /**
  * The ranking session's backlog source (unified Backlog + Refine, 2026-09-21). The server
@@ -44,6 +46,16 @@ const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({
   ...jest.requireActual('@/lib/analytics'),
   track: (...a: unknown[]) => mockTrack(...a),
+}));
+
+/**
+ * **The summary's numbers come from a fresh read of the ranking** (QA corrections,
+ * 2026-11-06), not from the placement's own answer. Each test says what the ranking is.
+ */
+const mockReadRanked = jest.fn();
+jest.mock('@/features/collection/use-collection', () => ({
+  ...jest.requireActual('@/features/collection/use-collection'),
+  readRankedCollection: (...a: unknown[]) => mockReadRanked(...a),
 }));
 
 const UNTOUCHED = {
@@ -111,6 +123,10 @@ const open = async (start: 'backlog' | 'refine' = 'backlog') => {
 beforeEach(() => {
   mockRpc.mockReset();
   mockTrack.mockReset();
+  // Heat second of six in It was fine, under two in I liked it: #4, 6.2 — the same
+  // standing the `placed` fixture reports, so a one-title sitting reads as it did.
+  mockReadRanked.mockReset();
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 2, fine: 6 }, { heat: 4 }));
 });
 
 it('asks "How was it?" first for a title with no bingd opinion, and opens nothing yet', async () => {
@@ -293,6 +309,85 @@ it('shows the target poster on How was it?', async () => {
   expect(view.getByTestId('backlog-ask-poster')).toBeTruthy();
 });
 
+/**
+ * **A poster the size of the comparison's** (founder, QA corrections, 2026-11-06): about
+ * one and a half times the old fixed 88pt, giving way to a short screen or large text so
+ * the choices below it stay on screen.
+ */
+/** The poster's own frame: the first child of the block that holds it and its title. */
+const posterFrame = (box: { children: unknown[] }) =>
+  StyleSheet.flatten((box.children[0] as { props: { style: ViewStyle } }).props.style);
+
+describe('the "How was it?" poster', () => {
+  it('is about 1.45–1.5× the old 88pt on ordinary phones', () => {
+    expect(askPosterWidth({ width: 320, height: 640 })).toBe(128);
+    expect(askPosterWidth({ width: 360, height: 780 })).toBe(132);
+    expect(askPosterWidth({ width: 412, height: 915 })).toBe(132);
+    for (const [width, height] of [
+      [320, 640],
+      [360, 780],
+      [412, 915],
+    ] as const) {
+      const ratio = askPosterWidth({ width, height }) / 88;
+      expect(ratio).toBeGreaterThanOrEqual(1.4);
+      expect(ratio).toBeLessThanOrEqual(1.5);
+    }
+  });
+
+  it('gives way to a short screen, but never below the old size at ordinary text', () => {
+    expect(askPosterWidth({ width: 360, height: 560 })).toBe(112);
+    expect(askPosterWidth({ width: 320, height: 400 })).toBe(88);
+  });
+
+  it('scales down with larger system text so the choices keep their place', () => {
+    expect(askPosterWidth({ width: 360, height: 780, fontScale: 1.3 })).toBe(120);
+    expect(askPosterWidth({ width: 360, height: 780, fontScale: 2 })).toBe(78);
+    // At the largest sizes on a small phone it may go to poster.sm rather than the floor.
+    expect(askPosterWidth({ width: 320, height: 568, fontScale: 2 })).toBe(56);
+  });
+
+  it('draws at that width, 2:3, between the question and the title, buckets and Skip below', async () => {
+    serve({ ranking_backlog: [queue([{ ...UNTOUCHED, poster_path: '/heat.jpg' }])] });
+    const view = await open();
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    const box = view.getByTestId('backlog-ask-poster');
+    const frame = posterFrame(box);
+    const { width, height, fontScale } = Dimensions.get('window');
+    expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
+    expect(frame.aspectRatio).toBe(2 / 3);
+    expect(frame.height).toBeUndefined();
+
+    // The title stays under the poster, inside the same block; the order down the screen
+    // is question, poster, title, choices, Skip title.
+    expect(within(box).getByText('Heat')).toBeTruthy();
+    const tree = JSON.stringify(view.toJSON());
+    const at = ['"How was it?"', '"Heat"', '"I liked it"', '"Skip title"'].map((text) =>
+      tree.indexOf(text),
+    );
+    expect(at.every((index) => index >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(view.getByTestId('backlog-bucket-choices')).toBeTruthy();
+  });
+
+  it('is the same for a TV season', async () => {
+    serve({
+      ranking_backlog: [
+        queue([{ ...UNTOUCHED, kind: 'season', title: 'Severance, S1', poster_path: '/s.jpg' }]),
+      ],
+    });
+    const onExit = jest.fn();
+    const view = await renderWithProviders(
+      <RankSessionScreen medium="tv_seasons" start="backlog" onExit={onExit} />,
+    );
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    const box = view.getByTestId('backlog-ask-poster');
+    const frame = posterFrame(box);
+    const { width, height, fontScale } = Dimensions.get('window');
+    expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
+  });
+});
+
 /** Founder QA, 2026-09-22: the two escapes must read as different acts on the pair screen. */
 it('names the title skip by its side on the comparison, and plainly on the bucket screen', async () => {
   serve({ ranking_backlog: [queue([UNTOUCHED])], rank_backlog_start: [comparing] });
@@ -331,7 +426,7 @@ describe('the completion summary', () => {
 
     await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
     // The canonical label, the score badge, and nothing about movement or watching.
-    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
     expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy();
     expect(view.queryByText(/→/)).toBeNull();
     expect(view.queryByText(/Still #/)).toBeNull();
@@ -375,7 +470,7 @@ describe('the completion summary', () => {
     // The queue empties by itself: the same component, the same heading and rows.
     await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
     expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
-    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
     /**
      * **No helper sentence** (founder, 2026-09-25). "You're caught up." restated what the
      * heading and the rows already said. That there is nothing left is expressed by the
@@ -400,6 +495,7 @@ describe('the completion summary', () => {
     // The actions are siblings of the scroll view rather than children of it.
     expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1);
+    // The rows wait for the fresh read of the ranking (settled-standing.ts).
+    await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1));
   });
 });

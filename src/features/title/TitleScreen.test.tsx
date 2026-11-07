@@ -1,12 +1,14 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { brand } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
 // app-directory.test.ts.
 import TitleScreen from '../../../app/title/[id]';
+import { hydrateTitleLayout, setTitleLayout } from './title-layout';
 
 const mockPush = jest.fn();
 /**
@@ -58,7 +60,11 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
+      // A result may be a function of the call's arguments — the circle's `following` read
+      // and the Reviews tab's read are one RPC told apart by `p_sort`.
+      const result = mockRpcResults[name];
+      const data = typeof result === 'function' ? (result as typeof mockRpc)(args) : result;
+      return Promise.resolve({ data: error ? null : (data ?? null), error });
     },
     from: (table: string) => {
       mockReads[table] = (mockReads[table] ?? 0) + 1;
@@ -120,7 +126,27 @@ let mockOpenId = 'film-1';
 // and by nothing else, which is the whole reason the callout can be trusted.
 let mockParams: Record<string, string> = {};
 
+// Whether this title is the screen on top; the immersive status bar depends on it.
+let mockFocused = true;
+// Every status-bar style the screen asks for, in render order.
+const mockStatusBars: string[] = [];
+/**
+ * Production's opt-in by default, so the Show previews tests below keep testing it; the
+ * Preview default (stills with the page) is its own test (founder Preview QA, 2026-11-07).
+ */
+let mockPreviewsByDefault = false;
+jest.mock('@/features/title/trailer-previews', () => ({
+  trailerPreviewsByDefault: () => mockPreviewsByDefault,
+}));
+
+jest.mock('expo-status-bar', () => ({
+  StatusBar: ({ style }: { style: string }) => {
+    mockStatusBars.push(style);
+    return null;
+  },
+}));
 jest.mock('expo-router', () => ({
+  useIsFocused: () => mockFocused,
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ id: mockOpenId, ...mockParams }),
   Stack: {
@@ -264,7 +290,16 @@ const videos = {
   },
 };
 
+/**
+ * The Cinematic page is the default since the release pass (2026-11-07); this file tests
+ * the Original page unless a block opts into Cinematic itself, so every test starts there.
+ */
+beforeEach(async () => {
+  await setTitleLayout('original');
+});
+
 beforeEach(() => {
+  mockPreviewsByDefault = false;
   mockHeaderOptions = {};
   mockOpenId = 'film-1';
   mockParams = {};
@@ -3489,7 +3524,7 @@ describe('the ranking state on the title page', () => {
     await fireEvent.press(view.getByTestId('title-action-rank'));
     await waitFor(() => expect(rankStarts()).toHaveLength(1));
     expect(rankStarts()[0][1]).toMatchObject({ p_media_item_id: 'film-1', p_bucket: 'fine' });
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('reads Rank for a seen title with no bucket, such as an untouched import, and logs it', async () => {
@@ -3501,7 +3536,926 @@ describe('the ranking state on the title page', () => {
     expect(view.queryByText('Finish ranking')).toBeNull();
 
     await fireEvent.press(view.getByTestId('title-action-rank'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(rankStarts()).toHaveLength(0);
+  });
+});
+
+/**
+ * **The Immersive Scroll experiment** (founder, 2026-11-04).
+ *
+ * The same screen with the device switch set to `immersive`. Everything above is the
+ * original page and still runs with the switch at its default, which is the first
+ * property these pin: nothing changes for anybody who has not opted in. The rest is what
+ * the brief asks of the experiment: one cinematic first screen, each piece of the page
+ * stated once, and the same actions behind the same handlers.
+ */
+describe('the immersive title page (experiment)', () => {
+  const ranked = () => {
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+      { user_id: 'user-1', media_item_id: 'other', position: 2, category: 'movies', bucket: 'loved' },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  };
+  const reviewBy = (n: number) => ({
+    id: `um-${n}`,
+    user_id: `user-${n + 10}`,
+    username: `reader${n}`,
+    display_name: `Reader ${n}`,
+    avatar_path: null,
+    note: `Review number ${n}.`,
+    has_spoilers: false,
+    updated_at: '2026-08-16T10:00:00.000Z',
+    score: '8.4',
+    reaction_count: 0,
+    helpful_count: 0,
+    viewer_helpful: false,
+  });
+
+  it('shows the Original page to someone who chose it in Labs', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-identity-copy')).toBeTruthy());
+    expect(view.queryByTestId('immersive-hero')).toBeNull();
+  });
+
+  describe('once opted in', () => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout('immersive');
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+      mockFocused = true;
+    });
+
+    it('asks for light status glyphs over the artwork while it is the screen on top', async () => {
+      mockStatusBars.length = 0;
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      expect(mockStatusBars.at(-1)).toBe('light');
+    });
+
+    it('asks for dark status glyphs from the first frame when there is no artwork', async () => {
+      // The band is Parchment then, and white glyphs on it would be unreadable.
+      tableRows.media_items = [{ ...film, backdrop_path: null, poster_path: null }];
+      mockStatusBars.length = 0;
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      expect(mockStatusBars.at(-1)).toBe('dark');
+    });
+
+    it('gives the full cast sheet a labelled way out', async () => {
+      const six = Array.from({ length: 6 }, (_, n) => ({
+        id: 9100 + n,
+        name: `Player ${n + 1}`,
+        character: null,
+        profile_path: null,
+      }));
+      tableRows.media_cache = [{ ...credits, payload: { ...credits.payload, cast: six } }];
+      const view = await open();
+      await fireEvent.press(
+        await waitFor(() => view.getByRole('button', { name: 'See all 6 cast members' })),
+      );
+      await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
+      await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(view.queryByTestId('cast-sheet')).toBeNull());
+    });
+
+    it('asks for nothing once another screen covers it, so the next screen keeps its own', async () => {
+      mockFocused = false;
+      mockStatusBars.length = 0;
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      expect(mockStatusBars).toEqual([]);
+    });
+
+    /**
+     * **The head of the page, then the page** (founder, title-page sprint, 2026-11-06): the
+     * hero is the sharp artwork and the module and nothing else — no viewport-high floor, no
+     * chevron — and About follows the module directly.
+     */
+    it('is only as tall as its contents, with no chevron, and About right after the module', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      await act(async () => {
+        fireEvent(view.getByTestId('title-scroll'), 'layout', {
+          nativeEvent: { layout: { x: 0, y: 0, width: 360, height: 744 } },
+        });
+      });
+
+      const hero = view.getByTestId('immersive-hero');
+      expect(StyleSheet.flatten(hero.props.style).minHeight).toBeUndefined();
+      expect(view.queryByRole('button', { name: 'More about this title' })).toBeNull();
+      expect(view.queryByTestId('immersive-more')).toBeNull();
+      expect(view.queryByTestId('immersive-extension')).toBeNull();
+      // About is a section after the hero, never inside it.
+      expect(within(hero).queryByTestId('immersive-section-about')).toBeNull();
+      const ids: string[] = [];
+      const walk = (node: unknown): void => {
+        if (Array.isArray(node)) return node.forEach(walk);
+        if (!node || typeof node !== 'object') return;
+        const { props, children } = node as { props?: { testID?: string }; children?: unknown };
+        if (props?.testID) ids.push(props.testID);
+        walk(children);
+      };
+      walk(view.toJSON());
+      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-section-about'));
+    });
+
+    it('opens on the cinematic first screen, with none of the original identity block', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+
+      expect(view.queryByTestId('title-identity-copy')).toBeNull();
+      expect(view.queryByTestId('title-poster-column')).toBeNull();
+      // Everything that names or acts on the title sits in the one floating module.
+      const module = within(view.getByTestId('immersive-module'));
+      expect(module.getByTestId('title-name')).toBeTruthy();
+      expect(module.getByTestId('genre-line')).toBeTruthy();
+      expect(module.getByTestId('title-meta')).toBeTruthy();
+      expect(module.getByTestId('title-actions')).toBeTruthy();
+      expect(module.getByTestId('immersive-scores')).toBeTruthy();
+    });
+
+    it('reads the genres under the title and the year first in the metadata', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('genre-line')).toBeTruthy());
+
+      expect(view.getByTestId('genre-line-text')).toHaveTextContent('Science Fiction · Action');
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^2010 · /);
+      // Not repeated in About: the module is where the genres live now.
+      expect(view.queryByTestId('genre-row')).toBeNull();
+      const order = readingOrder(view.toJSON());
+      expect(order.indexOf('Inception')).toBeLessThan(order.findIndex((t) => t.includes('Science Fiction')));
+    });
+
+    it('states the title, the scores, Rank and the synopsis once each', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-scores')).toBeTruthy());
+
+      expect(view.getAllByTestId('title-name')).toHaveLength(1);
+      expect(view.getAllByTestId('immersive-scores')).toHaveLength(1);
+      expect(view.queryByTestId('scores-section')).toBeNull();
+      expect(view.getAllByTestId('title-action-rank')).toHaveLength(1);
+      expect(view.getAllByText(film.overview)).toHaveLength(1);
+      // The three labels the brief names, inside the one module.
+      // Compact since post-QA sprint 2: the rating count rides in the label.
+      expect(view.getByTestId('immersive-score-you-label')).toHaveTextContent('Your score');
+      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd\.( \(\d+\))?$/);
+      expect(view.getByTestId('immersive-score-following-label')).toHaveTextContent(
+        /^Following( \(\d+\))?$/,
+      );
+    });
+
+    it('says why a score is missing, and never draws an empty circle', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-scores')).toBeTruthy());
+      const scores = within(view.getByTestId('immersive-scores'));
+
+      // A dash in each column; the reason is what each column says, not a wrapped line.
+      expect(scores.getAllByText('—')).toHaveLength(3);
+      expect(view.getByTestId('immersive-score-you').props.accessibilityLabel).toBe(
+        'Your score. Not ranked yet',
+      );
+      await waitFor(() =>
+        expect(view.getByTestId('immersive-score-bingd').props.accessibilityLabel).toMatch(
+          /^bingd score\. Not enough ratings yet(\. \d+ ratings?)?$/,
+        ),
+      );
+      expect(view.getByTestId('immersive-score-following').props.accessibilityLabel).toMatch(
+        /^People you follow\. No ratings yet from people you follow(\. \d+ ratings?)?$/,
+      );
+      expect(scores.queryByText('Not ranked yet')).toBeNull();
+      expect(scores.queryAllByLabelText(/out of 10/)).toHaveLength(0);
+    });
+
+    /**
+     * **One column of sections and no tabs** (founder, title-page sprint, 2026-11-06): About,
+     * Where to Watch, Cast, Reviews, Trailers, Details and Similar, each once, in that order.
+     */
+    it('lays the page out in the brief’s order, with no tabs', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+      await waitFor(() => expect(view.getByTestId('immersive-section-trailers')).toBeTruthy());
+
+      for (const key of ['about', 'cast', 'reviews', 'trailers', 'details', 'similar']) {
+        expect(view.getAllByTestId(`immersive-section-${key}`)).toHaveLength(1);
+      }
+      expect(view.queryByTestId('immersive-tabs')).toBeNull();
+      expect(view.queryAllByRole('tab')).toHaveLength(0);
+
+      const order = readingOrder(view.toJSON());
+      const at = (word: string) => order.indexOf(word);
+      // Section headings print in capitals; the spoken name keeps the title's case.
+      // Final title refinement (2026-11-06): Trailers before Reviews, Similar before the
+      // details, which are a closed disclosure at the foot.
+      const headings = ['ABOUT', 'CAST', 'TRAILERS', 'REVIEWS', 'SIMILAR', 'MORE DETAILS'];
+      for (const heading of headings) expect(at(heading)).toBeGreaterThan(-1);
+      for (let i = 1; i < headings.length; i++) {
+        expect(at(headings[i - 1]!)).toBeLessThan(at(headings[i]!));
+      }
+      // The cast is on the page, not behind a tab.
+      expect(view.getByText('Leonardo DiCaprio')).toBeTruthy();
+    });
+
+    it('says who directed a film in the module, once, and leaves it and the genres out of Details', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const director = await waitFor(() => view.getByTestId('title-director'));
+      await fireEvent.press(view.getByRole('button', { name: 'More details' }));
+
+      expect(director).toHaveTextContent('Directed by Christopher Nolan');
+      expect(within(view.getByTestId('immersive-module')).getByTestId('title-director')).toBeTruthy();
+      // Under the metadata, and the genres above both.
+      const order = readingOrder(view.toJSON());
+      const at = (text: string) => order.findIndex((t) => t.includes(text));
+      expect(at('Science Fiction')).toBeLessThan(at('2010 · '));
+      expect(at('2010 · ')).toBeLessThan(at('Directed by'));
+      // Details states what the module does not.
+      const details = within(view.getByTestId('immersive-section-details'));
+      // Labels print in capitals, so these match either case.
+      expect(details.queryByText('Christopher Nolan')).toBeNull();
+      expect(details.queryByText(/^director$/i)).toBeNull();
+      expect(details.queryByText(/^genres$/i)).toBeNull();
+      expect(details.getByText(/^released$/i)).toBeTruthy();
+      expect(details.getByText(/^original language$/i)).toBeTruthy();
+      expect(view.getAllByText(/Christopher Nolan/)).toHaveLength(1);
+    });
+
+    it('draws no director line when there is no Director credit', async () => {
+      tableRows.media_cache = [
+        {
+          ...credits,
+          payload: {
+            ...credits.payload,
+            crew: [{ id: 1, name: 'An Assistant', job: 'First Assistant Director', department: 'Directing' }],
+          },
+        },
+      ];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+      expect(view.queryByTestId('title-director')).toBeNull();
+      expect(view.queryByText(/Directed by/)).toBeNull();
+    });
+
+    /**
+     * **Trailers ask before they load anything from YouTube** (title-page sprint,
+     * 2026-11-06): a thumbnail is a request to `i.ytimg.com`. The Trailers tab only made
+     * them once opened; the always-visible section makes them only after Show previews.
+     */
+    it('draws trailer cards without YouTube thumbnails until previews are asked for', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+      const ytimg = () => {
+        const found: string[] = [];
+        const walk = (node: unknown): void => {
+          if (Array.isArray(node)) return node.forEach(walk);
+          if (!node || typeof node !== 'object') return;
+          const { props, children } = node as { props?: { source?: unknown }; children?: unknown };
+          const source = props?.source as { uri?: string } | { uri?: string }[] | undefined;
+          for (const item of Array.isArray(source) ? source : [source]) {
+            if (item?.uri?.includes('ytimg')) found.push(item.uri);
+          }
+          walk(children);
+        };
+        walk(view.toJSON());
+        return found;
+      };
+
+      expect(within(section).getAllByRole('link').length).toBeGreaterThan(0);
+      expect(ytimg()).toEqual([]);
+
+      await fireEvent.press(
+        view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+      );
+      await waitFor(() => expect(ytimg().length).toBeGreaterThan(0));
+      expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
+    });
+
+    /**
+     * **At a large text size** (independent review 1): a section's action drops under its
+     * heading rather than running off a 320pt screen — Show previews is the reader's one way
+     * to ask for thumbnails — and the module's title grows only to the display ceiling.
+     */
+    it('lets a section action wrap under its heading, and caps the title at 1.3×', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+
+      const heading = within(section).getByLabelText('Trailers');
+      expect(StyleSheet.flatten(heading.props.style)).toMatchObject({ flexWrap: 'wrap' });
+      expect(view.getByTestId('title-name').props.maxFontSizeMultiplier).toBe(1.3);
+      expect(view.getByTestId('title-director').props.numberOfLines).toBe(2);
+    });
+
+    it('opens a trailer on YouTube from its card, before or without previews', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+      const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+      await fireEvent.press(within(section).getAllByRole('link')[0]!);
+      expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//));
+      openURL.mockRestore();
+    });
+
+    /**
+     * **A video tile, not an empty box** (final title refinement, 2026-11-06): before
+     * previews, while one loads and when YouTube has no still, each card is the same Ink
+     * frame with its kind and a play button — never a blank rectangle.
+     */
+    describe('trailer tiles', () => {
+      const twoVideos = {
+        ...videos,
+        payload: {
+          results: [
+            ...videos.payload.results,
+            { id: 'v2', key: 'abcdefghijk', name: 'Teaser', type: 'Teaser', site: 'YouTube', official: true },
+          ],
+        },
+      };
+      const tiles = (section: ReturnType<typeof within>) => section.getAllByTestId('trailer-thumb');
+
+      it('draws the stills with the page outside production, with no Show previews', async () => {
+        mockPreviewsByDefault = true;
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(2);
+        expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
+        // The frame, kind and link are unchanged under the still.
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
+
+      it('draws each trailer as a video frame with its kind, before any preview', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+
+        expect(tiles(section)).toHaveLength(2);
+        for (const tile of tiles(section)) {
+          expect(StyleSheet.flatten(tile.props.style).backgroundColor).toBe(brand.ink);
+        }
+        expect(within(tiles(section)[0]!).getByText('Trailer')).toBeTruthy();
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.queryAllByTestId('trailer-still')).toHaveLength(0);
+        // Where it plays, under the name, once.
+        expect(section.getAllByText('YouTube')).toHaveLength(2);
+      });
+
+      it('keeps the frame for a trailer whose still YouTube cannot serve', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        await fireEvent.press(
+          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+        );
+        const stills = await waitFor(() => {
+          const found = section.getAllByTestId('trailer-still');
+          expect(found).toHaveLength(2);
+          return found;
+        });
+        // The image mock hands its source on as a list.
+        expect([stills[0]!.props.source].flat()[0]).toMatchObject({
+          uri: 'https://i.ytimg.com/vi/YoHD9XEInc0/hqdefault.jpg',
+        });
+
+        await act(async () => stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }));
+
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
+        // The failed card is still the frame, its kind and its link.
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
+
+      /**
+       * **YouTube's placeholder is not a still** (marquee cohesion sprint, measured against
+       * the real host): a removed video answers 404 with a grey 120×90 image, which a client
+       * that decodes it would draw as a grey logo. A real still is 480 wide.
+       */
+      it('keeps the frame when YouTube answers with its small placeholder image', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        await fireEvent.press(
+          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+        );
+        const stills = await waitFor(() => {
+          const found = section.getAllByTestId('trailer-still');
+          expect(found).toHaveLength(2);
+          return found;
+        });
+
+        // Decoded at YouTube's size, so the width is the image's and not the card's.
+        expect(stills[0]!.props.allowDownscaling).toBe(false);
+        await act(async () =>
+          stills[0]!.props.onLoad?.({ nativeEvent: { source: { width: 480, height: 360, url: 'real' } } }),
+        );
+        await act(async () =>
+          stills[1]!.props.onLoad?.({ nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } } }),
+        );
+
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
+    });
+
+    /**
+     * **More details, closed** (final title refinement, 2026-11-06): the facts the module
+     * does not state, behind one disclosure at the foot of the page, after Similar.
+     */
+    it('keeps the details behind a closed More details until asked for', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const toggle = await waitFor(() => view.getByRole('button', { name: 'More details' }));
+
+      expect(toggle.props.accessibilityState).toMatchObject({ expanded: false });
+      expect(view.queryByTestId('more-details')).toBeNull();
+
+      await fireEvent.press(toggle);
+
+      expect(view.getByRole('button', { name: 'More details' }).props.accessibilityState).toMatchObject({
+        expanded: true,
+      });
+      const facts = within(view.getByTestId('more-details'));
+      expect(facts.getByLabelText(/^Released: /)).toBeTruthy();
+      expect(facts.getByLabelText(/^Original language: /)).toBeTruthy();
+      // A film's runtime is already on the module's metadata line.
+      expect(facts.queryByLabelText(/^Runtime: /)).toBeNull();
+
+      await fireEvent.press(view.getByRole('button', { name: 'More details' }));
+      expect(view.queryByTestId('more-details')).toBeNull();
+    });
+
+    /**
+     * **Efficient vertically** (final title refinement, 2026-11-06): a section heading is its
+     * own line rather than a 44pt row. The synopsis starts 4pt under ABOUT, because two
+     * lines of text add their own leading; everything else 8pt, less a rail's own padding.
+     */
+    it('sets each section heading on its own line, the body just under it', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const about = await waitFor(() => view.getByTestId('immersive-section-about'));
+      const body = (key: string) =>
+        StyleSheet.flatten(view.getByTestId(`immersive-body-${key}`).props.style);
+
+      expect(StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight).toBe(0);
+      expect(body('about')).toMatchObject({ paddingTop: 4 });
+      expect(body('similar')).toMatchObject({ paddingTop: 8 });
+      // A rail's space is outside its scroll view, where See all's slop can use it without
+      // a coasting rail taking the press (independent review 2).
+      await waitFor(() => expect(view.getByTestId('immersive-body-cast')).toBeTruthy());
+      expect(body('cast')).toMatchObject({ paddingTop: 8 });
+      const strip = view.getByTestId('cast-strip');
+      expect(StyleSheet.flatten(strip.props.contentContainerStyle)).toMatchObject({
+        paddingVertical: 0,
+      });
+    });
+
+    /**
+     * **Where to Watch keeps to its own space** (independent review 1): its seam (28pt since the
+     * marquee cohesion sprint, the same as every section's) is its
+     * own row's top padding. It was a negative margin, which laid the row's Pressable over
+     * the synopsis above it and its More control.
+     */
+    it('spaces Where to Watch inside its own row, never over the synopsis', async () => {
+      mockFetchWatchProviders.mockResolvedValue({
+        region: 'US',
+        link: null,
+        providers: [{ provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] }],
+      });
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const row = await waitFor(() => view.getByTestId('where-to-watch'));
+
+      expect(StyleSheet.flatten(row.props.style)).toMatchObject({ paddingTop: 28 });
+      // Every section sits 28pt below the one before it.
+      expect(
+        StyleSheet.flatten(view.getByTestId('immersive-section-cast').props.style).paddingTop,
+      ).toBe(28);
+      // Nothing between the row and the page pulls it upward.
+      let node = row.parent;
+      while (node && node.props?.testID !== 'immersive-section-cast') {
+        const style = StyleSheet.flatten(node.props?.style) ?? {};
+        expect(Number(style.marginTop ?? 0)).toBeGreaterThanOrEqual(0);
+        node = node.parent;
+        if (node?.props?.testID === 'immersive-hero') break;
+      }
+    });
+
+    it('ranks an unranked title from Rank, through the log sheet', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+
+      await fireEvent.press(view.getByTestId('title-action-rank'));
+
+      await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+    });
+
+    /**
+     * **Rank and Edit ranking are never cut** (UI cohesion pass, 2026-11-06): in the card the
+     * control may take the row's full width and the icons wrap, at any text size; the
+     * original page's narrow column keeps its ceiling.
+     */
+    it('lets Edit ranking take the card’s width rather than truncating', async () => {
+      ranked();
+      const view = await open();
+      const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+      const style = StyleSheet.flatten(
+        typeof control.props.style === 'function'
+          ? control.props.style({ pressed: false })
+          : control.props.style,
+      );
+      expect(style.maxWidth).toBe('100%');
+      expect(style.flexShrink).toBe(0);
+    });
+
+    it('keeps a smaller Edit ranking on a ranked title, and no second Rank', async () => {
+      ranked();
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+      expect(within(view.getByTestId('title-action-ranked')).getByText('Edit ranking')).toBeTruthy();
+      expect(view.queryByTestId('title-action-rank')).toBeNull();
+      // The reader's own score is the prominent one, stated once.
+      await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
+
+      await fireEvent.press(view.getByTestId('title-action-ranked'));
+      await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+    });
+
+    it('saves to the watchlist from the bookmark', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('title-action-save')).toBeTruthy());
+
+      await fireEvent.press(view.getByTestId('title-action-save'));
+
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.objectContaining({ p_present: true })),
+      );
+    });
+
+    it('opens Add to list and Recommend from the same cluster', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+
+      await fireEvent.press(view.getByTestId('title-action-list'));
+      await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
+    });
+
+    it('opens the recommendation sheet from Share', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy());
+
+      await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+      await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
+    });
+
+    /**
+     * **Reviews after Cast, every review in a sheet** (post-QA sprint 2, 2026-11-05).
+     *
+     * The page shows one or two — yours first — and See all opens the full list in a
+     * sheet, where the order, Helpful, spoilers and reporting live. The Reviews tab and
+     * the "From your circle" line are gone; Following is a filter inside the sheet.
+     */
+    describe('reviews after Cast', () => {
+      const withNote = (visibility: 'public' | 'private', note = 'My own words on it.') => {
+        ranked();
+        tableRows.user_media = [
+          {
+            user_id: 'user-1',
+            media_item_id: 'film-1',
+            bucket: 'loved',
+            watched_on: '2026-08-12',
+            note,
+            note_visibility: visibility,
+            note_has_spoilers: false,
+            note_updated_at: '2026-10-02T10:00:00.000Z',
+          },
+        ];
+      };
+      const sheetOf = async (view: Awaited<ReturnType<typeof open>>) => {
+        await fireEvent.press(
+          await waitFor(() => view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ })),
+        );
+        return within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
+      };
+      const sortTab = (sheet: ReturnType<typeof within>, name: string | RegExp) =>
+        sheet.getByRole('tab', { name });
+      const reviewsCalledWith = (sort: string) =>
+        mockRpc.mock.calls.some(
+          ([name, args]) =>
+            name === 'title_reviews_v2' && (args as { p_sort?: string }).p_sort === sort,
+        );
+
+      it('previews the two most helpful under the Cast, three lines each', async () => {
+        tableRows.media_cache = [credits];
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
+        await waitFor(() => expect(preview.getByText('Review number 1.')).toBeTruthy());
+
+        expect(preview.getByText('Review number 2.')).toBeTruthy();
+        expect(preview.queryByText('Review number 3.')).toBeNull();
+        expect(preview.getAllByTestId('review-preview')).toHaveLength(2);
+        // Read as the Most Helpful list, at the server's ceiling.
+        expect(mockRpc).toHaveBeenCalledWith(
+          'title_reviews_v2',
+          expect.objectContaining({ p_sort: 'top_desc', p_limit: 100 }),
+        );
+        // Reviews sits after the Cast, and before Similar and the details.
+        const order = readingOrder(view.toJSON());
+        expect(order.indexOf('CAST')).toBeLessThan(order.indexOf('REVIEWS'));
+        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('SIMILAR'));
+        expect(order.indexOf('SIMILAR')).toBeLessThan(order.indexOf('MORE DETAILS'));
+        expect(view.getByRole('button', { name: 'See all 3 reviews' })).toBeTruthy();
+      });
+
+      it('leads with your published review and its Edit, then one other', async () => {
+        withNote('public');
+        mockRpcResults.title_reviews_v2 = [
+          reviewBy(1),
+          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          reviewBy(2),
+        ];
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
+        const mine = await waitFor(() => preview.getByTestId('your-review'));
+
+        expect(within(mine).getByText(/Your review/)).toBeTruthy();
+        expect(preview.getAllByText('My own words on it.')).toHaveLength(1);
+        expect(preview.getAllByTestId('review-preview')).toHaveLength(1);
+        expect(preview.getByText('Review number 1.')).toBeTruthy();
+        expect(preview.queryByText('Review number 2.')).toBeNull();
+        const order = readingOrder(view.toJSON());
+        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        // No score circle on your own review.
+        expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
+
+        await fireEvent.press(within(mine).getByTestId('edit-review'));
+        await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      });
+
+      it('never shows a private note as a review, anywhere', async () => {
+        withNote('private', 'Only for me.');
+        mockRpcResults.title_reviews_v2 = [reviewBy(1)];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        await waitFor(() => expect(view.getByText('Review number 1.')).toBeTruthy());
+
+        expect(view.queryByTestId('your-review')).toBeNull();
+        expect(view.queryByText('Only for me.')).toBeNull();
+        const sheet = await sheetOf(view);
+        expect(sheet.queryByText('Only for me.')).toBeNull();
+        expect(sheet.queryByTestId('your-review')).toBeNull();
+      });
+
+      it('masks a spoiler review in the preview for a reader who has not seen it', async () => {
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(7), note: 'The top keeps spinning.', has_spoilers: true },
+        ];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        const row = await waitFor(() => view.getByTestId('review-preview'));
+        expect(within(row).queryByText(/The top keeps spinning/)).toBeNull();
+        expect(row.props.accessibilityLabel).toMatch(/Contains spoilers$/);
+        expect(row.props.accessibilityLabel).not.toMatch(/spinning/);
+      });
+
+      it('says No reviews yet, with a compact Write a review for a ranked reader', async () => {
+        ranked();
+        mockRpcResults.title_reviews_v2 = [];
+        mockRpcResults.title_review_count = 0;
+        const view = await open();
+        const empty = await waitFor(() => view.getByTestId('reviews-preview-empty'));
+        expect(within(empty).getByText('No reviews yet')).toBeTruthy();
+        expect(within(empty).getByRole('button', { name: 'Write a review' })).toBeTruthy();
+        // Nothing to see all of.
+        expect(view.queryByRole('button', { name: /^See all/ })).toBeNull();
+
+        await fireEvent.press(within(empty).getByRole('button', { name: 'Write a review' }));
+        await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      });
+
+      it('asks an unranked reader to rank first', async () => {
+        mockRpcResults.title_reviews_v2 = [];
+        mockRpcResults.title_review_count = 0;
+        const view = await open();
+        await waitFor(() =>
+          expect(view.getByRole('button', { name: 'Rank to leave a review' })).toBeTruthy(),
+        );
+        expect(view.queryByTestId('your-review')).toBeNull();
+      });
+
+      it('draws no "From your circle" line any more', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(7)];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('reviews-preview')).toBeTruthy());
+        expect(view.queryByTestId('immersive-circle')).toBeNull();
+        expect(reviewsCalledWith('following')).toBe(false);
+      });
+
+      it('lists every review in the sheet, once, Most Helpful first, and closes on Done', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        for (const n of [1, 2, 3]) {
+          expect(sheet.getAllByText(`Review number ${n}.`)).toHaveLength(1);
+        }
+        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        // Helpful is the review's one reaction: a thumbs-up, and no heart beside it.
+        expect(sheet.getByLabelText(/^Mark Reader 1's review helpful/)).toBeTruthy();
+        expect(sheet.getByLabelText("Report Reader 1's review")).toBeTruthy();
+
+        await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
+      });
+
+      it('marks a review helpful from the sheet, on the real vote', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
+        mockRpcResults.set_review_helpful = { helpful_count: 1, viewer_helpful: true };
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 2's review helpful/));
+        await waitFor(() =>
+          expect(mockRpc).toHaveBeenCalledWith(
+            'set_review_helpful',
+            expect.objectContaining({ p_review_id: 'um-2', p_helpful: true }),
+          ),
+        );
+      });
+
+      it('orders by Newest on the server, and Oldest on a second tap', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Newest'));
+        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), { timeout: 4000 });
+        await fireEvent.press(sortTab(sheet, 'Newest first'));
+        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), { timeout: 4000 });
+        expect(sortTab(sheet, 'Oldest first')).toBeSelected();
+      });
+
+      it('orders by Rating over the complete list, highest first, then lowest', async () => {
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(1), score: '6.1' },
+          { ...reviewBy(2), score: '9.4' },
+          { ...reviewBy(3), score: null },
+          { ...reviewBy(4), score: '7.7' },
+        ];
+        mockRpcResults.title_review_count = 4;
+        const view = await open();
+        const sheet = await sheetOf(view);
+        const calls = mockRpc.mock.calls.length;
+
+        await fireEvent.press(sortTab(sheet, 'Rating'));
+        // An instance tree names each string at its composite and its host; once each.
+        const shown = () => [
+          ...new Set(
+            readingOrder(view.getByTestId('reviews-sheet-list')).filter((t) =>
+              /^Review number \d\.$/.test(t),
+            ),
+          ),
+        ];
+        await waitFor(() =>
+          expect(shown()).toEqual([
+            'Review number 2.',
+            'Review number 4.',
+            'Review number 1.',
+            'Review number 3.',
+          ]),
+        );
+        // Re-ordered from the list already read: no new order was asked of the server.
+        expect(
+          mockRpc.mock.calls
+            .slice(calls)
+            .filter(([name]) => name === 'title_reviews_v2')
+            .every(([, args]) => (args as { p_sort: string }).p_sort === 'top_desc'),
+        ).toBe(true);
+
+        await fireEvent.press(sortTab(sheet, 'Highest rated first'));
+        // Lowest first; a review with no score stays last either way.
+        await waitFor(() =>
+          expect(shown()).toEqual([
+            'Review number 1.',
+            'Review number 4.',
+            'Review number 2.',
+            'Review number 3.',
+          ]),
+        );
+      });
+
+      it('never offers Rating over a list the server may have cut short', async () => {
+        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) => reviewBy(n + 1));
+        mockRpcResults.title_review_count = 140;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        expect(sheet.queryByRole('tab', { name: 'Rating' })).toBeNull();
+        expect(sheet.getByTestId('reviews-truncated')).toHaveTextContent(
+          'Showing the first 100 reviews in this order.',
+        );
+      });
+
+      it('falls back to Most Helpful, label and rows alike, when Rating stops being honest', async () => {
+        // Independent review, post-QA sprint 2: Rating chosen over 99 reviews, then a
+        // refetch (after a vote) returns the 100-row ceiling. The sheet must not keep a
+        // Rating label over a Helpful list.
+        let full = false;
+        const ninetyNine = Array.from({ length: 99 }, (_, n) => ({
+          ...reviewBy(n + 1),
+          score: String((n % 9) + 1),
+        }));
+        mockRpcResults.title_reviews_v2 = () =>
+          full ? [...ninetyNine, { ...reviewBy(100), score: '9.9' }] : ninetyNine;
+        mockRpcResults.title_review_count = 99;
+        mockRpcResults.set_review_helpful = { helpful_count: 1, viewer_helpful: true };
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Rating'));
+        await waitFor(() => expect(sortTab(sheet, 'Highest rated first')).toBeSelected());
+
+        full = true;
+        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
+        await waitFor(() => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(), {
+          timeout: 4000,
+        });
+        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        expect(sheet.getByTestId('reviews-truncated')).toBeTruthy();
+      });
+
+      it('keeps Following as a filter inside the sheet', async () => {
+        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
+          args.p_sort === 'following' ? [reviewBy(7)] : [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Only people you follow'));
+        await waitFor(() => expect(sheet.getByText('Review number 7.')).toBeTruthy());
+        expect(sheet.queryByText('Review number 1.')).toBeNull();
+      });
+
+      it('pins your own review at the top of the sheet, with Edit', async () => {
+        withNote('public');
+        mockRpcResults.title_reviews_v2 = [
+          reviewBy(1),
+          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+        ];
+        mockRpcResults.title_review_count = 2;
+        const view = await open();
+        const sheet = await sheetOf(view);
+        const mine = sheet.getByTestId('your-review');
+        expect(sheet.getAllByText('My own words on it.')).toHaveLength(1);
+        const order = readingOrder(view.getByTestId('reviews-sheet-list'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+
+        // Edit from inside the sheet: the sheet goes, then the one composer opens.
+        await fireEvent.press(within(mine).getByTestId('edit-review'));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
+      });
+    });
+
+    it('shows a compact cast preview and the whole cast from See all', async () => {
+      const six = Array.from({ length: 6 }, (_, n) => ({
+        id: 9000 + n,
+        name: `Actor ${n + 1}`,
+        character: `Role ${n + 1}`,
+        profile_path: null,
+      }));
+      tableRows.media_cache = [{ ...credits, payload: { ...credits.payload, cast: six } }];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+
+      await fireEvent.press(view.getByRole('button', { name: 'See all 6 cast members' }));
+      await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
+      expect(within(view.getByTestId('cast-sheet-list')).getByText('Actor 6')).toBeTruthy();
+    });
   });
 });

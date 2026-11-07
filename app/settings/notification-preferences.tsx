@@ -202,6 +202,12 @@ function Row({
               : `Turn on to let these reach your inbox`
         }
         trackColor={{ true: theme.semantic.action, false: theme.border.strong }}
+        // The thumb, set for both states. Left unset, Android paints the ON thumb in the
+        // AppCompat theme's default accent (Material teal, #009688), which is not a bingd.
+        // colour. ON: a Parchment thumb on the Maroon track. OFF: the neutral grey of
+        // tertiary text on the grey track, so the two states differ in colour as well as
+        // in which side the thumb sits.
+        thumbColor={value ? theme.semantic.actionText : theme.text.tertiary}
       />
     </View>
   );

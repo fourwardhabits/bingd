@@ -119,14 +119,37 @@ export const projectedScore = (bucket: Bucket, position: number, sizes: BandSize
   return high - (rank - 1) * step;
 };
 
-/** The score as it is shown: {@link projectedScore} to one decimal. */
-export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): number =>
-  round1(projectedScore(bucket, position, sizes));
+/**
+ * The score as it is shown: {@link projectedScore} to one decimal, **rounded exactly as
+ * `score_for` rounds it** (QA corrections, 2026-11-06).
+ *
+ * `score_for` works in Postgres `numeric`, which is exact, and `round(x, 1)` takes a
+ * half up. Interpolating in floating point and then rounding is not the same thing: a
+ * score that is exactly 0.85 — I didn't like it, rank 40 of 53 — is 0.8499999… in a
+ * double, and printed 0.8 here while the server, the feed and every placement said 0.9.
+ * The real `score_for` disagrees with the floating version at six positions in bands of
+ * up to 150, all of them that 0.85.
+ *
+ * So the same formula is evaluated in tenths, as a fraction of two integers, and that
+ * fraction is rounded half up: exact for every band size a person can have. Nothing about
+ * what a score means changes; this only stops the client's copy of the formula disagreeing
+ * with the server's at a midpoint.
+ */
+export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): number => {
+  const { high, low } = BAND_RANGE[bucket];
+  const size = sizes[bucket];
+  const rank = rankInBand(bucket, position, sizes);
 
-/** One decimal, and never `-0`. */
-const round1 = (value: number) => {
-  const rounded = Math.round(value * 10) / 10;
-  return rounded === 0 ? 0 : rounded;
+  if (size <= 1 || rank <= 1) return high;
+  if (rank >= size) return low;
+
+  // score × 10 = (high₁₀ × (size − 1) − (rank − 1) × span₁₀) / (size − 1), all integers.
+  const high10 = Math.round(high * 10);
+  const span10 = Math.round((high - low) * 10);
+  const den = size - 1;
+  const num = high10 * den - (rank - 1) * span10;
+  // Half up; the numerator is positive inside a band, so this is also half away from zero.
+  return Math.floor((2 * num + den) / (2 * den)) / 10;
 };
 
 /**

@@ -4,10 +4,15 @@ import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 /**
- * The four metrics, in the order the chips draw them.
+ * The four metrics, in the order the categories draw them.
  *
- * **Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28.
- * Titles is the union of the two beside it, so the row reads as a total followed by its
+ * **All | Movies | TV | Reviews on screen, the full names spoken** (founder, nav cohesion
+ * sprint, 2026-11-06): four equal segments across a 320pt phone leave no room for
+ * "All Titles" and "TV Shows", so `short` is what the control draws and `label` is
+ * what a screen reader hears. Neither is sent anywhere; `value` is.
+ *
+ * **All Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28,
+ * named All Titles in the final polish (2026-11-04). It is the union of the two beside it, so the row reads as a total followed by its
  * two halves and then a different question — rather than the total, a different question,
  * and then the halves, which is what the first pass had.
  *
@@ -17,10 +22,10 @@ import { supabase } from '@/lib/supabase';
  * here is a visible failure rather than a board about the wrong question.
  */
 export const LEADERBOARD_METRICS = [
-  { value: 'titles', label: 'Titles' },
-  { value: 'movies', label: 'Movies' },
-  { value: 'tv', label: 'TV' },
-  { value: 'reviews', label: 'Reviews' },
+  { value: 'titles', label: 'All Titles', short: 'All' },
+  { value: 'movies', label: 'Movies', short: 'Movies' },
+  { value: 'tv', label: 'TV Shows', short: 'TV' },
+  { value: 'reviews', label: 'Reviews', short: 'Reviews' },
 ] as const;
 
 export type LeaderboardMetric = (typeof LEADERBOARD_METRICS)[number]['value'];
@@ -173,7 +178,7 @@ export function useLeaderboard(
       });
       if (error) throw error;
 
-      return ((data ?? []) as {
+      return orderBoard(((data ?? []) as {
         user_id: string;
         username: string;
         display_name: string | null;
@@ -205,9 +210,32 @@ export function useLeaderboard(
         // was readable and is a lie now: a minimal private row has no shared count, and
         // "0 shared" is a claim about a collection this reader has never seen.
         sharedCount: row.shared_count,
-      }));
+      })));
     },
   });
+}
+
+/**
+ * **The board in a fixed order: rank, then handle, then id** (marquee cohesion sprint,
+ * 2026-11-07).
+ *
+ * The ranks are the server's and are not touched: `leaderboard` computes them with SQL's
+ * `rank()`, which is competition ranking — equal counts share a rank and the next rank
+ * skips (1, 2, 2, 4) — over the whole board. Its page is ordered by count, then handle,
+ * then id, but the final select carries no `ORDER BY` of its own after the lateral join,
+ * so the order the rows arrive in is not promised. This restates the server's own order on
+ * the client, so tied people never swap places between refreshes. It ranks nobody and
+ * breaks no tie: two people on 12 are both second, in alphabetical order of handle.
+ */
+export function orderBoard<T extends { rank: number; username: string; id: string }>(
+  rows: readonly T[],
+): T[] {
+  return [...rows].sort(
+    (a, b) =>
+      a.rank - b.rank ||
+      (a.username < b.username ? -1 : a.username > b.username ? 1 : 0) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
 }
 
 /**

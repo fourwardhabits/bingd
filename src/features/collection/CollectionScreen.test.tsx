@@ -1,6 +1,8 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { fontFamily, theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -182,23 +184,54 @@ beforeEach(() => {
   for (const key of Object.keys(mockReads)) delete mockReads[key];
 });
 
+type View = Awaited<ReturnType<typeof renderWithProviders>>;
+
+/**
+ * **The page's marquee** (founder, marquee cohesion sprint, 2026-11-07): Watched, Watchlist,
+ * and Unranked while this side has an unranked title, as the toolbar's dropdown.
+ */
+const SEGMENTS = ['Watched', 'Watchlist', 'Unranked'] as const;
+const menu = (view: View) => view.getByTestId('collection-mode');
+
 const open = async () => {
   const view = await renderWithProviders(<CollectionScreen />);
-  await waitFor(() => expect(view.getByRole('tab', { name: 'Watched' })).toBeTruthy());
+  await waitFor(() => expect(menu(view)).toBeTruthy());
   return view;
 };
 
-const tab = (view: Awaited<ReturnType<typeof open>>, name: string) =>
-  view.queryByRole('tab', { name });
+/** Which section the marquee says is showing. */
+const shown = (view: View) =>
+  SEGMENTS.find((name) => view.queryByTestId('collection-mode-label')?.props.children === name);
 
-/** The category control is a dropdown: open it, then choose. */
-const switchTo = async (
-  view: Awaited<ReturnType<typeof open>>,
-  medium: 'Movies' | 'TV',
-) => {
-  await fireEvent.press(view.getByLabelText(/^Showing /));
-  await fireEvent.press(view.getByRole('button', { name: medium }));
+/**
+ * The sections on offer, in order: the open menu's items, read and then closed again by
+ * choosing the one already showing (which changes nothing).
+ */
+const offered = async (view: View) => {
+  await fireEvent.press(menu(view));
+  const items = await view.findAllByRole('menuitem');
+  const names = items.map((item) => item.props.accessibilityLabel as string);
+  const current = items.find((item) => item.props.accessibilityState?.selected);
+  if (current) await fireEvent.press(current);
+  return SEGMENTS.filter((name) => names.includes(name));
 };
+
+/** Choose a section from the marquee's menu. */
+const choose = async (view: View, name: (typeof SEGMENTS)[number]) => {
+  await fireEvent.press(menu(view));
+  await fireEvent.press(await view.findByRole('menuitem', { name }));
+};
+
+/** The medium is the Movies | TV switch beside the dropdown. */
+const switchTo = async (view: View, medium: 'Movies' | 'TV') => {
+  await fireEvent.press(view.getByRole('radio', { name: medium }));
+};
+
+/** Which side the switch is on. */
+const side = (view: View) =>
+  (['Movies', 'TV'] as const).find(
+    (name) => view.getByRole('radio', { name }).props.accessibilityState?.selected,
+  );
 
 describe('the Unranked tab', () => {
   it('does not appear on Movies because a TV season is unranked', async () => {
@@ -206,9 +239,9 @@ describe('the Unranked tab', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
-    expect(tab(view, 'Watched')).toBeTruthy();
-    expect(tab(view, 'Watchlist')).toBeTruthy();
+    await waitFor(async () => expect(await offered(view)).not.toContain('Unranked'));
+    expect(await offered(view)).toContain('Watched');
+    expect(await offered(view)).toContain('Watchlist');
   });
 
   it('does appear on TV when that season is the unranked one', async () => {
@@ -216,7 +249,7 @@ describe('the Unranked tab', () => {
     const view = await open();
     await switchTo(view, 'TV');
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
   });
 
   it('does not appear on TV because a movie is unranked', async () => {
@@ -225,23 +258,23 @@ describe('the Unranked tab', () => {
     const view = await open();
     await switchTo(view, 'TV');
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
+    await waitFor(async () => expect(await offered(view)).not.toContain('Unranked'));
   });
 
   it('appears on Movies when the unranked title is a film', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
   });
 
   it('appears on both sides when both have something unranked', async () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
     await switchTo(view, 'TV');
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
   });
 
   it('appears on neither when everything is ranked', async () => {
@@ -251,30 +284,29 @@ describe('the Unranked tab', () => {
     mockTables.rankings = [ranked('m1', 'movies'), ranked('s1', 'tv_seasons')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Watched')).toBeTruthy());
-    expect(tab(view, 'Unranked')).toBeNull();
+    await waitFor(async () => expect(await offered(view)).toContain('Watched'));
+    expect(await offered(view)).not.toContain('Unranked');
     await switchTo(view, 'TV');
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
+    await waitFor(async () => expect(await offered(view)).not.toContain('Unranked'));
   });
 });
 
 describe('switching category while standing on Unranked', () => {
-  const selected = (view: Awaited<ReturnType<typeof open>>, name: string) =>
-    Boolean(view.getByRole('tab', { name }).props.accessibilityState?.selected);
+  const selected = (view: View, name: string) => shown(view) === name;
 
   it('falls back to Watched rather than leaving a tab that is not there', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
-    await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
+    await choose(view, 'Unranked');
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
     await switchTo(view, 'TV');
 
     // The tab is gone and the reader is on Watched, in the same render — not on a
     // hidden segment showing an empty list.
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
+    await waitFor(async () => expect(await offered(view)).not.toContain('Unranked'));
     expect(selected(view, 'Watched')).toBe(true);
   });
 
@@ -284,7 +316,7 @@ describe('switching category while standing on Unranked', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
+    await choose(view, 'Unranked');
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
     await switchTo(view, 'TV');
@@ -292,7 +324,7 @@ describe('switching category while standing on Unranked', () => {
 
     await switchTo(view, 'Movies');
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
     expect(selected(view, 'Watched')).toBe(true);
   });
 
@@ -301,7 +333,7 @@ describe('switching category while standing on Unranked', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
+    await choose(view, 'Unranked');
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
     await switchTo(view, 'TV');
@@ -319,14 +351,13 @@ describe('switching category while standing on Unranked', () => {
  * is remembered locally, per account.
  */
 describe('the remembered category', () => {
-  const showing = (view: Awaited<ReturnType<typeof open>>) =>
-    view.getByLabelText(/^Showing /).props.accessibilityLabel;
+  const showing = side;
 
   it('opens on Movies when this account has never chosen', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Movies');
   });
 
   it('reopens on TV when that is where the reader last was', async () => {
@@ -334,7 +365,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
   });
 
   it('records the switch, so the next launch starts there', async () => {
@@ -365,14 +396,12 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() =>
-      expect(tab(view, 'Unranked')?.props.accessibilityState.selected).toBe(true),
-    );
-    expect(showing(view)).toBe('Showing Movies');
+    await waitFor(() => expect(shown(view)).toBe('Unranked'));
+    expect(showing(view)).toBe('Movies');
     // Consumed, so choosing Watched afterwards is not undone by a param still in the URL.
     expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
     // And still Movies once the remembered TV side has certainly been read.
-    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
+    await waitFor(() => expect(showing(view)).toBe('Movies'));
   });
 
   it('opens on the side a navigation asked for', async () => {
@@ -380,7 +409,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
   });
 
   /**
@@ -394,9 +423,9 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
     // And still TV after the preference read has certainly resolved.
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
   });
 
   /** Arriving from a control is a choice about this visit, not a new device habit. */
@@ -405,7 +434,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
     expect(mockPrefWrites).not.toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' });
   });
 
@@ -415,7 +444,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Movies');
   });
 
   it('goes back to Movies when the reader does, rather than remembering only TV', async () => {
@@ -423,13 +452,13 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
     await switchTo(view, 'Movies');
 
     await waitFor(() =>
       expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'movies' }),
     );
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Movies');
   });
 
 
@@ -439,7 +468,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Movies');
   });
 
   /**
@@ -466,7 +495,7 @@ describe('the remembered category', () => {
     mockProfile.id = 'user-2';
     await view.rerender(<CollectionScreen />);
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
   });
 
   it('falls back to Movies for a next account that has no stored side', async () => {
@@ -474,12 +503,12 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
 
     const view = await open();
-    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    await waitFor(() => expect(showing(view)).toBe('TV'));
 
     mockProfile.id = 'user-3';
     await view.rerender(<CollectionScreen />);
 
-    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
+    await waitFor(() => expect(showing(view)).toBe('Movies'));
   });
 });
 
@@ -684,9 +713,7 @@ describe('the unranked card', () => {
     await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
     await fireEvent.press(view.getByRole('button', { name: 'Rank' }));
 
-    await waitFor(() =>
-      expect(tab(view, 'Unranked')?.props.accessibilityState.selected).toBe(true),
-    );
+    await waitFor(() => expect(shown(view)).toBe('Unranked'));
   });
 
   it('stays away when this side of the selector has nothing unranked', async () => {
@@ -694,7 +721,7 @@ describe('the unranked card', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
+    await waitFor(async () => expect(await offered(view)).not.toContain('Unranked'));
     expect(view.queryByText('You have unranked titles')).toBeNull();
   });
 
@@ -707,7 +734,7 @@ describe('the unranked card', () => {
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
     expect(mockPrefWrites.map((write) => write.name)).toContain(NUDGE_KEY);
-    expect(tab(view, 'Unranked')).toBeTruthy();
+    expect(await offered(view)).toContain('Unranked');
   });
 
   /**
@@ -723,7 +750,7 @@ describe('the unranked card', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Dismiss' }));
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
-    expect(tab(view, 'Unranked')).toBeTruthy();
+    expect(await offered(view)).toContain('Unranked');
   });
 
   it('stays dismissed on the next launch, rather than returning immediately', async () => {
@@ -735,7 +762,7 @@ describe('the unranked card', () => {
 
     // Same store, fresh mount: the dismissal was written, so it survives.
     const second = await open();
-    await waitFor(() => expect(tab(second, 'Unranked')).toBeTruthy());
+    await waitFor(async () => expect(await offered(second)).toContain('Unranked'));
     expect(second.queryByText('You have unranked titles')).toBeNull();
   });
 });
@@ -800,95 +827,160 @@ describe('re-tapping the Collection tab', () => {
 
   it('returns to Watched from the Watchlist', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
-    await waitFor(() =>
-      expect(view.getByRole('tab', { name: 'Watchlist' }).props.accessibilityState.selected).toBe(
-        true,
-      ),
-    );
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
 
     await act(async () => pressTab());
 
-    await waitFor(() =>
-      expect(view.getByRole('tab', { name: 'Watched' }).props.accessibilityState.selected).toBe(
-        true,
-      ),
-    );
+    await waitFor(() => expect(shown(view)).toBe('Watched'));
   });
 
   it('keeps the side the reader is on, which is remembered on purpose', async () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
     await switchTo(view, 'TV');
-    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
+    await choose(view, 'Watchlist');
 
     await act(async () => pressTab());
 
     // Movies-or-TV is a device preference the founder asked to keep. Going back to the
     // top of a section is not a reason to change which collection you are looking at.
-    await waitFor(() => expect(view.getByLabelText(/^Showing TV/)).toBeTruthy());
+    await waitFor(() => expect(side(view)).toBe('TV'));
   });
 
   it('changes nothing when the press arrives from another tab', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
+    await choose(view, 'Watchlist');
 
     mockNavigation.focused = false;
     await act(async () => pressTab());
 
-    await waitFor(() =>
-      expect(view.getByRole('tab', { name: 'Watchlist' }).props.accessibilityState.selected).toBe(
-        true,
-      ),
-    );
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
   });
 });
 
 /**
- * **Movies / TV / Lists** — Lists is a first-class mode of the one selector (founder QA,
- * 2026-09-21), replacing the `My lists ›` link. Not a segment and not a bottom tab: in
- * Lists mode the Watched / Watchlist tabs are not drawn, and the choice is remembered
- * like the other two.
+ * **Lists, as one labelled secondary link** (founder, UI cohesion pass, 2026-11-06).
+ *
+ * It was the dropdown's last entry and an inline mode. With the dropdown replaced by
+ * Watched | Watchlist | Unranked tabs, Lists is not a fourth tab: it is `My lists ›` at
+ * the right of the count row, a push to the screen Profile's manage link opens, with this
+ * door's own `entry`.
  */
-describe('the Lists mode', () => {
-  const switchToLists = async (view: Awaited<ReturnType<typeof open>>) => {
-    await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: 'Lists' }));
-  };
-
-  it('is offered beside Movies and TV, and replaces the old link', async () => {
+describe('the way to Lists', () => {
+  it('is not a tab', async () => {
     const view = await open();
-    expect(view.queryByRole('button', { name: 'My lists' })).toBeNull();
-    await fireEvent.press(view.getByLabelText(/^Showing /));
-    view.getByRole('button', { name: 'TV' });
-    view.getByRole('button', { name: 'Lists' });
+    expect(view.queryByRole('tab', { name: 'Lists' })).toBeNull();
+    expect(await offered(view)).toEqual(['Watched', 'Watchlist']);
   });
 
-  it('shows the lists in place, with no medium tabs and no push', async () => {
+  it('is a labelled link that pushes My lists from this door', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
-    await switchToLists(view);
+    const link = await waitFor(() => view.getByRole('link', { name: 'My lists' }));
 
-    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
-    expect(tab(view, 'Watched')).toBeNull();
-    expect(tab(view, 'Watchlist')).toBeNull();
-    expect(view.getByLabelText('Showing Lists')).toBeTruthy();
-    expect(mockPush).not.toHaveBeenCalled();
-    expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'lists' });
+    await fireEvent.press(link);
+    expect(mockPush).toHaveBeenCalledWith('/lists?entry=collection');
   });
 
-  it('reopens on Lists when that was the last choice', async () => {
-    // One render per test (the RNTL trap this file's neighbours document): the write is
-    // asserted above, and here the stored value is seeded as a restart would find it.
+  it('is there on an empty collection too', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Your watched list starts here')).toBeTruthy());
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
+  it('stays there while a segment loads and when its read fails', async () => {
+    mockFailing.add('rankings');
+    mockFailing.add('watchlist');
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
+  it('is there on the Watchlist', async () => {
+    const view = await open();
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
+  it('opens on Movies when the build before left Lists as the remembered mode', async () => {
     mockPrefStore[MEDIUM_KEY] = 'lists';
-    const view = await renderWithProviders(<CollectionScreen />);
-    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
-    expect(tab(view, 'Watched')).toBeNull();
+    const view = await open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(side(view)).toBe('Movies');
+    expect(shown(view)).toBe('Watched');
+  });
+});
+
+/**
+ * **Movies | TV in the header, Watched | Watchlist | Unranked under it** (founder, UI
+ * cohesion pass, 2026-11-06): one switch, not repeated in the body, and tabs in equal
+ * columns with the chosen one in Maroon.
+ */
+describe('the header and the tabs', () => {
+  it('draws one Movies | TV switch, in the header', async () => {
+    const view = await open();
+    const switches = view.getAllByLabelText('Medium');
+    expect(switches).toHaveLength(1);
+    expect(view.queryByLabelText('Notifications')).toBeNull();
   });
 
-  it('is never a segment tab', async () => {
+  /**
+   * **The marquee** (founder, marquee cohesion sprint, 2026-11-07): the section's name in
+   * Maroon DM Serif Display, about 22pt, with a Maroon chevron — one 44pt control that opens
+   * a menu of the sections, the one showing marked.
+   */
+  it('names the section in Maroon DM Serif with a Maroon chevron, one 44pt control', async () => {
     const view = await open();
-    expect(tab(view, 'Lists')).toBeNull();
-    expect(tab(view, 'My lists')).toBeNull();
+    const label = StyleSheet.flatten(view.getByTestId('collection-mode-label').props.style);
+    expect(label.color).toBe(theme.semantic.action);
+    expect(label.fontFamily).toBe(fontFamily.serif);
+    expect(label.fontSize).toBeGreaterThanOrEqual(21);
+    expect(label.fontSize).toBeLessThanOrEqual(23);
+    // Wraps rather than truncating.
+    expect(view.getByTestId('collection-mode-label').props.numberOfLines).toBeUndefined();
+    expect(StyleSheet.flatten(menu(view).props.style).minHeight).toBe(theme.layout.minTapTarget);
+    expect(menu(view).props.accessibilityLabel).toBe('Showing Watched');
+    // No segmented control is left on the page.
+    expect(view.queryByTestId('nav-tabs')).toBeNull();
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
+  });
+
+  it('opens a menu of the sections with the one showing selected, and switches', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(async () => expect(await offered(view)).toEqual([...SEGMENTS]));
+
+    await fireEvent.press(menu(view));
+    const items = await view.findAllByRole('menuitem');
+    expect(items.map((item) => item.props.accessibilityState?.selected)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    await fireEvent.press(view.getByRole('menuitem', { name: 'Watchlist' }));
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.queryAllByRole('menuitem')).toHaveLength(0);
+  });
+
+  it('offers two sections where this side has nothing unranked', async () => {
+    const view = await open();
+    await waitFor(async () => expect(await offered(view)).toEqual(['Watched', 'Watchlist']));
+  });
+
+  it('keeps the tab when the side changes and the new side has it too', async () => {
+    const view = await open();
+    await choose(view, 'Watchlist');
+    await switchTo(view, 'TV');
+    await waitFor(() => expect(side(view)).toBe('TV'));
+    expect(shown(view)).toBe('Watchlist');
   });
 });
 
@@ -1086,19 +1178,4 @@ describe('the backlog and Refine cards', () => {
     });
   });
 
-  it('Lists: no ranking or refinement cards', async () => {
-    mockTables.user_media = [watched('m1', 'movie')];
-    mockRpcAnswers.ranking_backlog = backlog(3);
-    mockRpcAnswers.refine_candidates = strongRefine();
-    mockPrefStore[MEDIUM_KEY] = 'lists';
-    const view = await renderWithProviders(<CollectionScreen />);
-
-    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(view.queryByText('You have titles left to rank')).toBeNull();
-    expect(view.queryByText('Fine-tune your rankings')).toBeNull();
-    expect(view.queryByTestId('collection-start-ranking-card')).toBeNull();
-  });
 });

@@ -1,17 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Stack,
+  useIsFocused,
+  useLocalSearchParams,
+  useRouter,
+  type ErrorBoundaryProps,
+} from 'expo-router';
+import { cloneElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Dimensions,
   Linking,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -51,20 +60,32 @@ import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
-import { TitleActions } from '@/features/title/TitleActions';
+import { TitleActions, titleActionsFit } from '@/features/title/TitleActions';
+import { ImmersiveHero } from '@/features/title/ImmersiveHero';
+import { directedBy } from '@/features/title/directors';
+import { ImmersiveScores } from '@/features/title/ImmersiveScores';
+import { useTitleLayout, useTitleLayoutResolved } from '@/features/title/title-layout';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
+import { StatusBar } from 'expo-status-bar';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
+import { GenreLine } from '@/features/title/GenreLine';
+import { TrailerRail } from '@/features/title/TrailerRail';
+import { trailerPreviewsByDefault } from '@/features/title/trailer-previews';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
-import { TitleReviews } from '@/features/title/TitleReviews';
+import { ReviewsPreview, TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
 import {
   DEFAULT_REVIEW_SORT,
+  isRatingOrder,
+  orderByRating,
+  reviewsComplete,
+  serverSortOf,
   useSetReviewHelpful,
   useTitleReviewCount,
   useTitleReviews,
-  type ReviewSort,
+  type ReviewOrder,
   type TitleReview,
 } from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
@@ -75,7 +96,7 @@ import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
 import { hapticSelection } from '@/ui/haptics';
-import { posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
+import { avatarUri, posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -89,6 +110,7 @@ import {
 } from '@/features/recommendations/use-title-recommendations';
 import { compactName } from '@/lib/titles';
 import {
+  Avatar,
   CastStrip,
   EmptyState,
   EpisodeRow,
@@ -98,8 +120,10 @@ import {
   Screen,
   ScreenError,
   ScoresSection,
+  SectionHeader,
   SegmentedTabs,
   Sheet,
+  SheetDone,
   SheetRow,
   SkeletonRow,
   usePullRefresh,
@@ -127,6 +151,28 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 'similar';
+/** Cast portraits the immersive preview fits across a 360pt screen; See all past it. */
+const CAST_VISIBLE = 4;
+/** How many the preview strip holds before the sheet takes over. */
+const CAST_PREVIEW = 10;
+/**
+ * Similar on the Cinematic page before See more: two rows of three (final title
+ * refinement, 2026-11-06). The rest of the same nine follow in place.
+ */
+const SIMILAR_PREVIEW = 6;
+/**
+ * Between two Cinematic sections: from one body's end to the next heading. 28pt since the
+ * marquee cohesion sprint (2026-11-07; 20pt before): the founder asked for more air between
+ * sections and none inside them, so the heading-to-body gaps are unchanged. Never less than
+ * a tight heading action's upward slop, which lies in it (`TIGHT_SLOP.top`).
+ */
+const SECTION_SEAM = theme.space[7];
+/**
+ * The Cinematic module's 28pt title grows with the system text size only to 1.3×, the type
+ * scale's ceiling for display type (title-page sprint, 2026-11-06): at 2× a long first
+ * word such as "Everything" no longer fits a 320pt phone's line and broke mid-word.
+ */
+const TITLE_MAX_SCALE = 1.3;
 
 /**
  * How many episodes a season page draws before it offers to show the rest.
@@ -221,7 +267,7 @@ export default function TitleScreen() {
   const insets = useSafeAreaInsets();
   // The hero is the backdrop's own 16:9, so the width decides where it ends — which is
   // where the navigation has finished becoming a header.
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight, fontScale } = useWindowDimensions();
   const hasId = Boolean(id);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -235,6 +281,55 @@ export default function TitleScreen() {
   // A page that changes tab by itself a second after opening is worse than one that
   // opens on the wrong tab.
   const [tab, setTab] = useState<Tab | null>(null);
+  /**
+   * **Original or Immersive** (Immersive Scroll experiment, 2026-11-04). A device choice,
+   * `original` unless a tester opted in, and always `original` in production — see
+   * `title-layout.ts` and `docs/release/immersive-title-experiment.md`. It chooses a layout
+   * and nothing else: every read, handler and sheet below is shared by both.
+   */
+  const immersive = useTitleLayout() === 'immersive';
+  /**
+   * Whether this device's title-page choice is known yet. The Cinematic page is the default,
+   * so until a saved Original has been read the default can be drawn; the trailer stills,
+   * the page's one request to a third party, wait for this (independent review, release
+   * pass, 2026-11-07).
+   */
+  const layoutResolved = useTitleLayoutResolved();
+  /**
+   * Whether this title is the screen on top. The light status bar below is drawn only then:
+   * a title stays mounted under a profile or a list pushed over it, and an override that
+   * outlived its focus left white status glyphs on that screen's Paper (Codex review,
+   * 2026-11-04).
+   */
+  const focused = useIsFocused();
+  /** The first screen's measured height, which decides when the bar turns solid. */
+  const [immersiveHeight, setImmersiveHeight] = useState(0);
+  /**
+   * The two Cinematic sections that open in place rather than opening anything (final
+   * title refinement, 2026-11-06): Similar past its first six, and More details.
+   */
+  const [similarExpanded, setSimilarExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  /**
+   * Whether the Trailers section draws YouTube's thumbnails on this page. Each one is a
+   * request to `i.ytimg.com`. On by default outside production since the founder's Preview
+   * QA (2026-11-07); production keeps Show previews until its privacy disclosures name
+   * YouTube — see `trailerPreviewsByDefault`.
+   */
+  const [trailerPreviews, setTrailerPreviews] = useState(trailerPreviewsByDefault);
+  /** The full cast, in a sheet, from the immersive Cast preview's See all. */
+  const [castOpen, setCastOpen] = useState(false);
+  /** Where the immersive module's top edge sits; the top bar's reveal ends there. */
+  const [immersiveModuleTop, setImmersiveModuleTop] = useState(0);
+  /**
+   * **The page's visible height**, from its scroll view (UI cohesion pass, 2026-11-06): the
+   * Cinematic hero's sharp band grows toward a share of it on a tall phone. Measured rather
+   * than read from the window, so the status bar, the navigation bar and the bottom inset
+   * the screen keeps are all already accounted for.
+   */
+  const [viewportHeight, setViewportHeight] = useState(0);
+  /** The page's scroller, for the opening screen's chevron. */
+  const pageScroller = useRef<ScrollView>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   /**
    * The title the open ranking is about, and what it scored — the two halves of
@@ -286,7 +381,15 @@ export default function TitleScreen() {
   const pendingRecheck = useRef<{ watchEventId: string; bucket: RankingSubject['bucket'] } | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
-  const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
+  // The Cinematic Editorial sheet may also choose Rating, which reads Top and re-orders it.
+  const [reviewSort, setReviewSort] = useState<ReviewOrder>(DEFAULT_REVIEW_SORT);
+  /**
+   * The Cinematic Editorial Reviews sheet (post-QA sprint 2, 2026-11-05), and a write
+   * asked for from inside it: the sheet closes first and the log sheet opens after it has
+   * gone, so two modals are never presented at once — the rewatch hand-off's rule.
+   */
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  const pendingReviewWrite = useRef(false);
   const [recommending, setRecommending] = useState(false);
   /**
    * The ⋯ menu: add to a list, change the rating, drop it, or remove the title.
@@ -396,7 +499,8 @@ export default function TitleScreen() {
           // `note_visibility` since the Ranked menu had to say Edit *review* or Edit
           // *private note*: one column stores both, and the menu cannot name the right
           // one without it. `useLogState` has selected it since notes became social.
-          .select('bucket, watched_on, note, note_has_spoilers, note_visibility')
+          // `note_updated_at` for the immersive Reviews tab's "Your review" date.
+          .select('bucket, watched_on, note, note_has_spoilers, note_visibility, note_updated_at')
           .eq('user_id', profile.id)
           .eq('media_item_id', id ?? '')
           .maybeSingle(),
@@ -455,7 +559,24 @@ export default function TitleScreen() {
    *
    * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
    */
-  const reviews = useTitleReviews(data?.title?.kind === 'series' ? null : titleId, reviewSort);
+  const reviews = useTitleReviews(
+    data?.title?.kind === 'series' ? null : titleId,
+    serverSortOf(reviewSort),
+  );
+  /**
+   * The Most Helpful list, for the Cinematic Editorial page's Reviews preview and for the
+   * sheet's Rating order, which re-orders it (post-QA sprint 2, 2026-11-05).
+   *
+   * The same query key the sheet's default order reads — `['title-reviews', id,
+   * 'top_desc']` — so it is one cache entry, one request, and the one every Helpful
+   * vote and every collection change already updates and invalidates. It replaces the
+   * "From your circle" read: the preview supersedes that line, and Following stays a
+   * filter inside the sheet.
+   */
+  const helpfulReviews = useTitleReviews(
+    immersive && data?.title?.kind !== 'series' ? titleId : null,
+    'top_desc',
+  );
   /**
    * The number on the tab, read separately from the list.
    *
@@ -569,7 +690,8 @@ export default function TitleScreen() {
    * seeded this key — in which case the query finds fresh data and asks nobody — or
    * it did not, and this is the fallback doing its job.
    */
-  const showsEpisodes = data?.title?.kind === 'season' && (tab === null || tab === 'episodes');
+  const showsEpisodes =
+    data?.title?.kind === 'season' && (immersive || tab === null || tab === 'episodes');
   const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
   /**
    * The Similar tab's data, when it is the tab being shown.
@@ -594,7 +716,7 @@ export default function TitleScreen() {
    * id, finds the parent and says which row it wrote the facet against.
    */
   const showsSimilar =
-    tab === 'similar' || (tab === null && data?.title?.kind === 'movie');
+    immersive || tab === 'similar' || (tab === null && data?.title?.kind === 'movie');
   const similar = useSimilarTitles({
     sourceId: titleId,
     kind: data?.title?.kind ?? null,
@@ -805,7 +927,11 @@ export default function TitleScreen() {
    */
   const collapsedHero = barHeight + HERO_COLLAPSED_BAND;
   const revealEnd = Math.max(
-    (hero.uri ? screenWidth / theme.layout.aspect.backdrop : collapsedHero) - barHeight,
+    (immersive
+      ? immersiveModuleTop || immersiveHeight || Math.round(screenHeight * 0.3)
+      : hero.uri
+        ? screenWidth / theme.layout.aspect.backdrop
+        : collapsedHero) - barHeight,
     2,
   );
   const revealStart = Math.max(revealEnd - REVEAL_WINDOW, 0);
@@ -1311,6 +1437,996 @@ export default function TitleScreen() {
    * `Ranking` group below for why one entry point is the whole of the change.
    */
 
+
+  /**
+   * **Rank, Save, List, Recommend: beside the poster where they fit, under it where they do
+   * not** (founder, Growth UX sprint, 2026-11-02).
+   *
+   * Decided from the viewport rather than left to `flexWrap`, which on a 375pt phone put the
+   * last glyph on a line of its own under the other three. The controls, their order and
+   * their sizes do not change, only which row they sit in. Measured against the column this
+   * title actually has, and at the reader's text size, so a larger setting moves the row
+   * instead of breaking it.
+   */
+  const identityColumn =
+    screenWidth -
+    theme.layout.gutter * 2 -
+    theme.space[4] -
+    (theme.poster.detail.width + theme.space[1] * 2);
+  const actionsBesidePoster = titleActionsFit(identityColumn, fontScale, {
+    rank: rankable,
+    icons: rankable ? 3 : 2,
+  });
+  const actions = (
+    <TitleActions
+      rank={
+        rankable
+          ? {
+              ranked: Boolean(data.ranked),
+              accessibilityLabel: data.ranked
+                ? 'Ranked. Change or remove this.'
+                : `Rank ${displayTitle ?? title.title}`,
+              accessibilityHint: data.ranked
+                ? 'Opens rating and collection options'
+                : 'Opens the rating sheet',
+              onPress: () => (data.ranked ? setManaging(true) : rank()),
+            }
+          : null
+      }
+      save={{
+        selected: isWatchlisted,
+        // The sentences the labelled control used, unchanged: a screen reader's
+        // name for this control is what says which way the toggle goes.
+        accessibilityLabel: isWatchlisted
+          ? `Remove ${title.title} from your watchlist`
+          : `Add ${title.title} to your watchlist`,
+        onPress: () => void toggleWatchlist(),
+        disabled: watchlistBusy,
+      }}
+      // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
+      // when this is pressed, so there is nothing to serialise against.
+      list={{
+        accessibilityLabel: `Add ${title.title} to a list`,
+        onPress: () => setAddingToList(true),
+      }}
+      recommend={
+        rankable
+          ? {
+              accessibilityLabel: `Recommend ${title.title} to a friend`,
+              onPress: () => {
+                setActionError(null);
+                setRecommendedTo(null);
+                setRecommending(true);
+              },
+            }
+          : null
+      }
+    />
+  );
+
+  /**
+   * **The notices under the actions**, moved verbatim so both layouts draw the same ones:
+   * the recommendation card, a failed action, a sent recommendation, a failed read.
+   */
+  const notices = (
+    <>
+        {recommendationRows.length > 0 ? (
+          <View style={styles.block}>
+            <RecommendationCard
+              rows={recommendationRows}
+              onOpenAll={() => setRecSheet({ kind: 'all' })}
+              onReport={(recommendationId) => setRecSheet({ kind: 'report', id: recommendationId })}
+            />
+          </View>
+        ) : null}
+
+        {actionError ? (
+          <View style={styles.block}>
+            <Text variant="footnote" tone="action">
+              {actionError}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* The confirmation, on the page the reader is still looking at rather than
+            in an alert they have to dismiss. It names the person, because "Sent"
+            alone leaves them checking. */}
+        {recommendedTo ? (
+          <View style={styles.block}>
+            <Text testID="recommend-confirmation" variant="footnote" tone="secondary">
+              {`Recommended to ${recommendedTo}`}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* The film is on screen and the viewer's own state is not. Said once,
+            quietly, with a way back — rather than either failing the whole page
+            or pretending the score badge means "unranked". */}
+        {personal.isError ? (
+          <View style={styles.block}>
+            <Text variant="footnote" tone="secondary">
+              {diagnose(personal.error) ??
+                'Your rating and watchlist state could not be loaded.'}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading your rating"
+              onPress={() => void personal.refetch()}
+              hitSlop={theme.space[2]}
+            >
+              <Text variant="callout" tone="action">
+                Try again
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+    </>
+  );
+
+  /**
+   * The thumbs-up, from the sheet, the original tab or the preview alike.
+   *
+   * One write at a time, and a second tap while it is in flight does nothing. Not
+   * throttling for its own sake: a queued mutation runs its `onMutate` immediately, so a
+   * second tap would take a snapshot of the first tap's optimistic state and a double
+   * failure would roll back to a mark the server never accepted. Refusing to start the
+   * second write keeps exactly one optimistic change alive, which is the condition the
+   * rollback in `useSetReviewHelpful` is correct under.
+   */
+  const toggleHelpful = (review: TitleReview) => {
+    if (setHelpful.isPending) return;
+    // The premium interaction vocabulary, at its quietest weight: this is a selection,
+    // not an achievement.
+    hapticSelection();
+    setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
+  };
+
+  /**
+   * The full list of reviews: the original page's Reviews tab, and the Cinematic
+   * Editorial page's Reviews sheet (post-QA sprint 2, 2026-11-05). One element, so the
+   * two cannot disagree about spoilers, Helpful, reporting or who sees what.
+   *
+   * In the sheet, Rating is the complete Most Helpful list re-ordered by score — offered
+   * only while that list is provably complete — and any other order is the server's.
+   */
+  const reviewList = ({ inSheet = false }: { inSheet?: boolean } = {}) => {
+    /**
+     * The order the sheet is actually in, used for the rows and the control alike
+     * (independent review, post-QA sprint 2). Rating chosen over a list that has since
+     * reached the ceiling — a refetch after a vote, say — is no longer an order this
+     * sheet can honestly show, so it reads as Most Helpful, which is what it draws, rather
+     * than a Rating label over a Helpful list.
+     */
+    const order: ReviewOrder =
+      isRatingOrder(reviewSort) && !(inSheet && ratingAvailable) ? 'top_desc' : reviewSort;
+    const rating = isRatingOrder(order);
+    const serverRows = rating ? helpfulReviews.data : reviews.data;
+    const rows = rating
+      ? orderByRating(helpfulReviews.data ?? [], order === 'rating_asc' ? 'asc' : 'desc')
+      : (reviews.data ?? []);
+    const loading = rating ? helpfulReviews.isPending : reviews.isPending;
+    return (
+      <TitleReviews
+          reviews={rows}
+          loading={loading}
+          sort={order}
+          onChangeSort={(next) => {
+            setReviewSort(next);
+            track({ name: 'reviews_sort_changed', props: { sort: next } });
+          }}
+          onToggleHelpful={toggleHelpful}
+          // Against this viewer's watched set and this exact media item: having seen
+          // Season 1 does not unmask Season 2.
+          maskedFor={(review) =>
+            shouldMask({
+              hasSpoilers: review.hasSpoilers,
+              mediaItemId: title.id,
+              viewerId: profile.id,
+              authorId: review.userId,
+              watched: watched.data,
+            })
+          }
+          onPressAuthor={(handle) => {
+            if (inSheet) setReviewsOpen(false);
+            router.push(`/u/${handle}`);
+          }}
+          viewerRanked={Boolean(data.ranked)}
+          viewerHasReview={(reviews.data ?? []).some(
+            (review) => review.userId === profile.id,
+          )}
+          // One composer. A note has always been written in the log sheet, where the
+          // spoiler flag and the visibility are chosen beside it; a second one here
+          // would be a second content model wearing a different button.
+          onWrite={inSheet ? writeFromSheet : () => openLog('review')}
+          noun={title.kind === 'season' ? 'season' : 'movie'}
+          // So the reporting control is absent from the viewer's own review, which
+          // the server would refuse anyway.
+          viewerId={profile.id}
+          ratingAvailable={inSheet && ratingAvailable}
+          truncated={inSheet && !reviewsComplete(serverRows)}
+          // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
+          // published review first, from your own row — a public note and nothing else.
+          variant={immersive ? 'editorial' : undefined}
+          ownReview={immersive ? ownPublishedReview : null}
+        />
+    );
+  };
+
+  /** Rating needs every review in hand; a list at the server's ceiling may not be all. */
+  const ratingAvailable = immersive && reviewsComplete(helpfulReviews.data);
+
+  /** Edit or Write from inside the sheet: close it, then open the one composer. */
+  const writeFromSheet = () => {
+    setReviewsOpen(false);
+    if (Platform.OS === 'ios') pendingReviewWrite.current = true;
+    else openLog('review');
+  };
+
+  /**
+   * **The tab bodies, as one function both layouts call** (Immersive Scroll experiment).
+   *
+   * The blocks inside are the ones the tab bar always rendered, moved here unchanged:
+   * `activeTab` is shadowed by the argument, so each still reads `activeTab === '…'`. The
+   * original page calls it with the selected tab; the immersive page calls it once per
+   * section. The two limits are the immersive previews and are absent on the original.
+   */
+  const tabContent = (
+    which: Tab | null | undefined,
+    { similarLimit }: { similarLimit?: number } = {},
+  ) => {
+    const activeTab = which;
+    return (
+      <>
+        {activeTab === 'episodes' ? (
+          episodes.data?.length ? (
+            <View>
+              {(showAllEpisodes
+                ? episodes.data
+                : episodes.data.slice(0, EPISODES_FIRST_PAGE)
+              ).map((episode, index) => (
+                <View
+                  // Keyed on position as well as number. TMDB occasionally repeats an
+                  // episode number within a season, and the normalizer keeps both
+                  // rather than losing a real episode to tidy up a display key.
+                  key={`${episode.episode_number}-${index}`}
+                >
+                  {/* No rule between episodes (founder, 2026-09-07). A hairline every
+                      row turned a season page into a table, which is the density note
+                      that runs through this whole pass: whitespace is the separator, and
+                      a rule marks a module rather than a sibling. `EpisodeRow`'s own
+                      vertical padding already puts 32 points between two of them, and
+                      the still and the number make the boundary obvious besides. */}
+                  <EpisodeRow
+                    episodeNumber={episode.episode_number}
+                    title={episode.title}
+                    airDate={formatShortDate(episode.air_date)}
+                    runtimeMinutes={episode.runtime_minutes}
+                    stillUri={stillUri(episode.still_path)}
+                    overview={episode.overview}
+                  />
+                </View>
+              ))}
+
+              {!showAllEpisodes && episodes.data.length > EPISODES_FIRST_PAGE ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show all ${episodes.data.length} episodes`}
+                  onPress={() => setShowAllEpisodes(true)}
+                  style={({ pressed }) => [styles.showAll, pressed && styles.pressed]}
+                >
+                  <Text variant="callout" tone="action">
+                    Show all {episodes.data.length} episodes
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : episodes.isPending || enriching ? (
+            <SkeletonRow count={3} />
+          ) : episodes.isError ? (
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="Episodes did not load"
+              body="Pull down to try again."
+            />
+          ) : (
+            // Distinct from the error above, and the difference is worth the words: a
+            // season the provider has published no episode list for is a fact about
+            // the show, not a fault the reader can retry away.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="No episodes listed"
+              body="TMDB has not published an episode list for this season yet."
+            />
+          )
+        ) : null}
+
+        {activeTab === 'cast' ? (
+          <CastStrip
+            cast={cast}
+            onPressMember={(member) => router.push(`/person/${member.id}`)}
+          />
+        ) : null}
+
+        {activeTab === 'videos' && videos.data?.length ? (
+          <View style={styles.details}>
+            {videos.data.map((video) => (
+              <Pressable
+                key={video.id}
+                accessibilityRole="link"
+                accessibilityLabel={`Play ${video.name} on YouTube`}
+                onPress={() => {
+                  const uri = videoUri(video.key);
+                  if (uri) void Linking.openURL(uri);
+                }}
+                style={({ pressed }) => [styles.video, pressed && styles.pressed]}
+              >
+                <Ionicons
+                  name="play-circle-outline"
+                  size={theme.layout.icon.lg}
+                  color={theme.semantic.action}
+                />
+                <View style={styles.videoCopy}>
+                  <Text variant="callout" numberOfLines={1}>
+                    {videoTitle(video)}
+                  </Text>
+                  {/* Where it plays and what kind of thing it is, in that order.
+                      "Trailer" alone said neither: three rows reading "Trailer 1",
+                      "Teaser", "Trailer" tell a reader nothing about which to tap. */}
+                  <Text variant="caption" tone="tertiary">
+                    {[SITE_LABEL[video.site] ?? video.site, video.type]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        {activeTab === 'reviews' ? reviewList() : null}
+
+        {activeTab === 'details' ? (
+          <View style={styles.details}>
+            <Detail label="Released" value={formatDate(title.release_date)} />
+            <Detail
+              label="Runtime"
+              value={title.runtime_minutes ? `${title.runtime_minutes} minutes` : null}
+            />
+            <Detail label="Genres" value={descriptive.genres.join(', ') || null} />
+            <Detail label="Language" value={languageName(descriptive.language)} />
+            <Detail label="Director" value={credits.data?.director ?? null} />
+            {/* The ordinal with its denominator. The panel above shows the short
+                form, which is the one people read; this is the one that says what
+                it is two of (PRD §10). */}
+            <Detail
+              label="Your rank"
+              value={
+                data.ranked && total
+                  ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}`
+                  : null
+              }
+            />
+          </View>
+        ) : null}
+
+        {activeTab === 'seasons' ? (
+          seasons.data?.length ? (
+            <View>
+              {seasons.data.map((season) => (
+                <TitleRow
+                  key={season.id}
+                  title={season.title}
+                  year={yearOf(season.release_date)}
+                  posterUri={posterUri(season.poster_path)}
+                  // Not the word "Season" — the title beside it already reads
+                  // "Season 2". What a returning reader wants from this list is where
+                  // they are up to, so the row says whether they have ranked it.
+                  secondary={rankedSeasonIds.has(season.id) ? 'Ranked' : 'Not ranked yet'}
+                  onPress={() => router.push(`/title/${season.id}`)}
+                />
+              ))}
+            </View>
+          ) : seasons.isPending || enriching ? (
+            <SkeletonRow count={3} />
+          ) : (
+            // A series with no seasons is a series nobody has looked up yet, not a
+            // series without seasons. Saying so is better than an empty box, and far
+            // better than removing the tab and leaving the page with no way onward.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="Seasons are still loading"
+              body="Pull down to try again in a moment."
+            />
+          )
+        ) : null}
+
+        {/**
+         * Similar, as one wall of artwork.
+         *
+         * `PosterGrid` unchanged, which is the app's established answer to "a lot of
+         * titles at once" — For You and the Collection wall are the same component, and
+         * three across means the nine-title budget is exactly three rows on a phone.
+         * Deliberately not a labelled variant of it: the grid draws no titles on purpose
+         * (its own header says why), and the name, the year and the reader's score all
+         * travel in each tile's accessibility label already.
+         *
+         * The score chip is the Collection wall's, on a candidate the reader has ranked
+         * and on nothing else. Nothing new is drawn for this tab, and the chip is the
+         * only thing on this surface the reader's own history touches: the *order* is
+         * TMDB's, unreranked (founder, 2026-09-12).
+         *
+         * Every destination is `/title/{id}` — the same push the seasons list above
+         * makes and the same one every other surface in the app makes. For a film that
+         * is the film; for television it is the **series**, which opens on its Seasons
+         * tab and is therefore the existing series-to-season flow rather than a second
+         * one. `use-similar-titles.ts` is where a season page's associations are taken
+         * from its parent instead of invented for it.
+         */}
+        {activeTab === 'similar' ? (
+          similar.tiles.length ? (
+            <PosterGrid
+              tiles={similarLimit ? similar.tiles.slice(0, similarLimit) : similar.tiles}
+              onPressTile={(tile) => {
+                track({
+                  name: 'similar_title_opened',
+                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
+                });
+                router.push(`/title/${tile.id}`);
+              }}
+            />
+          ) : similar.isPending ? (
+            // The same skeleton every other list on this page uses. Three rows, which is
+            // the height the grid is about to be.
+            <SkeletonRow count={3} />
+          ) : similar.isError ? (
+            /**
+             * Quiet, and the page around it keeps working.
+             *
+             * The provider can refuse — the hourly ceiling in api.md §9 is a per-user
+             * limit and this tab spends against it — and a refusal is a fact about one
+             * tab. It must never reach the route's error boundary, which is why the
+             * query's failure is read here rather than thrown: everything above the tab
+             * row is the reader's own data and TMDB has no opinion about any of it.
+             */
+            <EmptyState
+              kind="couldNotLoad"
+              compact
+              title="Could not load similar titles"
+              body="Pull down to try again in a moment."
+            />
+          ) : (
+            // A real answer rather than a failure. TMDB associates nothing with plenty of
+            // obscure titles, the adapter caches that fact deliberately, and "yet" is the
+            // honest word for something a later provider update could change.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="No similar titles yet"
+              body="Nothing is associated with this one."
+            />
+          )
+        ) : null}
+      </>
+    );
+  };
+  /**
+   * **The Cinematic Editorial layout** (founder-approved direction, 2026-11-04), rendered
+   * instead of the original scroll content when this device opted in.
+   *
+   * It reads the values the original page computes above and calls the same handlers, so
+   * ranking, scoring and every sheet behave identically; only the arrangement differs:
+   *
+   *   1. `ImmersiveHero` — a sharp backdrop, and over its lower part one Paper module
+   *      holding the title, the genre line, the metadata, the director, the actions and
+   *      the three scores. The module is the top of the page's Paper (title-page sprint,
+   *      2026-11-06): no blurred field, no chevron, no filler height;
+   *   2. then, on the same content line and with no tabs: About, Where to Watch, Episodes
+   *      or Seasons where they apply, Cast, Reviews, Trailers, Details and Similar.
+   *
+   * No second title, poster, Rank or score block anywhere below the module.
+   */
+  const immersiveName = (
+    <Text
+      testID="title-name"
+      variant="title1"
+      numberOfLines={3}
+      maxFontSizeMultiplier={TITLE_MAX_SCALE}
+    >
+      {primaryName}
+    </Text>
+  );
+  /**
+   * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
+   * Rank exactly as it was; a ranked one shows the smaller *Edit ranking*, which opens the
+   * rating sheet (*Update your rating*) — its score is the emphasis, in the score row.
+   */
+  const immersiveActions = cloneElement(actions, {
+    rank: rankable
+      ? {
+          ranked: Boolean(data.ranked),
+          label: data.ranked ? 'Edit ranking' : undefined,
+          icon: data.ranked ? 'create-outline' : undefined,
+          compact: Boolean(data.ranked),
+          // The card is the full width less 12pt a side: Rank and Edit ranking are never
+          // truncated there, at any text size; the icons wrap under them instead.
+          unclamped: true,
+          accessibilityLabel: data.ranked
+            ? `Edit your ranking of ${displayTitle ?? title.title}`
+            : `Rank ${displayTitle ?? title.title}`,
+          accessibilityHint: data.ranked
+            ? 'Opens the rating sheet, where you can rank it again'
+            : 'Opens the rating sheet',
+          onPress: () => (data.ranked ? openLog() : rank()),
+        }
+      : null,
+  });
+  /**
+   * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 2023 · TV-MA · 9
+   * episodes`. The year leads, as the brief asks. A film's director has its own quiet line
+   * under it (`directedBy`); a season or series has none, because a season's Director
+   * credit is an episode's and TMDB has no single director for a show.
+   */
+  const moduleMeta = [
+    isSeason ? identitySubtitle : year ? String(year) : null,
+    descriptive.certification,
+    lengthLabel,
+  ]
+    .filter(Boolean)
+    .join(SEP);
+  const directorLine = title.kind === 'movie' ? directedBy(credits.data?.directors ?? []) : null;
+  /**
+   * The facts behind the Cinematic page's More details (final title refinement,
+   * 2026-11-06), closed until asked for. Only what the module does not already say: no
+   * genres or director, and a film's runtime is already on its metadata line — a season's
+   * or series' line counts episodes instead, so their minutes are still news. The rank
+   * keeps its denominator, which the module's short form leaves out (PRD §10).
+   */
+  const moreDetails = (
+    [
+      ['Released', formatDate(title.release_date)],
+      [
+        'Runtime',
+        title.kind !== 'movie' && title.runtime_minutes ? `${title.runtime_minutes} minutes` : null,
+      ],
+      ['Original language', languageName(descriptive.language)],
+      ['Created by', title.kind === 'movie' ? null : (credits.data?.showrunner ?? null)],
+      [
+        'Your rank',
+        data.ranked && total ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}` : null,
+      ],
+    ] satisfies (readonly [string, string | null])[]
+  ).filter((row): row is [string, string] => Boolean(row[1]));
+  /**
+   * One section of the Cinematic page, on the page's full width (final title refinement,
+   * 2026-11-06): the heading and the body on the app's own 16pt gutter, which each
+   * component already draws, rather than inside the module's 12pt inset as well. Only the
+   * module is inset; below it the page is ordinary Paper, as wide as every other screen.
+   *
+   * **Vertically efficient.** The heading is its own line, not a 44pt row (`tight`), and
+   * the body starts `gap` below it: 8pt by default, less a component's own top padding
+   * where it has one, so the words under every heading start the same distance down.
+   *
+   * **An action's target stays off the rails.** A heading action's slop reaches into the
+   * 20pt seam above and the body's 8pt padding below (`TIGHT_SLOP`), so the Cast and
+   * Trailers rails carry no top padding of their own and start under that 8pt: a rail
+   * still coasting from a fling cannot take a press meant for See all or Show previews
+   * (independent review 2). A section with an action must keep `gap` at 8pt or more.
+   */
+  const immersiveSection = (
+    key: string,
+    heading: string,
+    body: ReactNode,
+    {
+      gap = theme.space[2],
+      action,
+    }: {
+      gap?: number;
+      action?: { label: string; accessibilityLabel?: string; onPress: () => void };
+    } = {},
+  ) => (
+    <View key={key} style={styles.immersiveSection} testID={`immersive-section-${key}`}>
+      <SectionHeader
+        title={heading}
+        actionLabel={action?.label}
+        actionAccessibilityLabel={action?.accessibilityLabel}
+        onPressAction={action?.onPress}
+        wrap
+        tight
+      />
+      <View style={{ paddingTop: gap }} testID={`immersive-body-${key}`}>
+        {body}
+      </View>
+    </View>
+  );
+
+  /** Spoiler masking for one review, against this viewer and this exact media item. */
+  const reviewMasked = (review: TitleReview) =>
+    shouldMask({
+      hasSpoilers: review.hasSpoilers,
+      mediaItemId: title.id,
+      viewerId: profile.id,
+      authorId: review.userId,
+      watched: watched.data,
+    });
+
+  /** The reader's own published review, from their own row — a public note, never a private one. */
+  const ownPublishedReview = hasReview
+    ? {
+        text: noteText,
+        hasSpoilers: Boolean(data.logged?.note_has_spoilers),
+        updatedAt:
+          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
+            ?.updatedAt ??
+          data.logged?.note_updated_at ??
+          null,
+        helpfulCount:
+          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
+            ?.helpfulCount ?? 0,
+      }
+    : null;
+
+  /**
+   * How many reviews See all leads to. The count and the list are two reads and either
+   * can be the fresher one for a moment, so the larger is used: See all is never hidden
+   * while a review is on screen.
+   */
+  const reviewTotal = Math.max(reviewCount.data ?? 0, helpfulReviews.data?.length ?? 0);
+
+  const openReviews = () => {
+    setReviewSort(DEFAULT_REVIEW_SORT);
+    setReviewsOpen(true);
+  };
+
+  const immersiveContent = (
+    <>
+      <ImmersiveHero
+        artwork={hero}
+        posterUri={
+          posterUri(title.poster_path, 'card') ?? posterUri(parent?.poster_path ?? null, 'card')
+        }
+        title={displayTitle ?? title.title}
+        topInset={insets.top}
+        viewportHeight={viewportHeight || undefined}
+        onHeight={setImmersiveHeight}
+        onModuleTop={setImmersiveModuleTop}
+      >
+        <View style={styles.immersiveIdentity} testID="title-identity">
+          {isSeason && parent?.id ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${primaryName}, the series this belongs to`}
+              onPress={() => router.push(`/title/${parent.id}`)}
+              hitSlop={theme.space[1]}
+            >
+              {immersiveName}
+            </Pressable>
+          ) : (
+            immersiveName
+          )}
+          <GenreLine genres={descriptive.genres} titleName={displayTitle ?? title.title} />
+          {moduleMeta ? (
+            <Text testID="title-meta" variant="footnote" tone="secondary" numberOfLines={2}>
+              {moduleMeta}
+            </Text>
+          ) : null}
+          {/* Quiet, like the metadata above it, and absent when there is no Director credit
+              (title-page sprint, 2026-11-06). Genres stay above it: they decide more. */}
+          {directorLine ? (
+            <Text
+              testID="title-director"
+              variant="footnote"
+              tone="tertiary"
+              numberOfLines={2}
+              accessibilityLabel={directorLine.label}
+            >
+              {directorLine.text}
+            </Text>
+          ) : null}
+          {contextLine ? (
+            <Pressable
+              accessibilityRole={historyOpen ? 'button' : undefined}
+              accessibilityLabel={historyOpen ? 'Watch history' : undefined}
+              disabled={!historyOpen}
+              hitSlop={8}
+              onPress={
+                historyOpen ? () => router.push(`/title/${id}/history` as never) : undefined
+              }
+            >
+              <Text testID="title-context" variant="caption" tone="tertiary" numberOfLines={1}>
+                {contextLine}
+                {historyOpen ? ' ›' : ''}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {immersiveActions}
+
+        {!isSeries ? (
+          <ImmersiveScores
+            you={
+              rankable
+                ? {
+                    score,
+                    pending: Boolean(data.ranked) && score == null,
+                    onPress: () => (data.ranked ? setManaging(true) : rank()),
+                  }
+                : null
+            }
+            // A count is drawn only once the server has given one: never a 0 while loading.
+            bingd={{
+              score: community.data?.score ?? null,
+              ratingCount: community.data ? community.data.ratingCount : null,
+              loading: community.isPending,
+            }}
+            following={{
+              score: following.data?.score ?? null,
+              ratingCount: following.data ? following.data.ratingCount : null,
+              loading: following.isPending,
+            }}
+            onPressFollowing={() => setFollowingRatingsOpen(true)}
+          />
+        ) : null}
+      </ImmersiveHero>
+
+      <View style={styles.immersiveNotices}>{notices}</View>
+
+      {/**
+       * **The sections, in one column and with no tabs** (title-page sprint, then the final
+       * title refinement, 2026-11-06): About, Where to Watch, Episodes or Seasons, Cast,
+       * Trailers, Reviews, Similar, and More details last and closed. Discovery before
+       * reference: Similar is reachable without scrolling past a list of facts, and the
+       * facts are one tap away rather than gone.
+       */}
+      {title.overview
+        ? immersiveSection('about', 'About', <Synopsis text={title.overview} flush />, {
+            // Text under text: the two lines' own leading supplies the rest of the gap.
+            gap: theme.space[1],
+          })
+        : null}
+
+      {/* Its spacing travels with it: a title with no providers draws nothing, gap included.
+          The row draws its own heading, so the seam is its own top padding, inside its own
+          touch area — never a negative margin over the synopsis above it. */}
+      <WhereToWatch mediaItemId={title.id} titleName={title.title} topSpace={SECTION_SEAM} />
+
+      {isSeason
+        ? immersiveSection('episodes', 'Episodes', tabContent('episodes'), { gap: 0 })
+        : null}
+      {isSeries ? immersiveSection('seasons', 'Seasons', tabContent('seasons'), { gap: 0 }) : null}
+
+      {cast.length
+        ? immersiveSection(
+            'cast',
+            'Cast',
+            <CastStrip
+              compact
+              cast={cast.slice(0, CAST_PREVIEW)}
+              onPressMember={(member) => router.push(`/person/${member.id}`)}
+            />,
+            {
+              action:
+                cast.length > CAST_VISIBLE
+                  ? {
+                      label: 'See all',
+                      accessibilityLabel: `See all ${cast.length} cast members`,
+                      onPress: () => setCastOpen(true),
+                    }
+                  : undefined,
+            },
+          )
+        : null}
+
+      {/**
+       * **Trailers, on the page** (title-page sprint, 2026-11-06; before Reviews since the
+       * final title refinement). The cards draw at once as video tiles; YouTube's
+       * thumbnails wait for Show previews, because each is a request to Google that the
+       * Trailers tab used to make only when it was opened. A tap on a card opens the
+       * video, as it always did.
+       */}
+      {videos.data?.length && layoutResolved
+        ? immersiveSection(
+            'trailers',
+            'Trailers',
+            <TrailerRail
+              videos={videos.data}
+              label={videoTitle}
+              site={(video) => SITE_LABEL[video.site] ?? video.site}
+              previews={trailerPreviews}
+            />,
+            {
+              action: trailerPreviews
+                ? undefined
+                : {
+                    label: 'Show previews',
+                    accessibilityLabel: 'Show trailer previews. Loads images from YouTube.',
+                    onPress: () => setTrailerPreviews(true),
+                  },
+            },
+          )
+        : null}
+
+      {/**
+       * **Reviews, after Trailers** (post-QA sprint 2, 2026-11-05; moved after Trailers in the
+       * final title refinement, 2026-11-06): one or two on the page,
+       * yours first, and every review behind See all. Not for a series, which nobody can
+       * rank and so nobody can review.
+       */}
+      {!isSeries
+        ? immersiveSection(
+            'reviews',
+            'Reviews',
+            <ReviewsPreview
+              reviews={helpfulReviews.data ?? []}
+              loading={helpfulReviews.isPending}
+              failed={helpfulReviews.isError && !helpfulReviews.data}
+              onRetry={() => void helpfulReviews.refetch()}
+              maskedFor={reviewMasked}
+              viewerId={profile.id}
+              viewerRanked={Boolean(data.ranked)}
+              ownReview={ownPublishedReview}
+              onWrite={() => openLog('review')}
+              onSeeAll={openReviews}
+              noun={title.kind === 'season' ? 'season' : 'movie'}
+              // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
+              // own name and picture on your review, and the same thumbs-up the sheet offers
+              // under everybody else's. Your score is the module's, so it is not repeated.
+              onToggleHelpful={toggleHelpful}
+              viewer={{
+                name: profile.display_name || profile.username,
+                avatarUri: avatarUri(profile.avatar_path),
+              }}
+            />,
+            {
+              action:
+                reviewTotal > 0
+                  ? {
+                      label: 'See all',
+                      accessibilityLabel:
+                        reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
+                      onPress: openReviews,
+                    }
+                  : undefined,
+            },
+          )
+        : null}
+
+      {/**
+       * **Similar, six at first** (final title refinement, 2026-11-06): two rows of three,
+       * and See more for the rest of the same list — the same nine `useSimilarTitles`
+       * already fetches, so nothing new is asked of the provider.
+       */}
+      {immersiveSection(
+        'similar',
+        'Similar',
+        tabContent('similar', { similarLimit: similarExpanded ? undefined : SIMILAR_PREVIEW }),
+        {
+          action:
+            similar.tiles.length > SIMILAR_PREVIEW
+              ? similarExpanded
+                ? {
+                    label: 'Show fewer',
+                    accessibilityLabel: 'Show fewer similar titles',
+                    onPress: () => setSimilarExpanded(false),
+                  }
+                : {
+                    label: 'See more',
+                    accessibilityLabel: `See ${similar.tiles.length - SIMILAR_PREVIEW} more similar titles`,
+                    onPress: () => setSimilarExpanded(true),
+                  }
+              : undefined,
+        },
+      )}
+
+      {moreDetails.length ? (
+        <View style={styles.immersiveSection} testID="immersive-section-details">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="More details"
+            accessibilityState={{ expanded: detailsOpen }}
+            onPress={() => setDetailsOpen((open) => !open)}
+            style={({ pressed }) => [styles.moreDetailsToggle, pressed && styles.pressed]}
+            testID="more-details-toggle"
+          >
+            <Text variant="sectionHeader" tone="action">
+              MORE DETAILS
+            </Text>
+            <Ionicons
+              name={detailsOpen ? 'chevron-up' : 'chevron-down'}
+              size={theme.layout.icon.sm}
+              color={theme.semantic.action}
+            />
+          </Pressable>
+          {detailsOpen ? (
+            <View style={styles.facts} testID="more-details">
+              {moreDetails.map(([label, value]) => (
+                <View key={label} style={styles.fact} accessible accessibilityLabel={`${label}: ${value}`}>
+                  <Text variant="footnote" tone="tertiary" style={styles.factLabel}>
+                    {label}
+                  </Text>
+                  <Text variant="footnote" style={styles.factValue}>
+                    {value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {castOpen ? (
+        <Sheet visible onClose={() => setCastOpen(false)} label={`Cast of ${title.title}`}>
+          <View style={styles.castSheet} testID="cast-sheet">
+            <Text variant="title2">Cast</Text>
+          </View>
+          {/* Bounded and scrolling: twelve rows at a large text size are taller than the
+              sheet, and the last members must still be reachable. */}
+          <ScrollView
+            testID="cast-sheet-list"
+            style={styles.castScroll}
+            contentContainerStyle={styles.castList}
+          >
+            {cast.map((member) => (
+              <Pressable
+                key={member.id}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  member.character ? `${member.name}, who plays ${member.character}` : member.name
+                }
+                onPress={() => {
+                  setCastOpen(false);
+                  router.push(`/person/${member.id}`);
+                }}
+                style={({ pressed }) => [styles.castRow, pressed && styles.pressed]}
+              >
+                <Avatar size="sm" uri={member.avatarUri} name={member.name} />
+                <View style={styles.immersiveCircleCopy}>
+                  <Text variant="callout" numberOfLines={1}>
+                    {member.name}
+                  </Text>
+                  {member.character ? (
+                    <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                      {member.character}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <SheetDone onPress={() => setCastOpen(false)} />
+        </Sheet>
+      ) : null}
+
+      <Sheet
+        visible={reviewsOpen}
+        onClose={() => setReviewsOpen(false)}
+        label={`Reviews of ${displayTitle ?? title.title}`}
+        onDismissed={() => {
+          if (!pendingReviewWrite.current) return;
+          pendingReviewWrite.current = false;
+          openLog('review');
+        }}
+      >
+        <View style={styles.castSheet} testID="reviews-sheet">
+          <Text variant="title2">
+            {reviewTotal ? `Reviews (${reviewTotal})` : 'Reviews'}
+          </Text>
+        </View>
+        <ScrollView
+          testID="reviews-sheet-list"
+          style={styles.castScroll}
+          contentContainerStyle={styles.reviewsSheetList}
+        >
+          {reviewList({ inSheet: true })}
+        </ScrollView>
+        <SheetDone onPress={() => setReviewsOpen(false)} />
+      </Sheet>
+    </>
+  );
+
   return (
     <Screen includeBottomInset edges={[]}>
       {/**
@@ -1329,6 +2445,11 @@ export default function TitleScreen() {
        * cast strip says `‹ Title` and not `‹ title/[id]`.
        */}
       <Stack.Screen options={{ title: title.title, headerShown: false }} />
+      {/* Dark glyphs over the Parchment band a title without artwork gets, from the first
+          frame; light over artwork until the bar has revealed. */}
+      {immersive && focused ? (
+        <StatusBar style={barRevealed || !hero.uri ? 'dark' : 'light'} />
+      ) : null}
 
       <TitleTopBar
         progress={scrollY.interpolate({
@@ -1370,6 +2491,12 @@ export default function TitleScreen() {
       />
 
       <Animated.ScrollView
+        ref={pageScroller}
+        testID="title-scroll"
+        onLayout={(event: LayoutChangeEvent) => {
+          const next = Math.round(event.nativeEvent.layout.height);
+          setViewportHeight((was) => (was === next ? was : next));
+        }}
         contentContainerStyle={styles.content}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           // Opacity is one of the properties the native driver can carry, so the bar's
@@ -1405,6 +2532,12 @@ export default function TitleScreen() {
           />
         }
       >
+        {/* Original and Immersive share everything outside this scroll view. The original
+            children below keep their lines exactly as they were; only this wrapper is new. */}
+        {immersive ? (
+          immersiveContent
+        ) : (
+          <>
         <View>
           <TitleHero
             uri={hero.uri}
@@ -1596,52 +2729,7 @@ export default function TitleScreen() {
              * ranking the same watch again and logging another watch, because that is the
              * menu's job and the distinction is the whole point of it.
              */}
-            <View style={styles.actionsRow}>
-              <TitleActions
-                rank={
-                  rankable
-                    ? {
-                        ranked: Boolean(data.ranked),
-                        accessibilityLabel: data.ranked
-                          ? 'Ranked. Change or remove this.'
-                          : `Rank ${displayTitle ?? title.title}`,
-                        accessibilityHint: data.ranked
-                          ? 'Opens rating and collection options'
-                          : 'Opens the rating sheet',
-                        onPress: () => (data.ranked ? setManaging(true) : rank()),
-                      }
-                    : null
-                }
-                save={{
-                  selected: isWatchlisted,
-                  // The sentences the labelled control used, unchanged: a screen reader's
-                  // name for this control is what says which way the toggle goes.
-                  accessibilityLabel: isWatchlisted
-                    ? `Remove ${title.title} from your watchlist`
-                    : `Add ${title.title} to your watchlist`,
-                  onPress: () => void toggleWatchlist(),
-                  disabled: watchlistBusy,
-                }}
-                // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
-                // when this is pressed, so there is nothing to serialise against.
-                list={{
-                  accessibilityLabel: `Add ${title.title} to a list`,
-                  onPress: () => setAddingToList(true),
-                }}
-                recommend={
-                  rankable
-                    ? {
-                        accessibilityLabel: `Recommend ${title.title} to a friend`,
-                        onPress: () => {
-                          setActionError(null);
-                          setRecommendedTo(null);
-                          setRecommending(true);
-                        },
-                      }
-                    : null
-                }
-              />
-            </View>
+            {actionsBesidePoster ? <View style={styles.actionsRow}>{actions}</View> : null}
           </View>
 
           <View style={styles.posterColumn} testID="title-poster-column">
@@ -1671,6 +2759,11 @@ export default function TitleScreen() {
           </View>
         </View>
 
+        {actionsBesidePoster ? null : (
+          <View style={styles.actionsFullWidth} testID="title-actions-full-width">
+            {actions}
+          </View>
+        )}
 
         {/* Who recommended this, and what they said — below the title and its actions,
             in the flow, whether or not there is artwork (founder F1, 2026-09-19). It sits
@@ -1678,56 +2771,7 @@ export default function TitleScreen() {
             and it is off the hero because a note is somebody's words and must not depend
             on being readable over a backdrop. Present however the reader arrived; gone
             once they rank the title. */}
-        {recommendationRows.length > 0 ? (
-          <View style={styles.block}>
-            <RecommendationCard
-              rows={recommendationRows}
-              onOpenAll={() => setRecSheet({ kind: 'all' })}
-              onReport={(recommendationId) => setRecSheet({ kind: 'report', id: recommendationId })}
-            />
-          </View>
-        ) : null}
-
-        {actionError ? (
-          <View style={styles.block}>
-            <Text variant="footnote" tone="action">
-              {actionError}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* The confirmation, on the page the reader is still looking at rather than
-            in an alert they have to dismiss. It names the person, because "Sent"
-            alone leaves them checking. */}
-        {recommendedTo ? (
-          <View style={styles.block}>
-            <Text testID="recommend-confirmation" variant="footnote" tone="secondary">
-              {`Recommended to ${recommendedTo}`}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* The film is on screen and the viewer's own state is not. Said once,
-            quietly, with a way back — rather than either failing the whole page
-            or pretending the score badge means "unranked". */}
-        {personal.isError ? (
-          <View style={styles.block}>
-            <Text variant="footnote" tone="secondary">
-              {diagnose(personal.error) ??
-                'Your rating and watchlist state could not be loaded.'}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Retry loading your rating"
-              onPress={() => void personal.refetch()}
-              hitSlop={theme.space[2]}
-            >
-              <Text variant="callout" tone="action">
-                Try again
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
+        {notices}
 
         {/**
          * **The description, then the genres** (founder redesign, 2026-09-07).
@@ -1857,289 +2901,10 @@ export default function TitleScreen() {
         {/* Episodes. Informational only: no row here is pressable, scoreable or
             loggable, because the rankable unit is the season this page already is
             (PRD §10). What the list does is answer "did I watch this one". */}
-        {activeTab === 'episodes' ? (
-          episodes.data?.length ? (
-            <View>
-              {(showAllEpisodes
-                ? episodes.data
-                : episodes.data.slice(0, EPISODES_FIRST_PAGE)
-              ).map((episode, index) => (
-                <View
-                  // Keyed on position as well as number. TMDB occasionally repeats an
-                  // episode number within a season, and the normalizer keeps both
-                  // rather than losing a real episode to tidy up a display key.
-                  key={`${episode.episode_number}-${index}`}
-                >
-                  {/* No rule between episodes (founder, 2026-09-07). A hairline every
-                      row turned a season page into a table, which is the density note
-                      that runs through this whole pass: whitespace is the separator, and
-                      a rule marks a module rather than a sibling. `EpisodeRow`'s own
-                      vertical padding already puts 32 points between two of them, and
-                      the still and the number make the boundary obvious besides. */}
-                  <EpisodeRow
-                    episodeNumber={episode.episode_number}
-                    title={episode.title}
-                    airDate={formatShortDate(episode.air_date)}
-                    runtimeMinutes={episode.runtime_minutes}
-                    stillUri={stillUri(episode.still_path)}
-                    overview={episode.overview}
-                  />
-                </View>
-              ))}
+        {tabContent(activeTab)}
 
-              {!showAllEpisodes && episodes.data.length > EPISODES_FIRST_PAGE ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show all ${episodes.data.length} episodes`}
-                  onPress={() => setShowAllEpisodes(true)}
-                  style={({ pressed }) => [styles.showAll, pressed && styles.pressed]}
-                >
-                  <Text variant="callout" tone="action">
-                    Show all {episodes.data.length} episodes
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : episodes.isPending || enriching ? (
-            <SkeletonRow count={3} />
-          ) : episodes.isError ? (
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title="Episodes did not load"
-              body="Pull down to try again."
-            />
-          ) : (
-            // Distinct from the error above, and the difference is worth the words: a
-            // season the provider has published no episode list for is a fact about
-            // the show, not a fault the reader can retry away.
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title="No episodes listed"
-              body="TMDB has not published an episode list for this season yet."
-            />
-          )
-        ) : null}
-
-        {activeTab === 'cast' ? (
-          <CastStrip
-            cast={cast}
-            onPressMember={(member) => router.push(`/person/${member.id}`)}
-          />
-        ) : null}
-
-        {activeTab === 'videos' && videos.data?.length ? (
-          <View style={styles.details}>
-            {videos.data.map((video) => (
-              <Pressable
-                key={video.id}
-                accessibilityRole="link"
-                accessibilityLabel={`Play ${video.name} on YouTube`}
-                onPress={() => {
-                  const uri = videoUri(video.key);
-                  if (uri) void Linking.openURL(uri);
-                }}
-                style={({ pressed }) => [styles.video, pressed && styles.pressed]}
-              >
-                <Ionicons
-                  name="play-circle-outline"
-                  size={theme.layout.icon.lg}
-                  color={theme.semantic.action}
-                />
-                <View style={styles.videoCopy}>
-                  <Text variant="callout" numberOfLines={1}>
-                    {videoTitle(video)}
-                  </Text>
-                  {/* Where it plays and what kind of thing it is, in that order.
-                      "Trailer" alone said neither: three rows reading "Trailer 1",
-                      "Teaser", "Trailer" tell a reader nothing about which to tap. */}
-                  <Text variant="caption" tone="tertiary">
-                    {[SITE_LABEL[video.site] ?? video.site, video.type]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-
-        {activeTab === 'reviews' ? (
-          <TitleReviews
-            reviews={reviews.data ?? []}
-            loading={reviews.isPending}
-            sort={reviewSort}
-            onChangeSort={(next) => {
-              setReviewSort(next);
-              track({ name: 'reviews_sort_changed', props: { sort: next } });
-            }}
-            onToggleHelpful={(review: TitleReview) => {
-              /**
-               * One write at a time, and a second tap while it is in flight does nothing.
-               *
-               * Not throttling for its own sake: a queued mutation runs its `onMutate`
-               * immediately, so a second tap would take a snapshot of the first tap's
-               * optimistic state and a double failure would roll back to a mark the
-               * server never accepted. Refusing to start the second write keeps exactly
-               * one optimistic change alive, which is the condition the rollback in
-               * `useSetReviewHelpful` is correct under.
-               */
-              if (setHelpful.isPending) return;
-              // The premium interaction vocabulary, at its quietest weight: this is a
-              // selection, not an achievement.
-              hapticSelection();
-              setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
-            }}
-            // Against this viewer's watched set and this exact media item: having seen
-            // Season 1 does not unmask Season 2.
-            maskedFor={(review) =>
-              shouldMask({
-                hasSpoilers: review.hasSpoilers,
-                mediaItemId: title.id,
-                viewerId: profile.id,
-                authorId: review.userId,
-                watched: watched.data,
-              })
-            }
-            onPressAuthor={(handle) => router.push(`/u/${handle}`)}
-            viewerRanked={Boolean(data.ranked)}
-            viewerHasReview={(reviews.data ?? []).some(
-              (review) => review.userId === profile.id,
-            )}
-            // One composer. A note has always been written in the log sheet, where the
-            // spoiler flag and the visibility are chosen beside it; a second one here
-            // would be a second content model wearing a different button.
-            onWrite={() => openLog('review')}
-            noun={title.kind === 'season' ? 'season' : 'movie'}
-            // So the reporting control is absent from the viewer's own review, which
-            // the server would refuse anyway.
-            viewerId={profile.id}
-          />
-        ) : null}
-
-        {activeTab === 'details' ? (
-          <View style={styles.details}>
-            <Detail label="Released" value={formatDate(title.release_date)} />
-            <Detail
-              label="Runtime"
-              value={title.runtime_minutes ? `${title.runtime_minutes} minutes` : null}
-            />
-            <Detail label="Genres" value={descriptive.genres.join(', ') || null} />
-            <Detail label="Language" value={languageName(descriptive.language)} />
-            <Detail label="Director" value={credits.data?.director ?? null} />
-            {/* The ordinal with its denominator. The panel above shows the short
-                form, which is the one people read; this is the one that says what
-                it is two of (PRD §10). */}
-            <Detail
-              label="Your rank"
-              value={
-                data.ranked && total
-                  ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}`
-                  : null
-              }
-            />
-          </View>
-        ) : null}
-
-        {activeTab === 'seasons' ? (
-          seasons.data?.length ? (
-            <View>
-              {seasons.data.map((season) => (
-                <TitleRow
-                  key={season.id}
-                  title={season.title}
-                  year={yearOf(season.release_date)}
-                  posterUri={posterUri(season.poster_path)}
-                  // Not the word "Season" — the title beside it already reads
-                  // "Season 2". What a returning reader wants from this list is where
-                  // they are up to, so the row says whether they have ranked it.
-                  secondary={rankedSeasonIds.has(season.id) ? 'Ranked' : 'Not ranked yet'}
-                  onPress={() => router.push(`/title/${season.id}`)}
-                />
-              ))}
-            </View>
-          ) : seasons.isPending || enriching ? (
-            <SkeletonRow count={3} />
-          ) : (
-            // A series with no seasons is a series nobody has looked up yet, not a
-            // series without seasons. Saying so is better than an empty box, and far
-            // better than removing the tab and leaving the page with no way onward.
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title="Seasons are still loading"
-              body="Pull down to try again in a moment."
-            />
-          )
-        ) : null}
-
-        {/**
-         * Similar, as one wall of artwork.
-         *
-         * `PosterGrid` unchanged, which is the app's established answer to "a lot of
-         * titles at once" — For You and the Collection wall are the same component, and
-         * three across means the nine-title budget is exactly three rows on a phone.
-         * Deliberately not a labelled variant of it: the grid draws no titles on purpose
-         * (its own header says why), and the name, the year and the reader's score all
-         * travel in each tile's accessibility label already.
-         *
-         * The score chip is the Collection wall's, on a candidate the reader has ranked
-         * and on nothing else. Nothing new is drawn for this tab, and the chip is the
-         * only thing on this surface the reader's own history touches: the *order* is
-         * TMDB's, unreranked (founder, 2026-09-12).
-         *
-         * Every destination is `/title/{id}` — the same push the seasons list above
-         * makes and the same one every other surface in the app makes. For a film that
-         * is the film; for television it is the **series**, which opens on its Seasons
-         * tab and is therefore the existing series-to-season flow rather than a second
-         * one. `use-similar-titles.ts` is where a season page's associations are taken
-         * from its parent instead of invented for it.
-         */}
-        {activeTab === 'similar' ? (
-          similar.tiles.length ? (
-            <PosterGrid
-              tiles={similar.tiles}
-              onPressTile={(tile) => {
-                track({
-                  name: 'similar_title_opened',
-                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
-                });
-                router.push(`/title/${tile.id}`);
-              }}
-            />
-          ) : similar.isPending ? (
-            // The same skeleton every other list on this page uses. Three rows, which is
-            // the height the grid is about to be.
-            <SkeletonRow count={3} />
-          ) : similar.isError ? (
-            /**
-             * Quiet, and the page around it keeps working.
-             *
-             * The provider can refuse — the hourly ceiling in api.md §9 is a per-user
-             * limit and this tab spends against it — and a refusal is a fact about one
-             * tab. It must never reach the route's error boundary, which is why the
-             * query's failure is read here rather than thrown: everything above the tab
-             * row is the reader's own data and TMDB has no opinion about any of it.
-             */
-            <EmptyState
-              kind="couldNotLoad"
-              compact
-              title="Could not load similar titles"
-              body="Pull down to try again in a moment."
-            />
-          ) : (
-            // A real answer rather than a failure. TMDB associates nothing with plenty of
-            // obscure titles, the adapter caches that fact deliberately, and "yet" is the
-            // honest word for something a later provider update could change.
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title="No similar titles yet"
-              body="Nothing is associated with this one."
-            />
-          )
-        ) : null}
+          </>
+        )}
 
         <View style={styles.footer}>
           {enriching ? (
@@ -2822,6 +3587,41 @@ const TITLE_CAP_OFFSET = theme.space[1];
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
+  // ---- Immersive Scroll experiment (2026-11-04)
+  immersiveIdentity: { gap: theme.space[1] },
+  immersiveNotices: {},
+  /**
+   * The seam between two sections (final title refinement, 2026-11-06): 20pt from the end
+   * of one body to the next heading, inside the founder's 20–24.
+   */
+  immersiveSection: { paddingTop: SECTION_SEAM },
+  /** More details: a heading-sized disclosure with a 44pt target, its facts beneath. */
+  moreDetailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    marginTop: -(theme.layout.minTapTarget - 16) / 2,
+    marginBottom: -(theme.layout.minTapTarget - 16) / 2,
+    paddingHorizontal: theme.layout.gutter,
+  },
+  facts: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+    gap: theme.space[2],
+  },
+  fact: { flexDirection: 'row', flexWrap: 'wrap', columnGap: theme.space[3] },
+  factLabel: { flexBasis: '36%', flexGrow: 0, flexShrink: 0 },
+  factValue: { flexBasis: '50%', flexGrow: 1, flexShrink: 1 },
+  // One quiet line above the tabs, on Paper: no card of its own.
+
+  immersiveCircleCopy: { flex: 1, gap: 2 },
+  castSheet: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  reviewsSheetList: { paddingBottom: theme.space[2] },
+  castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
+  castList: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
+  castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },
   /**
    * **The row starts where the hero ends** (founder, final direction, 2026-09-07).
    *
@@ -2888,6 +3688,11 @@ const styles = StyleSheet.create({
    * contract this screen holds, not a property of a button cluster.
    */
   actionsRow: { marginTop: theme.space[2] },
+  // The same 12 from whatever is above it, now the taller of the two columns.
+  actionsFullWidth: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
   /**
    * A Paper mat around the artwork, the way a print is framed.
    *

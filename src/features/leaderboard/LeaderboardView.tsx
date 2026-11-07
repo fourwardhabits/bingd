@@ -1,13 +1,21 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, Chip, Divider, EmptyState, SkeletonRow, Text } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import {
+  Avatar,
+  Divider,
+  EmptyState,
+  MediumSelector,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
+import { fontFamily, medal, theme } from '@/ui/tokens';
 
 import {
   countLabel,
   emptyCopy,
   LEADERBOARD_METRICS,
+  LEADERBOARD_TIMEFRAMES,
   type LeaderboardEntry,
   type LeaderboardMetric,
   type LeaderboardTimeframe,
@@ -18,6 +26,7 @@ export type LeaderboardViewProps = {
   metric: LeaderboardMetric;
   onChangeMetric: (next: LeaderboardMetric) => void;
   timeframe: LeaderboardTimeframe;
+  onChangeTimeframe: (next: LeaderboardTimeframe) => void;
   entries: readonly LeaderboardEntry[] | undefined;
   standing: MyStanding | undefined;
   loading: boolean;
@@ -55,6 +64,11 @@ export type LeaderboardViewProps = {
  * It keys on `rank`, not on position in the array — so a three-way tie for first shows
  * three accented rows and the fourth person is fourth, which is what the board says.
  *
+ * **Gold, silver and bronze medals since the marquee cohesion sprint** (founder,
+ * 2026-11-07): the first three ranks are drawn as a medal holding the number — see
+ * `RankMedal` — and fourth onward as the plain number. They replaced the trophy that sat
+ * beside first place, so no row shows a mark and a number for the same fact.
+ *
  * ---------------------------------------------------------------------------
  * THE "YOU" ROW
  *
@@ -68,6 +82,7 @@ export function LeaderboardView({
   metric,
   onChangeMetric,
   timeframe,
+  onChangeTimeframe,
   entries,
   standing,
   loading,
@@ -80,24 +95,41 @@ export function LeaderboardView({
 
   return (
     <View style={styles.body}>
-      {/* The heading is the timeframe selector, and it lives in the screen's content
-          header row rather than here — see `app/(tabs)/feed.tsx`. This component draws
-          the board beneath it, so there is exactly one place the timeframe is named
-          (founder §3). */}
+      {/* LEADERBOARD is the section's heading, in the screen's content header row — see
+          `app/(tabs)/feed.tsx`. This component draws the board beneath it. */}
 
-      {/* The same chip row Search and Collection filters use, so a reader who has met
-          one has met all three. Horizontal and wrapping rather than scrolling: four
-          short words fit on one line at every text size this app supports, and a
-          scrolling row of four hides the fourth on the narrowest phone. */}
-      <View style={styles.chips}>
-        {LEADERBOARD_METRICS.map((option) => (
-          <Chip
-            key={option.value}
-            label={option.label}
-            selected={option.value === metric}
-            onPress={() => onChangeMetric(option.value)}
-          />
-        ))}
+      {/**
+       * **What and when, as two dropdowns side by side** (founder Preview QA, 2026-11-07).
+       *
+       *     All Titles ▾    This month ▾
+       *
+       * They replaced a four-segment control over a separate time dropdown: the content type
+       * and the period are the board's two filters and now read as a pair, in the same
+       * compact text-and-chevron control, each a 44pt target opening the small anchored
+       * menu. The names are whole (All Titles, TV Shows), so nothing is abbreviated for
+       * a screen reader or on screen. Re-choosing the value already chosen is not a change,
+       * as before, and the time range is the same remembered preference. On a narrow phone
+       * at a large text size the second wraps under the first rather than clipping.
+       */}
+      <View style={styles.filters} testID="leaderboard-filters">
+        <MediumSelector
+          size="filter"
+          value={metric}
+          onChange={(next) => {
+            if (next !== metric) onChangeMetric(next);
+          }}
+          options={LEADERBOARD_METRICS.map((option) => ({ id: option.value, label: option.label }))}
+          accessibilityHint="Choose what the board counts"
+          testID="leaderboard-metric"
+        />
+        <MediumSelector
+          size="filter"
+          value={timeframe}
+          onChange={onChangeTimeframe}
+          options={LEADERBOARD_TIMEFRAMES}
+          accessibilityHint="Choose a time range"
+          testID="leaderboard-timeframe"
+        />
       </View>
 
       {/**
@@ -151,6 +183,45 @@ export function LeaderboardView({
   );
 }
 
+/**
+ * **A filled medal for ranks 1, 2 and 3, the number centred on it** (founder Preview QA,
+ * 2026-11-07; a ring until then): gold, silver and bronze from `medal` in the colour
+ * tokens, each fill paired with the numeral colour that reads on it at AA (Ink on gold and
+ * silver, Paper on the deeper bronze). Colour is not the only carrier: the number is on
+ * the medal.
+ *
+ * It keys on `rank`, never on position, so ties share a medal: two people level for
+ * second are both silver, and the next person is 4th with no bronze — competition ranking,
+ * as the server computes it. Hidden from a screen reader, which hears "Number 2" from the
+ * row.
+ */
+const MEDAL = 26;
+const MEDALS: Record<number, (typeof medal)[keyof typeof medal]> = {
+  1: medal.gold,
+  2: medal.silver,
+  3: medal.bronze,
+};
+
+function RankMedal({ rank }: { rank: number }) {
+  const pair = MEDALS[rank]!;
+  return (
+    <View
+      style={[styles.medal, { backgroundColor: pair.fill }]}
+      testID={`leaderboard-medal-${rank}`}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Text
+        variant="footnote"
+        style={[styles.medalNumber, { color: pair.numeral }]}
+        allowFontScaling={false}
+      >
+        {rank}
+      </Text>
+    </View>
+  );
+}
+
 function LeaderboardRow({
   entry,
   metric,
@@ -193,14 +264,15 @@ function LeaderboardRow({
         pressed && styles.pressed,
       ]}
     >
-      <Text
-        variant="callout"
-        tone={top ? 'action' : 'tertiary'}
-        style={styles.rank}
-        allowFontScaling={false}
-      >
-        {entry.rank}
-      </Text>
+      <View style={styles.rankCell}>
+        {top ? (
+          <RankMedal rank={entry.rank} />
+        ) : (
+          <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+            {entry.rank}
+          </Text>
+        )}
+      </View>
 
       <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
 
@@ -326,9 +398,11 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
         standing.count,
       )}`}
     >
-      <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
-        {standing.rank}
-      </Text>
+      <View style={styles.rankCell}>
+        <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+          {standing.rank}
+        </Text>
+      </View>
       <View style={styles.copy}>
         <Text variant="callout">You</Text>
         {/* The denominator, because a rank without one is a number a reader cannot
@@ -345,13 +419,15 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
   heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
-  chips: {
+  // The two dropdowns on the gutter, side by side; the second wraps under the first only
+  // when the row cannot hold both.
+  filters: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: theme.space[2],
+    alignItems: 'center',
+    columnGap: theme.space[5],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
+    paddingTop: theme.space[1],
   },
   row: {
     flexDirection: 'row',
@@ -361,9 +437,19 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[3],
   },
   rowYou: { backgroundColor: theme.surface.raised },
-  // Fixed width so the avatars line up whether the rank is 1 or 48. Right-aligned so
-  // the digits themselves line up, which is what makes a column of numbers scannable.
-  rank: { minWidth: 24, textAlign: 'right' },
+  // One column for every rank, medal or number, each centred in it (founder Preview QA,
+  // 2026-11-07), so 1, 2, 3 and 4 share one axis. A minimum rather than a width: a pinned
+  // standing of 1,000 still fits on one line (independent review 1).
+  rankCell: { minWidth: MEDAL, alignItems: 'center' },
+  rank: { textAlign: 'center', fontVariant: ['tabular-nums'] },
+  medal: {
+    width: MEDAL,
+    height: MEDAL,
+    borderRadius: MEDAL / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  medalNumber: { fontFamily: fontFamily.sansSemibold, fontVariant: ['tabular-nums'] },
   copy: { flex: 1, gap: 1 },
   // Name and handle on one baseline. The name keeps its intrinsic width and the handle
   // shrinks first, so a long display name costs the handle rather than the count.

@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
@@ -14,8 +15,9 @@ import {
 } from '@/features/collection/filters';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
-import { headlineFor, SLATE_SIZE } from '@/features/recommendations/rank';
+import { SLATE_SIZE } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
+import { ForYouShortcuts } from '@/features/recommendations/ForYouShortcuts';
 import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
 import {
   useRecommendationRequests,
@@ -31,7 +33,6 @@ import { useDismissTitle } from '@/features/recommendations/use-dismissed';
 import {
   MAX_PAGES,
   useForYou,
-  type ForYouItem,
   type Medium,
 } from '@/features/recommendations/use-for-you';
 import {
@@ -54,14 +55,14 @@ import {
 } from '@/features/recommendations/use-title-recommendations';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
-import { languageName } from '@/lib/language';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  ContentToolbar,
   EmptyState,
-  FilterChip,
+  FiltersAction,
   HeaderBoundary,
   PosterGrid,
   Screen,
@@ -71,6 +72,7 @@ import {
   SkeletonRow,
   Text,
 } from '@/ui/components';
+import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
 /**
  * For You, rebuilt to the shape of Collection (founder pass, 2026-08-17).
@@ -264,12 +266,6 @@ export default function RecommendationsScreen() {
     }, [sentOnly, topMedium, groupPicking, reviewingRequests]),
   );
 
-  /** What the selector shows. See `topMedium`. */
-  const mode: ForYouMode = topMedium
-    ? topMedium === 'movies'
-      ? 'topMovies'
-      : 'topTv'
-    : medium;
   /** Whether the wall is the community's order rather than this reader's slate. */
   const onTopRated = topMedium !== null;
 
@@ -650,57 +646,14 @@ export default function RecommendationsScreen() {
   };
 
   /**
-   * Why this tile is here, on a long press.
-   *
-   * **Production gets the sentence and nothing else** (pre-GTM audit, 2026-09-07). This
-   * used to put `score 0.412`, the anchor contributions and the popularity prior in
-   * front of anybody who held a poster — the working the engine shows a developer, in
-   * the vocabulary of `rank.ts`, on a store build. The sentence `headlineFor` derives is
-   * the explanation PRD §13 requires and the only one a reader is owed: "Because you
-   * loved Heat", "More drama, which you rank highly", "Popular right now".
-   *
-   * The raw diagnostics survive in local development only — `__DEV__`, a dev client
-   * attached to Metro — and nowhere else (founder decision, 2026-09-07). The first cut of
-   * this gated them on `diagnosticsAvailable`, which is beta and below, on the reasoning
-   * that a beta tester holding a poster is who the working is for. The founder's ruling
-   * is that a community beta build is a stranger's build for this purpose: the same
-   * sentence a store user gets, and nothing in `rank.ts` vocabulary. The Diagnostics
-   * sheet keeps its own wider gate; this one is narrower on purpose.
+   * **No long press on the wall** (founder, final direction, 2026-11-03). It answered with a
+   * native alert holding the `headlineFor` sentence ("Because you loved Heat"), and in
+   * local development the engine's working under it. The founder ruled the alert out of
+   * the design. PRD §13 constrains what a reason may say, not that one is shown, so
+   * nothing else depends on it; `headlineFor` and its tests stay in `rank.ts` for the day
+   * a reason is drawn on the page. Developers lose the working on long press; the
+   * Diagnostics sheet is unchanged.
    */
-  const explain = (item: ForYouItem) => {
-    const { explanation } = item;
-    const taste = slate.data?.taste;
-    if (!taste) return;
-
-    // The real taste, not a stand-in. A stand-in with a large `sampleSize` was
-    // defeating the suppression that stops a taste built from one ranking being
-    // asserted in words, so this panel showed a sentence the wall would not.
-    const headline = headlineFor(explanation, taste, (code) => languageName(code) ?? code);
-
-    if (!__DEV__) {
-      Alert.alert(item.title, headline);
-      return;
-    }
-
-    const lines = [
-      headline,
-      `score ${explanation.total.toFixed(3)}`,
-      explanation.anchors.length
-        ? `anchors: ${explanation.anchors
-            .map((hit) => `${hit.title} (#${hit.position}, +${hit.contribution.toFixed(2)})`)
-            .join(', ')}`
-        : 'anchors: none',
-      explanation.genre
-        ? `genre: ${explanation.genre.genre} ${explanation.genre.affinity.toFixed(2)}`
-        : 'genre: none',
-      explanation.language
-        ? `language: ${explanation.language.code} ${explanation.language.affinity.toFixed(2)}`
-        : 'language: none',
-      `popularity prior: ${explanation.popularity.toFixed(2)}`,
-    ].filter(Boolean);
-
-    Alert.alert(item.title, lines.join('\n'));
-  };
 
   const unopened = unopenedCount(sentRows);
   // The server caps this list at 200 and orders unopened first, so a full page of
@@ -711,6 +664,101 @@ export default function RecommendationsScreen() {
   // Items, not senders, and the server's own count rather than the length of a capped
   // list — see `useRecommendationRequests`.
   const requestCount = requests.data?.total ?? 0;
+
+  /**
+   * **The page's toolbar: Recommended ▾ or Top Rated ▾, Filters opposite** (founder,
+   * marquee cohesion sprint, 2026-11-07) — Collection's toolbar, at the same height, padding
+   * and marquee size, so the two pages read as siblings. Under it, the request alert when
+   * something is waiting and the two features, Sent to You and Find for a Group (absent on
+   * Top Rated, as they always were).
+   *
+   * It scrolls away with the wall rather than standing over it: it is the first thing in the
+   * wall's scroller, and in Sent to You's. Where there is nothing to scroll (loading, empty,
+   * a failed read) it is drawn above the state instead, so it is always reachable. The
+   * medium stays the header's switch.
+   */
+  const toolbar = (
+    <View testID="for-you-toolbar">
+      <ContentToolbar
+        title={
+          <MediumSelector
+            size="marquee"
+            value={onTopRated ? 'top' : 'recommended'}
+            options={FOR_YOU_WALLS}
+            accessibilityHint="Choose Recommended or Top Rated"
+            testID="for-you-mode"
+            onChange={(next) => {
+              const showing = topMedium ?? medium;
+              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
+            }}
+          />
+        }
+      >
+        {/* The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
+            stay off, because nothing on either wall has been ranked by this reader. */}
+        <View style={styles.tools} testID="for-you-controls">
+          <FiltersAction
+            activeCount={activeCount}
+            onPress={() => setFiltering(true)}
+            testID="for-you-filters"
+          />
+          {isFiltered(filters) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear all"
+              accessibilityHint="Turns every filter off"
+              onPress={() => changeFilters(emptyFilters())}
+              style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
+              testID="for-you-clear-filters"
+            >
+              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
+            </Pressable>
+          ) : null}
+        </View>
+      </ContentToolbar>
+
+      {/* Above the features, and only when something is waiting. Not a filter: it says
+          that something not on screen yet needs a decision. Absent at zero. */}
+      {requestCount > 0 ? (
+        <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
+      ) : null}
+
+      {/* Not on Top Rated: both are statements about particular people, and that wall's
+          whole claim is that its order belongs to everybody (founder, 2026-09-09). */}
+      {onTopRated ? (
+        <View style={styles.topRatedGap} />
+      ) : (
+        <ForYouShortcuts
+          shortcuts={[
+            {
+              key: 'sent',
+              icon: sentOnly ? 'mail-open' : 'mail-outline',
+              label: 'Sent to You',
+              badge: unopened > 0 ? `${unopened}${atLeast ? '+' : ''}` : null,
+              accessibilityLabel:
+                unopened > 0
+                  ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                  : 'Sent to You',
+              selected: sentOnly,
+              onPress: () => setSentOnly((on) => !on),
+            },
+            {
+              key: 'group',
+              icon: 'people-outline',
+              label: 'Find for a Group',
+              // The analytics name stays the feature's original one.
+              onPress: () => {
+                track({ name: 'group_picks_opened' });
+                setGroupPicking(true);
+              },
+            },
+          ]}
+        />
+      )}
+    </View>
+  );
+  /** Whether the wall's own scroller is drawn, and so carries the toolbar. */
+  const wallScrolls = !wall.isError && !wall.isPending && items.length > 0;
 
   return (
     <Screen>
@@ -724,186 +772,31 @@ export default function RecommendationsScreen() {
        * add it to the two screens that never had it.
        *
        * Nothing about notifications changed. The inbox is still reached from Feed, which
-       * is the social surface it belongs to, and from Profile beside the gear. This is a
-       * header losing a control, not a navigation redesign.
+       * is the social surface it belongs to. This is a header losing a control, not a
+       * navigation redesign.
+       *
+       * **Its corner holds Movies | TV now** (founder, UI cohesion pass, 2026-11-06), as
+       * Collection's does: the same switch, value and handler that sat at the right of the
+       * row below, moved up into the header rather than repeated.
        */}
-      <AppHeader />
-
-      {/**
-       * **Movies and TV shows** — one selector, in the place Collection leads with the
-       * same one.
-       *
-       * "TV shows" rather than "TV seasons" because this wall holds series: TMDB answers
-       * "similar" about a show and never about one of its seasons. Collection keeps its
-       * own two options and its own label — see `MediumSelector`.
-       *
-       * **People was a third option here and has left** (founder §A16, 2026-09-08). It is
-       * a mode of the Feed tab now, for the reason this file's header gives: a
-       * recommendations screen is not where a new account builds a social graph. What that
-       * leaves behind is a two-option dropdown, which is what this control was before
-       * 2026-08-26 and is again.
-       *
-       * A dropdown and not a tab row, which is the 2026-09-07 decision and is unaffected:
-       * on a device the tab row drew differently here than on Collection, and the two
-       * screens are meant to lead with the same control. It is also the only one of the two
-       * that scales — a fourth tab is a wrapped row where a fourth sheet row is a fourth
-       * sheet row, which is exactly the bet the two Top Rated entries below just called in.
-       *
-       * **Top Rated Movies and Top Rated TV are entries here rather than a chip** (founder,
-       * 2026-09-09). This control answers "what am I looking at", and the community's order
-       * is a different answer to that question, not a narrowing of the reader's own — every
-       * chip in the row below narrows a wall that is already showing, and this replaces it.
-       *
-       * `Top Rated TV` says seasons even though the personalised entry above it says shows,
-       * and the two are right for their own walls: a season is the only television unit
-       * anybody can rate, so it is the only one that can be rated highest. `MediumSelector`
-       * draws the four in one sheet, in this order, so the two personalised walls stay
-       * where a returning reader last found them.
-       */}
-      <MediumSelector value={mode} onChange={changeMode} options={FOR_YOU_MODES} />
-      {/* The selector above it is the screen's entire header, and this is the seam that
-      marks where the header ends and the wall begins. */}
+      <AppHeader
+        right={
+          <CompactSwitch
+            accessibilityLabel="Medium"
+            options={FOR_YOU_MEDIA}
+            value={topMedium ?? medium}
+            onChange={(next) =>
+              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
+            }
+          />
+        }
+      />
       <HeaderBoundary />
 
-          {/* Above the filters, and only when something is waiting.
-
-          It sits here rather than in the filter row because it is not a filter: the
-          chips narrow what is on screen, and this says that there is something *not*
-          on screen yet which needs a decision. Absent at zero, with no placeholder and
-          no empty state — a row that is always there stops being a signal. */}
-          {requestCount > 0 ? (
-            <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
-          ) : null}
-
-          {/**
-           * **One row, and never two** (founder, physical Android, 2026-09-07).
-           *
-           * Sent to you leads because it is the only chip that changes what kind of thing
-           * is on screen; the rest narrow whatever is. Clear all appears only when there is
-           * something to clear, and clears the *filters*: turning off Sent to you as well
-           * would make one control mean two things.
-           *
-           * The row used to wrap, and on a 360pt phone with a Sent to you count and a
-           * Filters count it did — three controls became two rows and the wall moved down
-           * to make room. The arithmetic does not allow a fit: `Sent to you · 12+`,
-           * `Group Picks` and `Filters · 2` at footnote size with their glyphs and chip
-           * padding come to more than the 328pt a 360pt screen has between its gutters,
-           * before Clear all is even drawn. So the row scrolls sideways instead. When the
-           * chips fit — every ordinary phone with no counts — the content is narrower than
-           * the viewport, it stays left-aligned and nothing about the layout changes;
-           * when they do not, the row scrolls rather than reflows, and the wall below it
-           * holds still. `alwaysBounceHorizontal={false}` so a row with nowhere to go
-           * does not rubber-band. The same arrangement `SegmentedTabs` uses, for the same
-           * reason.
-           */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            alwaysBounceHorizontal={false}
-            style={styles.filterScroller}
-            testID="for-you-controls-scroller"
-          >
-            <View style={styles.filterRow} testID="for-you-controls">
-              {/**
-               * **Sent to you and Group Picks are absent on Top Rated** (founder,
-               * 2026-09-09), and Filters is not.
-               *
-               * The rule that separates them is what each control is *about*. Sent to
-               * you narrows the wall to things people sent this reader, and Group Picks
-               * asks what a named group should watch: both are statements about
-               * particular people, and there is no honest way to apply either to a wall
-               * whose whole claim is that the order belongs to everybody. Offering them
-               * here would mean either a control that quietly leaves Top Rated the
-               * moment it is pressed, or one that does nothing.
-               *
-               * Filters are different in kind. Genre, Language and Decade narrow *which
-               * titles* are on screen and say nothing about whose opinion put them
-               * there, so `Horror, top rated` is a question this wall can answer
-               * without changing what it is. The rating filters stay off on both walls,
-               * for the reason they were always off here: nothing on either has been
-               * ranked by this reader.
-               */}
-              {onTopRated ? null : (
-              <FilterChip
-                icon={sentOnly ? 'mail-open' : 'mail-outline'}
-                label={
-                  unopened > 0
-                    ? `Sent to you · ${unopened}${atLeast ? '+' : ''}`
-                    : 'Sent to you'
-                }
-                accessibilityLabel={
-                  unopened > 0
-                    ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                    : 'Sent to you'
-                }
-                selected={sentOnly}
-                // A social feature, not a filter — see the note above `emphasis` on
-                // `FilterChip`, and `Group Picks` two chips down, which is the other one.
-                emphasis="social"
-                onPress={() => setSentOnly((on) => !on)}
-              />
-              )}
-              {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
-                entire wall, and every other control here narrows the wall that is
-                already showing — it belongs in the selector at the top with the other
-                answers to "what am I looking at", and that is where it lives again. */}
-              {/* An action chip rather than a filter: it opens the flow that answers "what
-            should this group watch together". Deliberately not a fourth MediumSelector
-            segment and not a tab — a group is a momentary question, and this row is
-            where the screen keeps its questions. The wall the chip sits on decides the
-            medium the picks answer for. */}
-              {onTopRated ? null : (
-                <FilterChip
-                  icon="people-outline"
-                  label="Group Picks"
-                  // The row's other social feature. It shares Sent to you's treatment
-                  // exactly, so the two read as one family and Filters reads as the
-                  // utility beside them.
-                  emphasis="social"
-                  onPress={() => {
-                    track({ name: 'group_picks_opened' });
-                    setGroupPicking(true);
-                  }}
-                />
-              )}
-              {/* The collection's own sheet, which its header always intended this screen to
-            reuse rather than growing a second one. Genre, Language, Decade and Anime
-            come with it. Rating filters are off: nothing on either list has been ranked
-            by this reader. */}
-              <FilterChip
-                icon="options-outline"
-                label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
-                selected={activeCount > 0}
-                onPress={() => setFiltering(true)}
-              />
-              {/* **The Refresh chip was here, and it is gone** (founder §18).
-
-            It existed because the wall could not rotate by itself: exposure was module
-            state, so every launch drew from an un-penalised pool and produced the same
-            first slate, and pressing Refresh was the only way past it. That was the
-            reader having to know a mechanism, which is exactly what §18 asks to remove —
-            "the user should not have to think: I need to press Refresh to make
-            recommendations work".
-
-            Two changes let it go rather than a decision that the row looked busy, which
-            the founder ruled out as a reason on its own. `recommendation_exposure`
-            (20260828000500) makes the rotation survive a relaunch, so the *default*
-            behaviour is now what Refresh used to buy. And an explicit way to ask for a
-            new slate still exists: pull-to-refresh on the wall, which runs the same
-            `refreshRecommendations` this chip did. A gesture the screen already had for
-            Sent to you, rather than a control competing with the filters. */}
-              {isFiltered(filters) ? (
-                <FilterChip
-                  icon="close"
-                  label="Clear all"
-                  onPress={() => changeFilters(emptyFilters())}
-                />
-              ) : null}
-            </View>
-          </ScrollView>
-
+          {!sentOnly && !wallScrolls ? toolbar : null}
           {sentOnly ? (
             <SentList
+              header={toolbar}
               query={sent}
               rows={sentVisible}
               total={sentRows.length}
@@ -1066,39 +959,11 @@ export default function RecommendationsScreen() {
                 />
               }
             >
-              {/**
-               * **What this wall is, when it is not yet the reader's** (pre-GTM audit,
-               * 2026-09-07).
-               *
-               * `lowData` is the hook's own word for a slate scored with no resolved
-               * anchors — a taste too thin to quote a title from. A stranger who has
-               * ranked two films sees exactly this wall, and without a word for it the
-               * screen called For You is presenting last week's trending page as
-               * personalisation. One quiet line in the footnote register the exhausted
-               * notice already uses, above the artwork, and gone the moment an anchor
-               * resolves. Not a header, not a card, and nothing about the slate moved.
-               *
-               * **Two sentences, because "popular" is a claim** (Codex review of #122).
-               * The pool takes `socialCandidates` as well as the trending fallback, so a
-               * reader with no anchor can be looking at titles the people they follow
-               * loved. `popularityOnly` is derived from the wall actually drawn: only
-               * when no anchor resolved *and* nothing social is on it does the line say
-               * the wall is popular; a thin taste with social titles on the wall gets
-               * the narrower truth, that bingd. is still learning, and no claim about
-               * where the titles came from.
-               */}
-              {/* Neither line belongs on Top Rated: both are statements about how well
-                  bingd. knows *this reader's* taste, and this wall makes no claim about
-                  that at all. */}
-              {onTopRated ? null : slate.data?.popularityOnly ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  Popular right now while bingd learns your taste.
-                </Text>
-              ) : slate.data?.lowData ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  bingd is still learning your taste.
-                </Text>
-              ) : null}
+              {toolbar}
+              <View style={styles.wallBody}>
+              {/* No line above the wall about how well bingd. knows the reader's taste
+                  (founder, 2026-11-03). Until then a thin taste printed "Popular right now
+                  while bingd learns your taste" or "bingd is still learning your taste". */}
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -1140,22 +1005,6 @@ export default function RecommendationsScreen() {
                         });
                       }
                 }
-                /**
-                 * Why a title is on the wall is a question only the slate can answer: it
-                 * explains a *score against this reader's taste*, and Top Rated has no
-                 * such score. The gesture is absent there rather than answering with
-                 * something else.
-                 */
-                onLongPressTile={
-                  onTopRated
-                    ? undefined
-                    : (tile) => {
-                        const item = slateItems.find(
-                          (candidate) => candidate.mediaItemId === tile.id,
-                        );
-                        if (item) explain(item);
-                      }
-                }
               />
 
               {/**
@@ -1180,6 +1029,7 @@ export default function RecommendationsScreen() {
                   Rank a few more titles to sharpen your recommendations.
                 </Text>
               ) : null}
+              </View>
             </ScrollView>
           )}
 
@@ -1259,24 +1109,16 @@ export default function RecommendationsScreen() {
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
 
-/**
- * **Recommended Movies · Recommended TV · Top Rated Movies · Top Rated TV** (founder
- * physical QA, 2026-09-14).
- *
- * The personalised pair read `Movies` and `TV shows`, which stopped being unambiguous once
- * `Top Rated Movies` sat beneath `Movies`: both are movies, and only one label said what kind
- * of list it was. Every entry now names its list, and the words that differ — Recommended,
- * Top Rated — are the ones a reader is choosing between. The tab and screen are still For
- * You. The ids, and everything keyed on them, are unchanged: this is words, not logic.
- *
- * A dropdown rather than a horizontal row, so nothing needs to scroll; `MediumSelector` lets
- * the trigger's label wrap rather than push its chevron off a narrow screen.
- */
-const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
-  { id: 'movies', label: 'Recommended Movies' },
-  { id: 'tv', label: 'Recommended TV' },
-  { id: 'topMovies', label: 'Top Rated Movies' },
-  { id: 'topTv', label: 'Top Rated TV' },
+/** The medium, in the compact switch. "TV", not "TV Shows", at this size (2026-11-04). */
+const FOR_YOU_MEDIA: readonly CompactSwitchOption<Medium>[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv', label: 'TV' },
+];
+
+/** Which wall, in the page's dropdown. */
+const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [
+  { id: 'recommended', label: 'Recommended' },
+  { id: 'top', label: 'Top Rated' },
 ];
 
 /**
@@ -1294,7 +1136,10 @@ function SentList({
   busyId,
   onOpen,
   onToggleSave,
+  header,
 }: {
+  /** The page's toolbar: first in the list's scroller, or above a state with none. */
+  header: React.ReactNode;
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
   total: number;
@@ -1303,26 +1148,38 @@ function SentList({
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
 }) {
-  if (query.isPending) return <SkeletonRow count={5} />;
+  if (query.isPending)
+    return (
+      <>
+        {header}
+        <SkeletonRow count={5} />
+      </>
+    );
 
   if (query.isError) {
     return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load these"
-        body="Check your connection and try again."
-        action={{ label: 'Try again', onPress: () => void query.refetch() }}
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load these"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void query.refetch() }}
+        />
+      </>
     );
   }
 
   if (total === 0) {
     return (
-      <EmptyState
-        kind="nothingYet"
-        title="Nothing sent your way yet"
-        body="When someone you follow back recommends a film or a season, it lands here."
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing sent your way yet"
+          body="When someone you follow back recommends a film or a season, it lands here."
+        />
+      </>
     );
   }
 
@@ -1332,11 +1189,14 @@ function SentList({
       // this, and a second one with the same label is the duplicated state the founder
       // rejected on the Feed: the reader would have to work out whether the two do the
       // same thing.
-      <EmptyState
-        kind="nothingYet"
-        title="Nothing matches your filters"
-        body="Clear your filters to see everything people have sent you."
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing matches your filters"
+          body="Clear your filters to see everything people have sent you."
+        />
+      </>
     );
   }
 
@@ -1352,6 +1212,8 @@ function SentList({
         />
       }
     >
+      {header}
+      <View style={styles.wallBody}>
       <SentToYouList
         rows={rows}
         saved={saved}
@@ -1359,6 +1221,7 @@ function SentList({
         onOpen={onOpen}
         onToggleSave={onToggleSave}
       />
+      </View>
     </ScrollView>
   );
 }
@@ -1422,40 +1285,23 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  content: { paddingBottom: theme.space[10], gap: theme.space[3] },
+  // Filters (`FiltersAction`) and, while filters are on, Clear beside it.
+  tools: { flexDirection: 'row', alignItems: 'center' },
+  clear: {
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolPressed: { opacity: 0.6 },
+  // Top Rated has no features row; this is the seam the row's foot would have given.
+  topRatedGap: { height: theme.space[3] },
+  content: { paddingBottom: theme.space[10] },
+  // The wall and its end line, under the toolbar, 12pt apart as they always were.
+  wallBody: { gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
     textAlign: 'center',
-  },
-  lowData: {
-    paddingHorizontal: theme.layout.gutter,
-    textAlign: 'center',
-  },
-  // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
-  // into whatever the page offers it — the note `SegmentedTabs` carries.
-  filterScroller: { flexGrow: 0 },
-  /**
-   * `nowrap` is the contract. A wrapped chip row is the founder's rejected state, and
-   * the scroller around this is what makes one row possible at every width instead of a
-   * promise the arithmetic cannot keep on a 360pt phone.
-   */
-  filterRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignItems: 'center',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    /**
-     * **16, and it was 8** (founder, physical QA, 2026-09-08).
-     *
-     * On the device the first row of posters sat directly under the chips with no seam
-     * between them, so the controls read as part of the wall rather than as the thing
-     * that governs it. `space[4]` is the top of the design system's *control row → the
-     * content it governs* interval (design-system.md §5), which is what this seam is:
-     * the wall has no top padding of its own, so this padding is the whole gap.
-     */
-    paddingBottom: theme.space[4],
   },
 });

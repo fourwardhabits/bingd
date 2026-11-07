@@ -9,6 +9,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import AccountScreen from '../../../app/settings/account';
 import NotificationsScreen from '../../../app/settings/notifications';
 import SettingsScreen from '../../../app/settings/index';
+import { setTitleLayout, useStoredTitleLayout } from '@/features/title/title-layout';
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
@@ -93,9 +94,14 @@ jest.mock('@/features/profile/AvatarPicker', () => ({ AvatarPicker: () => null }
 // audience that needed them. Mocking `variant: 'production'` alone would now leave
 // `isRelease` undefined and quietly re-enable the block, so the lane is stated too.
 // `src/lib/env.test.ts` covers the derivation itself.
+// The lane alone can be moved, by the Labs tests at the end of this file; everything else
+// stays a release build.
+let mockLane = 'production';
 jest.mock('@/lib/env', () => ({
   env: { variant: 'production', lane: 'production' },
-  lane: 'production',
+  get lane() {
+    return mockLane;
+  },
   isProduction: true,
   isRelease: true,
   showEnvironmentBadge: false,
@@ -1145,5 +1151,49 @@ describe('the Settings sections', () => {
 
     await fireEvent.press(view.getByLabelText('Account & Data'));
     expect(mockPush).toHaveBeenCalledWith('/settings/account');
+  });
+});
+
+/**
+ * **Labs** (Immersive Scroll experiment, 2026-11-04): one row, offered on every lane but
+ * production, that switches the title page between Original and Immersive on this device.
+ */
+/**
+ * **Labs offers the way back to Original, production included** (founder, release pass,
+ * 2026-11-07): the Cinematic title page is the default everywhere, and this row switches it.
+ */
+describe('Labs in Settings', () => {
+  afterEach(async () => {
+    mockLane = 'production';
+    await setTitleLayout('original');
+  });
+
+  it('is offered in a production build, and switches the title page in one tap', async () => {
+    mockLane = 'production';
+    await setTitleLayout('immersive');
+    let shown = '';
+    const Probe = () => {
+      shown = useStoredTitleLayout();
+      return null;
+    };
+    const view = await renderWithProviders(
+      <>
+        <SettingsScreen />
+        <Probe />
+      </>,
+    );
+
+    expect(view.getByText('LABS')).toBeTruthy();
+    const row = view.getByRole('button', { name: 'Title page, Cinematic' });
+    await act(async () => {
+      fireEvent.press(row);
+    });
+    await waitFor(() => expect(shown).toBe('original'));
+    expect(view.getByRole('button', { name: 'Title page, Original' })).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: 'Title page, Original' }));
+    });
+    await waitFor(() => expect(shown).toBe('immersive'));
   });
 });
