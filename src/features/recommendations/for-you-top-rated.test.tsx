@@ -1,6 +1,7 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { bandSizes, formatScore, scoreFor, type Bucket } from '@/features/collection/score';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -31,6 +32,8 @@ let mockTopRatedPages: Record<string, Row[]> = {};
 let mockTopRatedError: string | null = null;
 
 const mockCatalogue: Record<string, Record<string, unknown>> = {};
+/** The reader's own `rankings` rows: what `useMyScores` derives their score chips from. */
+let mockRankings: Record<string, unknown>[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -59,7 +62,11 @@ jest.mock('@/lib/supabase', () => ({
         then: (resolve: (value: unknown) => unknown) =>
           resolve({
             data:
-              table === 'media_items' ? wanted.map((id) => mockCatalogue[id]).filter(Boolean) : [],
+              table === 'media_items'
+                ? wanted.map((id) => mockCatalogue[id]).filter(Boolean)
+                : table === 'rankings'
+                  ? mockRankings
+                  : [],
             error: null,
           }),
       };
@@ -168,6 +175,7 @@ beforeEach(() => {
   });
   mockTopRatedPages = { first: [row('best-1', 9.4), row('best-2', 9.1), row('best-3', 8.8)] };
   mockTopRatedError = null;
+  mockRankings = [];
 });
 
 describe('choosing Top Rated', () => {
@@ -548,3 +556,63 @@ describe('the dropdown and the switch together', () => {
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
   });
 });
+
+/**
+ * **The reader's own score, on the titles they have ranked** (founder hotfix, 2026-11-07).
+ *
+ * Top Rated is the community's order and keeps titles the reader has seen, so a poster
+ * there can be one they ranked — and it now carries the same Maroon chip the Collection
+ * wall draws, from the same `PosterGrid` tile. Nothing is chipped onto an unranked title,
+ * and the community's order is untouched.
+ */
+describe('your own score on Top Rated', () => {
+  const ranking = (id: string, bucket: Bucket, position: number) => ({
+    media_item_id: id,
+    bucket,
+    position,
+    category: 'movies',
+  });
+
+  it('chips your score onto a title you ranked, and nothing onto the rest', async () => {
+    mockRankings = [ranking('best-2', 'loved', 1), ranking('elsewhere', 'loved', 2)];
+    const sizes = bandSizes(mockRankings as { bucket: Bucket }[]);
+    const yours = formatScore(scoreFor('loved', 1, sizes));
+
+    const view = await open();
+    await choose(view, 'Top Rated Movies');
+
+    await waitFor(() =>
+      expect(view.getByLabelText(`The Second, 2014, scored ${yours} out of 10`)).toBeTruthy(),
+    );
+    // The chip itself is hidden from screen readers: the tile's label already says it.
+    expect(view.getByText(yours, { includeHiddenElements: true })).toBeTruthy();
+    // Unranked titles keep a plain label and no chip; the order is still the server's.
+    const tiles = view
+      .getAllByLabelText(/^The .+, 2014/)
+      .map((node) => node.props.accessibilityLabel);
+    expect(tiles).toEqual([
+      'The Highest, 2014',
+      `The Second, 2014, scored ${yours} out of 10`,
+      'The Third, 2014',
+    ]);
+  });
+
+  it('chips nothing for a reader who has ranked none of the wall', async () => {
+    const view = await open();
+    await choose(view, 'Top Rated Movies');
+
+    await waitFor(() => expect(view.getByLabelText('The Highest, 2014')).toBeTruthy());
+    expect(view.queryByLabelText(/scored .* out of 10/)).toBeNull();
+  });
+
+  it('opens a chipped title like any other', async () => {
+    mockRankings = [ranking('best-1', 'fine', 1)];
+    const view = await open();
+    await choose(view, 'Top Rated Movies');
+
+    const tile = await view.findByLabelText(/^The Highest, 2014, scored /);
+    await fireEvent.press(tile);
+    expect(mockPush).toHaveBeenCalledWith('/title/best-1');
+  });
+});
+

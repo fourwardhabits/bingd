@@ -14,6 +14,7 @@ import {
   type CollectionFilters,
 } from '@/features/collection/filters';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
+import { useMyScores, type MyScore } from '@/features/collection/use-score';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { SLATE_SIZE } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
@@ -334,6 +335,14 @@ export default function RecommendationsScreen() {
    * ever asked for.
    */
   const topRated = useTopRated(profile.id, topMedium ?? 'movies', onTopRated);
+  /**
+   * The reader's own score for each title they have ranked, for Top Rated's chip — the
+   * Collection wall's chip, drawn by the same `PosterGrid` tile. Top Rated is the
+   * community's order and does not subtract what the reader has seen, so a ranked title
+   * can be on it; an unranked one has no entry here and gets no chip. Read only on Top
+   * Rated: the recommended slate subtracts everything watched.
+   */
+  const myScores = useMyScores(profile.id, onTopRated);
   const logged = useLoggedCollection(profile.id);
   const sent = useSentToYou(profile.id);
   /**
@@ -974,9 +983,10 @@ export default function RecommendationsScreen() {
                   // what lets a bookmark redraw one icon instead of replacing the wall —
                   // see `toggleSaveById`.
                   saved: savedIds.has(item.mediaItemId),
-                  // Deliberately no score. Nothing here has been watched, so a score would
-                  // have to be somebody else's, and a rating filter over unseen titles is
-                  // the thing the collection filter sheet already refuses.
+                  // Only the reader's own score, and only on Top Rated: the recommended
+                  // slate holds nothing they have watched, and nobody else's score is ever
+                  // chipped onto a poster.
+                  ...(onTopRated ? ownScore(myScores.data?.get(item.mediaItemId)) : null),
                 }))}
                 onPressTile={(tile) => router.push(`/title/${tile.id}`)}
                 onToggleSave={(tile) => {
@@ -1305,3 +1315,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+/** A tile's chip fields from the reader's own ranking, or nothing for an unranked title. */
+const ownScore = (mine: MyScore | undefined) =>
+  mine ? { score: mine.score, bucket: mine.bucket } : null;
