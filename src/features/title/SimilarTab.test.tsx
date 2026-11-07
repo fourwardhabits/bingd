@@ -199,6 +199,14 @@ const facet = (mediaItemId: string, ids: string[]) => ({
 
 const HOUR = 3600_000;
 
+/**
+ * The Cinematic page is the default since the release pass (2026-11-07); this file tests
+ * the Original page unless a block opts into Cinematic itself, so every test starts there.
+ */
+beforeEach(async () => {
+  await setTitleLayout('original');
+});
+
 beforeEach(() => {
   mockOpenId = 'film-1';
   mockPush.mockReset();

@@ -37,7 +37,17 @@ beforeEach(() => {
 });
 
 describe('the title-page switch', () => {
-  it('is Original until somebody opts in', async () => {
+  /** Cinematic by default everywhere since the release pass (founder, 2026-11-07). */
+  it('is Cinematic until somebody chooses Original', async () => {
+    const { result } = await renderHook(() => useTitleLayout());
+    await act(async () => {
+      await hydrateTitleLayout();
+    });
+    expect(result.current).toBe('immersive');
+  });
+
+  it('honours a stored Original at the next launch', async () => {
+    mockPrefs.set('title.layout', 'original');
     const { result } = await renderHook(() => useTitleLayout());
     await act(async () => {
       await hydrateTitleLayout();
@@ -64,18 +74,18 @@ describe('the title-page switch', () => {
     expect(result.current).toBe('immersive');
   });
 
-  it('treats anything it does not recognise as Original', async () => {
+  it('treats anything it does not recognise as the Cinematic default', async () => {
     mockPrefs.set('title.layout', 'cinematic');
     const { result } = await renderHook(() => useTitleLayout());
     await act(async () => {
       await hydrateTitleLayout();
     });
-    expect(result.current).toBe('original');
+    expect(result.current).toBe('immersive');
   });
 
-  it('is never offered in production, and production always renders Original', async () => {
+  it('is offered in production too, and renders the stored choice there', async () => {
     mockLane = 'production';
-    mockPrefs.set('title.layout', 'immersive');
+    mockPrefs.set('title.layout', 'original');
     const { result } = await renderHook(() => ({
       shown: useTitleLayout(),
       stored: useStoredTitleLayout(),
@@ -84,14 +94,13 @@ describe('the title-page switch', () => {
       await hydrateTitleLayout();
     });
 
-    expect(isTitleLayoutAvailable()).toBe(false);
-    // The stored choice survives (so a later decision can honour it) but is not drawn.
-    expect(result.current.stored).toBe('immersive');
+    expect(isTitleLayoutAvailable()).toBe(true);
+    expect(result.current.stored).toBe('original');
     expect(result.current.shown).toBe('original');
   });
 
-  it('is offered on every lane but production', () => {
-    for (const lane of ['development', 'preview', 'beta']) {
+  it('is offered on every lane', () => {
+    for (const lane of ['development', 'preview', 'beta', 'production']) {
       mockLane = lane;
       expect(isTitleLayoutAvailable()).toBe(true);
     }

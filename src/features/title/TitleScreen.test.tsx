@@ -290,6 +290,14 @@ const videos = {
   },
 };
 
+/**
+ * The Cinematic page is the default since the release pass (2026-11-07); this file tests
+ * the Original page unless a block opts into Cinematic itself, so every test starts there.
+ */
+beforeEach(async () => {
+  await setTitleLayout('original');
+});
+
 beforeEach(() => {
   mockPreviewsByDefault = false;
   mockHeaderOptions = {};
@@ -3575,7 +3583,7 @@ describe('the immersive title page (experiment)', () => {
     viewer_helpful: false,
   });
 
-  it('is not what anybody sees unless they opted in', async () => {
+  it('shows the Original page to someone who chose it in Labs', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-identity-copy')).toBeTruthy());
     expect(view.queryByTestId('immersive-hero')).toBeNull();

@@ -9,7 +9,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import AccountScreen from '../../../app/settings/account';
 import NotificationsScreen from '../../../app/settings/notifications';
 import SettingsScreen from '../../../app/settings/index';
-import { hydrateTitleLayout, setTitleLayout, useStoredTitleLayout } from '@/features/title/title-layout';
+import { setTitleLayout, useStoredTitleLayout } from '@/features/title/title-layout';
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
@@ -1158,21 +1158,19 @@ describe('the Settings sections', () => {
  * **Labs** (Immersive Scroll experiment, 2026-11-04): one row, offered on every lane but
  * production, that switches the title page between Original and Immersive on this device.
  */
+/**
+ * **Labs offers the way back to Original, production included** (founder, release pass,
+ * 2026-11-07): the Cinematic title page is the default everywhere, and this row switches it.
+ */
 describe('Labs in Settings', () => {
   afterEach(async () => {
     mockLane = 'production';
     await setTitleLayout('original');
   });
 
-  it('is not offered in a production build', async () => {
-    const view = await renderWithProviders(<SettingsScreen />);
-    expect(view.queryByText('LABS')).toBeNull();
-    expect(view.queryByRole('button', { name: /^Title page/ })).toBeNull();
-  });
-
-  it('is offered on Preview, reads Original, and switches the title page in one tap', async () => {
-    mockLane = 'preview';
-    await hydrateTitleLayout();
+  it('is offered in a production build, and switches the title page in one tap', async () => {
+    mockLane = 'production';
+    await setTitleLayout('immersive');
     let shown = '';
     const Probe = () => {
       shown = useStoredTitleLayout();
@@ -1186,16 +1184,16 @@ describe('Labs in Settings', () => {
     );
 
     expect(view.getByText('LABS')).toBeTruthy();
-    const row = view.getByRole('button', { name: 'Title page, Original' });
+    const row = view.getByRole('button', { name: 'Title page, Cinematic' });
     await act(async () => {
       fireEvent.press(row);
     });
-    await waitFor(() => expect(shown).toBe('immersive'));
-    expect(view.getByRole('button', { name: 'Title page, Immersive' })).toBeTruthy();
+    await waitFor(() => expect(shown).toBe('original'));
+    expect(view.getByRole('button', { name: 'Title page, Original' })).toBeTruthy();
 
     await act(async () => {
-      fireEvent.press(view.getByRole('button', { name: 'Title page, Immersive' }));
+      fireEvent.press(view.getByRole('button', { name: 'Title page, Original' }));
     });
-    await waitFor(() => expect(shown).toBe('original'));
+    await waitFor(() => expect(shown).toBe('immersive'));
   });
 });

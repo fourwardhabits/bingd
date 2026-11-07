@@ -218,11 +218,11 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Labs: opt-in experiments, never in production (Immersive Scroll, 2026-11-04).
-            One row per experiment, and the row is the whole switch: tap it to swap, and
-            the next title page opens in the other layout. `title-layout.ts` and
-            docs/release/immersive-title-experiment.md say what it changes and how to
-            put Original back for everyone. */}
+        {/* Labs: one row per alternative, and the row is the whole switch: tap it to swap,
+            and the next title page opens in the other layout. Since the release pass
+            (2026-11-07) the Cinematic title page is the default everywhere, production
+            included, and this row is how somebody returns to the Original one.
+            `title-layout.ts` says how to put Original back for everyone. */}
         {isTitleLayoutAvailable() ? (
           <View style={styles.section}>
             <SectionHeader title="Labs" />
@@ -230,8 +230,8 @@ export default function SettingsScreen() {
               <Row
                 icon="flask-outline"
                 label="Title page"
-                detail={titleLayout === 'immersive' ? 'Immersive' : 'Original'}
-                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the immersive title page'}
+                detail={titleLayout === 'immersive' ? 'Cinematic' : 'Original'}
+                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the cinematic title page'}
                 onPress={() => void setTitleLayout(titleLayout === 'immersive' ? 'original' : 'immersive')}
                 last
               />

@@ -2,6 +2,7 @@ import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, useWindowDimensions } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { setTitleLayout } from '@/features/title/title-layout';
 import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -264,6 +265,14 @@ const completeSeries = {
   certification: 'TV-MA',
   parent: null,
 };
+
+/**
+ * The Cinematic page is the default since the release pass (2026-11-07); this file tests
+ * the Original page unless a block opts into Cinematic itself, so every test starts there.
+ */
+beforeEach(async () => {
+  await setTitleLayout('original');
+});
 
 beforeEach(() => {
   setViewport(750);

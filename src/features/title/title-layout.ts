@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from 'react';
 
-import { lane } from '@/lib/env';
 import { readPref, writePref } from '@/lib/prefs';
 
 /**
@@ -22,20 +21,32 @@ import { readPref, writePref } from '@/lib/prefs';
  * `isTitleLayoutAvailable` returns false, which forces `original` whatever any device
  * stored.
  *
- * `isTitleLayoutAvailable` is the lane gate. Every lane but production offers the switch
- * (Preview, Beta, development). Production never shows it, so a production OTA carrying
- * this code still renders the original page for everyone until a separate decision
- * changes this function. The remote option the docs describe — a `public.` key in the existing
+ * `isTitleLayoutAvailable` was the lane gate that kept production on Original; since the
+ * release pass (below) every lane offers the switch and opens on Cinematic. The remote option the docs describe — a `public.` key in the existing
  * `app_config` table, which clients can already read — is deliberately not built.
  */
 export type TitleLayout = 'original' | 'immersive';
 
-/** Whether this build offers the switch at all. Read per call, so a test can vary the lane. */
-export const isTitleLayoutAvailable = (): boolean => lane !== 'production';
+/**
+ * **The Cinematic page is the default everywhere, production included** (founder, release
+ * pass, 2026-11-07). It had been Labs-only and locked off in production; the founder
+ * approved it as the production title page, with Original kept one switch away in
+ * Settings › Labs as a fallback for anybody who prefers it.
+ *
+ * So the switch is offered in every lane, an unset or unreadable choice is Cinematic, and
+ * a stored `original` is honoured. Rollback is an OTA that makes `DEFAULT_LAYOUT`
+ * `original` again (the Labs row keeps working either way).
+ *
+ * Kept as a function, so the Settings row and the tests ask one place.
+ */
+export const isTitleLayoutAvailable = (): boolean => true;
+
+/** What a device with no stored choice opens on. */
+export const DEFAULT_LAYOUT: TitleLayout = 'immersive';
 
 const PREF = 'title.layout';
 
-let current: TitleLayout = 'original';
+let current: TitleLayout = DEFAULT_LAYOUT;
 let hydrated = false;
 const listeners = new Set<() => void>();
 
@@ -43,12 +54,13 @@ const emit = () => {
   for (const listener of listeners) listener();
 };
 
-/** Reads the stored choice once per launch. A missing or unknown value is `original`. */
+/** Reads the stored choice once per launch. A missing or unknown value is the default. */
 export function hydrateTitleLayout(): Promise<void> {
   if (hydrated) return Promise.resolve();
   hydrated = true;
   return readPref<TitleLayout>(PREF).then((stored) => {
-    const next: TitleLayout = stored === 'immersive' ? 'immersive' : 'original';
+    const next: TitleLayout =
+      stored === 'original' || stored === 'immersive' ? stored : DEFAULT_LAYOUT;
     if (next !== current) {
       current = next;
       emit();
@@ -75,7 +87,7 @@ export function useStoredTitleLayout(): TitleLayout {
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
 
-/** The layout to render. Always `original` where the experiment is not offered. */
+/** The layout to render: the stored choice, or the default. */
 export function useTitleLayout(): TitleLayout {
   const stored = useStoredTitleLayout();
   return isTitleLayoutAvailable() ? stored : 'original';
@@ -83,7 +95,7 @@ export function useTitleLayout(): TitleLayout {
 
 /** Test seam: forget what this module read, as an app launch does. */
 export function resetTitleLayoutForTests(): void {
-  current = 'original';
+  current = DEFAULT_LAYOUT;
   hydrated = false;
   listeners.clear();
 }
