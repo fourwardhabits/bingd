@@ -211,6 +211,30 @@ describe('the medals', () => {
   });
 });
 
+describe('the pinned standing', () => {
+  /** Independent review 1: a four-digit standing must not wrap in a 26pt column. */
+  it('lets a long rank widen its column rather than wrap', async () => {
+    const view = await render(
+      <LeaderboardView
+        metric="titles"
+        onChangeMetric={jest.fn()}
+        timeframe="month"
+        onChangeTimeframe={jest.fn()}
+        entries={[person()]}
+        standing={{ rank: 1000, count: 3, entrants: 1200 }}
+        loading={false}
+        onPressPerson={() => {}}
+      />,
+    );
+    const rank = view.getByText('1000');
+    let node = rank.parent;
+    while (node && (StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.minWidth === undefined) node = node.parent;
+    const cell = StyleSheet.flatten(node!.props.style) as ViewStyle;
+    expect(cell.minWidth).toBe(26);
+    expect(cell.width).toBeUndefined();
+  });
+});
+
 /**
  * **A fixed order for ties** (marquee cohesion sprint): the server's rank, then handle, then
  * id — the server's own page order, restated because its final select promises none.

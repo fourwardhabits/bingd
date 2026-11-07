@@ -3931,6 +3931,8 @@ describe('the immersive title page (experiment)', () => {
           return found;
         });
 
+        // Decoded at YouTube's size, so the width is the image's and not the card's.
+        expect(stills[0]!.props.allowDownscaling).toBe(false);
         await act(async () =>
           stills[0]!.props.onLoad?.({ nativeEvent: { source: { width: 480, height: 360, url: 'real' } } }),
         );

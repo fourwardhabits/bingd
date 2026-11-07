@@ -441,7 +441,9 @@ const styles = StyleSheet.create({
   rowYou: { backgroundColor: theme.surface.raised },
   // Fixed width so the avatars line up whether the rank is a medal, 4 or 48. Right-aligned
   // so the digits themselves line up, which is what makes a column of numbers scannable.
-  rankCell: { width: MEDAL, alignItems: 'flex-end' },
+  // A minimum rather than a width: a pinned standing of 1,000 still fits on one line
+  // (independent review 1).
+  rankCell: { minWidth: MEDAL, alignItems: 'flex-end' },
   rank: { textAlign: 'right' },
   medal: {
     width: MEDAL,

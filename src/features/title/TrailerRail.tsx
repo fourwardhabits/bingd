@@ -89,6 +89,10 @@ export function TrailerRail({
                   source={{ uri: still }}
                   contentFit="cover"
                   transition={theme.duration.navigation}
+                  // Decoded at its own size, so the placeholder check below reads YouTube's
+                  // width rather than the card's: Android otherwise downscales a 480px still
+                  // to the 184pt card on a low-density screen (independent review 1).
+                  allowDownscaling={false}
                   style={StyleSheet.absoluteFill}
                   onError={() => setFailed((prev) => new Set(prev).add(video.key))}
                   // A removed or private video answers 404 *with* YouTube's grey 120×90
