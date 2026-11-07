@@ -1,16 +1,22 @@
+import { lane } from '@/lib/env';
+
 /**
- * **Whether trailer thumbnails load without being asked for** (founder Preview QA,
- * 2026-11-07; production since the release pass the same day).
+ * **Whether trailer thumbnails load without being asked for** (founder Preview QA and the
+ * release pass, 2026-11-07).
  *
  * Each still is a request from the device to Google's image host (`i.ytimg.com`), carrying
- * the reader's IP address and the video's id. It is on in every lane now, production
- * included, because the founder approved it **and the disclosures were updated to say so**:
- * the privacy policy's "Who else sees it" names YouTube's image servers (`web/build.mjs`),
- * and `docs/release/store-privacy-inventory.md` lists the request beside TMDB's images.
- * Those ship in the same release and the website deploys from `main` with it; the
- * production update is published only after the live policy has been checked.
+ * the reader's IP address and the video's id. The founder approved automatic stills for
+ * production *subject to accurate, verified disclosures*. The privacy policy now names
+ * YouTube's image servers (`web/build.mjs`, live with this release). The App Store and
+ * Google Play privacy answers could not be checked from here — nobody but the founder can
+ * open those consoles — so, by the founder's own fallback instruction:
  *
- * To turn the stills back into an opt-in (Show previews, once per page), make this return
- * false — the Trailers section still offers the button whenever it does.
+ * - **every lane but production** (Preview, Beta, development) loads the stills with the
+ *   page;
+ * - **production keeps the opt-in** — Show previews, once per page — until the founder has
+ *   confirmed both store forms against `docs/release/store-privacy-inventory.md`. Turning it
+ *   on is then this one line (`=> true`), shipped as an ordinary production update.
+ *
+ * Read per call, so a test can vary the lane.
  */
-export const trailerPreviewsByDefault = (): boolean => true;
+export const trailerPreviewsByDefault = (): boolean => lane !== 'production';

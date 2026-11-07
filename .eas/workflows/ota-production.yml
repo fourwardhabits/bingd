@@ -76,7 +76,9 @@ jobs:
       BINGD_LANE: production
     params:
       branch: production
-      platform: all
+      # Android only until an iOS build has passed QA (founder, 2026-11-07). Returning to
+      # all is a one-word change, reviewed like this one, once iOS is cleared.
+      platform: android
       message: ${{ inputs.message }}
       # The local path never uploaded maps, and this change moves where an update is bundled,
       # not what happens around it.

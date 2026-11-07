@@ -65,6 +65,8 @@ jobs:
       BINGD_LANE: preview
     params:
       branch: preview
-      platform: all
+      # Android only until an iOS build has passed QA (founder, 2026-11-07). Returning to
+      # all is a one-word change, reviewed like this one, once iOS is cleared.
+      platform: android
       message: ${{ inputs.message }}
       upload_sentry_sourcemaps: false
