@@ -38,20 +38,16 @@ export const backdropUri = (
 /**
  * An episode still.
  *
- * `w300` is TMDB's small still bucket and is the right one for this. The Episodes tab
- * draws stills at the content width of a phone, roughly 350pt, and a 16:9 still is
- * wide rather than tall; the next bucket up is `w780`, which is more pixels than the
- * screen can use and up to two hundred of them on one season page.
- *
- * There is deliberately no second size. Nothing else in the app renders a still, and
- * a size bucket exists for a screen rather than for completeness.
+ * `w300` is TMDB's small still bucket and is the right one for the episode rail's cards
+ * and the recall sheet's rows: up to two hundred of them on one season, none wider than
+ * a phone. `sheet` is `w780`, for the one still the episode detail sheet draws at the
+ * full width of the screen, where `w300` visibly softens on a 3x panel.
  *
  * Null for an episode TMDB has no still for, which is every unaired one and a good
- * many older ones. The row then renders text only rather than a placeholder box, the
- * same choice `profileUri` and the cast strip make.
+ * many older ones.
  */
-export const stillUri = (path: string | null | undefined) =>
-  path ? `${BASE}/w300${path}` : null;
+export const stillUri = (path: string | null | undefined, size: 'row' | 'sheet' = 'row') =>
+  path ? `${BASE}/${size === 'sheet' ? 'w780' : 'w300'}${path}` : null;
 
 /**
  * A cast member's photograph.
