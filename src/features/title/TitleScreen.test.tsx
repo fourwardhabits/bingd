@@ -3912,6 +3912,36 @@ describe('the immersive title page (experiment)', () => {
         expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
         expect(section.getAllByRole('link')).toHaveLength(2);
       });
+
+      /**
+       * **YouTube's placeholder is not a still** (marquee cohesion sprint, measured against
+       * the real host): a removed video answers 404 with a grey 120×90 image, which a client
+       * that decodes it would draw as a grey logo. A real still is 480 wide.
+       */
+      it('keeps the frame when YouTube answers with its small placeholder image', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        await fireEvent.press(
+          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+        );
+        const stills = await waitFor(() => {
+          const found = section.getAllByTestId('trailer-still');
+          expect(found).toHaveLength(2);
+          return found;
+        });
+
+        await act(async () =>
+          stills[0]!.props.onLoad?.({ nativeEvent: { source: { width: 480, height: 360, url: 'real' } } }),
+        );
+        await act(async () =>
+          stills[1]!.props.onLoad?.({ nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } } }),
+        );
+
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
     });
 
     /**
@@ -3967,7 +3997,8 @@ describe('the immersive title page (experiment)', () => {
     });
 
     /**
-     * **Where to Watch keeps to its own space** (independent review 1): its 20pt seam is its
+     * **Where to Watch keeps to its own space** (independent review 1): its seam (28pt since the
+     * marquee cohesion sprint, the same as every section's) is its
      * own row's top padding. It was a negative margin, which laid the row's Pressable over
      * the synopsis above it and its More control.
      */
@@ -3981,7 +4012,11 @@ describe('the immersive title page (experiment)', () => {
       const view = await open();
       const row = await waitFor(() => view.getByTestId('where-to-watch'));
 
-      expect(StyleSheet.flatten(row.props.style)).toMatchObject({ paddingTop: 20 });
+      expect(StyleSheet.flatten(row.props.style)).toMatchObject({ paddingTop: 28 });
+      // Every section sits 28pt below the one before it.
+      expect(
+        StyleSheet.flatten(view.getByTestId('immersive-section-cast').props.style).paddingTop,
+      ).toBe(28);
       // Nothing between the row and the page pulls it upward.
       let node = row.parent;
       while (node && node.props?.testID !== 'immersive-section-cast') {

@@ -160,10 +160,12 @@ const CAST_PREVIEW = 10;
  */
 const SIMILAR_PREVIEW = 6;
 /**
- * Between two Cinematic sections: from one body's end to the next heading. Never less than
+ * Between two Cinematic sections: from one body's end to the next heading. 28pt since the
+ * marquee cohesion sprint (2026-11-07; 20pt before): the founder asked for more air between
+ * sections and none inside them, so the heading-to-body gaps are unchanged. Never less than
  * a tight heading action's upward slop, which lies in it (`TIGHT_SLOP.top`).
  */
-const SECTION_SEAM = theme.space[5];
+const SECTION_SEAM = theme.space[7];
 /**
  * The Cinematic module's 28pt title grows with the system text size only to 1.3×, the type
  * scale's ceiling for display type (title-page sprint, 2026-11-06): at 2× a long first

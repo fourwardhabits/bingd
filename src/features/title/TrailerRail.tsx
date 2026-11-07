@@ -91,6 +91,17 @@ export function TrailerRail({
                   transition={theme.duration.navigation}
                   style={StyleSheet.absoluteFill}
                   onError={() => setFailed((prev) => new Set(prev).add(video.key))}
+                  // A removed or private video answers 404 *with* YouTube's grey 120×90
+                  // placeholder, which a client that decodes the body draws as a grey
+                  // logo in the frame (marquee cohesion sprint, measured against the
+                  // real host). A real `hqdefault` is 480 wide, so anything this small is
+                  // the placeholder and the card keeps its Ink frame.
+                  onLoad={(event) => {
+                    const width = event?.source?.width;
+                    if (typeof width === 'number' && width <= PLACEHOLDER_WIDTH) {
+                      setFailed((prev) => new Set(prev).add(video.key));
+                    }
+                  }}
                   accessibilityIgnoresInvertColors
                   testID="trailer-still"
                 />
@@ -122,6 +133,8 @@ export function TrailerRail({
 }
 
 const THUMB_WIDTH = 184;
+/** YouTube's "no thumbnail" image is 120×90; every real still here is 480 wide. */
+const PLACEHOLDER_WIDTH = 200;
 const PLAY_SIZE = 40;
 
 const styles = StyleSheet.create({
