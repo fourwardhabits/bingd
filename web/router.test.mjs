@@ -1888,8 +1888,24 @@ describe('the Terms of Use', () => {
    */
   it('dates itself from its own deterministic revision date', () => {
     assert.match(read('terms', 'index.html'), /Last updated 4 September 2026\./);
-    // The other three keep the shared date; the Terms did not drag them forward.
-    assert.match(read('privacy', 'index.html'), /Last updated 20 August 2026\./);
+    // The Privacy policy has its own date since its trailer-images revision (2026-11-07);
+    // the support and deletion pages keep the shared one. Neither dragged the other.
+    assert.match(read('privacy', 'index.html'), /Last updated 7 November 2026\./);
+    assert.match(read('account-deletion', 'index.html'), /Last updated 20 August 2026\./);
+  });
+
+  /**
+   * **The policy names YouTube's image servers** (release pass, 2026-11-07): the title
+   * page's trailer stills load from `i.ytimg.com` directly from the device, so "Who else
+   * sees it" has to say so, beside TMDB's images, and say that nothing about the account
+   * goes with the request.
+   */
+  it('discloses that trailer stills load directly from YouTube', () => {
+    const privacy = read('privacy', 'index.html');
+    assert.match(privacy, /<strong>YouTube<\/strong> \(Google\) supplies trailer still images/);
+    assert.match(privacy, /directly from YouTube&rsquo;s image servers/);
+    assert.match(privacy, /your IP address and which video&rsquo;s image was asked for/);
+    assert.match(privacy, /Bingd sends YouTube\s+nothing about your account/);
   });
 
   /**

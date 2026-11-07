@@ -1368,6 +1368,14 @@ const DOCUMENT_DATE = '20 August 2026';
  */
 const TERMS_DATE = '4 September 2026';
 
+/**
+ * The Privacy policy's own date since its first revision (2026-11-07): trailer still images
+ * load from YouTube's image servers, so "Who else sees it" names YouTube. Like the Terms'
+ * date, the line to change when this document's text changes; the other documents keep
+ * DOCUMENT_DATE.
+ */
+const PRIVACY_DATE = '7 November 2026';
+
 const PRIVACY_BODY = `      <p class="lede">
         Bingd describes what it actually
         stores, why, and who else sees it &mdash; written against the database schema
@@ -1454,6 +1462,13 @@ const PRIVACY_BODY = `      <p class="lede">
           server asks TMDB for it; your device does not, except that <strong>posters and
           images load directly from TMDB&rsquo;s servers</strong>, which means TMDB sees the
           request the way any website you load an image from would.</li>
+        <li><strong>YouTube</strong> (Google) supplies trailer still images. When a title
+          page shows its trailers, your device loads each trailer&rsquo;s still image
+          <strong>directly from YouTube&rsquo;s image servers</strong>, which means Google sees
+          that request &mdash; your IP address and which video&rsquo;s image was asked for
+          &mdash; the way any website you load an image from would. Bingd sends YouTube
+          nothing about your account. Playing a trailer opens it on YouTube, under
+          YouTube&rsquo;s own terms and Google&rsquo;s privacy policy.</li>
         <li><strong>Apple</strong> and <strong>Google</strong>, if you use their sign-in.</li>
       </ul>
       <p>
@@ -2106,7 +2121,7 @@ const DOCUMENTS = [
     // rest of that claim: a privacy policy that describes the product as invite-only
     // when it is on the App Store is a legal document with a false sentence in it, and
     // this is the one document a store reviewer definitely opens.
-    stamp: `Last updated ${DOCUMENT_DATE}.`,
+    stamp: `Last updated ${PRIVACY_DATE}.`,
     body: PRIVACY_BODY,
   },
   {
