@@ -32,19 +32,49 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 | Product analytics | **PostHog** | yes — carries the account id | one activation funnel |
 | Crash and error reports | **Sentry** | yes — carries the account id | diagnostics |
 | Image requests | **TMDB CDN**, direct from the device | no | posters load from TMDB's servers |
-| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the title page load from YouTube's servers (since 2026-11-07; see below) |
+| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page — automatic outside production; **in production only after the reader taps Show previews** (see below) |
 
-**Trailer stills (added 2026-11-07).** The Cinematic title page — the production default
-since the 2026-11-07 release — loads each trailer's still image from YouTube's image host as
-the page opens. It is the same kind of request as the TMDB poster loads above: the device
-fetches third-party content over HTTPS; Bingd's servers neither receive nor store anything
-from it, and no account identifier goes with it. Google sees the device's IP address and
-which video's image was requested, exactly as TMDB does for posters. This document's answers
-for the TMDB images therefore apply unchanged, and **no new data type is declared** for it in
-§2 or §3. The privacy policy names YouTube under "Who else sees it" (same release). **FOUNDER:**
-when you next open App Store Connect → App Privacy and Play Console → Data safety, confirm the
-forms still match this reasoning for third-party image loading; nothing in them was changed
-by this release.
+**Trailer stills (added 2026-11-07, corrected 2026-11-07).** What the app actually requests,
+from the code rather than from intent:
+
+- **The request.** `src/features/title/TrailerRail.tsx` draws one `expo-image` per trailer
+  from `https://i.ytimg.com/vi/<video id>/hqdefault.jpg`. Nothing else in the app loads from
+  a YouTube host; `www.youtube.com/watch?v=…` is only ever opened through `Linking` when the
+  reader taps a card, which leaves the app. Google sees the device's IP address, its user
+  agent and which video's image was asked for — the same kind of request as the TMDB poster
+  loads above. No account identifier, cookie or Bingd header goes with it, and Bingd's
+  servers neither receive nor store anything from it. `expo-image` keeps the still in its
+  disk cache, so a revisit may make no request at all.
+- **Which videos.** The TMDB adapter (`videosFacet`) keeps only `site === 'YouTube'`
+  Trailers and Teasers, at most six per title, so every still is on `i.ytimg.com`.
+- **Movie and TV alike.** The adapter writes that facet for films, series and seasons, and
+  the Trailers section on the title page is not conditioned on the kind of title, so a
+  movie page and a series page behave identically.
+- **Cinematic only.** The Original layout's Videos tab is text rows and loads no still. The
+  Cinematic page (the default in every lane since 2026-11-07, Original one switch away in
+  Settings › Labs) holds the stills back until the stored layout choice has been read, so a
+  reader who chose Original never sends one.
+- **When, by lane.** `trailerPreviewsByDefault()` (`src/features/title/trailer-previews.ts`)
+  is `lane !== 'production'`. Preview, Beta and development load the stills as the page
+  opens. **Production does not**: the cards draw as plain frames and nothing goes to
+  `i.ytimg.com` until the reader taps **Show previews**, once per page. Production builds
+  get `lane === 'production'` from `BINGD_LANE` on the `production` profile in `eas.json`.
+
+**Disclosure status.** The live policy at <https://bingd.app/privacy/> (fetched 2026-11-07,
+"Last updated 7 November 2026") already says, under "Who else sees it", that **YouTube
+(Google)** supplies trailer still images, that "when a title page shows its trailers, your
+device loads each trailer's still image directly from YouTube's image servers", and that
+Google sees the IP address and which video's image was asked for. That sentence describes
+both the opt-in and the automatic behaviour, for any title page, so the published policy does
+not need to change to enable automatic stills in production.
+
+This document's reasoning is that the answers for the TMDB images apply unchanged, so **no
+new data type is declared** for it in §2 or §3. **That reasoning has not been checked against
+either store console, and the consoles may need a change**, which is why production
+still uses the opt-in. One point specific to Play: its definition of
+*sharing* exempts a transfer the user initiates. A tap on Show previews arguably is one; an
+automatic load on page open is not. Turning the gate on in production waits for the founder's
+check in §6 item 8.
 
 **Not collected at all**, and worth stating because the store forms ask: no precise or
 coarse **location**, no **contacts**, no **health or fitness**, no **financial** data, no
@@ -175,7 +205,7 @@ transit** and whether users can **request deletion**.
 ### The three global answers
 
 - **Encrypted in transit: YES.** Every connection — Supabase, PostHog, Sentry, TMDB
-  images, bingd.app — is HTTPS. `.app` is an HSTS-preloaded TLD.
+  images, YouTube trailer stills (`i.ytimg.com`), bingd.app — is HTTPS. `.app` is an HSTS-preloaded TLD.
 - **Users can request data deletion: YES.** In-app, Settings › Account & Data, plus the web
   page at `https://bingd.app/account-deletion`. Play's "deletion URL" field takes that URL.
 - **Committed to Play Families Policy: NO.** Bingd is 13+ and not directed at children.
@@ -390,3 +420,22 @@ attribution section exists to satisfy, which is why the file's provenance is rec
 7. **Have the privacy page read by a lawyer before public launch.** Not before the friend
    beta. What is there now is an accurate description of behaviour, which is what a beta
    owes its testers; it is not a document that has been reviewed for GDPR/CCPA sufficiency.
+8. **Before automatic trailer stills go to production** (§1, "Trailer stills"), open both
+   consoles and confirm the submitted answers still hold for the device loading
+   images from YouTube's image host on every Cinematic title page, movie and TV, without a tap:
+   - **App Store Connect → the app → App Privacy:** the *Privacy Policy URL* is
+     `https://bingd.app/privacy`; under *Data Collection*, the declared data types and,
+     for each, *Linked to the user* and *Used for tracking* match §2 (no type added for
+     third-party image loading, tracking No everywhere). Note whether the published label
+     differs from what is in the editor.
+   - **Play Console → Policy and programs → App content → Data safety:** in *Data collection
+     and security*, "Does your app collect or share any of the required user data types?",
+     "Is all of the user data collected by your app encrypted in transit?" (Yes) and the
+     deletion answers; in *Data types*, whether any row — in particular **Device or other
+     IDs** or **App activity** — is affected, and for each declared row whether *Shared*
+     is still No once the load is automatic rather than user-initiated. Also
+     **App content → Privacy policy** is `https://bingd.app/privacy`.
+
+   If both hold unchanged, the code change is `trailerPreviewsByDefault => true` with its
+   test, shipped as an ordinary production update. If either form needs an edit, make and
+   publish that first.
