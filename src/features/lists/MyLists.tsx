@@ -1,14 +1,14 @@
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useCurrentProfile } from '@/features/auth';
 import { track, type MyListsEntry } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
-import { EmptyState, MiniButton, SkeletonRow, Text } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import { EmptyState, SkeletonRow, Text } from '@/ui/components';
+import { fontFamily, theme } from '@/ui/tokens';
 
 import { ListRow } from './ListRow';
 import { NewListSheet } from './NewListSheet';
@@ -79,8 +79,19 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
     );
   }
 
+  /**
+   * **New list in the header's right corner** (founder, marquee cohesion sprint,
+   * 2026-11-07), opposite the back control and the My lists title: obvious, out of the
+   * list's way, and the same corner Settings uses for its action. It replaced a bordered
+   * button heading the rows. The empty state keeps its own Create a list.
+   */
+  const header = {
+    headerRight: () => <NewListHeaderButton onPress={() => setCreating(true)} />,
+  };
+
   return (
     <View style={styles.body}>
+      <Stack.Screen options={header} />
       {lists.isPending ? (
         <View style={styles.loading}>
           <SkeletonRow count={4} />
@@ -96,7 +107,6 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
         <FlatList
           data={rows}
           keyExtractor={(row) => row.id}
-          ListHeaderComponent={<NewListButton onPress={() => setCreating(true)} />}
           renderItem={({ item }) => (
             <ListRow
               list={item}
@@ -123,27 +133,36 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
   );
 }
 
-/**
- * `+ New list`, as the list's header rather than as a floating control. It scrolls with
- * the rows: a person here is looking at their lists, not halfway through filing a title.
- *
- * **`MiniButton` since 2026-09-25**, which is the founder's one visual language for a
- * small optional action — the same sizing, border, radius and tap target as a utility
- * sheet's Done. It keeps its plus and it keeps its place: `align="start"` because this is
- * a control under a heading, not a footer, and centring it would move something the
- * founder asked to leave where it is.
- */
-function NewListButton({ onPress }: { onPress: () => void }) {
-  return <MiniButton label="New list" icon="add" align="start" onPress={onPress} style={styles.newList} />;
+/** `+ New` in Maroon, a full 44pt target in the header's corner. */
+function NewListHeaderButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="New list"
+      accessibilityHint="Creates a list"
+      onPress={onPress}
+      style={({ pressed }) => [styles.newList, pressed && styles.pressed]}
+      testID="my-lists-new"
+    >
+      <Ionicons name="add" size={theme.layout.icon.sm} color={theme.semantic.action} />
+      <Text variant="subhead" tone="action" style={styles.newListLabel}>
+        New list
+      </Text>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
   loading: { paddingTop: theme.space[3] },
-  list: { paddingBottom: theme.space[8] },
-  // Its place on the page. The shape is `MiniButton`'s, and the tap target with it.
+  list: { paddingTop: theme.space[1], paddingBottom: theme.space[8] },
   newList: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[2],
   },
+  newListLabel: { fontFamily: fontFamily.sansMedium },
+  pressed: { opacity: 0.6 },
 });

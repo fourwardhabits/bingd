@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -65,6 +66,8 @@ const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => mockParams,
+  // The header's right corner is drawn in place, so its New list can be pressed.
+  Stack: { Screen: ({ options }: { options?: { headerRight?: () => unknown } }) => options?.headerRight?.() ?? null },
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -203,5 +206,24 @@ describe('navigation', () => {
     await fireEvent.press(view.getByLabelText(/^Movies for Dad\./));
 
     expect(mockPush).toHaveBeenCalledWith('/lists/a?surface=my_lists');
+  });
+});
+
+/**
+ * **New list in the header's corner** (founder, marquee cohesion sprint, 2026-11-07),
+ * rather than a bordered button heading the rows.
+ */
+describe('creating', () => {
+  it('offers New list in the header, a 44pt target, and not as a row above the lists', async () => {
+    mockRows = [list('a', { title: 'Movies for Dad' })];
+    const view = await open();
+    await waitFor(() => view.getByText('Movies for Dad'));
+    const create = view.getByTestId('my-lists-new');
+    expect(create.props.accessibilityLabel).toBe('New list');
+    const style = StyleSheet.flatten(
+      typeof create.props.style === 'function' ? create.props.style({ pressed: false }) : create.props.style,
+    );
+    expect(style.minHeight).toBe(44);
+    expect(view.getAllByRole('button', { name: 'New list' })).toHaveLength(1);
   });
 });
