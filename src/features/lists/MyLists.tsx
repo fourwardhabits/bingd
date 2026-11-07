@@ -82,7 +82,13 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
    */
   return (
     <View style={styles.body}>
-      <AppHeader back={{ onPress: () => router.back() }} />
+      {/* Back to wherever this was pushed from; opened cold from a link, with nothing
+          behind it, to Collection, where its own My lists link lives (independent review). */}
+      <AppHeader
+        back={{
+          onPress: () => (router.canGoBack() ? router.back() : router.replace('/collection')),
+        }}
+      />
       <HeaderBoundary />
       <View style={styles.titleRow}>
         <View style={styles.titleLabel}>

@@ -63,8 +63,11 @@ jest.mock('@/lib/analytics', () => ({
 
 const mockParams: { entry?: string } = {};
 const mockPush = jest.fn();
+const mockBack = jest.fn();
+const mockReplace = jest.fn();
+let mockCanGoBack = true;
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace, canGoBack: () => mockCanGoBack }),
   useLocalSearchParams: () => mockParams,
   // The header's right corner is drawn in place, so its New list can be pressed.
   Stack: { Screen: ({ options }: { options?: { headerRight?: () => unknown } }) => options?.headerRight?.() ?? null },
@@ -249,5 +252,30 @@ describe('the header', () => {
     expect(view.getByRole('button', { name: 'Back' })).toBeTruthy();
     expect(view.getByText('MY LISTS')).toBeTruthy();
     expect(view.getByTestId('my-lists-new')).toBeTruthy();
+  });
+});
+
+describe('Back', () => {
+  beforeEach(() => {
+    mockBack.mockClear();
+    mockReplace.mockClear();
+  });
+
+  it('goes back where there is somewhere to go', async () => {
+    mockCanGoBack = true;
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Back' }));
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  /** Opened cold from a link, with nothing behind it (independent review). */
+  it('goes to Collection when the page was opened with nothing behind it', async () => {
+    mockCanGoBack = false;
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Back' }));
+    expect(mockBack).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith('/collection');
+    mockCanGoBack = true;
   });
 });
