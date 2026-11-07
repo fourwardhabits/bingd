@@ -154,3 +154,24 @@ describe('somebody else’s profile, where there is nothing to invite them to', 
     expect(StyleSheet.flatten(share(view).parent?.props?.style).flex).toBe(1);
   });
 });
+
+/**
+ * **The owner's compact pair** (founder, marquee cohesion sprint, 2026-11-07): two buttons
+ * that hug their labels at the small size, each a 44pt target, rather than two halves.
+ */
+describe('compact', () => {
+  it('draws Share Profile small, with the rest of its 44pt target in slop, and keeps the fill for the trailing act', async () => {
+    const view = await render(<ProfileActions compact onShare={() => {}} trailing={invite} />);
+    const row = StyleSheet.flatten(view.getByTestId('profile-actions-compact').props.style);
+    expect(row.flexDirection).toBe('row');
+    const share = view.getByRole('button', { name: 'Share Profile' });
+    const style = StyleSheet.flatten(
+      typeof share.props.style === 'function' ? share.props.style({ pressed: false }) : share.props.style,
+    );
+    expect(style.minHeight).toBe(36);
+    expect(style.flex).toBeUndefined();
+    expect(style.minHeight + share.props.hitSlop.top + share.props.hitSlop.bottom).toBe(
+      theme.layout.minTapTarget,
+    );
+  });
+});

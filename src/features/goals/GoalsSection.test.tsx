@@ -1,5 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 
+import { StyleSheet } from 'react-native';
+
 import { renderWithProviders } from '@/test-utils/render';
 
 import { GoalsSection } from './GoalsSection';
@@ -421,5 +423,30 @@ describe('opening a goal into the titles behind it', () => {
     expect(screen.getByLabelText('Movies, 2 of 52 movies').props.accessibilityRole).toBe(
       'progressbar',
     );
+  });
+});
+
+/**
+ * **The invitation gets the whole width** (founder, marquee cohesion sprint, 2026-11-07):
+ * the sentence above, Set a goal under it as a small button with a 44pt target.
+ */
+describe('the invitation', () => {
+  beforeEach(() => {
+    mockTables.watch_goals = [];
+    mockTables.watch_events = [];
+  });
+
+  it('puts Set a goal under its sentence, small, with a 44pt target', async () => {
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    const label = await waitFor(() => screen.getByText('Set a goal'));
+    const copy = screen.getByText(/Set a goal for how many films/);
+    // A column: the sentence's row holds nothing beside it.
+    expect(StyleSheet.flatten(copy.parent!.props.style)?.flexDirection).not.toBe('row');
+    let button = label.parent;
+    while (button && button.props.accessibilityRole !== 'button') button = button.parent;
+    const style = StyleSheet.flatten(
+      typeof button!.props.style === 'function' ? button!.props.style({ pressed: false }) : button!.props.style,
+    );
+    expect(style.minHeight + button!.props.hitSlop.top + button!.props.hitSlop.bottom).toBe(44);
   });
 });

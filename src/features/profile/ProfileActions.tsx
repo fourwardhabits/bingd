@@ -25,6 +25,15 @@ export type ProfileActionsProps = {
    * nothing. That is the trade for a slot the row has no opinion about.
    */
   trailing?: ReactNode;
+  /**
+   * **Two compact buttons rather than two halves of the row** (founder, marquee cohesion
+   * sprint, 2026-11-07): the owner's Share Profile and Invite friends were the largest
+   * things on the page. Each hugs its label at the small size (36pt drawn, 44pt to press),
+   * left-aligned on the gutter; Invite friends keeps the one fill. **Own profile only**, as
+   * the brief scoped it: somebody else's profile keeps its approved half-row Share and
+   * Follow. Whether it follows is a founder decision (the parity rule above).
+   */
+  compact?: boolean;
 };
 
 /**
@@ -82,7 +91,21 @@ export type ProfileActionsProps = {
  * wrapped and its button grew to two lines beside a one-line neighbour. `Button`'s own
  * note has the arithmetic.
  */
-export function ProfileActions({ onShare, trailing }: ProfileActionsProps) {
+export function ProfileActions({ onShare, trailing, compact = false }: ProfileActionsProps) {
+  if (compact) {
+    return (
+      <View style={styles.compactRow} testID="profile-actions-compact">
+        <Button
+          label="Share Profile"
+          kind="secondary"
+          size="sm"
+          hitSlop={COMPACT_SLOP}
+          onPress={onShare}
+        />
+        {trailing}
+      </View>
+    );
+  }
   return (
     <View style={styles.row}>
       <View style={styles.half}>
@@ -98,4 +121,8 @@ const styles = StyleSheet.create({
   // thing, and equal weight is what stops the fill reading as the only real control.
   row: { flexDirection: 'row', gap: theme.space[2] },
   half: { flex: 1 },
+  compactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
 });
+
+/** A small button is 36pt drawn; this is the rest of its 44pt target. */
+export const COMPACT_SLOP = { top: 4, bottom: 4 } as const;

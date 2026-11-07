@@ -136,7 +136,17 @@ export function GoalsSection({
           <Text variant="footnote" tone="secondary" style={styles.promptCopy}>
             Set a goal for how many films or seasons you want to watch this year.
           </Text>
-          <Button label="Set a goal" kind="secondary" onPress={() => setEditing(true)} />
+          {/* Under the sentence rather than beside it, so the sentence has the whole width
+              at any text size (founder, marquee cohesion sprint, 2026-11-07). */}
+          <View style={styles.promptAction}>
+            <Button
+              label="Set a goal"
+              kind="secondary"
+              size="sm"
+              hitSlop={{ top: 4, bottom: 4 }}
+              onPress={() => setEditing(true)}
+            />
+          </View>
         </View>
       ) : (
         <View style={[styles.body, styles.bars]}>
@@ -207,10 +217,7 @@ const styles = StyleSheet.create({
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   body: { paddingHorizontal: theme.layout.gutter },
   bars: { gap: theme.space[4] },
-  prompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[3],
-  },
-  promptCopy: { flex: 1 },
+  prompt: { gap: theme.space[3] },
+  promptCopy: {},
+  promptAction: { flexDirection: 'row' },
 });

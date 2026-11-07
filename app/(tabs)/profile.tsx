@@ -379,8 +379,9 @@ export default function ProfileScreen() {
              * is about somebody else.
              */
             <ProfileActions
+              compact
               onShare={() => void shareProfile()}
-              trailing={<InviteFriendsButton />}
+              trailing={<InviteFriendsButton size="sm" />}
             />
           }
         />
