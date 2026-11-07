@@ -56,12 +56,18 @@ export function ContentToolbar({
 export function FiltersAction({
   activeCount,
   onPress,
+  label = 'Filters',
   accessibilityLabel,
   accessibilityHint = 'Opens filters',
   testID,
 }: {
   activeCount: number;
   onPress: () => void;
+  /**
+   * The word. "Filters" on For You; "Filters & Sort" on Collection, whose sheet holds the
+   * sort as well (founder Preview QA, 2026-11-07).
+   */
+  label?: string;
   /** Defaults to "Filters" or "Filters, 2 on". */
   accessibilityLabel?: string;
   accessibilityHint?: string;
@@ -84,7 +90,7 @@ export function FiltersAction({
         color={on ? theme.semantic.action : theme.text.secondary}
       />
       <Text variant="subhead" tone={on ? 'action' : 'secondary'} numberOfLines={1}>
-        {on ? `Filters · ${activeCount}` : 'Filters'}
+        {on ? `${label} · ${activeCount}` : label}
       </Text>
     </Pressable>
   );

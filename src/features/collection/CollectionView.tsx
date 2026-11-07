@@ -199,6 +199,7 @@ export function CollectionView({
         testID="collection-toolbar"
       >
         <FiltersAction
+          label="Filters & Sort"
           activeCount={activeCount}
           accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
           accessibilityHint="Opens filters and the sort order"
