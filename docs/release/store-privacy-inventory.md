@@ -32,6 +32,19 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 | Product analytics | **PostHog** | yes — carries the account id | one activation funnel |
 | Crash and error reports | **Sentry** | yes — carries the account id | diagnostics |
 | Image requests | **TMDB CDN**, direct from the device | no | posters load from TMDB's servers |
+| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the title page load from YouTube's servers (since 2026-11-07; see below) |
+
+**Trailer stills (added 2026-11-07).** The Cinematic title page — the production default
+since the 2026-11-07 release — loads each trailer's still image from YouTube's image host as
+the page opens. It is the same kind of request as the TMDB poster loads above: the device
+fetches third-party content over HTTPS; Bingd's servers neither receive nor store anything
+from it, and no account identifier goes with it. Google sees the device's IP address and
+which video's image was requested, exactly as TMDB does for posters. This document's answers
+for the TMDB images therefore apply unchanged, and **no new data type is declared** for it in
+§2 or §3. The privacy policy names YouTube under "Who else sees it" (same release). **FOUNDER:**
+when you next open App Store Connect → App Privacy and Play Console → Data safety, confirm the
+forms still match this reasoning for third-party image loading; nothing in them was changed
+by this release.
 
 **Not collected at all**, and worth stating because the store forms ask: no precise or
 coarse **location**, no **contacts**, no **health or fitness**, no **financial** data, no
