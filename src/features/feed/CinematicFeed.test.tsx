@@ -502,9 +502,9 @@ describe('the actions', () => {
       expect(found).toHaveLength(2);
       return found;
     });
-    // The first post sits 12pt under RECENT ACTIVITY (marquee cohesion sprint); every
+    // The first post sits 20pt under RECENT ACTIVITY (marquee cohesion sprint); every
     // later one has 28pt above its avatar. The post's own rhythm is unchanged.
-    expect(StyleSheet.flatten(cards[0]!.props.style).paddingTop).toBe(theme.space[3]);
+    expect(StyleSheet.flatten(cards[0]!.props.style).paddingTop).toBe(theme.space[5]);
     const card = StyleSheet.flatten(cards[1]!.props.style);
     expect(card.paddingTop).toBe(28);
     expect(card.gap).toBe(theme.space[3]);

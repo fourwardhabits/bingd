@@ -11,8 +11,9 @@ import { artworkHeight, type FeedArtwork } from './feed-artwork';
 
 export type FeedCardProps = {
   /**
-   * The first post under RECENT ACTIVITY: 12pt above it rather than 28, so the heading
-   * belongs to the post (marquee cohesion sprint, 2026-11-07).
+   * The first post under RECENT ACTIVITY: 20pt above it rather than 28, so the heading
+   * belongs to the post (marquee cohesion sprint, 2026-11-07; 12pt until the founder's
+   * Preview QA asked for a little more room under the heading).
    */
   leading?: boolean;
   actorName: string;
@@ -444,7 +445,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
     borderBottomColor: theme.border.hairline,
   },
-  cardLeading: { paddingTop: theme.space[3] },
+  cardLeading: { paddingTop: theme.space[5] },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

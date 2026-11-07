@@ -820,7 +820,7 @@ export default function FeedScreen() {
              * phone the first post then read as part of the rail. Now: the Feed's own
              * separator (the hairline between posts) under Trending, 16pt either side of it,
              * and the heading in the Feed's section-label token, as TRENDING NOW is. The first
-             * post sits 12pt under it (`leading`), so the label belongs to what follows. The
+             * post sits 20pt under it (`leading`), so the label belongs to what follows. The
              * rule is drawn only under a shelf; with no shelf there is nothing to divide.
              */}
             <View style={styles.activityStart} testID="feed-activity-start">
