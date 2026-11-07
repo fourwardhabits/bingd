@@ -398,8 +398,6 @@ needed for each):
    production too (and keep Show previews only if the founder wants an opt-out). Until then
    production keeps the opt-in, so nothing is weakened silently.
 
- (nothing built, no migration)
-
 ## Release pass — production candidate (2026-11-07)
 
 Founder briefs "Final Profile Consistency, Automatic Trailers & Production Release" and
@@ -466,7 +464,7 @@ Not legal advice and not a claim of store-policy compliance; what was checked, a
 | iOS | Held | No iOS build of this UI has run on a device; production iOS OTA blocked by the workflow | Founder: QA the iOS Preview build |
 | Data integrity / migrations | No change | The release diff touches `app/`, `src/`, `web/`, `config/`, `.eas/` and docs, plus one Supabase test file; no migration. Every RPC and table it calls exists on `main` (audit) | — |
 
- (nothing built, no migration)
+## Phase C — research only (nothing built, no migration)
 
 ### Ten titles added to a Watchlist: what the Feed does today
 
