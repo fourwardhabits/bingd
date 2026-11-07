@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -10,7 +11,10 @@ const mockBack = jest.fn();
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'film-1' }),
   useRouter: () => ({ back: mockBack }),
+  // The header is the stack's; its options are recorded so a test can read the title.
+  Stack: { Screen: ({ options }: { options?: { title?: string } }) => { mockHeader.title = options?.title; return null; } },
 }));
+const mockHeader: { title?: string } = {};
 
 jest.mock('@/features/auth/session', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
@@ -385,5 +389,56 @@ describe('removing a watch', () => {
 
     await waitFor(() => expect(view.getByText('No connection.')).toBeTruthy());
     expect(mockBack).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * **A pushed page like the others** (founder, marquee cohesion sprint, 2026-11-07): the
+ * stack's header with a title, a span line for two or more dated watches, and each row's
+ * score and Edit on its right, Edit a full 44pt target.
+ */
+describe('the page', () => {
+  const two = () =>
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: 2,
+        events: [
+          event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+          event('w2', '2026-10-12', '2026-10-12T10:00:00Z'),
+        ],
+        details: new Map(),
+        placements: [placement('first', '2024-03-04T10:01:00Z', 9.0)],
+        posts: [post('2024-03-04T10:01:00Z', 9.0)],
+      },
+    });
+
+  it('has a header titled Watch history, and a span for two dated watches', async () => {
+    two();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(mockHeader.title).toBe('Watch history');
+    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.getByTestId('watch-history-span').props.children).toMatch(/^First .* · Latest /);
+  });
+
+  it('makes Edit a full 44pt target', async () => {
+    two();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    const edit = view.getByTestId('watch-edit-w1');
+    const style = StyleSheet.flatten(
+      typeof edit.props.style === 'function' ? edit.props.style({ pressed: false }) : edit.props.style,
+    );
+    expect(style.minHeight).toBe(44);
+    expect(style.minWidth).toBe(44);
+  });
+
+  it('says so when there is no watch left to show', async () => {
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: { count: 0, events: [], details: new Map(), placements: [], posts: [] },
+    });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('No watches recorded')).toBeTruthy();
+    expect(mockHeader.title).toBe('Watch history');
   });
 });

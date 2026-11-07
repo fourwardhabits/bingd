@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCurrentProfile } from '@/features/auth/session';
@@ -9,7 +9,8 @@ import { useTaggablePeople, type Person } from '@/features/collection/use-compan
 import { removeFromCollection } from '@/features/collection/writes';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
-import { LoadingScreen, Screen, Text } from '@/ui/components';
+import { EmptyState, LoadingScreen, Screen, Text } from '@/ui/components';
+import { formatWatchDate } from '@/features/collection/dates';
 
 import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
 import {
@@ -224,12 +225,47 @@ export default function WatchHistoryScreen() {
     }
   };
 
-  if (history.isPending) return <LoadingScreen message="Loading your watch history" />;
+  /**
+   * **A pushed page like the others** (founder, marquee cohesion sprint, 2026-11-07): the
+   * stack's own header, with back and a title, as My lists and a list have. This route was
+   * never declared with one, so it opened as a bare page whose only way out was the system
+   * back gesture.
+   */
+  const header = <Stack.Screen options={{ headerShown: true, title: 'Watch history' }} />;
+
+  if (history.isPending)
+    return (
+      <>
+        {header}
+        <LoadingScreen message="Loading your watch history" />
+      </>
+    );
 
   const count = events.length;
+  const dated = ordered.filter((event) => event.watchedOn).map((event) => event.watchedOn!);
+  /** `First Mar 4, 2024 · Latest Oct 12, 2026`, for two or more dated watches. */
+  const span =
+    count >= 2 && dated.length >= 2
+      ? `First ${formatWatchDate(dated[dated.length - 1]!)} · Latest ${formatWatchDate(dated[0]!)}`
+      : null;
+
+  if (count === 0) {
+    return (
+      <Screen includeBottomInset>
+        {header}
+        <EmptyState
+          kind="nothingYet"
+          compact
+          title="No watches recorded"
+          body="Log a watch from the title page and it appears here."
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen includeBottomInset>
+      {header}
       <FlatList
         testID="watch-history-list"
         data={ordered}
@@ -243,6 +279,11 @@ export default function WatchHistoryScreen() {
             <Text variant="title2" testID="watch-history-summary">
               {count === 1 ? 'Watched once' : `Watched ${count} times`}
             </Text>
+            {span ? (
+              <Text variant="footnote" tone="secondary" testID="watch-history-span">
+                {span}
+              </Text>
+            ) : null}
             {error ? (
               <Text variant="caption" tone="action" testID="watch-history-error">
                 {error}
@@ -263,7 +304,7 @@ export default function WatchHistoryScreen() {
           return (
             <View>
               {showYear ? (
-                <Text variant="caption" tone="tertiary" style={styles.year}>
+                <Text variant="sectionHeader" tone="action" style={styles.year}>
                   {String(group?.year)}
                 </Text>
               ) : null}
@@ -297,7 +338,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
-    paddingBottom: theme.space[4],
+    paddingBottom: theme.space[2],
     gap: theme.space[1],
   },
   year: {
