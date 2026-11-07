@@ -210,9 +210,19 @@ read-only sandbox; the suite above is the implementer's. Codex did not exercise 
 
 ## Android Preview
 
-Published to Android Preview from this record's commit after every gate above passed; the
-update IDs are recorded in the commit after it. Runtime `2503ffaa`, the installed Preview build:
-no rebuild. iOS, production and `main` untouched.
+**Live on Android Preview, 2026-11-06.** Published after every gate above passed, by this
+session as the one publisher, from `../worktrees/visual2-preview-publish` (real `npm ci`)
+detached at the record commit.
+
+| | |
+| --- | --- |
+| Source commit | `1996619` (code `cae88d0`) |
+| Update group | `29b60018-595c-4862-88c7-5d6c551f2a25` |
+| Android update | `01a1b34f-25a8-79b3-8adc-08549f9230ae` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543`, the installed Preview build; no rebuild |
+| Channel order after | `29b60018` (this), `8c8dfb90` (rollback), `9906ddd5` |
+
+Android only. iOS, production, `main` and the website are untouched.
 
 ## Rollback
 
