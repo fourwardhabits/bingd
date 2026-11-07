@@ -24,9 +24,11 @@ export type StatItem = {
 
 export type StatRowProps = {
   stats: StatItem[];
+  /** Each figure centred in its quarter, inside the owner's profile card (2026-11-07). */
+  centered?: boolean;
 };
 
-export function StatRow({ stats }: StatRowProps) {
+export function StatRow({ stats, centered = false }: StatRowProps) {
   return (
     <View style={styles.row}>
       {stats.map((stat) => {
@@ -56,6 +58,7 @@ export function StatRow({ stats }: StatRowProps) {
             // whole tile is the target rather than the two lines of text inside it.
             style={({ pressed }) => [
               styles.item,
+              centered && styles.centered,
               pressed && styles.pressed,
             ]}
           >
@@ -66,7 +69,7 @@ export function StatRow({ stats }: StatRowProps) {
             key={stat.label}
             accessible
             accessibilityLabel={label}
-            style={styles.item}
+            style={[styles.item, centered && styles.centered]}
           >
             {content}
           </View>
@@ -99,5 +102,6 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
     gap: 2,
   },
+  centered: { alignItems: 'center' },
   pressed: { opacity: 0.6 },
 });

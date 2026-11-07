@@ -1597,3 +1597,13 @@ describe('the headings on somebody else\'s profile', () => {
     expect(style.fontSize).toBe(12);
   });
 });
+
+/** Somebody else's profile keeps its layout: no owner's card (founder Preview QA, 2026-11-07). */
+describe('the owner-only card', () => {
+  it('is not drawn on somebody else\'s profile', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Share Profile')).toBeTruthy());
+    expect(view.queryByTestId('profile-card')).toBeNull();
+    expect(view.queryByTestId('profile-actions-compact')).toBeNull();
+  });
+});

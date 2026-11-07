@@ -304,6 +304,7 @@ export default function ProfileScreen() {
         }
       >
         <ProfileIdentity
+          card
           name={profile.display_name || profile.username}
           username={profile.username}
           bio={profile.bio}

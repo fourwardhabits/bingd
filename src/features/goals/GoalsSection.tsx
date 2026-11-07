@@ -101,6 +101,8 @@ export function GoalsSection({
   };
 
   const statuses = goals.data?.statuses ?? [];
+  /** The invitation is on screen, and it carries the streak beside its button. */
+  const prompting = !goals.isPending && !goals.isError && statuses.length === 0;
 
   return (
     <View style={styles.section}>
@@ -136,9 +138,11 @@ export function GoalsSection({
           <Text variant="footnote" tone="secondary" style={styles.promptCopy}>
             Set a goal for how many films or seasons you want to watch this year.
           </Text>
-          {/* Under the sentence rather than beside it, so the sentence has the whole width
-              at any text size (founder, marquee cohesion sprint, 2026-11-07). */}
-          <View style={styles.promptAction}>
+          {/* Under the sentence, so the sentence has the whole width at any text size,
+              with the streak beside it on one row when there is room (founder Preview QA,
+              2026-11-07). On a narrow phone or at a large text size the streak wraps under
+              the button rather than squeezing either. */}
+          <View style={styles.promptAction} testID="goals-prompt-row">
             <Button
               label="Set a goal"
               kind="secondary"
@@ -146,6 +150,7 @@ export function GoalsSection({
               hitSlop={{ top: 4, bottom: 4 }}
               onPress={() => setEditing(true)}
             />
+            {streakUserId ? <StreakLine userId={streakUserId} inline /> : null}
           </View>
         </View>
       ) : (
@@ -179,7 +184,8 @@ export function GoalsSection({
        * somebody else's profile too and a streak is a private fact about effort —
        * the caller passes it only where that is the reader's own.
        */}
-      {streakUserId ? <StreakLine userId={streakUserId} /> : null}
+      {/* Beside Set a goal while there is no goal (above); under the bars once there is. */}
+      {streakUserId && !prompting ? <StreakLine userId={streakUserId} /> : null}
 
       {/* Mounted only while open. The sheet seeds its draft from `targets` on mount,
           so a sheet that lived alongside this section would seed itself from `{}`
@@ -219,5 +225,11 @@ const styles = StyleSheet.create({
   bars: { gap: theme.space[4] },
   prompt: { gap: theme.space[3] },
   promptCopy: {},
-  promptAction: { flexDirection: 'row' },
+  promptAction: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[4],
+    rowGap: theme.space[2],
+  },
 });

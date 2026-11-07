@@ -8,6 +8,14 @@ import { SocialLinkRow } from './SocialLinkRow';
 import type { ProfileSocialLinks } from './social-links';
 
 export type ProfileIdentityProps = {
+  /**
+   * **One card for the top of the owner's profile** (founder Preview QA, 2026-11-07): the
+   * avatar, name and handle, bio, links, stats and the two actions on one raised surface
+   * with a hairline edge, so the identity reads as a unit rather than as rows floating on
+   * the page. The stats centre in their quarters to match the centred actions. Own profile
+   * only; somebody else's profile is unchanged.
+   */
+  card?: boolean;
   name: string;
   username: string;
   bio: string | null;
@@ -195,9 +203,10 @@ export function ProfileIdentity({
   onPressFollowing,
   onPressMovies,
   onPressSeasons,
+  card = false,
 }: ProfileIdentityProps) {
   return (
-    <View style={styles.block}>
+    <View style={[styles.block, card && styles.card]} testID={card ? 'profile-card' : undefined}>
       <View style={styles.identity}>
         {/* The photo and whatever belongs to the photo. A column rather than the avatar
             alone, so the badge under it is centred on the picture and not on the row. */}
@@ -250,6 +259,7 @@ export function ProfileIdentity({
         statsFallback
       ) : stats ? (
         <StatRow
+          centered={card}
           stats={[
             {
               label: 'Followers',
@@ -289,6 +299,17 @@ export function ProfileIdentity({
 
 const styles = StyleSheet.create({
   block: { gap: theme.space[1] },
+  // The card's own inset is the gutter its rows already carry, so text sits 16pt inside
+  // its edge; 16pt below the actions closes it.
+  card: {
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[3],
+    paddingBottom: theme.space[4],
+    backgroundColor: theme.surface.raised,
+    borderRadius: theme.radius.card,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+  },
   identity: {
     flexDirection: 'row',
     alignItems: 'center',

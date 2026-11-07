@@ -99,6 +99,8 @@ export function ProfileActions({ onShare, trailing, compact = false }: ProfileAc
           label="Share Profile"
           kind="secondary"
           size="sm"
+          // 12pt sides, so the pair stays on one line inside the card on a 320pt phone.
+          fit
           hitSlop={COMPACT_SLOP}
           onPress={onShare}
         />
@@ -121,7 +123,13 @@ const styles = StyleSheet.create({
   // thing, and equal weight is what stops the fill reading as the only real control.
   row: { flexDirection: 'row', gap: theme.space[2] },
   half: { flex: 1 },
-  compactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
+  // Centred under the stats, inside the profile card (founder Preview QA, 2026-11-07).
+  compactRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: theme.space[3],
+  },
 });
 
 /** A small button is 36pt drawn; this is the rest of its 44pt target. */

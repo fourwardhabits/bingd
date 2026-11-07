@@ -96,7 +96,7 @@ export function InviteFriendsButton({
   return (
     <Button
       label={opening ? 'Opening…' : 'Invite friends'}
-      fit={size === 'md'}
+      fit
       size={size}
       hitSlop={size === 'sm' ? { top: 4, bottom: 4 } : undefined}
       onPress={() => void invite()}

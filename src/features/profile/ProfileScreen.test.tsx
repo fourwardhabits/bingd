@@ -1110,3 +1110,22 @@ describe('the Profile headings', () => {
     expect(sizes).toEqual(headings.map((heading) => [String(heading), 15]));
   });
 });
+
+/**
+ * **One profile card** (founder Preview QA, 2026-11-07): the identity, stats and the two
+ * actions on one raised surface, the actions centred side by side.
+ */
+describe('the profile card', () => {
+  it('holds the identity, the stats and the centred actions on one raised surface', async () => {
+    const view = await open();
+    const card = view.getByTestId('profile-card');
+    const style = StyleSheet.flatten(card.props.style);
+    expect(style.backgroundColor).toBeDefined();
+    expect(style.borderRadius).toBeGreaterThan(0);
+    expect(within(card).getByText('@sai')).toBeTruthy();
+    expect(within(card).getByText('Share Profile')).toBeTruthy();
+    expect(within(card).getByText('Invite friends')).toBeTruthy();
+    const row = StyleSheet.flatten(within(card).getByTestId('profile-actions-compact').props.style);
+    expect(row).toMatchObject({ flexDirection: 'row', justifyContent: 'center' });
+  });
+});
