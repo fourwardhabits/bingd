@@ -175,7 +175,7 @@ sandbox; the suite above is the implementer's. Codex did not exercise native tou
 
 ## Android Preview
 
-| | Phase A | Phase B (live) |
+| | Phase A | Phase B |
 | --- | --- | --- |
 | Published | 2026-11-07 | 2026-11-07 |
 | Commit | `688a007` (code `1ee5646`) | `2f58ff4` (code `af8ef38`) |
@@ -185,7 +185,12 @@ sandbox; the suite above is the implementer's. Codex did not exercise native tou
 | Branch / platform | `preview`, Android only | the same |
 | Rollback to | `29b60018` (final title refinement) | `404c12c7` (Phase A) |
 
-This session was the only publisher for both.
+**Final polish (live):** commit `ae2a079` (code `9639b17`), update group
+`7c376dde-79a3-4276-9ab9-61ff7cba2535`, Android update `01a1b4ab-914d-7fdc-9161-aaa9583155b7`, runtime
+`2503ffaa`, published 2026-11-07. Rollback to Phase B:
+`npx eas update:republish --group 3704e9a9-38b2-4b82-af3f-999b37b674e0 --non-interactive`.
+
+This session was the only publisher for all three.
 
 ## Rollback
 
