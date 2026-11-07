@@ -1,8 +1,8 @@
-import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -187,11 +187,11 @@ beforeEach(() => {
 type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
 /**
- * **The page's tabs** (founder, UI cohesion pass, 2026-11-06): Watched, Watchlist, and
- * Unranked while this side has an unranked title, as a full-width tab row under the header.
+ * **The page's marquee** (founder, marquee cohesion sprint, 2026-11-07): Watched, Watchlist,
+ * and Unranked while this side has an unranked title, as the toolbar's dropdown.
  */
 const SEGMENTS = ['Watched', 'Watchlist', 'Unranked'] as const;
-const menu = (view: View) => view.getByTestId('nav-tabs');
+const menu = (view: View) => view.getByTestId('collection-mode');
 
 const open = async () => {
   const view = await renderWithProviders(<CollectionScreen />);
@@ -199,17 +199,27 @@ const open = async () => {
   return view;
 };
 
-/** Which tab is showing. */
+/** Which section the marquee says is showing. */
 const shown = (view: View) =>
-  SEGMENTS.find((name) => view.queryByRole('tab', { name })?.props.accessibilityState?.selected);
+  SEGMENTS.find((name) => view.queryByTestId('collection-mode-label')?.props.children === name);
 
-/** The tabs on offer, in order. Async so the call sites read as they always did. */
-const offered = async (view: View) =>
-  SEGMENTS.filter((name) => view.queryByRole('tab', { name }) !== null);
+/**
+ * The sections on offer, in order: the open menu's items, read and then closed again by
+ * choosing the one already showing (which changes nothing).
+ */
+const offered = async (view: View) => {
+  await fireEvent.press(menu(view));
+  const items = await view.findAllByRole('menuitem');
+  const names = items.map((item) => item.props.accessibilityLabel as string);
+  const current = items.find((item) => item.props.accessibilityState?.selected);
+  if (current) await fireEvent.press(current);
+  return SEGMENTS.filter((name) => names.includes(name));
+};
 
-/** Choose a tab. */
+/** Choose a section from the marquee's menu. */
 const choose = async (view: View, name: (typeof SEGMENTS)[number]) => {
-  await fireEvent.press(view.getByRole('tab', { name }));
+  await fireEvent.press(menu(view));
+  await fireEvent.press(await view.findByRole('menuitem', { name }));
 };
 
 /** The medium is the Movies | TV switch beside the dropdown. */
@@ -922,74 +932,47 @@ describe('the header and the tabs', () => {
     expect(view.queryByLabelText('Notifications')).toBeNull();
   });
 
-  it('writes the chosen tab in Parchment, the others in Ink, every tab an equal column', async () => {
-    mockTables.user_media = [watched('m1', 'movie')];
-    const view = await open();
-    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
-    for (const name of SEGMENTS) {
-      const tab = view.getByRole('tab', { name });
-      expect(StyleSheet.flatten(tab.props.style).flex).toBe(1);
-    }
-    const label = (name: string) =>
-      StyleSheet.flatten(within(view.getByRole('tab', { name })).getByText(name).props.style);
-    expect(label('Watched').color).toBe(theme.semantic.actionText);
-    expect(label('Watchlist').color).toBe(theme.text.primary);
-    expect(label('Unranked').color).toBe(theme.text.primary);
-    // Slightly larger than the Leaderboard's 15pt, at Inter Medium.
-    expect(label('Watched').fontSize).toBe(16);
-  });
-
   /**
-   * **One segmented control, the page's primary navigation** (founder, QA corrections,
-   * 2026-11-06): one outlined track, halves or thirds — no separate pills, nothing else
-   * filled. Since the final title refinement the chosen segment is filled Maroon, the
-   * Feed mode toggle's grammar, so the navigation outweighs Filter & Sort.
+   * **The marquee** (founder, marquee cohesion sprint, 2026-11-07): the section's name in
+   * Maroon DM Serif Display, about 22pt, with a Maroon chevron — one 44pt control that opens
+   * a menu of the sections, the one showing marked.
    */
-  it('draws the tabs as one control, the chosen segment filled Maroon', async () => {
-    mockTables.user_media = [watched('m1', 'movie')];
+  it('names the section in Maroon DM Serif with a Maroon chevron, one 44pt control', async () => {
     const view = await open();
-    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
-
-    const track = StyleSheet.flatten(view.getByTestId('nav-tabs').props.style);
-    expect(track.flexDirection).toBe('row');
-    expect(track.borderColor).toBe(theme.border.hairline);
-    expect(track.borderWidth).toBeGreaterThan(0);
-
-    const fill = (id: string) => StyleSheet.flatten(view.getByTestId(`nav-fill-${id}`).props.style);
-    expect(fill('watched').backgroundColor).toBe(theme.semantic.action);
-    expect(fill('watchlist').backgroundColor).toBeUndefined();
-    expect(fill('unranked').backgroundColor).toBeUndefined();
-
-    await choose(view, 'Watchlist');
-    expect(fill('watchlist').backgroundColor).toBe(theme.semantic.action);
-    expect(fill('watched').backgroundColor).toBeUndefined();
+    const label = StyleSheet.flatten(view.getByTestId('collection-mode-label').props.style);
+    expect(label.color).toBe(theme.semantic.action);
+    expect(label.fontFamily).toBe(fontFamily.serif);
+    expect(label.fontSize).toBeGreaterThanOrEqual(21);
+    expect(label.fontSize).toBeLessThanOrEqual(23);
+    // Wraps rather than truncating.
+    expect(view.getByTestId('collection-mode-label').props.numberOfLines).toBeUndefined();
+    expect(StyleSheet.flatten(menu(view).props.style).minHeight).toBe(theme.layout.minTapTarget);
+    expect(menu(view).props.accessibilityLabel).toBe('Showing Watched');
+    // No segmented control is left on the page.
+    expect(view.queryByTestId('nav-tabs')).toBeNull();
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
   });
 
-  it('splits the width in halves for two tabs and thirds for three, each 44pt tall', async () => {
+  it('opens a menu of the sections with the one showing selected, and switches', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
-    // Nothing unranked on this side: two tabs.
+    await waitFor(async () => expect(await offered(view)).toEqual([...SEGMENTS]));
+
+    await fireEvent.press(menu(view));
+    const items = await view.findAllByRole('menuitem');
+    expect(items.map((item) => item.props.accessibilityState?.selected)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    await fireEvent.press(view.getByRole('menuitem', { name: 'Watchlist' }));
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.queryAllByRole('menuitem')).toHaveLength(0);
+  });
+
+  it('offers two sections where this side has nothing unranked', async () => {
+    const view = await open();
     await waitFor(async () => expect(await offered(view)).toEqual(['Watched', 'Watchlist']));
-    const tabs = within(view.getByTestId('nav-tabs')).getAllByRole('tab');
-    expect(tabs).toHaveLength(2);
-    for (const tab of tabs) {
-      const style = StyleSheet.flatten(tab.props.style);
-      expect(style.flex).toBe(1);
-      expect(style.flexBasis).toBe(0);
-      expect(style.minHeight).toBe(theme.layout.minTapTarget);
-    }
-  });
-
-  it('keeps every label on one line, shrinking before it would truncate', async () => {
-    mockTables.user_media = [watched('m1', 'movie')];
-    const view = await open();
-    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
-    for (const name of SEGMENTS) {
-      const label = within(view.getByRole('tab', { name })).getByText(name);
-      expect(label.props.numberOfLines).toBe(1);
-      expect(label.props.adjustsFontSizeToFit).toBe(true);
-      // Its growth stops at 1.3× so three segments still fit a 320pt phone at 200% text.
-      expect(label.props.maxFontSizeMultiplier).toBe(1.3);
-    }
   });
 
   it('keeps the tab when the side changes and the new side has it too', async () => {

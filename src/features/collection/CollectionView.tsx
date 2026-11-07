@@ -6,7 +6,9 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
+  ContentToolbar,
   EmptyState,
+  FiltersAction,
   IconToggle,
   type IconToggleOption,
   PosterGridList,
@@ -14,7 +16,7 @@ import {
   TitleMetadata,
   TitleRow,
 } from '@/ui/components';
-import { coerceSortState, isDirectional, type SortAxisSpec } from '@/ui/sort';
+import { coerceSortState, type SortAxisSpec } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
@@ -24,7 +26,6 @@ import {
   applyFilters,
   COLLECTION_SORT_AXES,
   emptyFilters,
-  isFiltered,
   sortAxesFor,
   sortItems,
   type CollectionFilters,
@@ -111,6 +112,14 @@ export type CollectionViewProps = {
    * way to the lists never depends on there being titles.
    */
   countAccessory?: ReactNode;
+  /**
+   * The page's marquee title, `Watched ▾` (marquee cohesion sprint, 2026-11-07): the left
+   * of the toolbar, which scrolls away with the titles. Drawn in every state, so the way
+   * to Watchlist never depends on there being titles here.
+   */
+  title?: ReactNode;
+  /** Cards between the toolbar and the count (the unranked and refine prompts). */
+  lead?: ReactNode;
 };
 
 /**
@@ -135,6 +144,8 @@ export function CollectionView({
   onPressItem,
   empty,
   countAccessory,
+  title,
+  lead,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -154,6 +165,8 @@ export function CollectionView({
   if (items.length === 0) {
     return (
       <>
+        {title ? <ContentToolbar title={title} testID="collection-toolbar" /> : null}
+        {lead}
         {countAccessory ? <View style={styles.accessoryOnly}>{countAccessory}</View> : null}
         {empty}
       </>
@@ -161,82 +174,62 @@ export function CollectionView({
   }
 
   const activeCount = activeFilterCount(state.filters);
-  const filtered = isFiltered(state.filters);
   const reshuffle = () => onChange({ ...state, seed: state.seed + 1 });
 
-  return (
-    <View style={styles.body}>
-      {/**
-       * **One quiet toolbar: Filter & Sort on the left, Grid / List on the right** (founder,
-       * UI cohesion pass, 2026-11-06). It replaced a row of outlined chips and a filled
-       * segmented pair, which read as competing controls. Filter & Sort is one
-       * text-and-icon action that opens one sheet; what is in force is said beside it in
-       * tertiary text, so nothing needs a third row to show its state.
-       */}
-      <View style={styles.controls} testID="collection-toolbar">
-        <View style={styles.toolbarStart}>
+  /**
+   * **The page's toolbar, then its cards, then the count — all at the head of the list**
+   * (founder, marquee cohesion sprint, 2026-11-07).
+   *
+   *     Watched ▾                          ⚙ Filters   ▦ ☰
+   *     37 titles                                My lists ›
+   *
+   * The marquee is the page's navigation (Watched / Watchlist / Unranked), and the tools
+   * opposite it act on what it shows: Filters, one sheet holding the sort and the filters,
+   * and the Grid / List glyphs. The full-width segmented control that sat above this is
+   * gone; the order in force is not written beside Filters any more, because the sheet
+   * names it. The whole header scrolls away with the titles, so the posters get the screen
+   * back; the app header and the tab bar stay where they always were.
+   */
+  const header = (
+    <View>
+      <ContentToolbar
+        title={title}
+        // The last glyph's 44pt cell around its 20pt glyph, so the glyph lands on the gutter.
+        edgeInset={(theme.layout.minTapTarget - theme.layout.icon.sm) / 2}
+        testID="collection-toolbar"
+      >
+        <FiltersAction
+          activeCount={activeCount}
+          accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+          accessibilityHint="Opens filters and the sort order"
+          onPress={() => setFilterOpen(true)}
+          testID="collection-filter-sort"
+        />
+        {/* Shuffle's reshuffle, one press from the toolbar rather than three. */}
+        {sort.axis === 'shuffle' ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
-            accessibilityHint="Opens filters and the sort order"
-            onPress={() => setFilterOpen(true)}
-            style={({ pressed }) => [styles.filterSort, pressed && styles.pressed]}
-            testID="collection-filter-sort"
+            accessibilityLabel="Shuffle again"
+            onPress={reshuffle}
+            style={({ pressed }) => [styles.reshuffle, pressed && styles.pressed]}
+            testID="collection-reshuffle"
           >
-            {/* Footnote, secondary: a tool under the page's navigation, not a peer of it
-                (final title refinement, 2026-11-06). The 44pt row is unchanged. */}
-            <Ionicons
-              name="options-outline"
-              size={theme.layout.icon.sm}
-              color={filtered ? theme.semantic.action : theme.text.tertiary}
-            />
-            <Text variant="footnote" tone="secondary" style={styles.filterSortLabel}>
-              Filter & Sort
-            </Text>
-            <Text
-              variant="footnote"
-              tone={filtered ? 'action' : 'tertiary'}
-              numberOfLines={1}
-              // At a large text size it gives up a little size before it would end in "…".
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              style={styles.filterSortStatus}
-              testID="collection-filter-sort-status"
-            >
-              {filterSortStatus(axes, sort, activeCount)}
-            </Text>
+            <Ionicons name="shuffle" size={theme.layout.icon.sm} color={theme.semantic.action} />
           </Pressable>
-          {/* Shuffle's reshuffle, one press from the toolbar rather than three. */}
-          {sort.axis === 'shuffle' ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Shuffle again"
-              onPress={reshuffle}
-              style={({ pressed }) => [styles.reshuffle, pressed && styles.pressed]}
-              testID="collection-reshuffle"
-            >
-              <Ionicons name="shuffle" size={theme.layout.icon.sm} color={theme.semantic.action} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        {/* The view control, not a third collection state.
-
-            **Poster first, list second** — the founder's §11 ordering, and it is the
-            control reading as its own default: the leftmost cell is the one a device
-            with no stored preference opens on, so the row and the state agree without
-            the reader having to discover that they do. Reversed from the original,
-            which put List first and then defaulted to it, and then had to default to
-            Poster while still drawing List first. */}
+        ) : null}
+        {/* The view control, not a third collection state. **Poster first, list second**
+            (founder §11): the leftmost cell is the one a device with no stored preference
+            opens on, so the row and the state agree. */}
         <IconToggle
           label="View"
           appearance="quiet"
           value={state.mode}
           onChange={(mode) => onChange({ ...state, mode })}
           options={VIEW_MODES}
-          style={styles.toggle}
         />
-      </View>
+      </ContentToolbar>
+
+      {lead}
 
       <View style={styles.countRow}>
         <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
@@ -246,20 +239,27 @@ export function CollectionView({
         </Text>
         {countAccessory}
       </View>
+    </View>
+  );
 
+  return (
+    <View style={styles.body}>
       {visible.length === 0 ? (
-        <View style={styles.padded}>
-          <EmptyState
-            kind="nothingMatches"
-            compact
-            title="Nothing matches"
-            body="Try removing a filter."
-            action={{
-              label: 'Clear all',
-              onPress: () => onChange({ ...state, filters: emptyFilters() }),
-            }}
-          />
-        </View>
+        <>
+          {header}
+          <View style={styles.padded}>
+            <EmptyState
+              kind="nothingMatches"
+              compact
+              title="Nothing matches"
+              body="Try removing a filter."
+              action={{
+                label: 'Clear all',
+                onPress: () => onChange({ ...state, filters: emptyFilters() }),
+              }}
+            />
+          </View>
+        </>
       ) : state.mode === 'poster' ? (
         /**
          * **Both modes are virtualised, and that is the 2026-09-16 fix.**
@@ -290,7 +290,13 @@ export function CollectionView({
             bucket: item.bucket,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
-          paddingTop={styles.wall.paddingTop}
+          // The wall's top space follows the header now, rather than preceding it.
+          header={
+            <>
+              {header}
+              <View style={styles.wallTop} />
+            </>
+          }
           paddingBottom={styles.wall.paddingBottom}
         />
       ) : (
@@ -300,6 +306,7 @@ export function CollectionView({
           // See the note on the grid in `PosterGridList`: a re-sort keeps the offset
           // rather than chasing the row that happened to be on top.
           maintainVisibleContentPosition={LIST_POSITION}
+          ListHeaderComponent={header}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <TitleRow
@@ -364,36 +371,6 @@ export function CollectionView({
 
 const LIST_POSITION = { disabled: true } as const;
 
-const DOWN = '\u2193';
-const UP = '\u2191';
-
-/**
- * `Rating ↓`, `Recent ↓`, `Shuffle`, `Rating ↓ · 2 filters`: what is in force, beside the
- * action.
- *
- * **The axis in its short word** (QA corrections, 2026-11-06). The full label put
- * `Recently watched ↓` beside Filter & Sort, which ran out of room and ended in an
- * ellipsis on most phones. The status only has to say which order is on; the sheet one
- * tap away names it in full, and so does the spoken form.
- */
-export function filterSortStatus<Axis extends string>(
-  axes: readonly SortAxisSpec<Axis>[],
-  sort: { axis: Axis; direction: 'asc' | 'desc' },
-  activeFilters: number,
-): string {
-  const spec = axes.find((option) => option.axis === sort.axis);
-  const name = spec ? (spec.shortLabel ?? spec.label) : '';
-  const order = spec
-    ? isDirectional(spec)
-      ? `${name} ${sort.direction === 'desc' ? DOWN : UP}`
-      : name
-    : '';
-  const filters = activeFilters
-    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'}`
-    : null;
-  return [order, filters].filter(Boolean).join(' \u00b7 ');
-}
-
 /** The sentence a screen reader is given instead of the arrow. */
 function filterSortSpoken<Axis extends string>(
   axes: readonly SortAxisSpec<Axis>[],
@@ -423,42 +400,12 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
-  /**
-   * Two groups on one line: the action at the gutter, the view glyphs ending on it. The
-   * glyphs' 44pt targets are wider than their 20pt glyphs by 12pt a side, so the row is
-   * inset 12pt less on the right and the last glyph's edge lands on the gutter. The
-   * status text is what gives way on a narrow phone or at a large text size: it
-   * truncates before either control moves.
-   */
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: theme.layout.gutter,
-    paddingRight: theme.layout.gutter - (theme.layout.minTapTarget - theme.layout.icon.sm) / 2,
-    paddingTop: theme.space[2],
-  },
-  toolbarStart: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
-  // The status wraps under the label when the row has no room for both, rather than being
-  // squeezed to nothing: at 200% text on a 320pt phone "Filter & Sort" alone fills the row
-  // (QA corrections, 2026-11-06).
-  filterSort: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: theme.space[2],
-    minHeight: theme.layout.minTapTarget,
-    flexShrink: 1,
-    paddingRight: theme.space[2],
-  },
-  filterSortLabel: { flexShrink: 0 },
-  filterSortStatus: { flexShrink: 0, maxWidth: '100%' },
   reshuffle: {
     width: theme.layout.minTapTarget,
     height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toggle: { marginLeft: theme.space[2] },
   pressed: { opacity: 0.6 },
 
   /** `37 titles` on the left and the lists link on the right, one line under the toolbar. */
@@ -478,6 +425,7 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   list: { paddingBottom: theme.space[10] },
-  wall: { paddingBottom: theme.space[10], paddingTop: theme.space[2] },
+  wall: { paddingBottom: theme.space[10] },
+  wallTop: { height: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
 });

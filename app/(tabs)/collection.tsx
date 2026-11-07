@@ -30,10 +30,11 @@ import { fontFamily, theme } from '@/ui/tokens';
 import {
   AppHeader,
   Button,
+  ContentToolbar,
   HeaderBoundary,
   EmptyState,
+  MediumSelector,
   Screen,
-  SegmentedTabs,
   SkeletonRow,
   Text,
 } from '@/ui/components';
@@ -440,64 +441,41 @@ export default function CollectionScreen() {
     await writePref(`${profile.id}.${NUDGE_PREF_KEY}`, next);
   };
 
-  return (
-    <Screen>
-      {/**
-       * **Movies | TV in the header's right corner** (founder, UI cohesion pass,
-       * 2026-11-06), where Feed keeps its bell. The same switch, the same state and the
-       * same one tap; it is simply no longer a row of its own under the header.
-       */}
-      <AppHeader
-        right={
-          <CompactSwitch
-            accessibilityLabel="Medium"
-            options={COLLECTION_MEDIA}
-            value={medium}
-            onChange={changeMedium}
-          />
-        }
-      />
-      <HeaderBoundary />
-      {/**
-       * **Watched | Watchlist | Unranked, as the page's primary navigation** (founder, UI
-       * cohesion pass, then QA corrections, 2026-11-06). One segmented control across the
-       * full width, halves or thirds. Since the final title refinement (2026-11-06) the one
-       * showing is filled Maroon with its word in Parchment and the others are Ink, at 16pt
-       * (`solid`): on the phone the Parchment fill read as quieter than Filter & Sort.
-       * Unranked is drawn only while this side has an unranked title, as it always was,
-       * and the other two then share the width between them.
-       */}
-      <View style={styles.nav}>
-        <SegmentedTabs
-          variant="nav"
-          solid
-          options={segments}
-          value={active}
-          onChange={setSegment}
-          accessibilityLabel="Collection"
-        />
-      </View>
+  /**
+   * **The page's marquee: Watched ▾, Watchlist ▾ or Unranked ▾** (founder, marquee
+   * cohesion sprint, 2026-11-07). It replaces the full-width Maroon segmented control,
+   * which took a row of poster space to say one word. The same three choices, the same
+   * rule — Unranked is offered only while this side has an unranked title — and the same
+   * state, in For You's dropdown at the marquee size, at the left of the toolbar that
+   * scrolls with the titles. The open menu marks the one showing.
+   */
+  const marquee = (
+    <MediumSelector
+      size="marquee"
+      value={active}
+      options={segments}
+      onChange={setSegment}
+      accessibilityHint="Choose Watched, Watchlist or Unranked"
+      testID="collection-mode"
+    />
+  );
 
-      {/* **Two answers to one question, side by side.**
+  /**
+   * The cards under the toolbar, which scroll with it: Watched's unranked or refine prompt,
+   * Unranked's Start ranking. Watchlist has none.
+   */
+  const lead =
+    active === 'watched' ? (
+      showNudge ? (
+        /* **Two answers to one question, side by side.** Rank and Dismiss are a pair, in
+           the order the question asks them, at the notifications screen's compact size.
+           One dismissal: `dismissNudge` records it, and the card stays away until fourteen
+           days have passed and something has been ranked since
+           (`shouldShowUnrankedNudge`). Dismissing hides this card only; Unranked stands as
+           long as anything is unranked.
 
-          The card said its piece down the left and put an X at the far right edge,
-          so the two things a reader could do about it sat as far apart as the card
-          allowed and only one of them looked like a control. Rank and Dismiss are
-          now a pair, in the order the question asks them, using the same
-          primary/secondary pairing the notifications screen uses for Approve and
-          Decline — at the compact size that screen introduced.
-
-          One dismissal, not two: an X *and* a Dismiss would be the same act offered
-          twice. It was labelled "Not now" until 2026-09-12; the label says what the
-          press does, and the behaviour is unchanged — `dismissNudge` records it, and
-          the card stays away until fourteen days have passed and something has been
-          ranked since (`shouldShowUnrankedNudge`). Dismissing
-          hides this card only; the Unranked tab stands as long as anything is
-          unranked. */}
-      {/* **One card slot on Watched, and unranked wins** (unified design §1). The
-          Refine card below is drawn only when this one is not — and the server only lets
-          it show when nothing in the medium is left to rank, so the two never compete. */}
-      {active === 'watched' && showNudge ? (
+           **One card slot on Watched, and unranked wins** (unified design §1). The Refine
+           card is drawn only when this one is not. */
         backlogOn ? (
           <View style={styles.nudge} testID="collection-unranked-card">
             {/* No count on Watched (founder decision 3): this view is a collection, not a
@@ -539,62 +517,76 @@ export default function CollectionScreen() {
             </View>
           </View>
         )
-      ) : null}
-
-      {active === 'watched' && !showNudge ? (
+      ) : (
         <RefineCard userId={profile.id} medium={medium} />
-      ) : null}
-
-      {active === 'watched' ? (
-        <Watched
-          userId={profile.id}
-          medium={medium}
-          state={viewState}
-          onChange={changeView}
-          lists={<MyListsLink onPress={openLists} />}
-        />
-      ) : null}
-      {active === 'watchlist' ? (
-        <Watchlist
-          userId={profile.id}
-          medium={medium}
-          state={viewState}
-          onChange={changeView}
-          lists={<MyListsLink onPress={openLists} />}
-        />
-      ) : null}
-      {/* **Start ranking, persistent on Unranked** (unified design §1): no dismiss, and
-          the ordinary one-title-at-a-time ranking stays below it. The exact count is
-          useful here, because the reader chose to come and look (founder decision 3). */}
-      {active === 'unranked' && backlogOn && backlogTotal > 0 ? (
-        <View style={styles.nudge} testID="collection-start-ranking-card">
-          <Text variant="callout">Rank your unranked titles</Text>
-          {/* No explanatory line: the heading, the count and the button already say it
-              three times over (founder QA, 2026-09-22). */}
-          <Text variant="footnote" tone="secondary">
-            {backlogCountLine(backlogTotal, medium)}
-          </Text>
-          <View style={styles.nudgeActions}>
-            <Button
-              label="Start ranking"
-              size="sm"
-              onPress={() => router.push(`/rank-session?medium=${medium}&start=backlog`)}
-            />
-          </View>
+      )
+    ) : active === 'unranked' && backlogOn && backlogTotal > 0 ? (
+      /* **Start ranking, persistent on Unranked** (unified design §1): no dismiss, and the
+         ordinary one-title-at-a-time ranking stays below it. The exact count is useful
+         here, because the reader chose to come and look (founder decision 3). */
+      <View style={styles.nudge} testID="collection-start-ranking-card">
+        <Text variant="callout">Rank your unranked titles</Text>
+        {/* No explanatory line: the heading, the count and the button already say it
+            three times over (founder QA, 2026-09-22). */}
+        <Text variant="footnote" tone="secondary">
+          {backlogCountLine(backlogTotal, medium)}
+        </Text>
+        <View style={styles.nudgeActions}>
+          <Button
+            label="Start ranking"
+            size="sm"
+            onPress={() => router.push(`/rank-session?medium=${medium}&start=backlog`)}
+          />
         </View>
-      ) : null}
-      {active === 'unranked' ? (
-        <Unranked
-          userId={profile.id}
-          medium={medium}
-          state={viewState}
-          onChange={changeView}
-          lists={<MyListsLink onPress={openLists} />}
-        />
-      ) : null}
+      </View>
+    ) : null;
+
+  const section = {
+    userId: profile.id,
+    medium,
+    state: viewState,
+    onChange: changeView,
+    lists: <MyListsLink onPress={openLists} />,
+    title: marquee,
+    lead,
+  };
+
+  return (
+    <Screen>
+      {/**
+       * **Movies | TV in the header's right corner** (founder, UI cohesion pass,
+       * 2026-11-06), where Feed keeps its bell. The same switch, the same state and the
+       * same one tap; it is simply no longer a row of its own under the header.
+       */}
+      <AppHeader
+        right={
+          <CompactSwitch
+            accessibilityLabel="Medium"
+            options={COLLECTION_MEDIA}
+            value={medium}
+            onChange={changeMedium}
+          />
+        }
+      />
+      <HeaderBoundary />
+      {active === 'watched' ? <Watched {...section} /> : null}
+      {active === 'watchlist' ? <Watchlist {...section} /> : null}
+      {active === 'unranked' ? <Unranked {...section} /> : null}
     </Screen>
   );
 }
+
+/** What each of the three sections is handed: the shared view's state and the page's header. */
+type SectionProps = {
+  userId: string;
+  medium: Medium;
+  state: CollectionViewState;
+  onChange: (next: CollectionViewState) => void;
+  lists: React.ReactNode;
+  /** The marquee, `Watched ▾`: drawn in every state, loading and failed included. */
+  title: React.ReactNode;
+  lead?: React.ReactNode;
+};
 
 /**
  * Everything watched, through the shared view.
@@ -609,13 +601,9 @@ function Watched({
   state,
   onChange,
   lists,
-}: {
-  userId: string;
-  medium: Medium;
-  state: CollectionViewState;
-  onChange: (next: CollectionViewState) => void;
-  lists: React.ReactNode;
-}) {
+  title,
+  lead,
+}: SectionProps) {
   const router = useRouter();
   const ranked = useRankedCollection(userId, medium);
   const logged = useLoggedCollection(userId);
@@ -632,6 +620,7 @@ function Watched({
   if (ranked.isError || logged.isError) {
     return (
       <>
+        <SectionTop title={title} lead={lead} />
         <ListsOnly lists={lists} />
         <EmptyState
           kind="couldNotLoad"
@@ -648,7 +637,7 @@ function Watched({
       </>
     );
   }
-  if (ranked.isPending || logged.isPending) return <Loading lists={lists} />;
+  if (ranked.isPending || logged.isPending) return <Loading lists={lists} title={title} lead={lead} />;
 
   return (
     <CollectionView
@@ -657,6 +646,8 @@ function Watched({
       state={state}
       onChange={onChange}
       countAccessory={lists}
+      title={title}
+      lead={lead}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         logged.data.loggedCount === 0 ? (
@@ -684,13 +675,9 @@ function Watchlist({
   state,
   onChange,
   lists,
-}: {
-  userId: string;
-  medium: Medium;
-  state: CollectionViewState;
-  onChange: (next: CollectionViewState) => void;
-  lists: React.ReactNode;
-}) {
+  title,
+  lead,
+}: SectionProps) {
   const router = useRouter();
   const { data, isPending, isError, refetch } = useWatchlist(userId);
   const items = useMemo(() => watchlistItems(data ?? [], medium), [data, medium]);
@@ -698,6 +685,7 @@ function Watchlist({
   if (isError) {
     return (
       <>
+        <SectionTop title={title} lead={lead} />
         <ListsOnly lists={lists} />
         <EmptyState
           kind="couldNotLoad"
@@ -708,7 +696,7 @@ function Watchlist({
       </>
     );
   }
-  if (isPending) return <Loading lists={lists} />;
+  if (isPending) return <Loading lists={lists} title={title} lead={lead} />;
 
   return (
     <CollectionView
@@ -717,6 +705,8 @@ function Watchlist({
       state={state}
       onChange={onChange}
       countAccessory={lists}
+      title={title}
+      lead={lead}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -737,13 +727,9 @@ function Unranked({
   state,
   onChange,
   lists,
-}: {
-  userId: string;
-  medium: Medium;
-  state: CollectionViewState;
-  onChange: (next: CollectionViewState) => void;
-  lists: React.ReactNode;
-}) {
+  title,
+  lead,
+}: SectionProps) {
   const router = useRouter();
   const { data, isPending, isError, refetch } = useLoggedCollection(userId);
   const items = useMemo(() => watchlistItems(data?.unranked ?? [], medium), [data, medium]);
@@ -751,6 +737,7 @@ function Unranked({
   if (isError) {
     return (
       <>
+        <SectionTop title={title} lead={lead} />
         <ListsOnly lists={lists} />
         <EmptyState
           kind="couldNotLoad"
@@ -761,7 +748,7 @@ function Unranked({
       </>
     );
   }
-  if (isPending) return <Loading lists={lists} />;
+  if (isPending) return <Loading lists={lists} title={title} lead={lead} />;
 
   return (
     <CollectionView
@@ -770,6 +757,8 @@ function Unranked({
       state={state}
       onChange={onChange}
       countAccessory={lists}
+      title={title}
+      lead={lead}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -862,12 +851,35 @@ function backlogCountLine(total: number, medium: Medium) {
   return `${total} ${noun} to rank`;
 }
 
-function Loading({ lists }: { lists?: React.ReactNode }) {
+function Loading({
+  lists,
+  title,
+  lead,
+}: {
+  lists?: React.ReactNode;
+  title: React.ReactNode;
+  lead?: React.ReactNode;
+}) {
   return (
     <View style={styles.body}>
+      <SectionTop title={title} lead={lead} />
       <ListsOnly lists={lists} />
       <SkeletonRow count={7} />
     </View>
+  );
+}
+
+/**
+ * The toolbar and the cards, where there is no list to carry them: while a section loads
+ * and when its read fails. The marquee must stay reachable in both, or a failed Watched
+ * would strand the reader with no way to Watchlist.
+ */
+function SectionTop({ title, lead }: { title: React.ReactNode; lead?: React.ReactNode }) {
+  return (
+    <>
+      <ContentToolbar title={title} testID="collection-toolbar" />
+      {lead}
+    </>
   );
 }
 
@@ -882,8 +894,6 @@ function ListsOnly({ lists }: { lists?: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  /** The tabs, 4pt under the header's divider; the toolbar keeps its own 8pt under them. */
-  nav: { paddingTop: theme.space[2], paddingBottom: theme.space[1] },
   listsLink: {
     flexDirection: 'row',
     alignItems: 'center',
