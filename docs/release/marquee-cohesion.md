@@ -220,10 +220,64 @@ Relaunch once after the update. Cinematic title page: Labs → Cinematic.
    its dark frame (not a grey YouTube logo). A new title page asks again.
 10. **Largest system font:** Collection and For You — the tools drop to a line of their own,
     the marquee is never cut short.
+11. **Profile:** open stats with no box; Share Profile and Invite friends small, side by side;
+    Your 2026 sentence full width with Set a goal under it. Somebody else's profile unchanged.
+12. **My Lists** (Collection → My lists): + New list top right opens the sheet; each list led by
+    its fanned posters; an empty account shows Create a list.
+13. **Watch history** (title page → the watched line): a header with back and Watch history;
+    two watches show First … · Latest …; Edit sits on the date's line and opens the editor.
 
 ## Phase B — secondary screens
 
-Begun after the Phase A Preview; recorded here when it is published.
+| Commit | Area | What |
+| --- | --- | --- |
+| `117e922` | Profile | Open stats; a compact Share Profile / Invite friends pair; the goal prompt unwrapped |
+| `93debd4` | My Lists | New list in the header; each list led by its fanned posters |
+| `1dd7db4` | Watch history | A pushed page with a header, a span line, and score and Edit on the right |
+| `af8ef38` | Review fix | New list still opens its sheet when the lists read fails |
+
+- **Profile identity:** the four stats (Followers, Following, Movies, TV Shows) lost their
+  boxed, divided card: left-aligned figures in equal quarters, the first on the gutter under
+  the avatar, every cell still a 44pt target. Shared with somebody else's profile, so both read
+  the same. Avatar, name, handle, bio and links are unchanged.
+- **Primary actions (own profile):** Share Profile (outline) and Invite friends (the one fill)
+  are small content-sized buttons, 36pt drawn and 44pt to press, side by side on the gutter,
+  instead of two 48pt halves of the row. Same functions. **Somebody else's profile keeps its
+  approved half-row Share and Follow** — its tests hold that layout, and the brief named the
+  owner's pair; making it match is a founder decision below.
+- **Your 2026 / Set a goal:** the sentence has the whole width and the button sits under it,
+  small, with a 44pt target. Goal bars, the streak line, awards, Top Ranked, Watchlist, Lists
+  and Recent Activity are unchanged.
+- **My Lists index:** the stack's header (back, "My lists") now carries **+ New list** in its
+  right corner, a 44pt Maroon action, replacing the bordered button over the rows; the empty
+  state keeps its Create a list. Each list is a row led by up to four of its own posters
+  fanned left to right (the four `my_lists` already returns, so no backend work), then its
+  title, count, Numbered, visibility and update date, with a hairline between lists. A list
+  with no posters shows one Parchment card with the list glyph; one, two or three posters make
+  a shorter fan in the same width, so every title starts on one line. Privacy, editing, counts,
+  sharing and the list detail page are untouched.
+- **Watch history:** the route had no header (it was never declared in the root stack), so it
+  opened as a bare page left only by the system back gesture. It now has the stack's header
+  titled Watch history. Under "Watched N times" a span line gives the first and latest dated
+  watch; years are Maroon section labels; each row's score and Edit share a right column, Edit
+  a full 44pt target on the date's line. An empty history says so. Watch data, the repeat-watch
+  rules, edits, removal and scoring are unchanged.
+
+**Verified:** typecheck clean; lint 0 errors (36 warnings, three fewer than Phase A); Jest 286/286
+suites, 5,502 passed, 1 skipped at `af8ef38`; Android fingerprint `2503ffaa` at `af8ef38`; focused tests for the
+compact actions (36pt + slop = 44), the poster fan (four, front to back, one width for any
+count, hidden from screen readers), New list in the header (and with the read failed), the
+goal prompt's column, and the history header, span, empty state and Edit target. Renders at
+320, 360 and 412pt: Profile (established and new), somebody else's profile, My Lists
+(populated, empty, the New list sheet) and Watch history. In the web render My Lists and
+Watch history show no back arrow because they were opened directly; on a phone they are always
+pushed.
+
+**Independent review (Codex, against `7b1b952`):**
+1. Needs attention, one MEDIUM, fixed in `af8ef38`: a failed lists read returned early outside
+   the shell that mounts the New list sheet, while the header's New list stayed, so it did
+   nothing.
+2. Approve, no material findings.
 
 ## Phase C — research only (nothing built, no migration)
 
@@ -297,6 +351,9 @@ Begun after the Phase A Preview; recorded here when it is published.
 
 ## Founder decisions
 
+- **Somebody else's profile actions.** The owner's Share Profile / Invite friends are compact now;
+  a visitor's Share / Follow keep their approved half-row layout. Matching them needs
+  `FollowControl`'s compact size to gain a 44pt target first (small, not done here).
 - **Trailer previews across pages.** Today Show previews is per title page. Remembering it for
   the session, or as a setting, would remove the dark frames after the first tap but makes
   requests to YouTube on opening later titles.
