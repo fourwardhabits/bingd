@@ -66,19 +66,6 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
     router.push(`/lists/${list.id}?surface=my_lists`);
   };
 
-  if (lists.isError) {
-    return (
-      // `couldNotLoad` rather than `ScreenError`: this is a *read* that failed, which is
-      // recoverable in place.
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load your lists"
-        body="Check your connection and try again."
-        action={{ label: 'Try again', onPress: () => void lists.refetch() }}
-      />
-    );
-  }
-
   /**
    * **New list in the header's right corner** (founder, marquee cohesion sprint,
    * 2026-11-07), opposite the back control and the My lists title: obvious, out of the
@@ -92,7 +79,17 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
   return (
     <View style={styles.body}>
       <Stack.Screen options={header} />
-      {lists.isPending ? (
+      {/* A failed read is drawn inside this shell rather than returned early, so New list in
+          the header still opens its sheet (independent review, marquee cohesion sprint).
+          `couldNotLoad` rather than `ScreenError`: a read that failed, recoverable in place. */}
+      {lists.isError ? (
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load your lists"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void lists.refetch() }}
+        />
+      ) : lists.isPending ? (
         <View style={styles.loading}>
           <SkeletonRow count={4} />
         </View>

@@ -148,6 +148,14 @@ describe('the three states', () => {
     await waitFor(() => view.getByText('Could not load your lists'));
     view.getByRole('button', { name: 'Try again' });
   });
+
+  it('keeps New list working while the read has failed', async () => {
+    mockFails = true;
+    const view = await open();
+    await waitFor(() => view.getByText('Could not load your lists'));
+    await fireEvent.press(view.getByTestId('my-lists-new'));
+    await waitFor(() => view.getByText('Create list'));
+  });
 });
 
 describe('the discoverability tripwire', () => {
