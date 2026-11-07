@@ -295,7 +295,10 @@ function Navigation() {
                 directory name — which here would spell `lists` over the top of a list. */}
               <Stack.Screen
                 name="lists/index"
-                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/index'] }}
+                // No stack header: the page draws the bingd. header with a back chevron and its
+                // own MY LISTS label (founder Preview QA, 2026-11-07). The title stays declared:
+                // it is the back label of a list pushed on top.
+                options={{ headerShown: false, title: ROOT_SCREEN_TITLES['lists/index'] }}
               />
               <Stack.Screen
                 name="lists/[id]"

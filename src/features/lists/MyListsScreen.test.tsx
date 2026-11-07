@@ -235,3 +235,19 @@ describe('creating', () => {
     expect(view.getAllByRole('button', { name: 'New list' })).toHaveLength(1);
   });
 });
+
+/**
+ * **The bingd. header, then MY LISTS** (founder Preview QA, 2026-11-07): the tabs' header
+ * with a back chevron, and the page's own section label with New list opposite.
+ */
+describe('the header', () => {
+  it('draws the bingd. header with Back, and MY LISTS with New list beside it', async () => {
+    mockRows = [list('a', { title: 'Movies for Dad' })];
+    const view = await open();
+    await waitFor(() => view.getByText('Movies for Dad'));
+    expect(view.getByTestId('app-header')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(view.getByText('MY LISTS')).toBeTruthy();
+    expect(view.getByTestId('my-lists-new')).toBeTruthy();
+  });
+});

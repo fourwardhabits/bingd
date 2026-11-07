@@ -1,4 +1,4 @@
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -7,7 +7,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCurrentProfile } from '@/features/auth';
 import { track, type MyListsEntry } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
-import { EmptyState, SkeletonRow, Text } from '@/ui/components';
+import {
+  AppHeader,
+  EmptyState,
+  HeaderBoundary,
+  SectionHeader,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { ListRow } from './ListRow';
@@ -67,18 +74,22 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
   };
 
   /**
-   * **New list in the header's right corner** (founder, marquee cohesion sprint,
-   * 2026-11-07), opposite the back control and the My lists title: obvious, out of the
-   * list's way, and the same corner Settings uses for its action. It replaced a bordered
-   * button heading the rows. The empty state keeps its own Create a list.
+   * **The bingd. header, then MY LISTS** (founder Preview QA, 2026-11-07): the tabs' own
+   * header with the lockup — and a back chevron, since this page is pushed — in place of the
+   * stack's plain one, and "My lists" as the page's section label in the app's 15pt Maroon
+   * token with **+ New list** opposite it. The stack's header is off for this route
+   * (`app/_layout.tsx`).
    */
-  const header = {
-    headerRight: () => <NewListHeaderButton onPress={() => setCreating(true)} />,
-  };
-
   return (
     <View style={styles.body}>
-      <Stack.Screen options={header} />
+      <AppHeader back={{ onPress: () => router.back() }} />
+      <HeaderBoundary />
+      <View style={styles.titleRow}>
+        <View style={styles.titleLabel}>
+          <SectionHeader title="My lists" size="large" />
+        </View>
+        <NewListHeaderButton onPress={() => setCreating(true)} />
+      </View>
       {/* A failed read is drawn inside this shell rather than returned early, so New list in
           the header still opens its sheet (independent review, marquee cohesion sprint).
           `couldNotLoad` rather than `ScreenError`: a read that failed, recoverable in place. */}
@@ -130,7 +141,7 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
   );
 }
 
-/** `+ New` in Maroon, a full 44pt target in the header's corner. */
+/** `+ New list` in Maroon, a full 44pt target opposite MY LISTS. */
 function NewListHeaderButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
@@ -152,7 +163,15 @@ function NewListHeaderButton({ onPress }: { onPress: () => void }) {
 const styles = StyleSheet.create({
   body: { flex: 1 },
   loading: { paddingTop: theme.space[3] },
-  list: { paddingTop: theme.space[1], paddingBottom: theme.space[8] },
+  list: { paddingBottom: theme.space[8] },
+  // MY LISTS on the gutter (the header's own padding), New list's glyph edge on the other.
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: theme.space[3],
+    paddingRight: theme.layout.gutter - theme.space[2],
+  },
+  titleLabel: { flex: 1 },
   newList: {
     flexDirection: 'row',
     alignItems: 'center',

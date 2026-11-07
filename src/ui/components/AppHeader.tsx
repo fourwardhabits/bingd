@@ -26,6 +26,11 @@ export type AppHeaderProps = {
    * find it and costs the header nothing.
    */
   settings?: { onPress: () => void };
+  /**
+   * A back chevron before the lockup, for a pushed page that wears the tabs' header rather
+   * than the stack's (My lists, founder Preview QA, 2026-11-07). A full 44pt target.
+   */
+  back?: { onPress: () => void };
 };
 
 /**
@@ -41,10 +46,25 @@ export type AppHeaderProps = {
  * Pushed screens use `Stack.Screen`'s own header and never this component, so nothing
  * here can displace a Back control.
  */
-export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
+export function AppHeader({ right, notifications, settings, back }: AppHeaderProps) {
   return (
     <View style={styles.wrap} accessibilityRole="header" testID="app-header">
-      <BrandLockup size="sm" />
+      {back ? (
+        <View style={styles.left}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            onPress={back.onPress}
+            style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+            testID="app-header-back"
+          >
+            <Ionicons name="chevron-back" size={theme.layout.icon.md} color={theme.text.primary} />
+          </Pressable>
+          <BrandLockup size="sm" />
+        </View>
+      ) : (
+        <BrandLockup size="sm" />
+      )}
       <View style={styles.right}>
         {settings ? (
           <Pressable
@@ -146,6 +166,15 @@ const styles = StyleSheet.create({
    * side then moves to a line of its own, still right-aligned and wholly inside the header,
    * rather than overlapping the logo or leaving part of a target outside its parent.
    */
+  left: { flexDirection: 'row', alignItems: 'center' },
+  // The glyph's own edge on the gutter: the 44pt cell reaches 10pt past it to the left.
+  back: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    marginLeft: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   wrap: {
     minHeight: theme.layout.control.headerHeight,
     paddingHorizontal: theme.layout.gutter,
