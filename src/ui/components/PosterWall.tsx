@@ -205,6 +205,12 @@ export type PosterGridListProps = {
   /** Space above the first row and below the last, inside the scroller. */
   paddingTop?: number;
   paddingBottom?: number;
+  /**
+   * Drawn above the first row, inside the scroller, so it scrolls away with the wall
+   * (Collection's toolbar, marquee cohesion sprint). Full width: it is not inset by the
+   * wall's gutters, so it lays itself out from the screen's edges like any other row.
+   */
+  header?: React.ReactElement | null;
 };
 
 /**
@@ -233,6 +239,7 @@ export function PosterGridList({
   onPressTile,
   paddingTop = 0,
   paddingBottom = 0,
+  header,
 }: PosterGridListProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
@@ -251,6 +258,9 @@ export function PosterGridList({
       // under a reader who only changed the order. A plain ScrollView kept the offset,
       // which is what this wall has always done.
       maintainVisibleContentPosition={GRID_POSITION}
+      // Out to the screen's edges through the content's own gutter padding, which is
+      // still inside the scroller's bounds, so every control in it stays touchable.
+      ListHeaderComponent={header ? <View style={styles.fullBleed}>{header}</View> : null}
       contentContainerStyle={{
         paddingHorizontal: theme.layout.gutter,
         paddingTop,
@@ -276,6 +286,7 @@ export function PosterGridList({
 }
 
 const GRID_POSITION = { disabled: true } as const;
+
 
 /**
  * One poster as a button.
@@ -445,6 +456,7 @@ const styles = StyleSheet.create({
   // The width of the cell FlashList sized, never a flex share of it: a cell's height is
   // measured, and a flexing child would measure against the row instead of its tile.
   gridCell: { width: '100%' },
+  fullBleed: { marginHorizontal: -theme.layout.gutter },
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },

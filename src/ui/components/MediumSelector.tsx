@@ -65,15 +65,21 @@ export type MediumSelectorProps<T extends string = Medium> = {
    *   ink: the Leaderboard's This month / All time (same sprint). A secondary filter
    *   under the section's own heading, not a heading itself. No gutter of its own.
    *
-   * `heading` and `filter` open a **small menu under the control** rather than the
-   * bottom sheet: two options do not need a sheet's scrim and travel (same sprint). The
-   * other sizes keep the sheet.
+   * `marquee` — the page's browsing title: Maroon DM Serif Display at about 22pt (21 under
+   *   360pt, 23 from 412pt), with a Maroon chevron (founder, marquee cohesion sprint,
+   *   2026-11-07). Collection's Watched / Watchlist / Unranked and For You's Recommended /
+   *   Top Rated, so the two pages read as siblings. It wraps rather than truncating. No
+   *   gutter of its own: it sits in a `ContentToolbar`.
+   *
+   * `heading`, `filter` and `marquee` open a **small menu under the control** rather than
+   * the bottom sheet: two or three options do not need a sheet's scrim and travel (nav
+   * cohesion sprint). The other sizes keep the sheet.
    *
    * A prop rather than a second component, for the reason `IconToggle` is one component
    * with two callers: these are the same interaction — tap, choose — and two
    * implementations of it would drift into two dialects at the next tuning pass.
    */
-  size?: 'title' | 'nav' | 'section' | 'heading' | 'filter';
+  size?: 'title' | 'nav' | 'section' | 'heading' | 'filter' | 'marquee';
   /** What a screen reader hears after the label. Defaults to "Choose a category". */
   accessibilityHint?: string;
   testID?: string;
@@ -119,7 +125,7 @@ export function MediumSelector<T extends string = Medium>({
   testID,
 }: MediumSelectorProps<T>) {
   const [open, setOpen] = useState(false);
-  const anchored = size === 'heading' || size === 'filter';
+  const anchored = size === 'heading' || size === 'filter' || size === 'marquee';
   /** Where the anchored menu opens: just under the control, in window coordinates. */
   const [anchor, setAnchor] = useState<{ x: number; y: number; height: number } | null>(null);
   /** The open menu's own height, once laid out, so it can be placed inside the window. */
@@ -195,7 +201,16 @@ export function MediumSelector<T extends string = Medium>({
         testID={testID}
       >
         <View style={styles.row} ref={trigger} collapsable={false}>
-          {anchored ? (
+          {size === 'marquee' ? (
+            <Text
+              variant="title2"
+              tone="action"
+              style={[styles.title, marqueeType(win.width)]}
+              testID={testID ? `${testID}-label` : undefined}
+            >
+              {labelFor(value, table, labels)}
+            </Text>
+          ) : anchored ? (
             <Text
               variant={size === 'heading' ? 'headline' : 'subhead'}
               tone={size === 'heading' ? 'primary' : 'secondary'}
@@ -226,11 +241,18 @@ export function MediumSelector<T extends string = Medium>({
                 ? theme.layout.icon.md
                 : size === 'filter'
                   ? CHEVRON_FILTER
-                  : size === 'heading'
+                  : size === 'heading' || size === 'marquee'
                     ? CHEVRON_HEADING
                     : theme.layout.icon.sm
             }
-            color={size === 'section' ? theme.semantic.action : theme.text.secondary}
+            color={
+              size === 'section' || size === 'marquee'
+                ? theme.semantic.action
+                : theme.text.secondary
+            }
+            // Down the title's optical middle rather than its line box, which DM Serif sets
+            // high: the chevron reads as part of the word (marquee only).
+            style={size === 'marquee' ? styles.marqueeChevron : undefined}
           />
         </View>
       </Pressable>
@@ -362,6 +384,16 @@ export function MediumSelector<T extends string = Medium>({
 const MEASURE_TIMEOUT_MS = 120;
 const CHEVRON_HEADING = 18;
 const CHEVRON_FILTER = 16;
+
+/**
+ * The marquee's size for the window: 21pt under 360pt, 22pt on a standard phone, 23pt from
+ * 412pt (marquee cohesion sprint). The serif's line height moves with it. A width rule
+ * rather than a font-scale one: the system text size still scales whatever this returns.
+ */
+export function marqueeType(windowWidth: number) {
+  const fontSize = windowWidth < 360 ? 21 : windowWidth >= 412 ? 23 : 22;
+  return { fontSize, lineHeight: fontSize + 6 };
+}
 /** The anchored menu's width, and the space it keeps from the control above it. */
 const MENU_WIDTH = 220;
 const MENU_GAP = theme.space[1];
@@ -422,6 +454,7 @@ const styles = StyleSheet.create({
   },
   buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  marqueeChevron: { marginTop: 2, marginLeft: -2 },
   title: { flexShrink: 1 },
   scrim: {
     flex: 1,
