@@ -748,7 +748,9 @@ export default function FeedScreen() {
               // time range is a filter under the categories now, in `LeaderboardView`.
               <SectionHeader title="Leaderboard" size="large" fit />
             ) : showingPeople ? (
-              <SectionHeader title="People you may know" />
+              // The Feed's label size, as LEADERBOARD and TRENDING NOW (marquee cohesion
+              // sprint); it shrinks to fit beside the toggle on a narrow phone.
+              <SectionHeader title="People you may know" size="large" fit />
             ) : trendingHasItems ? (
               // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
               // heading keeps the standard 12pt, which is what fits beside the toggle.
@@ -811,26 +813,20 @@ export default function FeedScreen() {
             </View>
 
             {/**
-             * Where discovery ends and the social feed begins: **whitespace, and no
-             * visible heading** (founder, nav cohesion sprint, 2026-11-06).
+             * **Where discovery ends and the social feed begins: one rule, then RECENT
+             * ACTIVITY** (founder, marquee cohesion sprint, 2026-11-07).
              *
-             * Trending stays at the top and is not sticky; a reader scrolls past it into
-             * activity. A hairline and an ACTIVITY heading marked the boundary for a while,
-             * and read as a redundant label and an awkward stop before the first post. The
-             * Cinematic cards already open on 28pt of their own and close on a hairline,
-             * so a short spacer above the first one is the whole transition: the rail's
-             * artwork, then a person's. No rule, no card, no other heading.
-             *
-             * The spacer is still a heading to a screen reader, so the two sections stay
-             * navigable by heading; it draws nothing.
+             * The nav cohesion sprint took the boundary down to whitespace alone, and on the
+             * phone the first post then read as part of the rail. Now: the Feed's own
+             * separator (the hairline between posts) under Trending, 16pt either side of it,
+             * and the heading in the Feed's section-label token, as TRENDING NOW is. The first
+             * post sits 12pt under it (`leading`), so the label belongs to what follows. The
+             * rule is drawn only under a shelf; with no shelf there is nothing to divide.
              */}
-            <View
-              style={styles.boundary}
-              accessible
-              accessibilityRole="header"
-              accessibilityLabel="Activity"
-              testID="feed-activity-start"
-            />
+            <View style={styles.activityStart} testID="feed-activity-start">
+              {trendingHasItems ? <View style={styles.activityRule} /> : null}
+              <SectionHeader title="Recent activity" size="large" tight />
+            </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
             an alert they have to dismiss. It names the person, because "Sent" on its own
@@ -890,7 +886,7 @@ export default function FeedScreen() {
                 />
               </View>
             ) : (
-              events.map((event) =>
+              events.map((event, index) =>
                 /**
                  * **A follow story is a different row** (§§A9, A12), and it is a different
                  * row rather than an `ActivityRow` with six props left off.
@@ -942,6 +938,7 @@ export default function FeedScreen() {
                    */
                   <FeedCard
                     key={event.id}
+                    leading={index === 0}
                     actorName={event.actorName}
                     actorAvatarUri={event.actorAvatarUri}
                     onPressActor={
@@ -1299,11 +1296,14 @@ const styles = StyleSheet.create({
   // Takes the space the toggle leaves, so a long heading truncates rather than pushing
   // the control off the row.
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
-  /**
-   * The space between discovery and activity: 12pt here plus the first card's own 28pt,
-   * a little more than the 28pt between two posts, so the rail ends as a section.
-   */
-  boundary: { height: theme.space[3] },
+  /** Trending's end, the rule and RECENT ACTIVITY: 16pt above and below the rule. */
+  activityStart: { paddingTop: theme.space[4] },
+  // The hairline between two posts (`FeedCard`), full width, as the Feed's other rules are.
+  activityRule: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.border.hairline,
+    marginBottom: theme.space[4],
+  },
 });
 
 // `metadataFor` and `relativeTime` used to be defined here. Both now live in

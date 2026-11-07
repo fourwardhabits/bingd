@@ -10,6 +10,11 @@ import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
 
 export type FeedCardProps = {
+  /**
+   * The first post under RECENT ACTIVITY: 12pt above it rather than 28, so the heading
+   * belongs to the post (marquee cohesion sprint, 2026-11-07).
+   */
+  leading?: boolean;
   actorName: string;
   actorAvatarUri?: string | null;
   /** Opens the actor's profile. Absent for the viewer's own activity. */
@@ -90,6 +95,7 @@ export function FeedCard({
   onPressSave,
   saved = false,
   onPressShare,
+  leading = false,
 }: FeedCardProps) {
   const filmName = title ?? 'a title';
   const { width } = useWindowDimensions();
@@ -105,7 +111,7 @@ export function FeedCard({
   const othersGlyphs = (reaction.glyphs ?? []).filter((glyph) => glyph !== mine).slice(0, 3);
 
   return (
-    <View style={styles.card} testID="feed-card">
+    <View style={[styles.card, leading && styles.cardLeading]} testID="feed-card">
       {/* 1. Who did what, and when. */}
       <View style={styles.header}>
         {onPressActor ? (
@@ -438,6 +444,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
     borderBottomColor: theme.border.hairline,
   },
+  cardLeading: { paddingTop: theme.space[3] },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

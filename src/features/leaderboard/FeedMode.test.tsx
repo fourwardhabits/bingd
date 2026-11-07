@@ -298,7 +298,7 @@ describe('the toggle', () => {
   it('opens on Feed, with the Activity heading and no board', async () => {
     const view = await open();
 
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(view.getByLabelText('Recent activity')).toBeTruthy();
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -306,7 +306,7 @@ describe('the toggle', () => {
     const view = await open();
     await toBoard(view);
 
-    expect(view.queryByLabelText('Activity')).toBeNull();
+    expect(view.queryByLabelText('Recent activity')).toBeNull();
   });
 
   it('goes back to the Feed, with the feed untouched', async () => {
@@ -317,7 +317,7 @@ describe('the toggle', () => {
 
     await fireEvent.press(view.getByLabelText('Feed'));
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -394,7 +394,7 @@ describe('the timeframe, remembered — and the mode, not', () => {
     await chooseTimeframe(view, 'This month', 'All time');
 
     await fireEvent.press(view.getByLabelText('Feed'));
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     await toBoard(view, 'All time');
   });
 
@@ -416,7 +416,7 @@ describe('the timeframe, remembered — and the mode, not', () => {
 
     const second = await open();
 
-    expect(second.getByLabelText('Activity')).toBeTruthy();
+    expect(second.getByLabelText('Recent activity')).toBeTruthy();
     expect(second.queryByLabelText(/^Showing /)).toBeNull();
 
     await toBoard(second, 'All time');
@@ -1138,7 +1138,7 @@ describe('the hardware back button', () => {
 
     expect(pressBack()).toBe(true);
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -1155,7 +1155,7 @@ describe('the hardware back button', () => {
     await chooseTimeframe(view, 'This month', 'All time');
 
     expect(pressBack()).toBe(true);
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
     await toBoard(view, 'All time');
     expect(view.getByLabelText('Showing All time')).toBeTruthy();
@@ -1183,17 +1183,17 @@ describe('re-tapping the Feed tab', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
   it('changes nothing when the reader is already on the Feed root', async () => {
     const view = await open();
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(view.getByLabelText('Recent activity')).toBeTruthy();
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.getByLabelText('Feed')).toBeTruthy();
   });
 
@@ -1215,7 +1215,7 @@ describe('re-tapping the Feed tab', () => {
     await chooseTimeframe(view, 'This month', 'All time');
 
     pressFeedTab();
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
     await toBoard(view, 'All time');
     expect(view.getByLabelText('Showing All time')).toBeTruthy();
@@ -1233,7 +1233,7 @@ describe('re-tapping the Feed tab', () => {
     expect(views()).toBe(1);
 
     pressFeedTab();
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
     expect(views()).toBe(1);
   });
@@ -1334,7 +1334,7 @@ describe('the People mode', () => {
     const view = await open();
     await toPeople(view);
 
-    expect(view.queryByLabelText('Activity')).toBeNull();
+    expect(view.queryByLabelText('Recent activity')).toBeNull();
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -1344,7 +1344,7 @@ describe('the People mode', () => {
 
     await fireEvent.press(view.getByLabelText('Feed'));
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.queryByLabelText('People you may know')).toBeNull();
   });
 
@@ -1370,7 +1370,7 @@ describe('leaving People the two ways a mode can be left', () => {
 
     expect(pressBack()).toBe(true);
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
   });
 
   it('returns to the Feed root on a re-tap of the tab', async () => {
@@ -1379,7 +1379,7 @@ describe('leaving People the two ways a mode can be left', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
   });
 });
 
@@ -1406,7 +1406,7 @@ describe('arriving to find people', () => {
 
   it('opens People on an already-mounted tab, and lets go afterwards', async () => {
     const view = await open();
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(view.getByLabelText('Recent activity')).toBeTruthy();
 
     mockParams = { show: 'people', from: 'sparse_feed' };
     await view.rerender(<FeedScreen />);
@@ -1420,15 +1420,15 @@ describe('arriving to find people', () => {
     // Not stuck: the consumed parameter does not put People back on the next render.
     mockParams = {};
     await fireEvent.press(view.getByLabelText('Feed'));
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     await view.rerender(<FeedScreen />);
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(view.getByLabelText('Recent activity')).toBeTruthy();
   });
 
   it('opens on Feed when nobody asked for People', async () => {
     const view = await open();
 
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(view.getByLabelText('Recent activity')).toBeTruthy();
     expect(mockSetParams).not.toHaveBeenCalled();
   });
 
@@ -1477,7 +1477,7 @@ describe('the Feed headings', () => {
   const sizeOf = (node: { props: { style?: unknown } }) =>
     (StyleSheet.flatten(node.props.style as TextStyle) as TextStyle).fontSize;
 
-  it('draws TRENDING NOW at 15pt, and no visible ACTIVITY heading under it', async () => {
+  it('draws TRENDING NOW at 15pt, then one rule and RECENT ACTIVITY at 15pt', async () => {
     mockTrendingItems = [
       {
         mediaItemId: 'film-1',
@@ -1493,13 +1493,26 @@ describe('the Feed headings', () => {
 
     await waitFor(() => expect(view.getAllByText('TRENDING NOW').length).toBeGreaterThan(0));
     expect(sizeOf(view.getAllByText('TRENDING NOW')[0]!)).toBe(15);
-    // Removed (nav cohesion sprint, 2026-11-06): whitespace is the transition now. The
-    // spacer is still a heading to a screen reader, and draws nothing.
-    expect(view.queryByText('ACTIVITY')).toBeNull();
+    // Back, as RECENT ACTIVITY (marquee cohesion sprint, 2026-11-07): the Feed's
+    // separator under the shelf, then the heading in the same 15pt label token.
+    const heading = view.getByText('RECENT ACTIVITY');
+    expect(sizeOf(heading)).toBe(15);
+    expect(StyleSheet.flatten(heading.props.style as TextStyle).color).toBe(theme.semantic.action);
+    expect(view.getByLabelText('Recent activity').props.accessibilityRole).toBe('header');
+    expect(view.queryByText('FOLLOWER ACTIVITY')).toBeNull();
     const start = view.getByTestId('feed-activity-start');
-    expect(start.props.accessibilityRole).toBe('header');
-    expect(start.props.accessibilityLabel).toBe('Activity');
-    expect(start.props.children).toBeUndefined();
+    expect(StyleSheet.flatten(start.props.style).paddingTop).toBe(theme.space[4]);
+  });
+
+  it('draws no rule above RECENT ACTIVITY when there is no shelf to divide it from', async () => {
+    mockTrendingItems = [];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('RECENT ACTIVITY')).toBeTruthy());
+    const start = view.getByTestId('feed-activity-start');
+    // The heading alone: one child, the header row.
+    expect(within(start).getByLabelText('Recent activity').props.accessibilityRole).toBe('header');
+    expect(start.props.children.filter(Boolean)).toHaveLength(1);
+    expect(view.queryByText('TRENDING NOW')).toBeNull();
   });
 
   it('names the board LEADERBOARD at 15pt, like TRENDING NOW', async () => {
@@ -1512,12 +1525,15 @@ describe('the Feed headings', () => {
     // TRENDING NOW and the others still wrap.
   });
 
-  it('draws the time filter at 14pt and keeps PEOPLE YOU MAY KNOW at 12pt', async () => {
+  it('draws the time filter at 14pt and PEOPLE YOU MAY KNOW at 15pt, fitted to its line', async () => {
     const view = await open();
     await toBoard(view);
     expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText('This month'))).toBe(14);
 
     await toPeople(view);
-    expect(sizeOf(view.getByText('PEOPLE YOU MAY KNOW'))).toBe(12);
+    // The Feed modes share one heading token (marquee cohesion sprint, 2026-11-07).
+    const people = view.getByText('PEOPLE YOU MAY KNOW');
+    expect(sizeOf(people)).toBe(15);
+    expect(people.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
   });
 });

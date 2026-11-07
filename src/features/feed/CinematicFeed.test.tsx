@@ -494,13 +494,18 @@ describe('the actions', () => {
   });
 
   it('keeps one line between posts and more air above the next one', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER), event('e2', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
-    const card = StyleSheet.flatten(
-      (await waitFor(() => view.getAllByTestId('feed-card')))[0]!.props.style,
-    );
-    // 12pt more above the avatar than the 16pt it had; the post's own rhythm unchanged.
+    const cards = await waitFor(() => {
+      const found = view.getAllByTestId('feed-card');
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    // The first post sits 12pt under RECENT ACTIVITY (marquee cohesion sprint); every
+    // later one has 28pt above its avatar. The post's own rhythm is unchanged.
+    expect(StyleSheet.flatten(cards[0]!.props.style).paddingTop).toBe(theme.space[3]);
+    const card = StyleSheet.flatten(cards[1]!.props.style);
     expect(card.paddingTop).toBe(28);
     expect(card.gap).toBe(theme.space[3]);
     // The separator is the card's own foot, and the only one.
