@@ -435,9 +435,10 @@ Founder briefs "Final Profile Consistency, Automatic Trailers & Production Relea
   fallback, **production keeps Show previews** (`trailerPreviewsByDefault` is false in the
   production lane) and every other lane loads stills automatically. Turning production on is
   a one-line update after the founder confirms the forms.
-- **Android only.** Both OTA workflows publish `platform: android`, a fixed value pinned by
-  `config/ota-workflows.test.mjs`, so this release cannot reach iOS; the `runtimes` stage
-  still checks both binaries. Returning to `all` is a reviewed one-word change after iOS QA.
+- **Production publishes iOS only.** The platform is the fixed value `ios`. Preview stays
+  `android`. `all` is not used, so Android is not republished. The `runtimes` stage still
+  checks both store binaries, and `config/ota-workflows.test.mjs` pins that split. See
+  [`cloud-ota.md`](./cloud-ota.md).
 
 ### Compliance status — trailer stills and the privacy disclosures
 
@@ -461,7 +462,7 @@ Not legal advice and not a claim of store-policy compliance; what was checked, a
 | M-6 — production key in repository secrets | Deferrable for this UI release (unchanged by it), **open** | Audit 2026-11-07: Environments still empty, 6 repo secrets remain; every scheduled run since #219 passed with `environment:` set, so step 1 of the hardening plan is proven | Founder: move the secrets (plan `15-hardening-plan.md`) |
 | M-5 — query strings in Sentry | Deferrable, **open** | Founder-only Sentry rule, unconfirmed | Founder: add the four scrubbing rules |
 | M-3 residual — no throttle on a signed-in account | Deferrable, **open** | Design pass; this release adds no table or RPC, so it is not widened | Design pass |
-| iOS | Held | No iOS build of this UI has run on a device; production iOS OTA blocked by the workflow | Founder: QA the iOS Preview build |
+| iOS | Production publishes `ios` only, not `all` | The iOS build passed phone QA. Preview stays `android`. The `runtimes` stage still checks both store binaries. iOS was held on the earlier Android-first release. See [`cloud-ota.md`](./cloud-ota.md) | — |
 | Data integrity / migrations | No change | The release diff touches `app/`, `src/`, `web/`, `config/`, `.eas/` and docs, plus one Supabase test file; no migration. Every RPC and table it calls exists on `main` (audit) | — |
 
 ## Phase C — research only (nothing built, no migration)
@@ -606,7 +607,7 @@ It carries this release's JavaScript; Preview updates are Android-only, so it st
 | Automatic trailer stills in production | NOT ENABLED (fallback); one-line change after the two confirmations |
 | Android production | VERIFIED LIVE (served); on-device check REQUIRES FOUNDER ACTION |
 | iOS QA build | DONE (built); smoke test REQUIRES FOUNDER ACTION |
-| iOS production | HELD — workflow is Android-only until a reviewed change back to `all` |
+| iOS production | Production publishes `ios` only, not `all`. See [`cloud-ota.md`](./cloud-ota.md). iOS was held on the earlier Android-first release |
 | Watch-date race | Accepted for this release; migration fix next |
 | M-5, M-6, M-3 residual | Open; REQUIRES FOUNDER ACTION (M-5, M-6) / design pass (M-3) |
 

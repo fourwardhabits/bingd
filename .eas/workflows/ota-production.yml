@@ -76,9 +76,10 @@ jobs:
       BINGD_LANE: production
     params:
       branch: production
-      # Android only until an iOS build has passed QA (founder, 2026-11-07). Returning to
-      # all is a one-word change, reviewed like this one, once iOS is cleared.
-      platform: android
+      # iOS only (founder, 2026-11-07). The iOS build passed phone QA. `all` would
+      # republish Android, which this release does not. Fixed in the file, like the branch.
+      # The runtimes job still checks both store binaries.
+      platform: ios
       message: ${{ inputs.message }}
       # The local path never uploaded maps, and this change moves where an update is bundled,
       # not what happens around it.

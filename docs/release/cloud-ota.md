@@ -19,6 +19,7 @@ what may go over the air at all.
 | **EAS environment** | `preview` | `production` |
 | **EAS branch** | `preview` | `production` |
 | **`APP_VARIANT` / `BINGD_LANE`** | `preview` / `preview` | `production` / `production` |
+| **Publish platform** | `android` | `ios` |
 | **Started by** | `eas workflow:run` only | `eas workflow:run` only |
 | **Release checks** | reported | **refuse** |
 | **Runtime held to the live binary** | Android | **Android and iOS** |
@@ -29,15 +30,18 @@ job executes it. Each lane runs one publish at a time, so an overlapping run can
 commit last. That only covers overlap: dispatching an older commit after a newer one has finished
 still publishes it, so check what is live first.
 
-**Neither has a push trigger, so merging to `main` publishes nothing.** The branch, environment
-and lane are written into each file, not taken as inputs. `config/ota-workflows.test.mjs` runs in
-the pull request gate and fails if a trigger is added, if the files stop agreeing with `eas.json`,
-or if the two stop being the same workflow apart from the lane.
+**Neither has a push trigger, so merging to `main` publishes nothing.** The branch, environment,
+lane and platform are written into each file, not taken as inputs. `config/ota-workflows.test.mjs`
+runs in the pull request gate and fails if a trigger is added, if the files stop agreeing with
+`eas.json`, or if the two stop being the same workflow apart from the lane and the publish platform.
 
-**Android only since 2026-11-07.** Both workflows publish `platform: android`, fixed in the
-file: the founder released the new UI to Android first and held iOS until an iOS build passes
-QA. The `runtimes` stage still checks both binaries. Publishing to iOS again is a reviewed
-change of that one word back to `all` in both files (and its test).
+**Production publishes iOS only.** Earlier on 2026-11-07 both workflows published `android`, while
+iOS waited on device QA. The iOS build has passed phone QA. Production's platform is `ios`, fixed
+in the file, so this lane does not republish Android. `all` would send the same update to Android
+again, which this release does not do. Preview stays `android`: `config/live-runtimes.json` lists
+no iOS Preview binary. The production `runtimes` job is unchanged. It still receives both
+fingerprint hashes and refuses unless each one is the live store binary, so an iOS publish cannot
+ship when the Android check fails.
 
 ### Running one
 
