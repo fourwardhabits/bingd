@@ -48,28 +48,45 @@ const PREF = 'title.layout';
 
 let current: TitleLayout = DEFAULT_LAYOUT;
 let hydrated = false;
+/**
+ * Whether the stored choice is known yet (independent review, release pass): until it is,
+ * a reader who chose Original may still be drawn the default. The title page holds back
+ * anything that reaches a third party — the trailer stills — until this is true.
+ */
+let resolved = false;
 const listeners = new Set<() => void>();
 
 const emit = () => {
   for (const listener of listeners) listener();
 };
 
-/** Reads the stored choice once per launch. A missing or unknown value is the default. */
+/**
+ * Reads the stored choice once per launch. A missing or unknown value is the default, and
+ * so is a read that fails — after which the choice counts as known, so nothing waits on a
+ * store that will not answer. Started at launch by the root layout, so it has normally
+ * finished long before the first title page opens.
+ */
 export function hydrateTitleLayout(): Promise<void> {
   if (hydrated) return Promise.resolve();
   hydrated = true;
-  return readPref<TitleLayout>(PREF).then((stored) => {
-    const next: TitleLayout =
-      stored === 'original' || stored === 'immersive' ? stored : DEFAULT_LAYOUT;
-    if (next !== current) {
+  return readPref<TitleLayout>(PREF)
+    .then(
+      (stored) => (stored === 'original' || stored === 'immersive' ? stored : DEFAULT_LAYOUT),
+      () => DEFAULT_LAYOUT,
+    )
+    .then((next) => {
+      // A tap on the Settings row while the read was in flight is the newer intent, and
+      // has already resolved the choice; otherwise the stored one applies now.
+      if (resolved) return;
       current = next;
+      resolved = true;
       emit();
-    }
-  });
+    });
 }
 
 export async function setTitleLayout(next: TitleLayout): Promise<void> {
   current = next;
+  resolved = true;
   emit();
   await writePref(PREF, next);
 }
@@ -93,9 +110,15 @@ export function useTitleLayout(): TitleLayout {
   return isTitleLayoutAvailable() ? stored : 'original';
 }
 
+/** Whether the stored choice has been read (or chosen) on this launch. */
+export function useTitleLayoutResolved(): boolean {
+  return useSyncExternalStore(subscribe, () => resolved, () => resolved);
+}
+
 /** Test seam: forget what this module read, as an app launch does. */
 export function resetTitleLayoutForTests(): void {
   current = DEFAULT_LAYOUT;
   hydrated = false;
+  resolved = false;
   listeners.clear();
 }

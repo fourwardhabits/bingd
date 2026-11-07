@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Alert, Share, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
+import { Alert, Share, StyleSheet, type TextStyle } from 'react-native';
 
 import { theme } from '@/ui/tokens';
 
@@ -1316,24 +1316,6 @@ describe('sharing and awards on somebody else’s profile', () => {
  * the relationship on somebody else's, and each screen has exactly one action row.
  */
 describe('the shape of somebody else’s profile', () => {
-  /**
-   * The row, read off the tree rather than off a prop.
-   *
-   * `ProfileActions` is a row of two `flex: 1` halves; a button reaches its half
-   * directly, and `FollowControl` puts one stretch wrapper in between. Both answers
-   * are the half, which is the thing that has to be shared.
-   */
-  type Node = { parent: unknown; children: unknown[]; props: Record<string, unknown> } | null;
-  const halfOf = (button: Node): Node => {
-    let node = button;
-    while (node) {
-      if ((StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.flex === 1)
-        return node;
-      node = node.parent as Node;
-    }
-    return null;
-  };
-
   /**
    * **The owner's compact, centred pair, on somebody else's profile too** (founder, release
    * pass, 2026-11-07): Share and the relationship side by side at the small size, each a

@@ -64,7 +64,7 @@ import { TitleActions, titleActionsFit } from '@/features/title/TitleActions';
 import { ImmersiveHero } from '@/features/title/ImmersiveHero';
 import { directedBy } from '@/features/title/directors';
 import { ImmersiveScores } from '@/features/title/ImmersiveScores';
-import { useTitleLayout } from '@/features/title/title-layout';
+import { useTitleLayout, useTitleLayoutResolved } from '@/features/title/title-layout';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { StatusBar } from 'expo-status-bar';
@@ -288,6 +288,13 @@ export default function TitleScreen() {
    * and nothing else: every read, handler and sheet below is shared by both.
    */
   const immersive = useTitleLayout() === 'immersive';
+  /**
+   * Whether this device's title-page choice is known yet. The Cinematic page is the default,
+   * so until a saved Original has been read the default can be drawn; the trailer stills,
+   * the page's one request to a third party, wait for this (independent review, release
+   * pass, 2026-11-07).
+   */
+  const layoutResolved = useTitleLayoutResolved();
   /**
    * Whether this title is the screen on top. The light status bar below is drawn only then:
    * a title stays mounted under a profile or a list pushed over it, and an override that
@@ -2220,7 +2227,7 @@ export default function TitleScreen() {
        * Trailers tab used to make only when it was opened. A tap on a card opens the
        * video, as it always did.
        */}
-      {videos.data?.length
+      {videos.data?.length && layoutResolved
         ? immersiveSection(
             'trailers',
             'Trailers',

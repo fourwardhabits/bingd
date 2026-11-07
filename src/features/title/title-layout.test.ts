@@ -7,15 +7,26 @@ import {
   setTitleLayout,
   useStoredTitleLayout,
   useTitleLayout,
+  useTitleLayoutResolved,
 } from './title-layout';
 
 /**
- * The title-page switch (Immersive Scroll experiment, 2026-11-04). Device-local, `original`
- * by default, and locked to `original` in production whatever a device stored.
+ * The title-page switch: device-local, Cinematic (`immersive`) by default in every lane
+ * since the release pass (2026-11-07), a stored Original honoured.
  */
 const mockPrefs = new Map<string, unknown>();
+/** When set, the next read waits until the test releases it: a slow store at launch. */
+let mockHeldRead: ((value: unknown) => void) | null = null;
+let mockHoldReads = false;
+let mockReadFails = false;
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  readPref: (name: string) => {
+    if (mockReadFails) return Promise.reject(new Error('store unavailable'));
+    if (!mockHoldReads) return Promise.resolve(mockPrefs.get(name) ?? null);
+    return new Promise((resolve) => {
+      mockHeldRead = () => resolve(mockPrefs.get(name) ?? null);
+    });
+  },
   writePref: (name: string, value: unknown) => {
     mockPrefs.set(name, value);
     return Promise.resolve();
@@ -104,5 +115,60 @@ describe('the title-page switch', () => {
       mockLane = lane;
       expect(isTitleLayoutAvailable()).toBe(true);
     }
+  });
+});
+
+/**
+ * **Known before anything third-party loads** (independent review, release pass): until the
+ * stored choice is read, a reader who chose Original may be drawn the default, so the title
+ * page waits on `useTitleLayoutResolved` before its trailer stills.
+ */
+describe('resolving the stored choice', () => {
+  afterEach(() => {
+    mockHoldReads = false;
+    mockReadFails = false;
+    mockHeldRead = null;
+  });
+
+  it('is unresolved while the store is slow, then applies a saved Original', async () => {
+    mockPrefs.set('title.layout', 'original');
+    mockHoldReads = true;
+    const { result } = await renderHook(() => ({
+      shown: useTitleLayout(),
+      resolved: useTitleLayoutResolved(),
+    }));
+    expect(result.current.resolved).toBe(false);
+
+    await act(async () => {
+      mockHeldRead?.(undefined);
+    });
+    expect(result.current.resolved).toBe(true);
+    expect(result.current.shown).toBe('original');
+  });
+
+  it('resolves to the default when the store cannot be read', async () => {
+    mockReadFails = true;
+    const { result } = await renderHook(() => ({
+      shown: useTitleLayout(),
+      resolved: useTitleLayoutResolved(),
+    }));
+    await act(async () => {
+      await hydrateTitleLayout().catch(() => {});
+    });
+    expect(result.current.resolved).toBe(true);
+    expect(result.current.shown).toBe('immersive');
+  });
+
+  it('lets a choice made while the read is in flight stand', async () => {
+    mockPrefs.set('title.layout', 'immersive');
+    mockHoldReads = true;
+    const { result } = await renderHook(() => useTitleLayout());
+    await act(async () => {
+      await setTitleLayout('original');
+    });
+    await act(async () => {
+      mockHeldRead?.(undefined);
+    });
+    expect(result.current).toBe('original');
   });
 });
