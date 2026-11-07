@@ -149,15 +149,28 @@ describe('the OTA workflows', () => {
   }
 
   /**
-   * Production publishes iOS only (founder, 2026-11-07): the iOS build passed phone QA,
-   * and `all` would republish Android. Preview stays Android, because no iOS Preview
-   * binary is listed for this runtime. Each platform is a fixed value in the file, like
-   * the branch, so nothing typed at dispatch can widen it.
+   * Production publishes Android and iOS together (founder, 2026-11-07, after Android
+   * Preview QA passed): `all`, written out in one publish job, so both platforms land as one
+   * update group or neither does. Preview stays Android, because no iOS Preview binary is
+   * listed for this runtime. Each platform is a fixed value in the file, like the branch, so
+   * nothing typed at dispatch can narrow or widen it.
    */
-  it('production publishes iOS only, fixed in the file', () => {
-    const publish = job(read('production'), 'publish');
-    assert.match(publish, /\n {6}platform: ios\n/);
-    assert.doesNotMatch(publish, /\n {6}platform: (?:android|all)\n/);
+  it('production publishes Android and iOS from one job, fixed in the file', () => {
+    const yaml = read('production');
+    const publish = job(yaml, 'publish');
+    assert.match(publish, /\n {6}platform: all\n/);
+    assert.doesNotMatch(publish, /\n {6}platform: (?:android|ios)\n/);
+    assert.equal(withoutComments(yaml).match(/\n {4}type: update\n/g)?.length, 1);
+  });
+
+  it('production refuses to publish either platform unless both runtimes are live', async () => {
+    assert.deepEqual((await gate()).fatal, []);
+    for (const name of ['ANDROID', 'IOS']) {
+      for (const value of ['', 'new']) {
+        const { fatal } = await gate({ [`OTA_${name}_RUNTIME`]: value });
+        assert.equal(fatal.length, 1, `${name}=${value || '(none)'} must refuse`);
+      }
+    }
   });
 
   it('preview publishes Android only, fixed in the file', () => {
@@ -174,7 +187,7 @@ describe('the OTA workflows', () => {
         .replaceAll(lane, 'LANE')
         .replace(`\n      platform: ${platform}\n`, '\n      platform: PLATFORM\n');
     };
-    assert.equal(normal('production', 'ios'), normal('preview', 'android'));
+    assert.equal(normal('production', 'all'), normal('preview', 'android'));
   });
 
   it('names both live store binaries by full runtime', () => {

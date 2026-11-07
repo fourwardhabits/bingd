@@ -88,6 +88,7 @@ import {
   type ReviewOrder,
   type TitleReview,
 } from '@/features/title/use-title-reviews';
+import { EpisodeRail } from '@/features/title/EpisodeRail';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
 import { useSimilarTitles } from '@/features/title/use-similar-titles';
 import { formatShortDate } from '@/lib/dates';
@@ -96,7 +97,7 @@ import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
 import { hapticSelection } from '@/ui/haptics';
-import { avatarUri, posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
+import { avatarUri, posterUri, profileUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -113,7 +114,6 @@ import {
   Avatar,
   CastStrip,
   EmptyState,
-  EpisodeRow,
   LoadingScreen,
   Poster,
   PosterGrid,
@@ -173,27 +173,11 @@ const SECTION_SEAM = theme.space[7];
  * word such as "Everything" no longer fits a 320pt phone's line and broke mid-word.
  */
 const TITLE_MAX_SCALE = 1.3;
-
-/**
- * How many episodes a season page draws before it offers to show the rest.
- *
- * Ordinary seasons run six to twenty-four and never reach this. It exists for the
- * ones the provider models as a single long run — a daily soap, or a long anime
- * season — where two hundred rows with a still apiece is a lot of images inside a
- * `ScrollView` that has to lay all of them out at once.
- *
- * A bounded first page rather than a `FlatList`: nesting a vertical virtualized list
- * inside this vertical `ScrollView` is the arrangement React Native warns about, and
- * it breaks the scrolling of the page it is nested in. Nothing is lost — "Show all"
- * reveals the rest, and no metadata is dropped on the way.
- */
-const EPISODES_FIRST_PAGE = 50;
-
 /**
  * The one joiner in the identity block: space, middle dot, space.
  *
  * Written down once because the founder's grammar lock is that all three lines below the
- * title read as one statement — `Season 1 · 2024`, `TV-MA · 24 episodes`, `#2 in TV ·
+ * title read as one statement — `Season 1 · 24 episodes · 2024`, `TV-MA · Craig Mazin`, `#2 in TV ·
  * Watched Aug 17, 2026`. The subtitle used a comma until 2026-09-07, which made two
  * adjacent lines of the same metadata look like two different kinds of claim.
  *
@@ -271,9 +255,6 @@ export default function TitleScreen() {
   const hasId = Boolean(id);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Reset by leaving the screen and nothing else. A reader who asked to see all of a
-  // long season should not have it collapse again when they visit Cast and come back.
-  const [showAllEpisodes, setShowAllEpisodes] = useState(false);
   // Null until the reader picks one, so the default is whatever the tab row leads with
   // rather than a name fixed before the title is known. It was `'cast'`, which meant a
   // series settled on Cast the moment its credits arrived — after briefly showing the
@@ -1005,20 +986,27 @@ export default function TitleScreen() {
    */
   const primaryName = (isSeason ? (parent?.title ?? title.title) : title.title) || title.title;
   /**
-   * `Season 1 · 2024`, or `2013`.
+   * `Season 2 · 7 episodes · 2025`, or `2013`.
+   *
+   * **A season's length sits here, between its number and its year** (founder hotfix,
+   * 2026-11-07): season number, episode count, then year, in that order, on both layouts.
+   * The count is the season's own `episode_count` and is absent when TMDB has none (or
+   * reports zero — see `lengthOf`); it is never a runtime. It moved off the metadata line
+   * below, so it is said once. A series' line is unchanged: its year alone.
    *
    * **One separator for the whole identity block** (founder grammar lock, 2026-09-07).
    * It was a comma here and a middle dot on the line below, which made two adjacent lines
    * of the same metadata look like two different kinds of statement. The middle dot is
    * what the metadata line already used and it is now the block's only joiner, so
-   * `Season 1 · 2024` and `TV-MA · 24 episodes` read as one grammar.
+   * `Season 1 · 24 episodes · 2024` and `TV-MA · Craig Mazin` read as one grammar.
    *
    * The em-dash form the log sheet uses — "Parks and Recreation — Season 2" — is for
    * surfaces with one line to say the whole name in. Here there is a hierarchy to put it
    * in.
    */
+  const lengthLabel = lengthOf(title.kind, title.runtime_minutes, title.episode_count);
   const identitySubtitle = isSeason
-    ? [displayTitle ?? title.title, year].filter(Boolean).map(String).join(SEP)
+    ? [displayTitle ?? title.title, lengthLabel, year].filter(Boolean).map(String).join(SEP)
     : year
       ? String(year)
       : null;
@@ -1059,10 +1047,12 @@ export default function TitleScreen() {
    * line is absent rather than empty when all three are: an empty `Text` is a line box
    * with the footnote's height, which reads as a gap under the title.
    */
-  const lengthLabel = lengthOf(title.kind, title.runtime_minutes, title.episode_count);
   const credit =
     title.kind === 'movie' ? (credits.data?.director ?? null) : (credits.data?.showrunner ?? null);
-  const metaLine = [descriptive.certification, lengthLabel, credit].filter(Boolean).join(SEP);
+  // A season's episode count is on the identity line above (`identitySubtitle`).
+  const metaLine = [descriptive.certification, isSeason ? null : lengthLabel, credit]
+    .filter(Boolean)
+    .join(SEP);
 
   /**
    * The reader's own context under the metadata: where it sits, and when they saw it.
@@ -1679,46 +1669,13 @@ export default function TitleScreen() {
       <>
         {activeTab === 'episodes' ? (
           episodes.data?.length ? (
-            <View>
-              {(showAllEpisodes
-                ? episodes.data
-                : episodes.data.slice(0, EPISODES_FIRST_PAGE)
-              ).map((episode, index) => (
-                <View
-                  // Keyed on position as well as number. TMDB occasionally repeats an
-                  // episode number within a season, and the normalizer keeps both
-                  // rather than losing a real episode to tidy up a display key.
-                  key={`${episode.episode_number}-${index}`}
-                >
-                  {/* No rule between episodes (founder, 2026-09-07). A hairline every
-                      row turned a season page into a table, which is the density note
-                      that runs through this whole pass: whitespace is the separator, and
-                      a rule marks a module rather than a sibling. `EpisodeRow`'s own
-                      vertical padding already puts 32 points between two of them, and
-                      the still and the number make the boundary obvious besides. */}
-                  <EpisodeRow
-                    episodeNumber={episode.episode_number}
-                    title={episode.title}
-                    airDate={formatShortDate(episode.air_date)}
-                    runtimeMinutes={episode.runtime_minutes}
-                    stillUri={stillUri(episode.still_path)}
-                    overview={episode.overview}
-                  />
-                </View>
-              ))}
-
-              {!showAllEpisodes && episodes.data.length > EPISODES_FIRST_PAGE ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show all ${episodes.data.length} episodes`}
-                  onPress={() => setShowAllEpisodes(true)}
-                  style={({ pressed }) => [styles.showAll, pressed && styles.pressed]}
-                >
-                  <Text variant="callout" tone="action">
-                    Show all {episodes.data.length} episodes
-                  </Text>
-                </Pressable>
-              ) : null}
+            // One compact rail; each episode's synopsis, date and runtime are in the sheet
+            // a card opens (founder hotfix, 2026-11-07). `EpisodeRail` has the argument.
+            <View style={immersive ? undefined : styles.episodesTab}>
+              <EpisodeRail
+                episodes={episodes.data}
+                seasonLabel={isSeason ? displayTitle : null}
+              />
             </View>
           ) : episodes.isPending || enriching ? (
             <SkeletonRow count={3} />
@@ -1964,15 +1921,15 @@ export default function TitleScreen() {
       : null,
   });
   /**
-   * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 2023 · TV-MA · 9
-   * episodes`. The year leads, as the brief asks. A film's director has its own quiet line
+   * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 9 episodes · 2023 ·
+   * TV-MA`. The year leads, as the brief asks. A film's director has its own quiet line
    * under it (`directedBy`); a season or series has none, because a season's Director
    * credit is an episode's and TMDB has no single director for a show.
    */
   const moduleMeta = [
     isSeason ? identitySubtitle : year ? String(year) : null,
     descriptive.certification,
-    lengthLabel,
+    isSeason ? null : lengthLabel,
   ]
     .filter(Boolean)
     .join(SEP);
@@ -2194,7 +2151,7 @@ export default function TitleScreen() {
       <WhereToWatch mediaItemId={title.id} titleName={title.title} topSpace={SECTION_SEAM} />
 
       {isSeason
-        ? immersiveSection('episodes', 'Episodes', tabContent('episodes'), { gap: 0 })
+        ? immersiveSection('episodes', 'Episodes', tabContent('episodes'))
         : null}
       {isSeries ? immersiveSection('seasons', 'Seasons', tabContent('seasons'), { gap: 0 }) : null}
 
@@ -2898,9 +2855,9 @@ export default function TitleScreen() {
           />
         </View>
 
-        {/* Episodes. Informational only: no row here is pressable, scoreable or
-            loggable, because the rankable unit is the season this page already is
-            (PRD §10). What the list does is answer "did I watch this one". */}
+        {/* Episodes. Informational only: a card opens the episode's details and
+            nothing is scoreable or loggable, because the rankable unit is the season
+            this page already is (PRD §10). What the rail answers is "did I watch this one". */}
         {tabContent(activeTab)}
 
           </>
@@ -3755,12 +3712,7 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[6],
     gap: theme.space[1],
   },
-  // Reveals the rest of a long season. Full-width and gutter-aligned so it reads as
-  // the continuation of the list rather than as a control floating beside it.
-  showAll: {
-    paddingHorizontal: theme.layout.gutter,
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-  },
+  // The original page's tab row has no gap under it; the rail draws no vertical padding.
+  episodesTab: { paddingTop: theme.space[3], paddingBottom: theme.space[2] },
   pressed: { opacity: 0.7 },
 });

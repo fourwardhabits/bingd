@@ -2205,8 +2205,8 @@ describe('the action row', () => {
  * cues that close it.
  *
  * What these assert is mostly the boundary of the feature rather than its middle.
- * Episodes is informational metadata (PRD §10) — no row is pressable, nothing is
- * logged, nothing is scored — and the tab exists on a season and on nothing else.
+ * Episodes is informational metadata (PRD §10) — a card opens a sheet of facts, nothing
+ * is logged, nothing is scored — and the tab exists on a season and on nothing else.
  */
 describe('a season, and its episodes', () => {
   const seasonRow = {
@@ -2259,13 +2259,77 @@ describe('a season, and its episodes', () => {
     );
   });
 
-  it('shows an episode as its number, its title, and then when and how long', async () => {
+  /** The episode detail sheet, opened from the rail by its card. */
+  const openEpisode = async (view: Awaited<ReturnType<typeof openSeason>>, n: number) => {
+    await waitFor(() => expect(view.getByTestId(`episode-card-${n}`)).toBeTruthy());
+    await fireEvent.press(view.getByTestId(`episode-card-${n}`));
+    return within(view.getByTestId('episode-sheet'));
+  };
+
+  it('shows episodes as one compact rail: number and title, and no synopsis', async () => {
+    // Founder hotfix, 2026-11-07: the synopses made a season page excessively long.
     const view = await openSeason();
 
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
-    expect(view.getByText('2 · Episode title 2')).toBeTruthy();
-    expect(view.getAllByText(`${airDate('2011-04-17')} · 62 min`)).toHaveLength(2);
-    expect(view.getByText('What happens in episode 1.')).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('episode-rail')).toBeTruthy());
+    expect(view.getByTestId('episode-rail').props.horizontal).toBe(true);
+    expect(view.getByText('Episode 1')).toBeTruthy();
+    expect(view.getByText('Episode title 1')).toBeTruthy();
+    expect(view.getByText('Episode title 2')).toBeTruthy();
+    // One line each for the number and the title, whatever their length.
+    expect(view.getByText('Episode title 1').props.numberOfLines).toBe(1);
+    // The synopsis, date and runtime are the sheet's, not the page's.
+    expect(view.queryByText('What happens in episode 1.')).toBeNull();
+    expect(view.queryByText(`${airDate('2011-04-17')} · 62 min`)).toBeNull();
+  });
+
+  it('keeps the provider’s order, as a list of buttons that say what they open', async () => {
+    mockFetchSeasonEpisodes.mockResolvedValue([episode(1), episode(2), episode(3)]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByTestId('episode-card-3')).toBeTruthy());
+    const labels = view
+      .getAllByRole('button', { name: /^Episode \d/ })
+      .map((card) => card.props.accessibilityLabel);
+    expect(labels).toEqual([
+      'Episode 1, Episode title 1',
+      'Episode 2, Episode title 2',
+      'Episode 3, Episode title 3',
+    ]);
+    expect(view.getByTestId('episode-card-1').props.accessibilityHint).toBe(
+      "Shows the episode's details",
+    );
+  });
+
+  it('opens an episode’s full details in a sheet', async () => {
+    const view = await openSeason();
+    const sheet = await openEpisode(view, 2);
+
+    expect(sheet.getByText('Season 1 · Episode 2')).toBeTruthy();
+    expect(sheet.getByText('Episode title 2')).toBeTruthy();
+    expect(sheet.getByText(`${airDate('2011-04-17')} · 62 min`)).toBeTruthy();
+    expect(sheet.getByText('What happens in episode 2.')).toBeTruthy();
+    // The larger still, from TMDB's w780 bucket.
+    expect(JSON.stringify(sheet.getByTestId('episode-sheet-still').props.source)).toContain(
+      '/w780/still2.jpg',
+    );
+
+    await fireEvent.press(view.getByText('Done'));
+    expect(view.queryByTestId('episode-sheet')).toBeNull();
+    // Reading an episode navigates nowhere and writes nothing.
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('shows a long title whole in the sheet, and on one line on the card', async () => {
+    const long =
+      'The One Where Everybody Finally Remembers What Happened at the Lake House That Summer';
+    mockFetchSeasonEpisodes.mockResolvedValue([episode(1, { title: long })]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText(long)).toBeTruthy());
+    expect(view.getByText(long).props.numberOfLines).toBe(1);
+
+    const sheet = await openEpisode(view, 1);
+    expect(sheet.getByText(long).props.numberOfLines).toBeUndefined();
   });
 
   it('names an episode by its number when the provider has no title for it', async () => {
@@ -2274,19 +2338,26 @@ describe('a season, and its episodes', () => {
     const view = await openSeason();
 
     await waitFor(() => expect(view.getByText('Episode 4')).toBeTruthy());
+    expect(view.getByTestId('episode-card-4').props.accessibilityLabel).toBe('Episode 4');
   });
 
-  it('drops a missing field rather than drawing a placeholder for it', async () => {
+  it('keeps the frame for a missing still, and draws nothing invented in the sheet', async () => {
     // An unaired episode legitimately has no runtime, no still and often no synopsis.
-    // Framing each absence would make the common case look broken.
     mockFetchSeasonEpisodes.mockResolvedValue([
       episode(3, { runtime_minutes: null, still_path: null, overview: null }),
     ]);
     const view = await openSeason();
 
-    await waitFor(() => expect(view.getByText('3 · Episode title 3')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('episode-still-missing')).toBeTruthy());
+    expect(view.getByTestId('episode-frame')).toBeTruthy();
+    expect(view.queryByTestId('episode-still')).toBeNull();
+
+    const sheet = await openEpisode(view, 3);
     // The date survives on its own, with no stray separator beside it.
-    expect(view.getByText(airDate('2011-04-17'))).toBeTruthy();
+    expect(sheet.getByTestId('episode-sheet-meta')).toHaveTextContent(
+      new RegExp(`^${airDate('2011-04-17')}$`),
+    );
+    expect(sheet.queryByTestId('episode-sheet-still')).toBeNull();
     expect(view.queryByText(/Unknown|TBA|null|undefined/)).toBeNull();
   });
 
@@ -2295,8 +2366,9 @@ describe('a season, and its episodes', () => {
       episode(8, { air_date: '2099-01-01', runtime_minutes: null, still_path: null }),
     ]);
     const view = await openSeason();
+    const sheet = await openEpisode(view, 8);
 
-    await waitFor(() => expect(view.getByText(airDate('2099-01-01'))).toBeTruthy());
+    expect(sheet.getByText(airDate('2099-01-01'))).toBeTruthy();
   });
 
   it('leaves the whole metadata line out when there is neither a date nor a runtime', async () => {
@@ -2304,9 +2376,9 @@ describe('a season, and its episodes', () => {
       episode(1, { air_date: null, runtime_minutes: null }),
     ]);
     const view = await openSeason();
+    const sheet = await openEpisode(view, 1);
 
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
-    expect(view.queryByText(/ · \d+ min/)).toBeNull();
+    expect(sheet.queryByTestId('episode-sheet-meta')).toBeNull();
   });
 
   it('says the provider has published no list, rather than showing an empty tab', async () => {
@@ -2331,59 +2403,43 @@ describe('a season, and its episodes', () => {
     expect(view.queryByText(/BG502|TMDB is unavailable|Error/)).toBeNull();
   });
 
-  it('draws the first fifty of a long season, then offers the rest', async () => {
-    // A daily soap or a long anime run that the provider models as one season. Two
-    // hundred rows with a still apiece is a lot of images to lay out at once, and a
-    // virtualized list nested in this page's ScrollView is the arrangement React
-    // Native warns about. Nothing is dropped: "Show all" reveals them.
+  it('hands a long season to the rail whole, with no "Show all" to find', async () => {
+    // A daily soap or a long anime run that the provider models as one season. The rail
+    // virtualises horizontally, so every episode is reachable by scrolling it.
     mockFetchSeasonEpisodes.mockResolvedValue(
-      Array.from({ length: 60 }, (_, index) => episode(index + 1)),
+      Array.from({ length: 200 }, (_, index) => episode(index + 1)),
     );
     const view = await openSeason();
 
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
-    expect(view.getByText('50 · Episode title 50')).toBeTruthy();
-    expect(view.queryByText('51 · Episode title 51')).toBeNull();
-
-    await fireEvent.press(view.getByLabelText('Show all 60 episodes'));
-
-    expect(view.getByText('51 · Episode title 51')).toBeTruthy();
-    expect(view.getByText('60 · Episode title 60')).toBeTruthy();
-    expect(view.queryByLabelText('Show all 60 episodes')).toBeNull();
-  });
-
-  it('offers nothing to show when the season is exactly the first page long', async () => {
-    mockFetchSeasonEpisodes.mockResolvedValue(
-      Array.from({ length: 50 }, (_, index) => episode(index + 1)),
-    );
-    const view = await openSeason();
-
-    await waitFor(() => expect(view.getByText('50 · Episode title 50')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('episode-card-1')).toBeTruthy());
+    expect(view.getByTestId('episode-rail').props.data).toHaveLength(200);
+    expect(view.queryByTestId('episode-card-200')).toBeNull();
     expect(view.queryByLabelText(/Show all/)).toBeNull();
   });
 
   it('keeps the episodes when the reader visits another tab and comes back', async () => {
     const view = await openSeason();
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Episode title 1')).toBeTruthy());
 
     await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
-    expect(view.queryByText('1 · Episode title 1')).toBeNull();
+    expect(view.queryByText('Episode title 1')).toBeNull();
 
     await fireEvent.press(view.getByRole('tab', { name: 'Episodes' }));
-    expect(view.getByText('1 · Episode title 1')).toBeTruthy();
+    expect(view.getByText('Episode title 1')).toBeTruthy();
     // One request for the whole visit. The list is cached for an hour.
     expect(mockFetchSeasonEpisodes).toHaveBeenCalledTimes(1);
   });
 
-  it('renders episodes as reading matter, with nothing to press on a row', async () => {
+  it('offers nothing on an episode to rank or log', async () => {
     // The product boundary, as a test. An episode is not rankable, not loggable and
-    // not a media_items row, so a pressable episode is the first step toward a
-    // feature the decision log rules out.
+    // not a media_items row: its card opens a sheet of facts and nothing else.
     const view = await openSeason();
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Episode title 1')).toBeTruthy());
 
     expect(view.queryByLabelText(/Rank Episode title 1/)).toBeNull();
     expect(view.queryByLabelText(/Log Episode title 1/)).toBeNull();
+    const sheet = await openEpisode(view, 1);
+    expect(sheet.queryByText(/^Rank|^Log/)).toBeNull();
     expect(mockPush).not.toHaveBeenCalled();
   });
 
@@ -2392,7 +2448,7 @@ describe('a season, and its episodes', () => {
     // in the hero cluster above the tab row and is not inside any tab, so choosing
     // Episodes does not take it away.
     const view = await openSeason();
-    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Episode title 1')).toBeTruthy());
 
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
   });
@@ -3686,6 +3742,83 @@ describe('the immersive title page (experiment)', () => {
       expect(module.getByTestId('title-meta')).toBeTruthy();
       expect(module.getByTestId('title-actions')).toBeTruthy();
       expect(module.getByTestId('immersive-scores')).toBeTruthy();
+    });
+
+    /**
+     * **A season's line: number, episode count, year** (founder hotfix, 2026-11-07), and
+     * its episodes as one rail under their heading, with the synopsis in a sheet.
+     */
+    describe('on a season', () => {
+      const season = {
+        ...film,
+        id: 'season-2',
+        kind: 'season',
+        title: 'Season 2',
+        season_number: 2,
+        release_date: '2025-04-13',
+        runtime_minutes: null,
+        episode_count: 7,
+        certification: null,
+        parent: {
+          id: 'series-1',
+          title: 'The Last of Us',
+          poster_path: null,
+          backdrop_path: null,
+          certification: 'TV-MA',
+        },
+      };
+      beforeEach(() => {
+        mockOpenId = 'season-2';
+        tableRows.media_items = [season];
+        mockFetchSeasonEpisodes.mockReset();
+        mockFetchSeasonEpisodes.mockResolvedValue([
+          {
+            episode_number: 1,
+            title: 'Future Days',
+            air_date: '2025-04-13',
+            runtime_minutes: 59,
+            still_path: '/s1.jpg',
+            overview: 'Five years after the events of the first season.',
+          },
+        ]);
+      });
+
+      it('reads Season 2 · 7 episodes · 2025, and never a runtime', async () => {
+        const view = await renderWithProviders(<TitleScreen />);
+        await waitFor(() => expect(view.getByTestId('title-meta')).toBeTruthy());
+
+        expect(view.getByTestId('title-meta')).toHaveTextContent(
+          /^Season 2 · 7 episodes · 2025 · TV-MA$/,
+        );
+        expect(view.getByTestId('title-meta')).not.toHaveTextContent(/min/);
+      });
+
+      it('leaves the count out, not invented, when TMDB has none', async () => {
+        tableRows.media_items = [{ ...season, episode_count: null }];
+        const view = await renderWithProviders(<TitleScreen />);
+        await waitFor(() => expect(view.getByTestId('title-meta')).toBeTruthy());
+
+        expect(view.getByTestId('title-meta')).toHaveTextContent(/^Season 2 · 2025 · TV-MA$/);
+      });
+
+      it('puts the rail under the Episodes heading, and the synopsis only in the sheet', async () => {
+        const view = await renderWithProviders(<TitleScreen />);
+        const section = await waitFor(() => view.getByTestId('immersive-section-episodes'));
+
+        const rail = within(section).getByTestId('episode-rail');
+        expect(rail.props.horizontal).toBe(true);
+        // The heading sits above the rail's scroller, outside it, with the section's own
+        // gap between them, so a fling on the rail cannot land on the heading.
+        expect(within(rail).queryByText('Episodes')).toBeNull();
+        expect(StyleSheet.flatten(view.getByTestId('immersive-body-episodes').props.style).paddingTop)
+          .toBeGreaterThan(0);
+        expect(view.queryByText('Five years after the events of the first season.')).toBeNull();
+
+        await fireEvent.press(within(section).getByTestId('episode-card-1'));
+        const sheet = within(view.getByTestId('episode-sheet'));
+        expect(sheet.getByText('Season 2 · Episode 1')).toBeTruthy();
+        expect(sheet.getByText('Five years after the events of the first season.')).toBeTruthy();
+      });
     });
 
     it('reads the genres under the title and the year first in the metadata', async () => {

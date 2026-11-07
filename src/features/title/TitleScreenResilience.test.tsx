@@ -344,11 +344,10 @@ describe('the three kinds of title', () => {
   });
 
   it('renders a season, whose parent arrives as an array', async () => {
-    // The heading is the *show*, and the season and year are the subtitle beneath it.
+    // The heading is the *show*; the subtitle is season number, episode count, then year
+    // (founder hotfix, 2026-11-07), joined by the block's one separator.
     const view = await openOn(completeSeason, 'The Last of Us');
-    // One separator for the whole block since 2026-09-07: the middle dot the metadata
-    // line beneath already used, so the two lines read as one grammar.
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 2023$/);
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
   });
 
   it('renders a series, which has no score block and no rank control', async () => {
@@ -405,8 +404,10 @@ describe('optional metadata that is absent in the catalogue', () => {
     );
 
     expect(view.getByTestId('title-name')).toHaveTextContent(/^Season 1$/);
-    // Nine episodes is still the season's own length, with no rating in front of it.
-    expect(view.getByTestId('title-meta')).toHaveTextContent(/9 episodes/);
+    // Nine episodes is still the season's own length, on the subtitle, and no rating
+    // means no metadata line at all rather than an empty one.
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
+    expect(view.queryByTestId('title-meta')).toBeNull();
   });
 
   it('renders a ranked title while the credits facet is empty', async () => {
@@ -605,11 +606,13 @@ describe('the identity line', () => {
 
   it('uses an episode count for a TV season, and inherits the show’s rating', async () => {
     // Neither fact is on the season row: TMDB publishes a rating on the series and never
-    // on a season, and a season's length is its episode count rather than a runtime.
+    // on a season, and a season's length is its episode count rather than a runtime. The
+    // count is said once, on the subtitle, in the order season · episodes · year.
     const view = await openOn(completeSeason, 'The Last of Us');
 
-    expect(view.getByTestId('title-meta')).toHaveTextContent(/TV-MA · 9 episodes/);
-    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/min/);
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
+    expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/);
+    expect(view.getByTestId('title-subtitle')).not.toHaveTextContent(/min/);
   });
 
   it('omits a length TMDB reports as zero rather than printing it', async () => {
@@ -622,6 +625,8 @@ describe('the identity line', () => {
 
     expect(view.getByTestId('title-meta')).toHaveTextContent(/TV-MA/);
     expect(view.getByTestId('title-meta')).not.toHaveTextContent(/episode/);
+    // Absent rather than invented: season and year, with no stray separator between.
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 2023$/);
   });
 
   it('names a television Creator, and only a Creator', async () => {
@@ -640,7 +645,7 @@ describe('the identity line', () => {
 
     await waitFor(() =>
       expect(view.getByTestId('title-meta')).toHaveTextContent(
-        /^TV-MA · 9 episodes · Craig Mazin$/,
+        /^TV-MA · Craig Mazin$/,
       ),
     );
   });
@@ -654,7 +659,7 @@ describe('the identity line', () => {
      * page in the app was presenting them in the slot a reader reads as "whose show is
      * this" — a confident falsehood in the one place on the page nobody can check.
      *
-     * `TV-MA · 9 episodes` is the founder's answer, and it is better.
+     * `TV-MA` alone is the founder's answer, and it is better.
      */
     tableRows.media_cache = [
       {
@@ -673,7 +678,7 @@ describe('the identity line', () => {
     const view = await openOn(completeSeason, 'The Last of Us');
 
     await waitFor(() =>
-      expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA · 9 episodes$/),
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/),
     );
     // Neither stand-in. An executive producer is routinely a financier or a star with a
     // production deal, and an episode director directed one episode.

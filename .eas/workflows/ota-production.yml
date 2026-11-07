@@ -76,10 +76,12 @@ jobs:
       BINGD_LANE: production
     params:
       branch: production
-      # iOS only (founder, 2026-11-07). The iOS build passed phone QA. `all` would
-      # republish Android, which this release does not. Fixed in the file, like the branch.
-      # The runtimes job still checks both store binaries.
-      platform: ios
+      # Android and iOS together (founder, 2026-11-07, after Android Preview QA passed).
+      # `all` is written out rather than left to EAS's default, and fixed in the file like the
+      # branch, so nothing typed at dispatch can narrow or widen it. One job publishes both,
+      # so the two platforms land as one update group or not at all. The runtimes job above
+      # refuses unless both hashes are the live store binaries.
+      platform: all
       message: ${{ inputs.message }}
       # The local path never uploaded maps, and this change moves where an update is bundled,
       # not what happens around it.
