@@ -175,23 +175,31 @@ sandbox; the suite above is the implementer's. Codex did not exercise native tou
 
 ## Android Preview
 
-| | Phase A |
-| --- | --- |
-| Published | 2026-11-07, this session the only publisher |
-| Commit | `688a007` (code `1ee5646`) |
-| Update group | `404c12c7-6397-4cc5-9c23-e81c190d5b20` |
-| Android update | `01a1b44e-c3f9-766b-821b-636fcb402ba9` |
-| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` |
-| Branch / platform | `preview`, Android only |
-| Previous (rollback) | `29b60018-595c-4862-88c7-5d6c551f2a25` |
+| | Phase A | Phase B (live) |
+| --- | --- | --- |
+| Published | 2026-11-07 | 2026-11-07 |
+| Commit | `688a007` (code `1ee5646`) | `2f58ff4` (code `af8ef38`) |
+| Update group | `404c12c7-6397-4cc5-9c23-e81c190d5b20` | `3704e9a9-38b2-4b82-af3f-999b37b674e0` |
+| Android update | `01a1b44e-c3f9-766b-821b-636fcb402ba9` | `01a1b46b-dc2d-7fff-8da7-ad8f0c3856a0` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` | the same |
+| Branch / platform | `preview`, Android only | the same |
+| Rollback to | `29b60018` (final title refinement) | `404c12c7` (Phase A) |
+
+This session was the only publisher for both.
 
 ## Rollback
 
+To undo Phase B only (back to Phase A):
+
 ```
-npx eas update:republish --group 29b60018-595c-4862-88c7-5d6c551f2a25 --non-interactive
+npx eas update:republish --group 404c12c7-6397-4cc5-9c23-e81c190d5b20 --non-interactive
 ```
 
-This returns the Preview channel to the final title refinement (`1996619`). Run it from
+To undo the whole sprint (back to the final title refinement, `1996619`):
+
+```
+npx eas update:republish --group 29b60018-595c-4862-88c7-5d6c551f2a25 --non-interactive
+``` Run it from
 `../worktrees/visual2-preview-publish`.
 
 ## Phone QA checklist
