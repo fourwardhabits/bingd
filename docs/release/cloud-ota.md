@@ -19,7 +19,7 @@ what may go over the air at all.
 | **EAS environment** | `preview` | `production` |
 | **EAS branch** | `preview` | `production` |
 | **`APP_VARIANT` / `BINGD_LANE`** | `preview` / `preview` | `production` / `production` |
-| **Publish platform** | `android` | `ios` |
+| **Publish platform** | `android` | `all` (Android and iOS) |
 | **Started by** | `eas workflow:run` only | `eas workflow:run` only |
 | **Release checks** | reported | **refuse** |
 | **Runtime held to the live binary** | Android | **Android and iOS** |
@@ -35,13 +35,14 @@ lane and platform are written into each file, not taken as inputs. `config/ota-w
 runs in the pull request gate and fails if a trigger is added, if the files stop agreeing with
 `eas.json`, or if the two stop being the same workflow apart from the lane and the publish platform.
 
-**Production publishes iOS only.** Earlier on 2026-11-07 both workflows published `android`, while
-iOS waited on device QA. The iOS build has passed phone QA. Production's platform is `ios`, fixed
-in the file, so this lane does not republish Android. `all` would send the same update to Android
-again, which this release does not do. Preview stays `android`: `config/live-runtimes.json` lists
-no iOS Preview binary. The production `runtimes` job is unchanged. It still receives both
-fingerprint hashes and refuses unless each one is the live store binary, so an iOS publish cannot
-ship when the Android check fails.
+**Production publishes Android and iOS together.** Earlier on 2026-11-07 production published
+`ios` only, while the Android hotfix waited on Preview QA. That QA has passed, so production's
+platform is `all`, written out and fixed in the file. EAS Update only exports Android and iOS
+bundles, so `all` means exactly those two. One `publish` job sends both, so they land as one
+update group or not at all, and nothing typed at dispatch can narrow or widen the platform.
+Preview stays `android`: `config/live-runtimes.json` lists no iOS Preview binary. The production
+`runtimes` job is unchanged. It receives both fingerprint hashes and refuses unless each one is the
+live store binary, so neither platform ships when the other's check fails.
 
 ### Running one
 
