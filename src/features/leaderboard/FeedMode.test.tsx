@@ -238,6 +238,25 @@ const toBoard = async (view: View, expecting = 'This month') => {
   await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
 };
 
+/**
+ * Open the content-type dropdown and choose (founder Preview QA, 2026-11-07: the four
+ * categories are a dropdown beside the time range, no longer segments).
+ */
+const chooseMetric = async (view: View, to: string) => {
+  await fireEvent.press(view.getByTestId('leaderboard-metric'));
+  await fireEvent.press(await view.findByRole('menuitem', { name: to }));
+};
+
+/** The content-type dropdown's menu, read and closed again on the current entry. */
+const metricMenu = async (view: View) => {
+  await fireEvent.press(view.getByTestId('leaderboard-metric'));
+  const items = await view.findAllByRole('menuitem');
+  const names = items.map((item) => item.props.accessibilityLabel as string);
+  const current = items.find((item) => item.props.accessibilityState?.selected);
+  if (current) await fireEvent.press(current);
+  return names;
+};
+
 /** Open the time-range filter's menu and choose (nav cohesion sprint, 2026-11-06). */
 const chooseTimeframe = async (view: View, from: string, to: string) => {
   await fireEvent.press(view.getByLabelText(`Showing ${from}`));
@@ -477,12 +496,8 @@ describe('the board is people only', () => {
     await toBoard(view);
 
     expect(view.queryByText('Top Titles')).toBeNull();
-    expect(view.getAllByRole('tab').map((tab) => tab.props.accessibilityLabel)).toEqual([
-      'All Titles',
-      'Movies',
-      'TV Shows',
-      'Reviews',
-    ]);
+    expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
     // The Feed's own three icons, with Leaderboard the chosen one.
     expect(
       within(view.getByLabelText('Feed mode'))
@@ -491,9 +506,8 @@ describe('the board is people only', () => {
     ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
-      expect(view.getByLabelText(label)).toBeTruthy();
-    }
+    expect(view.getByLabelText('Showing All Titles')).toBeTruthy();
+    expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
   });
 
   it('reads no community-score list from the board', async () => {
@@ -541,7 +555,7 @@ describe('switching metrics keeps the board still', () => {
     expect(styleOf(withRows).paddingTop ?? 0).toBe(0);
     expect(styleOf(withRows).marginTop ?? 0).toBe(0);
 
-    await fireEvent.press(view.getByLabelText('Reviews'));
+    await chooseMetric(view, 'Reviews');
     await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
 
     const empty = view.getByTestId('leaderboard-content');
@@ -599,7 +613,7 @@ describe('switching metrics keeps the board still', () => {
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Movies'));
+    await chooseMetric(view, 'Movies');
 
     expect(view.getByTestId('feed-scroll').props.refreshControl.props.refreshing).toBe(false);
     expect(view.getByTestId('leaderboard-content').props.accessibilityState).toMatchObject({
@@ -661,7 +675,7 @@ describe('switching metrics keeps the board still', () => {
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Movies'));
+    await chooseMetric(view, 'Movies');
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('my_leaderboard_standing', expect.objectContaining({ p_metric: 'movies' })),
     );
@@ -704,7 +718,7 @@ describe('switching metrics keeps the board still', () => {
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Movies'));
+    await chooseMetric(view, 'Movies');
 
     // In flight: the Titles rows stay exactly where they were, and no skeleton replaces them.
     expect(view.getByText('Ada')).toBeTruthy();
@@ -739,9 +753,8 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
-      expect(view.getByLabelText(label)).toBeTruthy();
-    }
+    expect(view.getByLabelText('Showing All Titles')).toBeTruthy();
+    expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
     expect(view.queryByText('Watched')).toBeNull();
   });
 
@@ -754,7 +767,7 @@ describe('the metrics', () => {
     await toBoard(view, 'All time');
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Reviews'));
+    await chooseMetric(view, 'Reviews');
 
     await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
     expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
@@ -1073,7 +1086,7 @@ describe('an empty and sparse beta', () => {
     await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
     expect(view.getByText('You could take the first spot.')).toBeTruthy();
 
-    await fireEvent.press(view.getByLabelText('Reviews'));
+    await chooseMetric(view, 'Reviews');
     await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
     expect(view.getByText('Yours could be the first.')).toBeTruthy();
   });
@@ -1109,10 +1122,10 @@ describe('the two analytics events', () => {
     await toBoard(view);
     mockTrack.mockClear();
 
-    await fireEvent.press(view.getByLabelText('All Titles'));
+    await chooseMetric(view, 'All Titles');
     expect(mockTrack).not.toHaveBeenCalled();
 
-    await fireEvent.press(view.getByText('Movies'));
+    await chooseMetric(view, 'Movies');
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'leaderboard_metric_selected',
       props: { metric: 'movies' },

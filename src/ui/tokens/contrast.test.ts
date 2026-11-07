@@ -1,4 +1,4 @@
-import { brand, bucket, bucketInk, semantic, surface, text } from './color';
+import { brand, bucket, bucketInk, medal, semantic, surface, text } from './color';
 import { WCAG, contrastRatio } from './contrast';
 
 /**
@@ -120,5 +120,12 @@ describe('there is no fourth text tone', () => {
       ),
     );
     expect(weakest).toBeGreaterThanOrEqual(WCAG.AA_BODY);
+  });
+});
+
+/** The Leaderboard's filled medals carry their rank, so every pair must read (2026-11-07). */
+describe('medal badges', () => {
+  it.each(Object.entries(medal))('%s: the numeral reads on its fill at AA', (_name, pair) => {
+    expect(contrastRatio(pair.numeral, pair.fill)).toBeGreaterThanOrEqual(WCAG.AA_BODY);
   });
 });

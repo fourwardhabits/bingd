@@ -2,7 +2,7 @@ import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
-import { theme, tier } from '@/ui/tokens';
+import { medal as medalTokens, theme } from '@/ui/tokens';
 
 import { LeaderboardView } from './LeaderboardView';
 import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
@@ -51,69 +51,45 @@ const board = (
 
 const tabs = (view: Awaited<ReturnType<typeof board>>) => view.getAllByRole('tab');
 
-describe('the categories', () => {
-  it('read All, Movies, TV and Reviews, and are spoken in full', async () => {
+/**
+ * **What and when, two dropdowns side by side** (founder Preview QA, 2026-11-07): the
+ * content type is a dropdown beside the time range, no longer four segments.
+ */
+describe('the content type', () => {
+  it('is a dropdown of the four, named in full, beside the time range', async () => {
     const view = await board([]);
+    const filters = view.getByTestId('leaderboard-filters');
+    expect(StyleSheet.flatten(filters.props.style)).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' });
+    const metric = within(filters).getByLabelText('Showing All Titles');
+    expect(within(filters).getByLabelText('Showing This month')).toBeTruthy();
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
+    // A 44pt target, in the same compact type as the time range.
+    expect(StyleSheet.flatten(metric.props.style).minHeight).toBe(44);
+    expect(
+      (StyleSheet.flatten(within(metric).getByText('All Titles').props.style) as TextStyle).fontSize,
+    ).toBe(14);
 
-    expect(tabs(view).map((tab) => String(within(tab).getByText(/\S/).props.children))).toEqual([
-      'All',
-      'Movies',
-      'TV',
-      'Reviews',
-    ]);
-    expect(tabs(view).map((tab) => tab.props.accessibilityLabel)).toEqual([
+    await fireEvent.press(metric);
+    const items = await view.findAllByRole('menuitem');
+    expect(items.map((item) => item.props.accessibilityLabel)).toEqual([
       'All Titles',
       'Movies',
       'TV Shows',
       'Reviews',
     ]);
+    expect(items[0]!.props.accessibilityState).toMatchObject({ selected: true });
   });
 
-  it('are four equal 44pt segments, so all four fit with nothing to scroll', async () => {
-    const view = await board([]);
-
-    // One track, not the old sideways-scrolling chip row.
-    expect(view.queryByLabelText('Leaderboard metric')).toBeNull();
-    expect(view.getByLabelText('Leaderboard category').props.horizontal).toBeUndefined();
-    for (const tab of tabs(view)) {
-      const style = StyleSheet.flatten(tab.props.style) as ViewStyle;
-      expect(style).toMatchObject({ flex: 1, flexBasis: 0, minHeight: theme.layout.minTapTarget });
-    }
-    // The dense labels: 14pt, shrinking to fit rather than clipping at a large text size.
-    const label = within(tabs(view)[3]!).getByText('Reviews');
-    expect((StyleSheet.flatten(label.props.style) as TextStyle).fontSize).toBe(14);
-    expect(label.props.adjustsFontSizeToFit).toBe(true);
-    expect(label.props.numberOfLines).toBe(1);
-  });
-
-  it('mark the current one in Maroon on Parchment, and choose another', async () => {
+  it('chooses another, and does not report the current one again', async () => {
     const onChangeMetric = jest.fn();
     const view = await board([], onChangeMetric);
-
-    expect(tabs(view).map((tab) => Boolean(tab.props.accessibilityState?.selected))).toEqual([
-      true,
-      false,
-      false,
-      false,
-    ]);
-    const fill = view.getByTestId('nav-fill-titles');
-    expect((StyleSheet.flatten(fill.props.style) as ViewStyle).backgroundColor).toBe(
-      theme.surface.sunken,
-    );
-    expect(
-      (StyleSheet.flatten(within(fill).getByText('All').props.style) as TextStyle).color,
-    ).toBe(theme.semantic.action);
-
-    await fireEvent.press(view.getByLabelText('Reviews'));
-    expect(onChangeMetric).toHaveBeenCalledWith('reviews');
-  });
-
-  it('does not report a re-tap of the current one as a change', async () => {
-    const onChangeMetric = jest.fn();
-    const view = await board([], onChangeMetric);
-
-    await fireEvent.press(view.getByLabelText('All Titles'));
+    await fireEvent.press(view.getByLabelText('Showing All Titles'));
+    await fireEvent.press((await view.findAllByRole('menuitem'))[0]!);
     expect(onChangeMetric).not.toHaveBeenCalled();
+
+    await fireEvent.press(view.getByLabelText('Showing All Titles'));
+    await fireEvent.press(await view.findByRole('menuitem', { name: 'Reviews' }));
+    expect(onChangeMetric).toHaveBeenCalledWith('reviews');
   });
 });
 
@@ -149,32 +125,43 @@ describe('the time range', () => {
 });
 
 /**
- * **Gold, silver and bronze** (founder, marquee cohesion sprint, 2026-11-07): ranks 1–3 are
- * a medal holding the number, a ring in the award tier's metal; fourth onward is the number.
+ * **Gold, silver and bronze, filled** (founder Preview QA, 2026-11-07): ranks 1–3 are a
+ * filled medal with the number centred on it in the colour certified for that fill;
+ * fourth onward is the number, centred in the same column.
  */
 describe('the medals', () => {
   const medal = (view: Awaited<ReturnType<typeof board>>, rank: number) =>
     view.queryAllByTestId(`leaderboard-medal-${rank}`, { includeHiddenElements: true });
 
-  it('rings 1, 2 and 3 in gold, silver and bronze, and leaves 4 a number', async () => {
+  it('fills 1, 2 and 3 gold, silver and bronze, and leaves 4 a number', async () => {
     const view = await board([
       person(),
       person({ id: 'u-2', username: 'bea', name: 'Bea', rank: 2, count: 7 }),
       person({ id: 'u-3', username: 'cy', name: 'Cy', rank: 3, count: 5 }),
       person({ id: 'u-4', username: 'dee', name: 'Dee', rank: 4, count: 2 }),
     ]);
-    const ring = (rank: number) =>
-      (StyleSheet.flatten(medal(view, rank)[0]!.props.style) as ViewStyle).borderColor;
-    expect(ring(1)).toBe(tier.gold);
-    expect(ring(2)).toBe(tier.silver);
-    expect(ring(3)).toBe(tier.bronze);
+    const fill = (rank: number) =>
+      (StyleSheet.flatten(medal(view, rank)[0]!.props.style) as ViewStyle).backgroundColor;
+    const numeral = (rank: number) =>
+      (
+        StyleSheet.flatten(
+          within(medal(view, rank)[0]!).getByText(String(rank), { includeHiddenElements: true })
+            .props.style,
+        ) as TextStyle
+      ).color;
+    expect([fill(1), fill(2), fill(3)]).toEqual([
+      medalTokens.gold.fill,
+      medalTokens.silver.fill,
+      medalTokens.bronze.fill,
+    ]);
+    expect([numeral(1), numeral(2), numeral(3)]).toEqual([
+      medalTokens.gold.numeral,
+      medalTokens.silver.numeral,
+      medalTokens.bronze.numeral,
+    ]);
     expect(medal(view, 4)).toHaveLength(0);
-    // The number is in the medal, in Ink, and is not drawn a second time beside it.
+    // The number is on the medal and is not drawn a second time beside it.
     expect(view.getAllByText('1', { includeHiddenElements: true })).toHaveLength(1);
-    expect(
-      (StyleSheet.flatten(within(medal(view, 2)[0]!).getByText('2', { includeHiddenElements: true }).props.style) as TextStyle)
-        .color,
-    ).toBe(theme.text.primary);
     expect(view.getByText('4')).toBeTruthy();
     expect(view.queryByTestId('leaderboard-trophy', { includeHiddenElements: true })).toBeNull();
   });
@@ -200,7 +187,11 @@ describe('the medals', () => {
     expect(medalStyle.width).toBe(26);
     expect(medalStyle.position).toBeUndefined();
     const rank = StyleSheet.flatten(view.getByText('4').props.style) as TextStyle;
-    expect(rank.textAlign).toBe('right');
+    expect(rank.textAlign).toBe('center');
+    // Medal and number share one centred column.
+    let cell = view.getByText('4').parent;
+    while (cell && (StyleSheet.flatten(cell.props.style) as ViewStyle | undefined)?.minWidth === undefined) cell = cell.parent;
+    expect(StyleSheet.flatten(cell!.props.style)).toMatchObject({ minWidth: 26, alignItems: 'center' });
   });
 
   it('is silent to a screen reader, which already hears "Number 1"', async () => {

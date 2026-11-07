@@ -6,11 +6,10 @@ import {
   Divider,
   EmptyState,
   MediumSelector,
-  SegmentedTabs,
   SkeletonRow,
   Text,
 } from '@/ui/components';
-import { fontFamily, theme, tier } from '@/ui/tokens';
+import { fontFamily, medal, theme } from '@/ui/tokens';
 
 import {
   countLabel,
@@ -100,39 +99,29 @@ export function LeaderboardView({
           `app/(tabs)/feed.tsx`. This component draws the board beneath it. */}
 
       {/**
-       * **All | Movies | TV | Reviews, four equal segments that always fit** (founder, nav
-       * cohesion sprint, 2026-11-06). The chips ran past the screen edge at 360pt and
-       * Reviews was reached by scrolling. Collection's Watched | Watchlist control, in its
-       * dense form: one hairline track, the chosen segment Parchment with a Maroon word,
-       * each a 44pt target. At a large text size a word shrinks to fit its segment rather
-       * than clipping. The spoken names stay whole: All Titles, TV Shows.
+       * **What and when, as two dropdowns side by side** (founder Preview QA, 2026-11-07).
        *
-       * Re-choosing the segment already chosen is not a change, as before.
+       *     All Titles ▾    This month ▾
+       *
+       * They replaced a four-segment control over a separate time dropdown: the content type
+       * and the period are the board's two filters and now read as a pair, in the same
+       * compact text-and-chevron control, each a 44pt target opening the small anchored
+       * menu. The names are whole (All Titles, TV Shows), so nothing is abbreviated for
+       * a screen reader or on screen. Re-choosing the value already chosen is not a change,
+       * as before, and the time range is the same remembered preference. On a narrow phone
+       * at a large text size the second wraps under the first rather than clipping.
        */}
-      <View style={styles.categories}>
-        <SegmentedTabs
-          variant="nav"
-          dense
-          accessibilityLabel="Leaderboard category"
-          options={LEADERBOARD_METRICS.map((option) => ({
-            id: option.value,
-            label: option.short,
-            accessibilityLabel: option.label,
-          }))}
+      <View style={styles.filters} testID="leaderboard-filters">
+        <MediumSelector
+          size="filter"
           value={metric}
           onChange={(next) => {
             if (next !== metric) onChangeMetric(next);
           }}
+          options={LEADERBOARD_METRICS.map((option) => ({ id: option.value, label: option.label }))}
+          accessibilityHint="Choose what the board counts"
+          testID="leaderboard-metric"
         />
-      </View>
-
-      {/**
-       * **The time range, as a secondary filter** (same sprint): a compact
-       * text-and-chevron under the categories, opening a two-line menu beside it rather
-       * than a sheet. It was the row's uppercase Maroon heading. The one place the
-       * timeframe is named, still (founder §3), and the same remembered preference.
-       */}
-      <View style={styles.timeframe}>
         <MediumSelector
           size="filter"
           value={timeframe}
@@ -195,13 +184,11 @@ export function LeaderboardView({
 }
 
 /**
- * **A medal for ranks 1, 2 and 3: the number inside a ring of gold, silver or bronze**
- * (founder, marquee cohesion sprint, 2026-11-07).
- *
- * The metals are the award tiers' (`tier` in the colour tokens), which the design system
- * keeps off text and out from behind it — so the metal is the ring and the number stays
- * Ink on the row's own ground, legible at any contrast setting. Colour is not the only
- * carrier: the number is in the medal.
+ * **A filled medal for ranks 1, 2 and 3, the number centred on it** (founder Preview QA,
+ * 2026-11-07; a ring until then): gold, silver and bronze from `medal` in the colour
+ * tokens, each fill paired with the numeral colour that reads on it at AA (Ink on gold and
+ * silver, Paper on the deeper bronze). Colour is not the only carrier: the number is on
+ * the medal.
  *
  * It keys on `rank`, never on position, so ties share a medal: two people level for
  * second are both silver, and the next person is 4th with no bronze — competition ranking,
@@ -209,17 +196,26 @@ export function LeaderboardView({
  * row.
  */
 const MEDAL = 26;
-const MEDALS: Record<number, string> = { 1: tier.gold, 2: tier.silver, 3: tier.bronze };
+const MEDALS: Record<number, (typeof medal)[keyof typeof medal]> = {
+  1: medal.gold,
+  2: medal.silver,
+  3: medal.bronze,
+};
 
 function RankMedal({ rank }: { rank: number }) {
+  const pair = MEDALS[rank]!;
   return (
     <View
-      style={[styles.medal, { borderColor: MEDALS[rank] }]}
+      style={[styles.medal, { backgroundColor: pair.fill }]}
       testID={`leaderboard-medal-${rank}`}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Text variant="footnote" style={styles.medalNumber} allowFontScaling={false}>
+      <Text
+        variant="footnote"
+        style={[styles.medalNumber, { color: pair.numeral }]}
+        allowFontScaling={false}
+      >
         {rank}
       </Text>
     </View>
@@ -423,13 +419,15 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
   heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
-  // Its own height and no more: a horizontal ScrollView otherwise grows in a column.
-  categories: { paddingTop: theme.space[2] },
-  // The filter's 44pt target, on the gutter, directly under the categories: a filter of
-  // the board, not a row of its own (marquee cohesion sprint).
-  timeframe: {
+  // The two dropdowns on the gutter, side by side; the second wraps under the first only
+  // when the row cannot hold both.
+  filters: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[5],
     paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[1],
   },
   row: {
     flexDirection: 'row',
@@ -439,21 +437,19 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[3],
   },
   rowYou: { backgroundColor: theme.surface.raised },
-  // Fixed width so the avatars line up whether the rank is a medal, 4 or 48. Right-aligned
-  // so the digits themselves line up, which is what makes a column of numbers scannable.
-  // A minimum rather than a width: a pinned standing of 1,000 still fits on one line
-  // (independent review 1).
-  rankCell: { minWidth: MEDAL, alignItems: 'flex-end' },
-  rank: { textAlign: 'right' },
+  // One column for every rank, medal or number, each centred in it (founder Preview QA,
+  // 2026-11-07), so 1, 2, 3 and 4 share one axis. A minimum rather than a width: a pinned
+  // standing of 1,000 still fits on one line (independent review 1).
+  rankCell: { minWidth: MEDAL, alignItems: 'center' },
+  rank: { textAlign: 'center', fontVariant: ['tabular-nums'] },
   medal: {
     width: MEDAL,
     height: MEDAL,
     borderRadius: MEDAL / 2,
-    borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  medalNumber: { fontFamily: fontFamily.sansSemibold, color: theme.text.primary },
+  medalNumber: { fontFamily: fontFamily.sansSemibold, fontVariant: ['tabular-nums'] },
   copy: { flex: 1, gap: 1 },
   // Name and handle on one baseline. The name keeps its intrinsic width and the handle
   // shrinks first, so a long display name costs the handle rather than the count.
