@@ -10,7 +10,7 @@ import {
   SkeletonRow,
   Text,
 } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme, tier } from '@/ui/tokens';
 
 import {
   countLabel,
@@ -65,9 +65,10 @@ export type LeaderboardViewProps = {
  * It keys on `rank`, not on position in the array — so a three-way tie for first shows
  * three accented rows and the fourth person is fourth, which is what the board says.
  *
- * **First place alone adds one mark**: a 16pt Amber trophy beside the rank (founder final
- * polish, 2026-11-04). One icon in the palette's existing celebration colour, not a podium
- * or a medal set — see `TROPHY`.
+ * **Gold, silver and bronze medals since the marquee cohesion sprint** (founder,
+ * 2026-11-07): the first three ranks are drawn as a medal holding the number — see
+ * `RankMedal` — and fourth onward as the plain number. They replaced the trophy that sat
+ * beside first place, so no row shows a mark and a number for the same fact.
  *
  * ---------------------------------------------------------------------------
  * THE "YOU" ROW
@@ -194,18 +195,36 @@ export function LeaderboardView({
 }
 
 /**
- * **The trophy beside first place** (founder final polish, 2026-11-04): Amber, the
- * palette's celebration colour, at 16pt.
+ * **A medal for ranks 1, 2 and 3: the number inside a ring of gold, silver or bronze**
+ * (founder, marquee cohesion sprint, 2026-11-07).
  *
- * Out of the row's flow, in the spare left of the rank column — the column is 24pt wide
- * and right-aligned, so a one-digit rank leaves room beside it. In flow it would push the
- * avatar, name and count of the first-place row out of line with every row below.
+ * The metals are the award tiers' (`tier` in the colour tokens), which the design system
+ * keeps off text and out from behind it — so the metal is the ring and the number stays
+ * Ink on the row's own ground, legible at any contrast setting. Colour is not the only
+ * carrier: the number is in the medal.
  *
- * On every row ranked 1, so a tie for first shows a trophy on each — the same rule as the
- * top-three accent, which keys on `rank` rather than on position. Hidden from a screen
- * reader: the row already says "Number 1".
+ * It keys on `rank`, never on position, so ties share a medal: two people level for
+ * second are both silver, and the next person is 4th with no bronze — competition ranking,
+ * as the server computes it. Hidden from a screen reader, which hears "Number 2" from the
+ * row.
  */
-const TROPHY = 16;
+const MEDAL = 26;
+const MEDALS: Record<number, string> = { 1: tier.gold, 2: tier.silver, 3: tier.bronze };
+
+function RankMedal({ rank }: { rank: number }) {
+  return (
+    <View
+      style={[styles.medal, { borderColor: MEDALS[rank] }]}
+      testID={`leaderboard-medal-${rank}`}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Text variant="footnote" style={styles.medalNumber} allowFontScaling={false}>
+        {rank}
+      </Text>
+    </View>
+  );
+}
 
 function LeaderboardRow({
   entry,
@@ -249,25 +268,15 @@ function LeaderboardRow({
         pressed && styles.pressed,
       ]}
     >
-      <Text
-        variant="callout"
-        tone={top ? 'action' : 'tertiary'}
-        style={styles.rank}
-        allowFontScaling={false}
-      >
-        {entry.rank}
-      </Text>
-      {entry.rank === 1 ? (
-        <Ionicons
-          name="trophy"
-          size={TROPHY}
-          color={theme.semantic.emphasis}
-          style={styles.trophy}
-          testID="leaderboard-trophy"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        />
-      ) : null}
+      <View style={styles.rankCell}>
+        {top ? (
+          <RankMedal rank={entry.rank} />
+        ) : (
+          <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+            {entry.rank}
+          </Text>
+        )}
+      </View>
 
       <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
 
@@ -393,9 +402,11 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
         standing.count,
       )}`}
     >
-      <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
-        {standing.rank}
-      </Text>
+      <View style={styles.rankCell}>
+        <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+          {standing.rank}
+        </Text>
+      </View>
       <View style={styles.copy}>
         <Text variant="callout">You</Text>
         {/* The denominator, because a rank without one is a number a reader cannot
@@ -414,11 +425,11 @@ const styles = StyleSheet.create({
   heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
   // Its own height and no more: a horizontal ScrollView otherwise grows in a column.
   categories: { paddingTop: theme.space[2] },
-  // The filter's 44pt target, on the gutter, close under the categories.
+  // The filter's 44pt target, on the gutter, directly under the categories: a filter of
+  // the board, not a row of its own (marquee cohesion sprint).
   timeframe: {
     flexDirection: 'row',
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[1],
   },
   row: {
     flexDirection: 'row',
@@ -428,17 +439,19 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[3],
   },
   rowYou: { backgroundColor: theme.surface.raised },
-  // Fixed width so the avatars line up whether the rank is 1 or 48. Right-aligned so
-  // the digits themselves line up, which is what makes a column of numbers scannable.
-  rank: { minWidth: 24, textAlign: 'right' },
-  // Centred on the row and drawn from the gutter, where the rank column starts. A "1"
-  // right-aligned in 24pt leaves about 16pt to its left; see `TROPHY`.
-  trophy: {
-    position: 'absolute',
-    left: theme.layout.gutter - 4,
-    top: '50%',
-    marginTop: -TROPHY / 2,
+  // Fixed width so the avatars line up whether the rank is a medal, 4 or 48. Right-aligned
+  // so the digits themselves line up, which is what makes a column of numbers scannable.
+  rankCell: { width: MEDAL, alignItems: 'flex-end' },
+  rank: { textAlign: 'right' },
+  medal: {
+    width: MEDAL,
+    height: MEDAL,
+    borderRadius: MEDAL / 2,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  medalNumber: { fontFamily: fontFamily.sansSemibold, color: theme.text.primary },
   copy: { flex: 1, gap: 1 },
   // Name and handle on one baseline. The name keeps its intrinsic width and the handle
   // shrinks first, so a long display name costs the handle rather than the count.

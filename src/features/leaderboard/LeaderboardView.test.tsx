@@ -2,10 +2,10 @@ import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
-import { theme } from '@/ui/tokens';
+import { theme, tier } from '@/ui/tokens';
 
 import { LeaderboardView } from './LeaderboardView';
-import type { LeaderboardEntry } from './use-leaderboard';
+import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
 
 /**
  * **The Leaderboard's final polish** (founder, 2026-11-04): first place carries a small
@@ -148,49 +148,90 @@ describe('the time range', () => {
   });
 });
 
-describe('the first-place trophy', () => {
-  const trophies = (view: Awaited<ReturnType<typeof board>>) =>
-    view.queryAllByTestId('leaderboard-trophy', { includeHiddenElements: true });
+/**
+ * **Gold, silver and bronze** (founder, marquee cohesion sprint, 2026-11-07): ranks 1–3 are
+ * a medal holding the number, a ring in the award tier's metal; fourth onward is the number.
+ */
+describe('the medals', () => {
+  const medal = (view: Awaited<ReturnType<typeof board>>, rank: number) =>
+    view.queryAllByTestId(`leaderboard-medal-${rank}`, { includeHiddenElements: true });
 
-  it('is a 16pt Amber trophy on first place and nowhere else', async () => {
+  it('rings 1, 2 and 3 in gold, silver and bronze, and leaves 4 a number', async () => {
     const view = await board([
       person(),
       person({ id: 'u-2', username: 'bea', name: 'Bea', rank: 2, count: 7 }),
       person({ id: 'u-3', username: 'cy', name: 'Cy', rank: 3, count: 5 }),
+      person({ id: 'u-4', username: 'dee', name: 'Dee', rank: 4, count: 2 }),
     ]);
-
-    expect(trophies(view)).toHaveLength(1);
-    const [trophy] = trophies(view);
-    const style = StyleSheet.flatten(trophy!.props.style) as TextStyle;
-    expect(style.color).toBe(theme.semantic.emphasis);
-    expect(style.fontSize).toBe(16);
+    const ring = (rank: number) =>
+      (StyleSheet.flatten(medal(view, rank)[0]!.props.style) as ViewStyle).borderColor;
+    expect(ring(1)).toBe(tier.gold);
+    expect(ring(2)).toBe(tier.silver);
+    expect(ring(3)).toBe(tier.bronze);
+    expect(medal(view, 4)).toHaveLength(0);
+    // The number is in the medal, in Ink, and is not drawn a second time beside it.
+    expect(view.getAllByText('1', { includeHiddenElements: true })).toHaveLength(1);
+    expect(
+      (StyleSheet.flatten(within(medal(view, 2)[0]!).getByText('2', { includeHiddenElements: true }).props.style) as TextStyle)
+        .color,
+    ).toBe(theme.text.primary);
+    expect(view.getByText('4')).toBeTruthy();
+    expect(view.queryByTestId('leaderboard-trophy', { includeHiddenElements: true })).toBeNull();
   });
 
-  it('is on every row tied for first, because it keys on rank', async () => {
+  it('shares a medal across a tie, and the next rank skips (1, 2, 2, 4)', async () => {
     const view = await board([
       person(),
-      person({ id: 'u-2', username: 'bea', name: 'Bea', rank: 1 }),
-      person({ id: 'u-3', username: 'cy', name: 'Cy', rank: 3, count: 5 }),
+      person({ id: 'u-2', username: 'bea', name: 'Bea', rank: 2, count: 7 }),
+      person({ id: 'u-3', username: 'cy', name: 'Cy', rank: 2, count: 7 }),
+      person({ id: 'u-4', username: 'dee', name: 'Dee', rank: 4, count: 2 }),
     ]);
-
-    expect(trophies(view)).toHaveLength(2);
+    expect(medal(view, 2)).toHaveLength(2);
+    expect(medal(view, 3)).toHaveLength(0);
+    expect(view.getByRole('button', { name: /^Number 4, Dee,/ })).toBeTruthy();
   });
 
-  it('takes no space in the row, so nothing on it moves', async () => {
-    const view = await board([person()]);
-    const style = StyleSheet.flatten(trophies(view)[0]!.props.style) as ViewStyle;
-
-    expect(style.position).toBe('absolute');
-    // The rank keeps its column and stays the first thing drawn in the row.
-    const rank = StyleSheet.flatten(view.getByText('1').props.style) as TextStyle;
-    expect(rank.minWidth).toBe(24);
+  it('keeps every rank in one column, medal or number', async () => {
+    const view = await board([
+      person(),
+      person({ id: 'u-4', username: 'dee', name: 'Dee', rank: 4, count: 2 }),
+    ]);
+    const medalStyle = StyleSheet.flatten(medal(view, 1)[0]!.props.style) as ViewStyle;
+    expect(medalStyle.width).toBe(26);
+    expect(medalStyle.position).toBeUndefined();
+    const rank = StyleSheet.flatten(view.getByText('4').props.style) as TextStyle;
     expect(rank.textAlign).toBe('right');
   });
 
   it('is silent to a screen reader, which already hears "Number 1"', async () => {
     const view = await board([person()]);
 
-    expect(view.queryByTestId('leaderboard-trophy')).toBeNull();
+    expect(view.queryByTestId('leaderboard-medal-1')).toBeNull();
     expect(view.getByRole('button', { name: /^Number 1, Ada,/ })).toBeTruthy();
+  });
+});
+
+/**
+ * **A fixed order for ties** (marquee cohesion sprint): the server's rank, then handle, then
+ * id — the server's own page order, restated because its final select promises none.
+ */
+describe('orderBoard', () => {
+  const row = (id: string, username: string, rank: number) => ({ id, username, rank });
+
+  it('orders by rank, then handle, then id, and never changes a rank', () => {
+    const rows = [
+      row('c', 'zed', 2),
+      row('b', 'amy', 2),
+      row('a', 'top', 1),
+      row('e', 'amy', 2),
+      row('d', 'low', 4),
+    ];
+    const ordered = orderBoard(rows);
+    expect(ordered.map((r) => r.id)).toEqual(['a', 'b', 'e', 'c', 'd']);
+    expect(ordered.map((r) => r.rank)).toEqual([1, 2, 2, 2, 4]);
+    // The same answer whatever order the rows arrive in.
+    expect(orderBoard([...rows].reverse()).map((r) => r.id)).toEqual(['a', 'b', 'e', 'c', 'd']);
+    // The input is left alone.
+    expect(rows[0]!.id).toBe('c');
   });
 });

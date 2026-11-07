@@ -178,7 +178,7 @@ export function useLeaderboard(
       });
       if (error) throw error;
 
-      return ((data ?? []) as {
+      return orderBoard(((data ?? []) as {
         user_id: string;
         username: string;
         display_name: string | null;
@@ -210,9 +210,32 @@ export function useLeaderboard(
         // was readable and is a lie now: a minimal private row has no shared count, and
         // "0 shared" is a claim about a collection this reader has never seen.
         sharedCount: row.shared_count,
-      }));
+      })));
     },
   });
+}
+
+/**
+ * **The board in a fixed order: rank, then handle, then id** (marquee cohesion sprint,
+ * 2026-11-07).
+ *
+ * The ranks are the server's and are not touched: `leaderboard` computes them with SQL's
+ * `rank()`, which is competition ranking — equal counts share a rank and the next rank
+ * skips (1, 2, 2, 4) — over the whole board. Its page is ordered by count, then handle,
+ * then id, but the final select carries no `ORDER BY` of its own after the lateral join,
+ * so the order the rows arrive in is not promised. This restates the server's own order on
+ * the client, so tied people never swap places between refreshes. It ranks nobody and
+ * breaks no tie: two people on 12 are both second, in alphabetical order of handle.
+ */
+export function orderBoard<T extends { rank: number; username: string; id: string }>(
+  rows: readonly T[],
+): T[] {
+  return [...rows].sort(
+    (a, b) =>
+      a.rank - b.rank ||
+      (a.username < b.username ? -1 : a.username > b.username ? 1 : 0) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
 }
 
 /**
