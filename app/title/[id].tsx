@@ -293,9 +293,9 @@ export default function TitleScreen() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   /**
    * Whether the Trailers section draws YouTube's thumbnails on this page. Each one is a
-   * request to `i.ytimg.com`. On by default outside production since the founder's Preview
-   * QA (2026-11-07); production keeps Show previews until its privacy disclosures name
-   * YouTube — see `trailerPreviewsByDefault`.
+   * request to `i.ytimg.com`. Starts at `trailerPreviewsByDefault`, which is `true` in every
+   * lane on this branch; production runs the Show previews opt-in until that change ships
+   * (gated on F-6, see `trailerPreviewsByDefault`).
    */
   const [trailerPreviews, setTrailerPreviews] = useState(trailerPreviewsByDefault);
   /** The full cast, in a sheet, from the immersive Cast preview's See all. */
@@ -2179,10 +2179,10 @@ export default function TitleScreen() {
 
       {/**
        * **Trailers, on the page** (title-page sprint, 2026-11-06; before Reviews since the
-       * final title refinement). The cards draw at once as video tiles; YouTube's
-       * thumbnails wait for Show previews, because each is a request to Google that the
-       * Trailers tab used to make only when it was opened. A tap on a card opens the
-       * video, as it always did.
+       * final title refinement). The cards draw at once as video tiles; YouTube stills
+       * load whenever `trailerPreviews` is true (the prepared default on this branch).
+       * The Show previews action appears only when previews are off (today's live
+       * production OTA). A tap on a card opens the video, as it always did.
        */}
       {videos.data?.length && layoutResolved
         ? immersiveSection(

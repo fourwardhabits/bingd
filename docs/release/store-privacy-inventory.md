@@ -32,7 +32,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 | Product analytics | **PostHog** | yes — carries the account id | one activation funnel |
 | Crash and error reports | **Sentry** | yes — carries the account id | diagnostics |
 | Image requests | **TMDB CDN**, direct from the device | no | posters load from TMDB's servers |
-| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page — automatic outside production; **in production only after the reader taps Show previews** (see below) |
+| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page. **Currently deployed (production OTA 2026-11-07):** opt-in — production shows plain frames until the reader taps Show previews. **Prepared change (PR #239, pending F-6):** automatic on Cinematic pages in all lanes once the production OTA ships. See below. |
 
 **Trailer stills (added 2026-11-07, corrected 2026-11-07).** What the app actually requests,
 from the code rather than from intent:
@@ -55,10 +55,12 @@ from the code rather than from intent:
   Settings › Labs) holds the stills back until the stored layout choice has been read, so a
   reader who chose Original never sends one.
 - **When, by lane.** `trailerPreviewsByDefault()` (`src/features/title/trailer-previews.ts`)
-  is `lane !== 'production'`. Preview, Beta and development load the stills as the page
-  opens. **Production does not**: the cards draw as plain frames and nothing goes to
-  `i.ytimg.com` until the reader taps **Show previews**, once per page. Production builds
-  get `lane === 'production'` from `BINGD_LANE` on the `production` profile in `eas.json`.
+  returns `true` for all lanes as of the prepared production change (PR #239, 2026-11-09).
+  Preview, Beta, development, and **production (once the OTA ships)** all load stills with
+  the page. **Production stills are not yet live**: the production OTA must not be published
+  until **F-6** is resolved, which is the one open Play question (Approximate location via
+  IP; see below). Until that OTA runs, production keeps the opt-in. See
+  `pr239-thumbnail-privacy-review.md` and `privacy-decision-matrix.md` §16.
 
 **Disclosure status.** The live policy at <https://bingd.app/privacy/> (fetched 2026-11-07,
 "Last updated 7 November 2026") already says, under "Who else sees it", that **YouTube
@@ -68,13 +70,21 @@ Google sees the IP address and which video's image was asked for. That sentence 
 both the opt-in and the automatic behaviour, for any title page, so the published policy does
 not need to change to enable automatic stills in production.
 
-This document's reasoning is that the answers for the TMDB images apply unchanged, so **no
-new data type is declared** for it in §2 or §3. **That reasoning has not been checked against
-either store console, and the consoles may need a change**, which is why production
-still uses the opt-in. One point specific to Play: its definition of
-*sharing* exempts a transfer the user initiates. A tap on Show previews arguably is one; an
-automatic load on page open is not. Turning the gate on in production waits for the founder's
-check in §6 item 8.
+**Store forms** (full evidence in `pr239-thumbnail-privacy-review.md`):
+
+- **Apple: existing disclosure supported.** Apple's "collect" means access by the developer
+  "and/or your third-party partners", meaning vendors "whose code you've added to your app".
+  No Google or TMDB code is in the app, and bingd keeps nothing from these requests.
+- **Play: one question unresolved.** Google and TMDB are third parties, not service
+  providers: they serve images under their own terms, not on bingd's instructions. No sharing
+  exemption covers automatic loads. The production opt-in's tap plausibly counted as a
+  user-initiated action; opening a page does not. No cookie or identifier is sent (verified),
+  so Device or other IDs and User IDs are not triggered. *App interactions* is not supported
+  either: the request carries no record of how the user uses bingd. Still open: Play says
+  IP-inferred location "must be disclosed" as Approximate location, and ties IP disclosure to
+  "particular usage and practices". bingd does not use the IP, and the guidance does not say
+  whether a third-party host's possible inference counts. TMDB images have raised the same
+  question in production all along. This is **F-6**; see §6 item 8.
 
 **Not collected at all**, and worth stating because the store forms ask: no precise or
 coarse **location**, no **contacts**, no **health or fitness**, no **financial** data, no
@@ -135,7 +145,7 @@ ask permission for, and asking is itself a rejection risk.
 | Contact Info → **Email Address** | Yes | No | App Functionality |
 | Contact Info → **Name** | Yes | No | App Functionality — display name, and the name Apple/Google return |
 | User Content → **Photos or Videos** | Yes | No | App Functionality — profile picture only |
-| User Content → **Other User Content** | Yes | No | App Functionality — rankings, notes, reviews, comments, watchlist |
+| User Content → **Other User Content** | Yes | No | App Functionality — rankings, notes, reviews, comments, watchlist; **also Product Personalization** — rankings drive recommendations (corrected 2026-11-09; see `privacy-decision-matrix.md` §5) |
 | Identifiers → **User ID** | Yes | No | App Functionality, Analytics |
 | Usage Data → **Product Interaction** | Yes | No | Analytics |
 | Diagnostics → **Crash Data** | Yes | No | App Functionality |
@@ -169,16 +179,52 @@ in logs, declare Search History. If you cannot establish it, **declare it** — 
 over-declaration is a line on a label, and the cost of an under-declaration is a rejected
 submission or a removal.
 
+### Declare these (corrections vs. earlier inventory versions)
+
+> **2026-11-09 correction:** Three rows in this section previously said "do not declare".
+> The public Apple App Privacy label (fetched 2026-11-08, no App Store Connect sign-in)
+> shows all three as declared. The analysis in `privacy-decision-matrix.md` concludes the
+> public label is correct and the earlier inventory was wrong. Summary:
+>
+> - **Location → Coarse Location (Analytics):** The public label declares this. Source is
+>   first-party `account_context` (timezone + locale region stored for release-notification
+>   send-window logic) and/or PostHog GeoIP if enabled. **FOUNDER (F-1):** correct the
+>   declared purpose from Analytics to App Functionality in App Store Connect for
+>   first-party data; Analytics is additionally justified if PostHog GeoIP is on (F-3).
+> - **Identifiers → Device ID (Analytics and App Functionality):** The public label
+>   declares this. Source is PostHog's persisted DeviceId UUID (app-generated, not IDFV
+>   or advertising ID) and the Expo push token in `device_tokens`. Both qualify as
+>   device-scoped identifiers under Apple's definition. **No console change needed** — the
+>   declaration is accurate.
+> - **User Content → Other User Content, Product Personalization:** The public label
+>   declares this purpose. Rankings and comparisons drive `match_scores` and
+>   `recommendation_*` tables. Product Personalization is accurate. **No console change
+>   needed** — the declaration is accurate.
+
 ### Do **not** declare these
 
-Location · Health & Fitness · Financial Info · Contacts · Browsing History · Purchases ·
-Audio Data · Device ID · Advertising Data · Physical Address · Phone Number · Email or Text
+Health & Fitness · Financial Info · Contacts · Browsing History · Purchases ·
+Audio Data · Advertising Data · Physical Address · Phone Number · Email or Text
 Messages · Gameplay Content · Customer Support.
+
+> **Location**: Coarse Location is declared (see correction above). Precise Location
+> is not declared and should not be. There is no GPS, no `NSLocation*`, no
+> `expo-location` in the codebase.
 
 ### Notes for the reviewer form
 
-- **Data is not used for third-party advertising, Bingd's own advertising, or
-  personalisation.** Only App Functionality and Analytics.
+- **No advertising, no third-party personalisation, no data broker.** Bingd shows no
+  advertising and runs no advertising or attribution SDK. Data is never shared with a
+  third party for their own purposes or sold. Tracking is No for every declared type.
+  **First-party Product Personalization is declared on Apple** for Other User Content
+  (rankings and comparisons) because they drive Bingd's own recommendation engine
+  (`match_scores`, `recommendation_*`). That is App functionality by another name — the
+  feature that produces the For You and Similar screens. It is not advertising
+  personalization and it is not third-party personalization. Apple's form has a
+  "Product Personalization" purpose; this is what it is for. **On Play, the current
+  form (founder Data safety CSV export, 2026-11-08) declares App functionality only
+  for Other user-generated content; adding a Personalisation purpose is a proposed
+  addition requiring founder console action (see §3 Play rows table).**
 - **Account deletion:** in-app, Settings › Account & Data. Guideline 5.1.1(v) is met; there
   is no "email us" path.
 - **Sign-in for review:** Apple's *App Review Information* and Play's *App access* both need
@@ -213,13 +259,21 @@ transit** and whether users can **request deletion**.
 ### "Shared" — read the definition before answering
 
 Play defines **sharing** as transfer to a *third party*, and explicitly excludes transfer to
-a **service provider** processing on your behalf. Supabase, PostHog and Sentry are service
-providers under contract; they are **not** sharing.
+a **service provider** processing on your behalf under contract. Supabase, PostHog and Sentry
+are service providers in this sense; they are **not** sharing for the rows below.
 
-**So every row below is `Shared: No`.** State the reasoning in the console's optional notes
-so a reviewer does not have to guess: *"Data is processed by Supabase (hosting), PostHog
-(product analytics) and Sentry (crash reporting) as service providers. No data is
-transferred to any third party for their own purposes, sold, or used for advertising."*
+**Every declared row below is `Shared: No`** for data held by Supabase/PostHog/Sentry.
+The Data safety form has no free-text field for this reasoning, so it is kept here: Supabase
+(hosting), PostHog (product analytics) and Sentry (crash reporting) process data as service
+providers, and no declared user data is transferred to any third party for their own
+purposes, sold, or used for advertising.
+
+> **Note — image hosts (TMDB, YouTube):** The service-provider exemption above does not
+> extend to `image.tmdb.org` or `i.ytimg.com`. Those hosts serve images under their own terms,
+> not on bingd's instructions. The requests carry the device IP, a User-Agent and the image
+> path, with no cookie or identifier. Whether that IP has to be declared as **Approximate
+> location** (Collected and Shared) is the open F-6 question. See §6 item 8 and
+> `pr239-thumbnail-privacy-review.md`.
 
 ### The rows
 
@@ -227,10 +281,10 @@ transferred to any third party for their own purposes, sold, or used for adverti
 |---|---|---|---|---|
 | Personal info → **Name** | Yes | No | Optional | App functionality |
 | Personal info → **Email address** | Yes | No | Required | App functionality, Account management |
-| Personal info → **User IDs** | Yes | No | Required | App functionality, Analytics |
+| Personal info → **User IDs** *(proposed — not in current form)*⁴ | Yes | No | Required *(proposed)* | App functionality, Analytics — **not currently declared** per founder Data safety CSV export, 2026-11-08. Whether to add this row is F-8 in `privacy-decision-matrix.md`. |
 | Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility. **Not** declared under Personalisation: DOB-1 retains the date for possible future age-based recommendations, but nothing reads it for that today, and a declared purpose has to describe what ships. Revisit this row, not the collection answer, if a recommender ever consumes it |
 | Photos and videos → **Photos** | Yes | No | Optional | App functionality — profile picture |
-| App activity → **Other user-generated content** | Yes | No | Optional | App functionality |
+| App activity → **Other user-generated content** | Yes | No | Optional | App functionality *(current form per founder CSV export, 2026-11-08)*. **Personalisation purpose not yet declared on Play** — proposed addition, requires founder console action. Apple correctly declares Product Personalization (see §2 correction notice). See `privacy-decision-matrix.md` §5. |
 | App activity → **App interactions** | Yes | No | **Required**² | Analytics |
 | App info and performance → **Crash logs** | Yes | No | **Required**² | App functionality — diagnostics |
 | App info and performance → **Diagnostics** | Yes | No | **Required**² | App functionality — diagnostics |
@@ -245,6 +299,8 @@ is the opposite: it exists only because somebody typed it, and Bingd is entirely
 without ever opening search. Google's Optional is exactly that case — the user chooses
 whether to provide the data. This row was Required for one round on the reasoning that
 applies to telemetry; review 28d separated the two and was right to.
+
+⁴ **Not currently declared.** The founder's Data safety CSV export (2026-11-08, not committed) shows no Personal info → User IDs row. Account identifiers are currently covered by Device or other IDs (declared). Whether to add a separate User IDs row is an open founder decision (F-8 in `privacy-decision-matrix.md`).
 
 ¹ **Declare it. Whether you may mark it "processed ephemerally" depends on the same
 homework as Apple's row, and is not settled.**
@@ -263,11 +319,19 @@ that this asserts the very thing the Apple note says nobody has established. So:
 - **If it cannot be established, declare it without the qualifier.** Over-declaring costs a
   line on a label; under-declaring is grounds for removal from Play.
 
+### Declare these (corrections vs. earlier inventory versions)
+
+> **2026-11-09 correction:** The earlier inventory said "do not declare Device or other IDs".
+> The public Play Data safety page (fetched 2026-11-08) shows Device or other IDs declared
+> for App functionality and Analytics. The analysis in `privacy-decision-matrix.md` concludes
+> the public declaration is correct. Source: PostHog DeviceId UUID and Expo push token.
+> **FOUNDER (F-2):** open Play Console → Data safety → Device or other IDs and confirm the
+> declared purposes (App functionality, Analytics) are current.
+
 ### Do **not** declare these
 
-Location (approximate or precise) · Financial info · Health and fitness · Messages ·
-Audio · Files and docs · Calendar · Contacts · Web browsing · Installed apps · Device or
-other IDs.
+Approximate or Precise Location · Financial info · Health and fitness · Messages ·
+Audio · Files and docs · Calendar · Contacts · Web browsing · Installed apps.
 
 ### Two answers that are easy to get wrong
 
@@ -428,14 +492,21 @@ attribution section exists to satisfy, which is why the file's provenance is rec
      for each, *Linked to the user* and *Used for tracking* match §2 (no type added for
      third-party image loading, tracking No everywhere). Note whether the published label
      differs from what is in the editor.
-   - **Play Console → Policy and programs → App content → Data safety:** in *Data collection
-     and security*, "Does your app collect or share any of the required user data types?",
-     "Is all of the user data collected by your app encrypted in transit?" (Yes) and the
-     deletion answers; in *Data types*, whether any row — in particular **Device or other
-     IDs** or **App activity** — is affected, and for each declared row whether *Shared*
-     is still No once the load is automatic rather than user-initiated. Also
-     **App content → Privacy policy** is `https://bingd.app/privacy`.
+   - **Play Console → Policy and programs → App content → Data safety (F-6):** resolve
+     the one open question: whether the device IP that image requests carry to
+     `i.ytimg.com` and `image.tmdb.org` must be declared as **Location → Approximate
+     location**. Ask Google Play developer support in writing (exact wording in
+     `pr239-thumbnail-privacy-review.md` §5), and check Test and release → Closed testing
+     release history for whether a beta release with automatic stills has been rolled
+     out on the `alpha` track.
+     - **If declaration is required** (or the founder decides to declare
+       conservatively): select Approximate location; *collected, shared, or both* →
+       Collected and Shared; *processed ephemerally* → No; Required; purpose → App
+       functionality. Publish before the OTA. This covers TMDB, which needs it
+       regardless of the OTA.
+     - **If it is not required:** no Play answer changes.
+     - Do **not** add App interactions as Shared; the request does not carry it.
+       Also confirm **App content → Privacy policy** is `https://bingd.app/privacy`.
 
-   If both hold unchanged, the code change is `trailerPreviewsByDefault => true` with its
-   test, shipped as an ordinary production update. If either form needs an edit, make and
-   publish that first.
+   For Apple: no form change required. Confirm the Privacy Policy URL and that no
+   declared type's Linked or Tracking answer changes for automatic image loads.
