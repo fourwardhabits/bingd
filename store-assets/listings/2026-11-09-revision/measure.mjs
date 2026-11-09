@@ -1,0 +1,57 @@
+/**
+ * Measures a rendered card from its pixels, not from layout constants:
+ *   subtitleBottom  last row of subtitle ink (light pixels on the maroon ground)
+ *   phoneTop        first row of the main phone's frame (#1A191C) at the card's centre
+ *   gap             clear rows between them
+ *   topMargin       rows above the first ink of any type
+ */
+import { sharp } from './lib.mjs';
+
+const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+export async function measureCard(file) {
+  const { data, info } = await sharp(file)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width: w, height: h } = info;
+  const px = (x, y) => {
+    const i = (y * w + x) * 3;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const lightRow = (y) => {
+    const bg = lum(...px(12, y));
+    for (let x = 24; x < w - 24; x++) if (lum(...px(x, y)) > bg + 45) return true;
+    return false;
+  };
+  let phoneTop = -1;
+  for (let y = 300; y < h; y++) {
+    let dark = 0;
+    for (let x = 300; x < w - 300; x++) if (lum(...px(x, y)) < 34) dark++;
+    if (dark > (w - 600) * 0.9) {
+      phoneTop = y;
+      break;
+    }
+  }
+  let subtitleBottom = -1;
+  for (let y = phoneTop - 1; y > 0; y--)
+    if (lightRow(y)) {
+      subtitleBottom = y;
+      break;
+    }
+  let topInk = -1;
+  for (let y = 0; y < subtitleBottom; y++)
+    if (lightRow(y)) {
+      topInk = y;
+      break;
+    }
+  return {
+    width: w,
+    height: h,
+    topInk,
+    subtitleBottom,
+    phoneTop,
+    gap: phoneTop - subtitleBottom - 1,
+    topMargin: topInk,
+  };
+}
