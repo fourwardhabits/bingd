@@ -62,8 +62,8 @@
  * Twelve more arrived with the front page's ranking demo and the build's environment
  * check (2026-10-28). Each is a defect the page would render without complaint:
  *
- *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
- *      one of their three.
+ *  17. A swap counted as a choice, so "Haven't seen one? Refresh." quietly costs the
+ *      visitor one of their three.
  *  18. A demo poster path used as written rather than through `posterUrl`, so a value in
  *      the movie list becomes an `img.src` that can leave TMDB's CDN.
  *  19. The swap reserve dropped, so a visitor who swaps often is handed a "ranking" of
@@ -203,7 +203,7 @@ const MUTANTS = [
      * This was the correct order for six weeks and is the obvious thing to restore if
      * somebody reads the comment about opt-in pages without the date on it. With
      * `optInUrl` leading, every public Android visitor is sent to a tester page for a
-     * track they are not on, from a button labelled "Join the bingd. Android beta" —
+     * track they are not on, from a button labelled "Join the bingd Android beta" —
      * and the site still builds, still passes a shape check, and still has a working
      * link under every button.
      */

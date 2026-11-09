@@ -203,32 +203,34 @@ describe('destinationFor', () => {
 
 describe('installLabel', () => {
   /**
-   * The wordmark is lowercase with its full stop, on every button a person reads.
+   * The name is lowercase and, on a button, written as text: `bingd`, no full stop.
    *
-   * These read "Bingd" until 2026-09-03. The founder's instruction is that the brand is
-   * `bingd.` in product copy, and an install button is the most product-facing copy on
-   * the site. Pinned as exact strings for the same reason they always were: a button
-   * label is the last thing anybody re-reads before tapping.
+   * These read "Bingd" until 2026-09-03, then `bingd.` until Visual 2.0 (2026-11-02),
+   * when the founder settled that the full stop belongs to the logo only. Every install
+   * label follows the same rule, the beta fallbacks included, so the day a fallback is
+   * chosen it does not reintroduce the old spelling. Pinned as exact strings for the same
+   * reason they always were: a button label is the last thing anybody re-reads before
+   * tapping.
    */
   it('names the beta destinations in the brand’s own casing', () => {
     assert.equal(
       installLabel({ platform: 'ios', kind: 'testflight', url: 'x' }),
-      'Get the bingd. beta for iPhone',
+      'Get the bingd beta for iPhone',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play-opt-in', url: 'x' }),
-      'Join the bingd. Android beta',
+      'Join the bingd Android beta',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play', url: 'x' }),
-      'Get bingd. on Google Play',
+      'Get bingd on Google Play',
     );
   });
 
   it('labels the iOS store button for an iPhone', () => {
     assert.equal(
       installLabel(destinationFor('ios', { ios: { storeUrl: 'https://apps.apple.com/x' } })),
-      'Get bingd. on the App Store',
+      'Get bingd on the App Store',
     );
   });
 
@@ -248,7 +250,7 @@ describe('installLabel', () => {
         android: { storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
       }),
     );
-    assert.equal(label, 'Get bingd. on Google Play');
+    assert.equal(label, 'Get bingd on Google Play');
     assert.ok(!/iphone/i.test(label), 'the Android button must not name an iPhone');
   });
 
@@ -1056,7 +1058,7 @@ describe('the built site', () => {
         '<meta property="og:description" content="See where it ranks with friends, or rank it yourself." />',
       ),
     );
-    assert.ok(title.includes('<meta property="og:image:alt" content="The bingd. wordmark" />'));
+    assert.ok(title.includes('<meta property="og:image:alt" content="bingd. Rank what you watch. See where it really lands." />'));
     // No poster host anywhere in the card, even though the page loads from one.
     const head = title.slice(0, title.indexOf('</head>'));
     assert.ok(!head.includes('image.tmdb.org'));
@@ -1225,7 +1227,7 @@ describe('the built site', () => {
       kind: 'store',
       url: 'https://play.google.com/store/apps/details?id=app.bingd',
     });
-    assert.equal(installLabel(android), 'Get bingd. on Google Play');
+    assert.equal(installLabel(android), 'Get bingd on Google Play');
 
     const ios = destinationFor('ios', config.distribution);
     assert.deepEqual(ios, {
@@ -1233,7 +1235,7 @@ describe('the built site', () => {
       kind: 'store',
       url: 'https://apps.apple.com/app/id6803954532',
     });
-    assert.equal(installLabel(ios), 'Get bingd. on the App Store');
+    assert.equal(installLabel(ios), 'Get bingd on the App Store');
 
     // The fallbacks are still carried, and still lose. Keeping them is deliberate — see
     // distribution.config.json — so "they lose" has to be asserted rather than assumed
@@ -2451,10 +2453,9 @@ describe('the release mode', () => {
     // comment thread. The compare sheet left the page. 2026-09-14: the last section shows
     // the Recommended Movies wall beside the Group Picks sheet, in place of For you and
     // Watchlist. Later the same day the compare sheet came back in place of the ranked
-    // list, so the ranking section shows the head-to-head and then the score.
+    // list, so the ranking section shows the head-to-head and then the score. 2026-11-02:
+    // the collection section left the page, and its two shots with it.
     for (const name of [
-      'shot-movies',
-      'shot-tv',
       'shot-compare',
       'shot-score',
       'shot-feed',
@@ -3191,7 +3192,7 @@ describe('the title page, painted', () => {
     // Get bingd., which on Android is the public Play listing and nothing else.
     const install = page.el('primary-install');
     assert.equal(install.href, PLAY);
-    assert.equal(install.textContent, 'Get bingd. on Google Play');
+    assert.equal(install.textContent, 'Get bingd on Google Play');
     assert.equal(install.hidden, false);
 
     // The generic line is replaced rather than left above the real one.
@@ -3201,7 +3202,7 @@ describe('the title page, painted', () => {
   it('sends an iPhone to the App Store from the same page', async () => {
     const page = await paint({ file: 'title.html', url: AT, userAgent: IPHONE_UA, row: AMADEUS });
     assert.equal(page.el('primary-install').href, APP_STORE);
-    assert.equal(page.el('primary-install').textContent, 'Get bingd. on the App Store');
+    assert.equal(page.el('primary-install').textContent, 'Get bingd on the App Store');
   });
 
   it('offers both stores to a desktop browser and chooses neither', async () => {
@@ -3334,7 +3335,7 @@ describe('the invitation page, painted', () => {
     const install = page.el('primary-install');
     assert.equal(install.href, PLAY);
     assert.ok(!install.href.includes('/apps/testing/'));
-    assert.equal(install.textContent, 'Get bingd. on Google Play');
+    assert.equal(install.textContent, 'Get bingd on Google Play');
 
     // The honest return instruction stays, because deferred attribution is still not
     // implemented and a store install still does not carry the invitation across.
@@ -3374,7 +3375,7 @@ describe('the front page, painted', () => {
     assert.ok(buttons.length >= 3, `only ${buttons.length} install buttons were painted`);
     for (const button of buttons) {
       assert.equal(button.href, PLAY);
-      assert.equal(button.textContent, 'Get bingd. on Google Play');
+      assert.equal(button.textContent, 'Get bingd on Google Play');
       assert.equal(button.hidden, false);
     }
 
@@ -4078,7 +4079,7 @@ describe('the ranking demo, built', () => {
 
   it('keeps the swap quiet: a text button, not a third choice', () => {
     const demo = demoMarkup();
-    assert.match(demo, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both\? Swap pair<\/button>/);
+    assert.match(demo, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen one\? Refresh\.<\/button>/);
     assert.doesNotMatch(demo, /I liked it|I didn&rsquo;t like it|stars?<\/button>|type="range"/);
   });
 
@@ -4095,49 +4096,127 @@ describe('the ranking demo, built', () => {
   });
 
   /**
-   * The founder note, in the founder's final wording (2026-10-28), set as a compact pull
-   * quote: three short paragraphs, an oversized opening mark from the stylesheet, and a
-   * quiet "Suraj, founder". No portrait, no bio, no heading.
+   * The founder note, in the founder's final wording (2026-11-02), set as a compact pull
+   * quote: two short paragraphs, an oversized opening mark from the stylesheet, and the
+   * founder's name. No portrait, no bio, no heading.
    */
   it('carries the founder note in the founder\'s words, as a pull quote, text only', () => {
     const front = read('index.html');
-    const start = front.indexOf('<section class="band founder-section">');
+    const start = front.indexOf('<section class="closer">');
     const section = front.slice(start, front.indexOf('</section>', start));
     const note = section.slice(section.indexOf('<figure class="founder-note">'), section.indexOf('</figure>'));
     const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
     const paragraphs = [...note.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => text(m[1]));
     assert.deepEqual(paragraphs, [
-      'Beli changed the way I experienced restaurants. I went from eating out occasionally to ranking every place, comparing lists with friends, and hunting for the next spot.',
-      'I built bingd because I wanted that same post-watch ritual for movies and TV: rank what you watch, compare taste with friends, and keep the fun going after the credits roll.',
-      'Hope you enjoy it as much as I do. Happy binging,',
+      'The Beli app completely changed my experience of restaurants. I went from occasionally eating out to ranking every place, comparing lists with friends, and even making reservations. I built &ldquo;bingd&rdquo; because I wanted that same post-watch ritual and excitement for movies and TV.',
+      'Keep the fun going even after the credits roll. Happy binging,',
     ]);
-    assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), 'Suraj, founder');
+    assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), 'Suraj Kandukuri');
     assert.match(front, /\.founder-note::before \{\s*content: '\\201C';/, 'no opening quotation mark');
-    assert.doesNotMatch(section, /<img|<h[1-6]|class="kicker"/, 'a portrait or heading came back');
-    assert.match(front, /your new post-watch ritual/);
+    assert.doesNotMatch(note, /<img|<h[1-6]|class="kicker"/, 'a portrait or heading came back');
   });
 
   /**
-   * And small (founder QA, 2026-10-28): the previous treatment set the note in the display
-   * serif at near-headline size and took more than a desktop screen. The words are body
-   * copy now, in the body sans, with the serif kept for the quotation mark.
+   * It has to read as a quotation (founder QA, 2026-11-02): in the body sans it was one
+   * more paragraph of the page. The words and the mark are in the serif's italic, which
+   * the stylesheet link has to ask for or the browser slants the roman instead. And it
+   * stays small (founder QA, 2026-10-28): near-headline size took more than a desktop
+   * screen, so the words stop at the app's title2 rather than a display size.
    */
-  it('sets the founder note as body copy, not a headline', () => {
+  it('sets the founder note in the serif italic, at a reading size', () => {
     const front = read('index.html');
     const rule = (selector) => {
       const start = front.indexOf(`${selector} {`);
       assert.ok(start >= 0, `${selector} has no rule`);
       return front.slice(start, front.indexOf('}', start));
     };
-    const rem = (block, property) => Number(new RegExp(`${property}: ([\\d.]+)rem;`).exec(block)?.[1]);
 
     const words = rule('.founder-note blockquote p');
-    assert.doesNotMatch(words, /font-family|clamp\(/, 'the note is set in a display face or a fluid headline size');
-    assert.ok(rem(words, 'font-size') <= 1.125, 'the note is larger than body copy');
-    assert.ok(rem(rule('.founder-section'), 'padding-block') <= 3, 'the note has headline-sized room around it');
-    assert.ok(rem(rule('.founder-note blockquote p + p'), 'margin-top') <= 1, 'the paragraphs are loosely spaced');
-    assert.match(rule('.founder-note::before'), /'DM Serif Display'/, 'the quotation mark lost its serif');
+    assert.match(words, /font-family: 'DM Serif Display'/, 'the quote lost its serif');
+    assert.match(words, /font-style: italic;/, 'the quote is not italic');
+    const largest = Number(/font-size: clamp\([^,]+,[^,]+, ([\d.]+)rem\);/.exec(words)?.[1]);
+    assert.ok(largest > 0 && largest <= 1.375, 'the quote is set at a headline size');
+    const spacing = Number(/margin-top: ([\d.]+)rem;/.exec(rule('.founder-note blockquote p + p'))?.[1]);
+    assert.ok(spacing > 0 && spacing <= 1, 'the paragraphs are loosely spaced');
+
+    const mark = rule('.founder-note::before');
+    assert.match(mark, /'DM Serif Display'/, 'the quotation mark lost its serif');
+    assert.match(mark, /font-style: italic;/, 'the quotation mark is not italic');
+
+    assert.match(front, /family=DM\+Serif\+Display:ital@0;1/, 'the italic cut is not loaded');
+  });
+
+  /**
+   * The quote and the install ask share one band, left and right, so the end of the page
+   * is not two screens of closing (founder QA, 2026-11-02). A hairline stands between them
+   * and lies across the gap when they stack, and the button pair stacks at one width
+   * because it does not fit a half-width column.
+   */
+  it('closes the page with the quote beside the install ask, with a rule between them', () => {
+    const front = read('index.html');
+    const start = front.indexOf('<section class="closer">');
+    const section = front.slice(start, front.indexOf('</section>', start));
+
+    assert.doesNotMatch(front, /founder-section/, 'the quote has its own section again');
+    assert.match(section, /^<section class="closer">\s*<div class="wrap split">\s*<figure class="founder-note">/);
+    assert.ok(
+      section.indexOf('</figure>') < section.indexOf('<div class="closer-cta">'),
+      'the quote is not the first of the two columns',
+    );
+    assert.match(section, /<div class="closer-cta">[\s\S]*data-install="primary-install"/);
+    assert.match(
+      section,
+      /<div class="closer-cta">[\s\S]*<p class="fineprint">[^<]+<\/p>/,
+      'the ask lost the line saying where it can be installed from',
+    );
+    assert.doesNotMatch(
+      front,
+      /\.closer[^{]*\{[^}]*text-align: center/,
+      'a centred ask beside a left-aligned quote reads as two different pages',
+    );
+
+    assert.match(front, /\.closer-cta::before \{\s*content: '';[\s\S]*?height: 1px;/);
+    assert.match(
+      front,
+      /@media \(min-width: 56rem\) \{\s*\.closer-cta \{[^}]*\}\s*\.closer-cta::before \{[^}]*width: 1px;/,
+      'the rule does not stand upright beside the two columns',
+    );
+    assert.match(front, /\.closer \.actions \{ flex-direction: column;/);
+  });
+
+  /**
+   * "TV" alone reads as a noun nobody can count ("five movies or TV you love"). It says
+   * TV shows, and a no-break space keeps the phrase on one line.
+   */
+  it('asks for movies or TV shows in the closing heading', () => {
+    assert.match(read('index.html'), /<h2>Start with five movies or TV&nbsp;shows you love\.<\/h2>/);
+  });
+
+  /**
+   * "Your collection" left the page (founder, 2026-11-02): it described a tracker, which
+   * added little. The story is how ranking works, then what it finds you, then the people.
+   * Bands and sides alternate, or two sections would run together, and each section keeps
+   * the two shots that show what it says.
+   */
+  it('runs the sections from how it works, to the next binge, to the social layer', () => {
+    const front = read('index.html');
+    const main = front.slice(front.indexOf('</section>'), front.indexOf('<section class="closer">'));
+    const sections = [
+      ...main.matchAll(/<section( class="band")?>\s*<div class="wrap split( flip)?">([\s\S]*?)<\/section>/g),
+    ].map((m) => ({
+      label: /<p class="kicker">([^<]+)<\/p>/.exec(m[3])?.[1],
+      band: Boolean(m[1]),
+      flip: Boolean(m[2]),
+      shots: [...m[3].matchAll(/src="\/(shot-[a-z]+)\.webp"/g)].map((s) => s[1]),
+    }));
+
+    assert.deepEqual(sections, [
+      { label: 'How it works', band: true, flip: true, shots: ['shot-compare', 'shot-score'] },
+      { label: 'Find your next binge', band: false, flip: false, shots: ['shot-recommended', 'shot-grouppicks'] },
+      { label: 'Social watching experience', band: true, flip: true, shots: ['shot-feed', 'shot-comments'] },
+    ]);
+    assert.doesNotMatch(front, /Your collection|A social experience|shot-movies|shot-tv/);
   });
 
   /**
@@ -4168,11 +4247,11 @@ describe('the ranking demo, built', () => {
     const blurbs = [
       ...front.matchAll(/<p class="(?:lede|section-lede|demo-prompt|demo-honest)"[^>]*>([\s\S]*?)<\/p>/g),
     ].map((m) => m[1].replace(/\s+/g, ' ').trim());
-    assert.ok(blurbs.length >= 9, `only ${blurbs.length} blurbs found`);
+    assert.ok(blurbs.length >= 8, `only ${blurbs.length} blurbs found`);
     for (const blurb of blurbs) assert.doesNotMatch(blurb, /\.$/, blurb);
 
     // Sentences inside a blurb keep theirs.
-    assert.match(front, /bingd is your new post-watch ritual\. A movie and TV logging app/);
+    assert.match(front, /Pick which movie or TV season you liked more\. bingd turns those choices/);
     // And the founder quote is quoted, not restyled.
     assert.match(front, /Happy binging,<\/p>/);
   });
@@ -4323,23 +4402,23 @@ describe('the ranking demo, painted', () => {
       const sticky = page.document.querySelector('.sticky [data-install="primary-install"]');
       assert.equal(sticky.hidden, false);
       assert.equal(sticky.href, PLAY);
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play');
 
       page.el('demo-left').click();
       page.el('demo-left').click();
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play', 'relabelled before the demo was finished');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play', 'relabelled before the demo was finished');
       page.el('demo-left').click();
 
       assert.equal(sticky.textContent, 'Keep ranking in bingd.');
       assert.equal(sticky.href, PLAY, 'the sticky bar lost its destination');
       // The hero and closing-band buttons keep the store's name.
-      assert.equal(page.el('primary-install').textContent, 'Get bingd. on Google Play');
+      assert.equal(page.el('primary-install').textContent, 'Get bingd on Google Play');
       for (const mirror of page.document.querySelectorAll('.closer [data-install="primary-install"]')) {
-        assert.equal(mirror.textContent, 'Get bingd. on Google Play');
+        assert.equal(mirror.textContent, 'Get bingd on Google Play');
       }
 
       page.el('demo-again').click();
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play');
       assert.equal(sticky.href, PLAY);
     } finally {
       page.restore();
