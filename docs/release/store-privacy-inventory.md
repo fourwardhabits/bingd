@@ -58,10 +58,11 @@ from the code rather than from intent:
   returns `true` for all lanes as of the prepared production change (PR #239, 2026-11-09).
   Preview, Beta, development, and **production (once the OTA ships)** all load stills with
   the page. **Production stills are not yet live**: the production OTA must not be published
-  until the founder confirms F-6 (Play Console "No data shared with third parties" for
-  automatic loads). Until that OTA runs, production builds still compiled from an earlier
-  bundle show the old opt-in behaviour. See `privacy-decision-matrix.md` §16 and the gate
-  table at the bottom of that file.
+  until the founder completes **F-6** — choosing Option A (no Play form change; record the
+  rationale in the console's optional notes) or Option B (mark App interactions Shared for
+  App functionality and publish the updated form before the OTA). Until that OTA runs,
+  production builds still compiled from an earlier bundle show the old opt-in behaviour.
+  See `privacy-decision-matrix.md` §16 and the gate table at the bottom of that file.
 
 **Disclosure status.** The live policy at <https://bingd.app/privacy/> (fetched 2026-11-07,
 "Last updated 7 November 2026") already says, under "Who else sees it", that **YouTube

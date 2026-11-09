@@ -12,9 +12,12 @@
  * in preparation for enabling automatic stills in production.
  *
  * **This change is prepared but not yet live in production.** The PR must not be merged and
- * the production OTA must not be published until the founder completes F-6: open Play Console →
- * App content → Data safety → Data collection and security and confirm "No data shared with
- * third parties" remains accurate for automatic loads. See `docs/release/privacy-decision-matrix.md`.
+ * the production OTA must not be published until the founder completes **F-6**: open Play
+ * Console → App content → Data safety and choose Option A (no form change; record rationale
+ * in the console's optional notes — request carries no declared user-data row, IP is not a
+ * bingd data type, TMDB posters load identically undeclared) or Option B (mark App
+ * interactions Shared for App functionality and publish the updated form before the OTA).
+ * See `docs/release/privacy-decision-matrix.md` §16.
  *
  * Original layout never mounts `TrailerRail`, so it never sends a YouTube image request
  * regardless of this value.
