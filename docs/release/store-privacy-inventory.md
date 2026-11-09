@@ -135,7 +135,7 @@ ask permission for, and asking is itself a rejection risk.
 | Contact Info → **Email Address** | Yes | No | App Functionality |
 | Contact Info → **Name** | Yes | No | App Functionality — display name, and the name Apple/Google return |
 | User Content → **Photos or Videos** | Yes | No | App Functionality — profile picture only |
-| User Content → **Other User Content** | Yes | No | App Functionality — rankings, notes, reviews, comments, watchlist |
+| User Content → **Other User Content** | Yes | No | App Functionality — rankings, notes, reviews, comments, watchlist; **also Product Personalization** — rankings drive recommendations (corrected 2026-11-09; see `privacy-decision-matrix.md` §5) |
 | Identifiers → **User ID** | Yes | No | App Functionality, Analytics |
 | Usage Data → **Product Interaction** | Yes | No | Analytics |
 | Diagnostics → **Crash Data** | Yes | No | App Functionality |
@@ -169,11 +169,37 @@ in logs, declare Search History. If you cannot establish it, **declare it** — 
 over-declaration is a line on a label, and the cost of an under-declaration is a rejected
 submission or a removal.
 
+### Declare these (corrections vs. earlier inventory versions)
+
+> **2026-11-09 correction:** Three rows in this section previously said "do not declare".
+> The public Apple App Privacy label (fetched 2026-11-08, no App Store Connect sign-in)
+> shows all three as declared. The analysis in `privacy-decision-matrix.md` concludes the
+> public label is correct and the earlier inventory was wrong. Summary:
+>
+> - **Location → Coarse Location (Analytics):** The public label declares this. Source is
+>   first-party `account_context` (timezone + locale region stored for release-notification
+>   send-window logic) and/or PostHog GeoIP if enabled. **FOUNDER (F-1):** correct the
+>   declared purpose from Analytics to App Functionality in App Store Connect for
+>   first-party data; Analytics is additionally justified if PostHog GeoIP is on (F-3).
+> - **Identifiers → Device ID (Analytics and App Functionality):** The public label
+>   declares this. Source is PostHog's persisted DeviceId UUID (app-generated, not IDFV
+>   or advertising ID) and the Expo push token in `device_tokens`. Both qualify as
+>   device-scoped identifiers under Apple's definition. **No console change needed** — the
+>   declaration is accurate.
+> - **User Content → Other User Content, Product Personalization:** The public label
+>   declares this purpose. Rankings and comparisons drive `match_scores` and
+>   `recommendation_*` tables. Product Personalization is accurate. **No console change
+>   needed** — the declaration is accurate.
+
 ### Do **not** declare these
 
-Location · Health & Fitness · Financial Info · Contacts · Browsing History · Purchases ·
-Audio Data · Device ID · Advertising Data · Physical Address · Phone Number · Email or Text
+Health & Fitness · Financial Info · Contacts · Browsing History · Purchases ·
+Audio Data · Advertising Data · Physical Address · Phone Number · Email or Text
 Messages · Gameplay Content · Customer Support.
+
+> **Location**: Coarse Location is declared (see correction above). Precise Location
+> is not declared and should not be. There is no GPS, no `NSLocation*`, no
+> `expo-location` in the codebase.
 
 ### Notes for the reviewer form
 
@@ -263,11 +289,19 @@ that this asserts the very thing the Apple note says nobody has established. So:
 - **If it cannot be established, declare it without the qualifier.** Over-declaring costs a
   line on a label; under-declaring is grounds for removal from Play.
 
+### Declare these (corrections vs. earlier inventory versions)
+
+> **2026-11-09 correction:** The earlier inventory said "do not declare Device or other IDs".
+> The public Play Data safety page (fetched 2026-11-08) shows Device or other IDs declared
+> for App functionality and Analytics. The analysis in `privacy-decision-matrix.md` concludes
+> the public declaration is correct. Source: PostHog DeviceId UUID and Expo push token.
+> **FOUNDER (F-2):** open Play Console → Data safety → Device or other IDs and confirm the
+> declared purposes (App functionality, Analytics) are current.
+
 ### Do **not** declare these
 
-Location (approximate or precise) · Financial info · Health and fitness · Messages ·
-Audio · Files and docs · Calendar · Contacts · Web browsing · Installed apps · Device or
-other IDs.
+Approximate or Precise Location · Financial info · Health and fitness · Messages ·
+Audio · Files and docs · Calendar · Contacts · Web browsing · Installed apps.
 
 ### Two answers that are easy to get wrong
 

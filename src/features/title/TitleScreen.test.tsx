@@ -1352,6 +1352,26 @@ describe('tabs that have nothing behind them', () => {
     const view = await open();
     expect(view.queryByRole('tab', { name: 'Cast' })).toBeNull();
   });
+
+  /**
+   * **Original layout never mounts TrailerRail** (production trailer enablement,
+   * 2026-11-09). The Cinematic page is the default; Original is one Labs switch away.
+   * Even when `trailerPreviewsByDefault` returns `true` (production), the Original
+   * layout's Videos tab is text rows — it never renders `trailer-still` or
+   * `trailer-rail` testIDs and never makes a YouTube image request.
+   */
+  it('does not load YouTube thumbnails in Original layout, even when videos are present', async () => {
+    tableRows.media_cache = [videos];
+    const view = await open();
+
+    // The Videos tab is present in Original layout (text rows).
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Videos' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
+
+    // No TrailerRail, no thumbnail images — not before and not after opening the tab.
+    expect(view.queryByTestId('trailer-rail')).toBeNull();
+    expect(view.queryByTestId('trailer-still')).toBeNull();
+  });
 });
 
 /**

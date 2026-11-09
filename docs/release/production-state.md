@@ -1,7 +1,7 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-01**, when the store table below was checked against both public listings.
+**2026-11-09** (OTA from 2026-11-07 recorded; store table from public listings 2026-11-08).
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -15,16 +15,22 @@ is changed. This is what came out the other side. **Old `release/*`, `integratio
 What is left to do is one list: [`../product/founder-todo.md`](../product/founder-todo.md),
 which also holds the freeze rule.
 
+> **Coordination note (2026-11-09):** PR #224 (`docs/release-record-219`) also edits this
+> file, recording the 2026-11-03 security OTA. This update supersedes it by going further:
+> it records all OTAs through 2026-11-07. If #224 is merged first, this file will conflict;
+> rebase this branch on the merged result or let this branch merge first and close #224.
+
 ---
 
 ## The release
 
 | | |
 |---|---|
-| **Frozen application source** | `main` `9d9683a` (#210). Application development is frozen here |
-| **DB migrations** | **172 applied**, head `20261023000100`; staging identical |
-| **Production OTA** | update group `01a0db04` from `9d9683a`, on iOS runtime `61efbf17` and Android runtime `da3c7f47` |
-| **Preview OTA** | update group `01a0db08` from the same `9d9683a`, staging backend |
+| **Live application source** | `main` `3757656` (merge of #238, 2026-11-07). Includes PR #237 (compact TV episode rail, episode detail sheet, season metadata order, personal scores in For You → Top Rated) and PR #238 (trailer-privacy inventory language). |
+| **DB migrations** | **177 applied**, head `20261024000500`; staging identical |
+| **Production OTA, 1.1.0** | Android update `01a1b812-7bdb-7cc6-a4eb-a4dbe8f29a01`, group `d5e7f3f3-368d-41a1-8db1-24ed60bf211f`, runtime `ec79e181`; iOS update `01a1b812-7bdb-7a29-98f0-351ad279ef8b`, group `5a561da1-6ea1-477d-b741-17f2643fd8a8`, runtime `8ea562b7`. Published 2026-11-07 from source commit `f0f6d26`, EAS workflow run. |
+| **Production OTA, 1.0.1** | from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
+| **Preview OTA** | Android group `2c4aca0c` on runtime `2503ffaa`, staging backend. No iOS binary on the current preview runtime. |
 
 ### Store distribution
 
@@ -38,9 +44,9 @@ Both 1.1.0 binaries are built from release commit `63694c3` = `9d9683a` + the ma
 They **embed** the frozen app, including the fresh-install reload guard (#198), which no OTA can
 deliver to a first launch.
 
-Read from the public App Store lookup and Play listing on 2026-11-01. The Play listing shows the
-current version, not rollout percentage. `config/live-runtimes.json` holds the same two runtimes
-for the OTA gate, and changes with this table.
+Read from the public App Store lookup and Play listing on 2026-11-08. Both show 1.1.0 (15).
+The Play listing shows the current version, not rollout percentage. `config/live-runtimes.json`
+holds the same two runtimes for the OTA gate, and changes with this table.
 
 ### OTA and binary roles
 
@@ -48,8 +54,9 @@ for the OTA gate, and changes with this table.
   `01a0db04`. A fresh install of one launches its old embedded bundle, downloads `01a0db04` in
   the background, and runs it after the next reload. That older embedded bundle predates #198,
   so its first foreground return can reload mid-sign-in.
-- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) *embed* `9d9683a`. No OTA has been
-  published for those runtimes, and none is needed: first launch is already the frozen app.
+- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and now receive the
+  1.1.0 OTA above (source `f0f6d26`, published 2026-11-07), which delivers the cinematic episode
+  rail (PR #237) and trailer-privacy inventory language (PR #238).
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return
