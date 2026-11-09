@@ -293,9 +293,9 @@ export default function TitleScreen() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   /**
    * Whether the Trailers section draws YouTube's thumbnails on this page. Each one is a
-   * request to `i.ytimg.com`. On by default outside production since the founder's Preview
-   * QA (2026-11-07); production keeps Show previews until its privacy disclosures name
-   * YouTube — see `trailerPreviewsByDefault`.
+   * request to `i.ytimg.com`. Starts at `trailerPreviewsByDefault`, which is `true` in every
+   * lane on this branch; production runs the Show previews opt-in until that change ships
+   * (gated on F-6, see `trailerPreviewsByDefault`).
    */
   const [trailerPreviews, setTrailerPreviews] = useState(trailerPreviewsByDefault);
   /** The full cast, in a sheet, from the immersive Cast preview's See all. */
