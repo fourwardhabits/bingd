@@ -90,10 +90,10 @@ function versionLine(build: SupportBuild) {
  */
 export function buildSupportBody(topic: SupportTopic, build: SupportBuild): string {
   if (topic === 'feedback') {
-    return ['Hi bingd. team,', '', '[Share your feedback here]', ''].join('\n');
+    return ['Hi bingd team,', '', '[Share your feedback here]', ''].join('\n');
   }
   return [
-    'Hi bingd. team,',
+    'Hi bingd team,',
     '',
     '[Describe what happened here]',
     '',

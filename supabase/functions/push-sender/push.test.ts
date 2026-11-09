@@ -55,7 +55,7 @@ Deno.test('every eligible type says something in the second person', () => {
     watch_tag: ['Ada Lovelace', 'watched something with you'],
     recommendation: ['Ada Lovelace', 'recommended something to watch'],
     recommendation_ranked: ['Ada Lovelace', 'ranked your recommendation'],
-    invite_activated: ['Ada Lovelace', 'joined bingd. from your invite'],
+    invite_activated: ['Ada Lovelace', 'joined bingd from your invite'],
     invite_welcome: ['Welcome to bingd.', 'Ada Lovelace invited you'],
   };
 

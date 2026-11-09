@@ -66,7 +66,7 @@ describe('the draft', () => {
   it('asks a reporter what happened, and tells support which build it happened on', () => {
     const body = buildSupportBody('problem', build);
 
-    expect(body).toContain('Hi bingd. team,');
+    expect(body).toContain('Hi bingd team,');
     expect(body).toContain('[Describe what happened here]');
     expect(body).toContain('App version: 1.0.0 (7)');
     expect(body).toContain('Platform: iOS');

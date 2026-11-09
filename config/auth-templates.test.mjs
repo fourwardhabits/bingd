@@ -136,7 +136,7 @@ describe('the canonical auth email templates', () => {
 
       it('is branded and says what to do with the code', () => {
         const body = bodyOf(entry);
-        assert.match(body, /bingd\./, 'the brand is "bingd." — lowercase, with the period');
+        assert.match(body, /bingd\./, 'the email wordmark is "bingd."');
         // "sign-in code" in both, because a new address and a returning one get the same
         // sentence — see the indistinguishability assertion below.
         assert.match(body, /sign-in code/i);
@@ -147,7 +147,8 @@ describe('the canonical auth email templates', () => {
 
       it('names a subject', () => {
         assert.equal(typeof entry.subject, 'string');
-        assert.ok(entry.subject.includes('bingd.'));
+        assert.equal(entry.subject, 'Your bingd sign-in code');
+        assert.doesNotMatch(entry.subject, /bingd\./);
         assert.ok(entry.subject.length <= 60, 'a subject line is truncated by every mail client');
       });
     });
