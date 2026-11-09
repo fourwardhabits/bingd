@@ -32,7 +32,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 | Product analytics | **PostHog** | yes — carries the account id | one activation funnel |
 | Crash and error reports | **Sentry** | yes — carries the account id | diagnostics |
 | Image requests | **TMDB CDN**, direct from the device | no | posters load from TMDB's servers |
-| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page — automatic outside production; **in production only after the reader taps Show previews** (see below) |
+| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page. **Currently deployed (production OTA 2026-11-07):** opt-in — production shows plain frames until the reader taps Show previews. **Prepared change (PR #239, pending F-6):** automatic on Cinematic pages in all lanes once the production OTA ships. See below. |
 
 **Trailer stills (added 2026-11-07, corrected 2026-11-07).** What the app actually requests,
 from the code rather than from intent:
@@ -71,14 +71,16 @@ Google sees the IP address and which video's image was asked for. That sentence 
 both the opt-in and the automatic behaviour, for any title page, so the published policy does
 not need to change to enable automatic stills in production.
 
-This document's reasoning is that the answers for the TMDB images apply unchanged, so **no
-new data type is declared** for it in §2 or §3. The production gate change is prepared
-(PR #239). One point specific to Play: its definition of *sharing* exempts a transfer the
-user initiates; an automatic load on page open is not user-initiated. The analysis in
-`privacy-decision-matrix.md` §16 concludes "No data shared" remains accurate because the
-image CDN request does not transfer any declared user-data row to Google — **but this must
-be confirmed in the live Play console form (F-6) before the production OTA ships.** See §6
-item 8.
+This document's reasoning is that no declared user-data row is transferred to Google or
+TMDB in either case: the request carries no account ID, no bingd-collected data, and IP is
+not a Play data type bingd uses. **No new data type is declared** in §2 or §3. TMDB posters
+already load the same way undeclared; whatever rule applies to YouTube stills must apply
+consistently to TMDB too. Note: the Play service-provider exemption (§3 "Shared" section)
+covers Supabase, PostHog and Sentry only — Google/YouTube and TMDB process image requests
+under their own terms, not on bingd's instructions. The production gate change is prepared
+(PR #239). Before the production OTA, the founder must complete **F-6**: choose Option A
+(no form change, record rationale in Play console notes) or Option B (add a sharing row and
+publish the form first). See `privacy-decision-matrix.md` §16 and §6 item 8 below.
 
 **Not collected at all**, and worth stating because the store forms ask: no precise or
 coarse **location**, no **contacts**, no **health or fitness**, no **financial** data, no
@@ -250,13 +252,22 @@ transit** and whether users can **request deletion**.
 ### "Shared" — read the definition before answering
 
 Play defines **sharing** as transfer to a *third party*, and explicitly excludes transfer to
-a **service provider** processing on your behalf. Supabase, PostHog and Sentry are service
-providers under contract; they are **not** sharing.
+a **service provider** processing on your behalf under contract. Supabase, PostHog and Sentry
+are service providers in this sense; they are **not** sharing for the rows below.
 
-**So every row below is `Shared: No`.** State the reasoning in the console's optional notes
-so a reviewer does not have to guess: *"Data is processed by Supabase (hosting), PostHog
-(product analytics) and Sentry (crash reporting) as service providers. No data is
-transferred to any third party for their own purposes, sold, or used for advertising."*
+**Every declared row below is `Shared: No`** for data held by Supabase/PostHog/Sentry.
+State the reasoning in the console's optional notes: *"Data is processed by Supabase
+(hosting), PostHog (product analytics) and Sentry (crash reporting) as service providers.
+No declared user data is transferred to any third party for their own purposes, sold, or
+used for advertising."*
+
+> **Note — image CDN requests (TMDB, YouTube):** The service-provider exemption above
+> does not extend to TMDB or Google/YouTube. Those hosts process image requests under their
+> own terms, not on bingd's instructions, so they are not service providers in Play's sense.
+> However, no declared user-data row from this form is transferred in those requests — the
+> request carries only device IP (not a bingd-collected type) and a resource identifier.
+> Whether automatic YouTube still loads require a form change is the open F-6 question;
+> see §6 item 8 and `privacy-decision-matrix.md` §16.
 
 ### The rows
 
@@ -473,14 +484,24 @@ attribution section exists to satisfy, which is why the file's provenance is rec
      for each, *Linked to the user* and *Used for tracking* match §2 (no type added for
      third-party image loading, tracking No everywhere). Note whether the published label
      differs from what is in the editor.
-   - **Play Console → Policy and programs → App content → Data safety:** in *Data collection
-     and security*, "Does your app collect or share any of the required user data types?",
-     "Is all of the user data collected by your app encrypted in transit?" (Yes) and the
-     deletion answers; in *Data types*, whether any row — in particular **Device or other
-     IDs** or **App activity** — is affected, and for each declared row whether *Shared*
-     is still No once the load is automatic rather than user-initiated. Also
-     **App content → Privacy policy** is `https://bingd.app/privacy`.
+   - **Play Console → Policy and programs → App content → Data safety:** choose
+     **Option A** or **Option B** (see `privacy-decision-matrix.md` §16 for the full
+     analysis and beta-lane open fact).
+     - **Option A (no form change):** confirm that no declared user-data row from the
+       current form is transferred to Google in an image request — the request carries
+       only device IP (not a bingd-collected data type) and a video ID. Record this
+       rationale in the console's optional Data safety notes field. Also confirm whether
+       any beta binary is currently live on Play's alpha/beta track; if so, automatic
+       stills already cover that audience and the current form applies. Note: do not rely
+       on the Play service-provider exemption for Google/YouTube — those hosts process
+       requests under their own terms, not as bingd's service providers.
+     - **Option B (proactive declaration):** add App interactions as Shared with Google
+       for App functionality (covering the implicit signal from an image request for a
+       specific video ID), publish the updated Data safety form, then ship the production
+       OTA. Confirm **App content → Privacy policy** is `https://bingd.app/privacy`.
 
-   If both hold unchanged, the code change is `trailerPreviewsByDefault => true` with its
-   test, shipped as an ordinary production update. If either form needs an edit, make and
-   publish that first.
+   For Apple: no form change required. Confirm the Privacy Policy URL and that no
+   declared type's Linked or Tracking answer changes for automatic image loads.
+
+   Whichever Play option is chosen, record the decision before triggering the OTA
+   workflow. If Option B, the form must be published before the OTA.
