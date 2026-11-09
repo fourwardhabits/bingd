@@ -1,7 +1,8 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-09** (OTA from 2026-11-07 recorded; store table from public listings 2026-11-08).
+**2026-11-09** (production OTA of 2026-11-09 from merge `19362af` recorded; store table from
+public listings 2026-11-08).
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -15,10 +16,9 @@ is changed. This is what came out the other side. **Old `release/*`, `integratio
 What is left to do is one list: [`../product/founder-todo.md`](../product/founder-todo.md),
 which also holds the freeze rule.
 
-> **Coordination note (2026-11-09):** PR #224 (`docs/release-record-219`) also edits this
-> file, recording the 2026-11-03 security OTA. This update supersedes it by going further:
-> it records all OTAs through 2026-11-07. If #224 is merged first, this file will conflict;
-> rebase this branch on the merged result or let this branch merge first and close #224.
+> **Coordination note (2026-11-09):** PR #224 (`docs/release-record-219`, still open) also
+> edits this file, recording the 2026-11-03 security OTA. This page already records every
+> production OTA through 2026-11-09, so #224 is superseded; closing it is the founder's call.
 
 ---
 
@@ -26,11 +26,73 @@ which also holds the freeze rule.
 
 | | |
 |---|---|
-| **Live application source** | `main` `3757656` (merge of #238, 2026-11-07). Includes PR #237 (compact TV episode rail, episode detail sheet, season metadata order, personal scores in For You → Top Rated) and PR #238 (trailer-privacy inventory language). |
+| **Live application source** | `main` `19362af9c4f94bda68f870b39e39c56e4f243def` (merge of #239, 2026-11-09T16:21:13Z). Adds automatic trailer stills on Cinematic title pages to everything in `3757656` (merge of #238, 2026-11-07: PR #237 compact TV episode rail, episode detail sheet, season metadata order, personal scores in For You → Top Rated; PR #238 trailer-privacy inventory language). |
 | **DB migrations** | **177 applied**, head `20261024000500`; staging identical |
-| **Production OTA, 1.1.0** | Android update `01a1b812-7bdb-7cc6-a4eb-a4dbe8f29a01`, group `d5e7f3f3-368d-41a1-8db1-24ed60bf211f`, runtime `ec79e181`; iOS update `01a1b812-7bdb-7a29-98f0-351ad279ef8b`, group `5a561da1-6ea1-477d-b741-17f2643fd8a8`, runtime `8ea562b7`. Published 2026-11-07 from source commit `f0f6d26`, EAS workflow run. |
+| **Production OTA, 1.1.0 (live)** | Android update `01a1c1cb-991e-781a-b32e-dd26b3a3f368`, group `84b59979-aa7a-467e-8ca0-d1e2a780824c`, runtime `ec79e1818e57bb6ea8f21e1296286bca881f8aef`; iOS update `01a1c1cb-991e-7577-bd7f-daf6d90f6b7c`, group `5b0883b1-8070-4741-9fae-1ecb0d5fc87a`, runtime `8ea562b7f252462cc2b3f44d0c45d817a18eeddb`. Branch `production`, commit `19362af`, created 2026-11-09T19:31:48.126Z. Published by `ota-production.yml`; evidence below. |
+| **Production OTA, 1.1.0 (previous, rollback target)** | Android update `01a1b812-7bdb-7cc6-a4eb-a4dbe8f29a01`, group `d5e7f3f3-368d-41a1-8db1-24ed60bf211f`, runtime `ec79e181`; iOS update `01a1b812-7bdb-7a29-98f0-351ad279ef8b`, group `5a561da1-6ea1-477d-b741-17f2643fd8a8`, runtime `8ea562b7`. Published 2026-11-07 from source commit `f0f6d26`, EAS workflow run. Trailer stills only after Show previews. |
 | **Production OTA, 1.0.1** | from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
 | **Preview OTA** | Android group `2c4aca0c` on runtime `2503ffaa`, staging backend. No iOS binary on the current preview runtime. |
+
+### The 2026-11-09 release (PR #239)
+
+Founder-authorized for this release only. Published from the release operator's machine with
+the project's Expo token, not by the agent that wrote this record.
+
+| Check | Result |
+|---|---|
+| Release gate (GitHub) | run `42669504320`, `workflow_dispatch` on `19362af`, success |
+| CI on `main` (GitHub) | run `42653895360`, `push` on `19362af`, success |
+| `ota-production-check.yml` (EAS) | run `01a1c1c4-2d5c-79ea-a3a9-71d27f46c9c7`, success; fingerprints Android `ec79e1818e57bb6ea8f21e1296286bca881f8aef`, iOS `8ea562b7f252462cc2b3f44d0c45d817a18eeddb`, equal to `config/live-runtimes.json` |
+| `ota-production.yml` (EAS) | run `01a1c1c6-fb68-7a51-a69e-041b38dbab2e`, started 2026-11-09T19:26:45Z; preflight, fingerprint, runtimes and publish all success |
+| `eas update:view` | both groups above on branch `production`, commit `19362af9c4f94bda68f870b39e39c56e4f243def`, the runtimes above |
+
+The GitHub runs were re-read when this record was written. The EAS rows are as reported by the
+release operator from `eas update:view`; no EAS session was available to re-read them. The
+release changed JavaScript and comments only: no migration, no native or config change, and
+`config/live-runtimes.json` is unchanged because no binary moved.
+
+**What it changed for readers.** On a Cinematic title page, trailer stills now load from
+YouTube's image host (`i.ytimg.com`) with the page; before, production waited for Show
+previews. The Original layout never mounts the trailer rail and sends no YouTube request.
+
+### Open privacy follow-up (F-6)
+
+**Not a compliance determination.** Whether the device IP address carried by third-party image
+requests (`i.ytimg.com` for trailer stills, and in parallel `image.tmdb.org` for posters, which
+were already automatic) means declaring **Location → Approximate location** as Collected and
+Shared on Google Play Data safety is **unresolved**. On 2026-11-09 at 9:17 AM MST the founder
+decided to ship automatic stills under the **existing** Play declaration, with that question
+kept open as a privacy follow-up. No Apple or Google declaration and no privacy policy text
+changed with this release; the live policy already describes the YouTube image requests.
+Evidence and the exact question to put to Google Play developer support:
+[`pr239-thumbnail-privacy-review.md`](./pr239-thumbnail-privacy-review.md) and
+[`privacy-decision-matrix.md`](./privacy-decision-matrix.md) F-6.
+
+### Rolling back this release
+
+A rollback is a production change and needs its own founder authorization.
+[`safe-update-runbook.md`](./safe-update-runbook.md) §4 governs.
+
+- **Back to the 2026-11-07 update** (stills behind Show previews again). Republish each
+  platform's previous group:
+
+  ```
+  npx eas update:republish --group d5e7f3f3-368d-41a1-8db1-24ed60bf211f --message "rollback to 2026-11-07 (f0f6d26)"
+  npx eas update:republish --group 5a561da1-6ea1-477d-b741-17f2643fd8a8 --message "rollback to 2026-11-07 (f0f6d26)"
+  ```
+
+- **Back to the bundle embedded in the 1.1.0 binaries** (`9d9683a`), when no published update
+  is trusted:
+
+  ```
+  npx eas update:roll-back-to-embedded --branch production --message "back to the shipped bundle"
+  ```
+
+- **Code route.** Restore `trailerPreviewsByDefault` in `src/features/title/trailer-previews.ts`
+  to `(): boolean => lane !== 'production'`, merge, and publish that commit with
+  `ota-production.yml`.
+
+Each lands on the next foreground check or cold start, as below. Record whichever runs here.
 
 ### Store distribution
 
@@ -55,8 +117,9 @@ holds the same two runtimes for the OTA gate, and changes with this table.
   the background, and runs it after the next reload. That older embedded bundle predates #198,
   so its first foreground return can reload mid-sign-in.
 - **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and now receive the
-  1.1.0 OTA above (source `f0f6d26`, published 2026-11-07), which delivers the cinematic episode
-  rail (PR #237) and trailer-privacy inventory language (PR #238).
+  1.1.0 OTA above (source `19362af`, published 2026-11-09), which delivers the cinematic episode
+  rail (PR #237), trailer-privacy inventory language (PR #238) and automatic trailer stills
+  (PR #239).
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return
@@ -100,6 +163,9 @@ holds the same two runtimes for the OTA gate, and changes with this table.
   Add to List, share links.
 - **Import.** Letterboxd CSV import into the collection.
 - **Discovery.** Search, title pages, For You, Top Rated, Trending, Similar, Cast.
+- **Trailers.** Cinematic title pages load trailer stills from YouTube's image host with the
+  page (since 2026-11-09). The Original layout shows trailers as text rows and requests no
+  stills.
 - **Web.** bingd.app: install page, public title and profile previews, invite links.
 
 ### Intentionally not live

@@ -6,6 +6,10 @@ in production, so the Cinematic title page loads YouTube still images without th
 tapping _Show trailer previews_. Nothing in this document has been confirmed or approved by
 the founder, and no store declaration, policy page or OTA has been changed.
 
+> **Released 2026-11-09.** The change shipped in the production OTA of 2026-11-09 (merge
+> `19362af`) by founder decision, under the existing Play Data safety declaration. The
+> question below (F-6) stays open; see §4 and `production-state.md`.
+
 **Determination in one line.** Apple's label and the published privacy policy already cover
 the change. For Google Play, no exemption covers automatic loads and no identifier is sent,
 but one classification question is **unresolved**: whether passing the device's IP address
@@ -23,7 +27,7 @@ is **not supported** by what the request carries.
 | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | URL is `https://i.ytimg.com/vi/<video id>/hqdefault.jpg`, where the id is the 11-character YouTube key                     | `src/features/title/TrailerRail.tsx:66-70`; key shape enforced by `src/lib/images.ts:90-99`                                                                       | Verified (code)           |
 | No custom headers are passed (`source={{ uri: still }}` only)                                                              | `src/features/title/TrailerRail.tsx:88-111`                                                                                                                       | Verified (code)           |
-| Resolved to `expo-image` 57.0.2 in this branch                                                                              | `package.json:60` (`~57.0.2` range); `package-lock.json:9532-9534` (`node_modules/expo-image` version `57.0.2`)                                                  | Verified                  |
+| Resolved to `expo-image` 57.0.2 in this branch                                                                             | `package.json:60` (`~57.0.2` range); `package-lock.json:9532-9534` (`node_modules/expo-image` version `57.0.2`)                                                   | Verified                  |
 | Only Cinematic mounts `TrailerRail`; Original never requests a still                                                       | `TitleScreen.test.tsx` ("does not load YouTube thumbnails in Original layout…")                                                                                   | Verified (test)           |
 | Default cache policy is `disk`, so each still is requested about once per device until evicted, not on every page visit    | `node_modules/expo-image/src/Image.types.ts:252-254` (`@default 'disk'`)                                                                                          | Verified (library source) |
 | Nothing else in the app contacts a YouTube or `ytimg` host; `www.youtube.com/watch` is only opened with `Linking` on a tap | `rg -i "ytimg\|youtube" src`: the only request is in `TrailerRail.tsx`; the other matches are `videoUri` in `images.ts`, comments, and profile social-link fields | Verified (code)           |
@@ -237,8 +241,12 @@ release history is not visible from the repo.
 | **Privacy policy** (`bingd.app/privacy`) | **Existing disclosure supported.** The YouTube paragraph does not depend on a tap ("When a title page shows its trailers, your device loads…") and names the IP address and video. One optional addition, not required and not published: say that the request also carries the phone's operating system and model, which the device puts in every image request (applies to TMDB too).          |
 | **Google Play Data safety**              | **Unresolved, on one question:** Approximate location via IP, for both `i.ytimg.com` and `image.tmdb.org`. Everything else is settled: no exemption covers automatic loads; Device or other IDs and User IDs are not triggered; App interactions as Shared is not supported. Writing down a rationale does not substitute for an accurate answer, and the Data safety form has no field for one. |
 
-**Gate.** Keep the production OTA blocked until the Approximate-location question is
-resolved (F-6). The code gate is unchanged.
+**Gate (as written before release).** Keep the production OTA blocked until the
+Approximate-location question is resolved (F-6). The code gate is unchanged.
+
+**Status after release (2026-11-09).** The founder chose to ship under the existing Play
+declaration, and the production OTA of 2026-11-09 (merge `19362af`) published it. F-6 is an
+open privacy follow-up, not a compliance determination. See `production-state.md`.
 
 ---
 
@@ -262,8 +270,8 @@ Neither has been done, and neither is done by this PR.
    library transmissions to third-party servers as collection); _processed ephemerally?_ →
    **No** (Google's retention cannot be shown to be ephemeral); _required or optional?_ →
    **Required** for automatic loads; purpose for collection and for sharing → **App
-   functionality**. Publish the form before the production OTA. Apple and the privacy policy
-   do not change.
+   functionality**. Publish the form once decided; the production OTA already shipped on
+   2026-11-09. Apple and the privacy policy do not change.
    If the answer is no, no answer on any form changes.
 
 Do **not** add App interactions as Shared. The evidence does not support it.
