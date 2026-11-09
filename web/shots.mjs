@@ -52,6 +52,7 @@ const flag = (name, fallback) => {
 
 const raw = flag('--raw', join(repo, '02 Screenshots', 'App Store'));
 const out = flag('--out', join(here, 'src'));
+const layers = flag('--layers', null);
 
 /**
  * Android system chrome, cropped off every frame.
@@ -63,7 +64,7 @@ const out = flag('--out', join(here, 'src'));
  * Stated as a fraction of height rather than in pixels because the captures are not all
  * 1080x2340 — four were already cropped by whatever produced them.
  */
-const TOP = 0.030;
+const TOP = 0.03;
 const BOTTOM = 0.043;
 
 /**
@@ -75,21 +76,10 @@ const BOTTOM = 0.043;
  */
 
 /**
- * `[x, y, width, height]` in source pixels, blurred before the crop.
+ * Masks are `[x, y, width, height]` in source pixels, blurred before the crop. Sigma 14
+ * at 1080px wide is past the point where letterforms survive, which is the bar: a name
+ * that can be squinted at is not blurred.
  *
- * Only the Feed needs any. Sigma 14 at 1080px wide is past the point where letterforms
- * survive, which is the bar: a name that can be squinted at is not blurred.
- */
-const FEED_MASKS = [
-  [175, 1010, 360, 56], // row 1 display name
-  [96, 1115, 60, 60], // row 1 actor avatar, overlapping the poster
-  [175, 1382, 360, 56], // row 2 display name
-  [96, 1487, 60, 60], // row 2 actor avatar
-  [175, 1758, 190, 52], // row 3 handle
-  [90, 1846, 56, 56], // row 3 actor avatar
-];
-
-/**
  * The Witcher comments thread. Every display name and avatar is blurred, the founder's
  * included, for the same reason as the Feed: a comment is somebody's words, and the page
  * shows the conversation, not who had it.
@@ -118,16 +108,76 @@ const GROUP_PICKS_MASKS = [
   [36, 1923, 524, 106], // Ganga
 ];
 
-const SHOTS = [
+/**
+ * The 2026-11-09 refresh, from the founder's prepared screen layers rather than raw
+ * captures: `node web/shots.mjs --layers <prepared-screen-layers>`.
+ *
+ * These are the same screens as the approved App Store set, before they went into a
+ * phone frame. They arrive already redacted (localized blur on every member's name and
+ * photo) with the Android bars already cropped, so this mode applies no masks and no
+ * TOP/BOTTOM trim. It only scales them, and crops the router's ranking detail.
+ *
+ * The capture-based entries for these eight names were removed from `SHOTS`, so a plain
+ * run cannot put the August captures back.
+ */
+const LAYER_SHOTS = [
   {
-    // The For you tab's Recommended Movies wall, with Sent to you, Group Picks and Filters
-    // (Galaxy S25, 2026-09-14). This capture was saved at 794x1721 rather than 1080x2340;
-    // the TOP and BOTTOM trims are fractions of height for exactly that reason.
-    source: 'Screenshot_20260914_111024_bingd.jpg',
+    source: '01-movies-tv__main-screen.png',
+    name: 'shot-movies',
+    width: 640,
+    alt: 'A ranked bingd movie collection as a grid of posters, each one carrying its own score out of ten',
+  },
+  {
+    source: '01-movies-tv__secondary-screen.png',
+    name: 'shot-tv',
+    width: 640,
+    alt: 'A ranked bingd TV collection as a grid of posters, each season carrying its own score out of ten',
+  },
+  {
+    source: '02-head-to-head__secondary-screen.png',
+    name: 'shot-compare',
+    width: 640,
+    alt: 'The bingd ranking sheet asking which did you like more, You Can See Everything or Inception',
+  },
+  {
+    // The same ranking as shot-compare, finished: the result sheet over the title page.
+    source: '02-head-to-head__main-screen.png',
+    name: 'shot-score',
+    width: 640,
+    alt: 'The score a bingd ranking lands on, 9.8 for You Can See Everything, sixth in Movies and just below Inglourious Basterds',
+  },
+  {
+    source: '03-friends__main-screen.png',
+    name: 'shot-feed',
+    width: 640,
+    alt: 'The bingd feed, showing trending titles above friends’ recent activity, with names and faces blurred',
+  },
+  {
+    source: '06-for-you__main-screen.png',
     name: 'shot-recommended',
     width: 640,
-    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to you, Group Picks and Filters',
+    alt: 'The bingd For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
   },
+  {
+    source: '01-movies-tv__secondary-screen.png',
+    name: 'shot-collection',
+    format: 'jpeg',
+    width: 720,
+    alt: 'A bingd collection of ranked series, each with a score out of ten.',
+  },
+  {
+    // The comparison sheet alone, from just above its rounded top edge to under Undo and
+    // Can't decide.
+    source: '02-head-to-head__secondary-screen.png',
+    name: 'shot-ranking',
+    format: 'jpeg',
+    width: 720,
+    crop: [0, 388, 709, 974],
+    alt: 'Two films side by side in bingd, under the question which did you like more.',
+  },
+];
+
+const SHOTS = [
   {
     source: 'Screenshot_20260914_110947_bingd.jpg',
     name: 'shot-grouppicks',
@@ -154,49 +204,11 @@ const SHOTS = [
     alt: 'The bingd. Your First Five screen: four movies ranked in order, each with its score out of ten',
   },
   {
-    // The head-to-head that comes before the score (founder, 2026-09-14): the whole screen,
-    // Harry Potter and the Goblet of Fire against Spider-Man: Far From Home, with Undo and
-    // Too tough. Taken 36 seconds before shot-score, so the two read as one ranking. 640
-    // wide, not the 760 it used to be, so the pair's two phones are the same size.
-    source: 'Screenshot_20260831_094018_bingd.jpg',
-    name: 'shot-compare',
-    width: 640,
-    alt: 'The bingd. ranking sheet asking which did you like more, Harry Potter and the Goblet of Fire or Spider-Man: Far From Home',
-  },
-  {
-    // The score a ranking ends on, the whole screen: the title page behind the sheet, the
-    // score, the title and the sheet's actions, with the host phone's bars removed like
-    // every other Android capture.
-    source: 'Screenshot_20260831_094054_bingd.jpg',
-    name: 'shot-score',
-    width: 640,
-    alt: 'The score a bingd. ranking lands on, 9.1 for Harry Potter and the Goblet of Fire, in the sheet shown after ranking',
-  },
-  {
     source: 'Screenshot_20260831_094209_bingd.jpg',
     name: 'shot-comments',
     width: 640,
     masks: COMMENT_MASKS,
     alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
-  },
-  {
-    source: 'Screenshot_20260831_093909_bingd.jpg',
-    name: 'shot-movies',
-    width: 640,
-    alt: 'A ranked bingd. movie collection as a poster grid, each poster carrying its own score',
-  },
-  {
-    source: 'Screenshot_20260831_093915_bingd.jpg',
-    name: 'shot-tv',
-    width: 640,
-    alt: 'A ranked bingd. TV collection as a poster grid, each season carrying its own score',
-  },
-  {
-    source: 'Screenshot_20260831_093902_bingd.jpg',
-    name: 'shot-feed',
-    width: 640,
-    masks: FEED_MASKS,
-    alt: 'The bingd. feed showing trending titles and friends’ activity, with names and faces blurred',
   },
   {
     source: 'Screenshot_20260831_094137_bingd.jpg',
@@ -219,8 +231,10 @@ const manifest = [];
 /** `--only shot-a,shot-b` regenerates just those, leaving every committed shot untouched. */
 const only = flag('--only', null)?.split(',');
 
-for (const shot of SHOTS.filter((s) => !only || only.includes(s.name))) {
-  const file = join(raw, shot.source);
+for (const shot of (layers ? LAYER_SHOTS : SHOTS).filter(
+  (s) => !only || only.includes(s.name),
+)) {
+  const file = join(layers ?? raw, shot.source);
   try {
     await access(file);
   } catch {
@@ -236,10 +250,7 @@ for (const shot of SHOTS.filter((s) => !only || only.includes(s.name))) {
     // part of an image in sharp: `blur()` is whole-image.
     const patches = await Promise.all(
       shot.masks.map(async ([left, top, width, height]) => ({
-        input: await sharp(file)
-          .extract({ left, top, width, height })
-          .blur(14)
-          .toBuffer(),
+        input: await sharp(file).extract({ left, top, width, height }).blur(14).toBuffer(),
         left,
         top,
       })),
@@ -263,28 +274,35 @@ for (const shot of SHOTS.filter((s) => !only || only.includes(s.name))) {
   }
 
   // The whole frame minus the host phone's status and navigation bars, unless the shot
-  // names its own crop.
+  // names its own crop. A prepared layer has no bars left to trim.
   const box = shot.crop
     ? { left: shot.crop[0], top: shot.crop[1], width: shot.crop[2], height: shot.crop[3] }
-    : {
-        left: 0,
-        top: Math.round(h * TOP),
-        width: w,
-        height: h - Math.round(h * TOP) - Math.round(h * BOTTOM),
-      };
+    : layers
+      ? { left: 0, top: 0, width: w, height: h }
+      : {
+          left: 0,
+          top: Math.round(h * TOP),
+          width: w,
+          height: h - Math.round(h * TOP) - Math.round(h * BOTTOM),
+        };
 
-  const buffer = await image
+  const ext = shot.format === 'jpeg' ? 'jpg' : 'webp';
+  const resized = image
     .extract(box)
-    .resize({ width: shot.width })
-    .webp({ quality: 80, effort: 6 })
-    .toBuffer();
+    .flatten({ background: '#fbf8f4' })
+    .resize({ width: shot.width });
+  const buffer = await (
+    ext === 'jpg'
+      ? resized.jpeg({ quality: 82, mozjpeg: true })
+      : resized.webp({ quality: 80, effort: 6 })
+  ).toBuffer();
 
   const meta = await sharp(buffer).metadata();
-  await sharp(buffer).toFile(join(out, `${shot.name}.webp`));
+  await sharp(buffer).toFile(join(out, `${shot.name}.${ext}`));
 
   manifest.push({ name: shot.name, width: meta.width, height: meta.height, alt: shot.alt });
   console.log(
-    `${shot.name}.webp  ${meta.width}x${meta.height}  ${(buffer.length / 1024).toFixed(0)}KB`,
+    `${shot.name}.${ext}  ${meta.width}x${meta.height}  ${(buffer.length / 1024).toFixed(0)}KB`,
   );
 }
 
