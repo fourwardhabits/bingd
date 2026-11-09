@@ -2179,10 +2179,10 @@ export default function TitleScreen() {
 
       {/**
        * **Trailers, on the page** (title-page sprint, 2026-11-06; before Reviews since the
-       * final title refinement). The cards draw at once as video tiles; YouTube's
-       * thumbnails wait for Show previews, because each is a request to Google that the
-       * Trailers tab used to make only when it was opened. A tap on a card opens the
-       * video, as it always did.
+       * final title refinement). The cards draw at once as video tiles; YouTube stills
+       * load whenever `trailerPreviews` is true (the prepared default on this branch).
+       * The Show previews action appears only when previews are off (today's live
+       * production OTA). A tap on a card opens the video, as it always did.
        */}
       {videos.data?.length && layoutResolved
         ? immersiveSection(

@@ -3,10 +3,11 @@
  *
  * Each still is an `expo-image` request from the device to Google's image host
  * (`i.ytimg.com`). It carries the reader's IP address, the platform's User-Agent and the
- * video's id, and no cookie or identifier. TMDB images go out the same way. The privacy policy
- * at `https://bingd.app/privacy/` already describes these requests, and Apple's label needs no
- * change. One Play Data safety question is unresolved: whether that IP must be declared as
- * Approximate location (F-6). No sharing exemption covers automatic loads.
+ * video's id. Android sends no cookie or app/account identifier on this path; iOS uses the
+ * shared cookie store if one exists for the host. TMDB images go out the same way. The
+ * privacy policy at `https://bingd.app/privacy/` already describes these requests, and
+ * Apple's label needs no change. One Play Data safety question is unresolved: whether that IP
+ * must be declared as Approximate location (F-6). No sharing exemption covers automatic loads.
  * See `docs/release/pr239-thumbnail-privacy-review.md`.
  *
  * Production has a manual "Show previews" opt-in (OTA of 2026-11-07). This returns `true` for
