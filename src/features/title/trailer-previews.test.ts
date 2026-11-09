@@ -1,15 +1,15 @@
 import { trailerPreviewsByDefault } from './trailer-previews';
 
 /**
- * **Stills by default in all lanes including production** (enabled 2026-11-09, after the
- * founder confirmed Play Console "No data shared" remains accurate for automatic loads —
- * F-6 in `docs/release/privacy-decision-matrix.md`).
+ * **Stills prepared for all lanes including production** (2026-11-09 — production change
+ * ready, pending founder confirmation of F-6 before merge/OTA).
  *
- * The function no longer reads `lane` — it is unconditionally `true` — so no lane mock
- * is needed here.
+ * The function is unconditionally `true`; no lane mock is needed here. Behaviour in the
+ * Cinematic and Original layouts is covered by `TitleScreen.test.tsx` (trailer tiles and
+ * Original-layout-never-loads-YouTube-thumbnails tests).
  */
 describe('trailerPreviewsByDefault', () => {
-  it('is on in every lane, including production', () => {
+  it('returns true in every lane, including production', () => {
     expect(trailerPreviewsByDefault()).toBe(true);
   });
 });

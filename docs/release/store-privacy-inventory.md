@@ -55,10 +55,13 @@ from the code rather than from intent:
   Settings › Labs) holds the stills back until the stored layout choice has been read, so a
   reader who chose Original never sends one.
 - **When, by lane.** `trailerPreviewsByDefault()` (`src/features/title/trailer-previews.ts`)
-  is `lane !== 'production'`. Preview, Beta and development load the stills as the page
-  opens. **Production does not**: the cards draw as plain frames and nothing goes to
-  `i.ytimg.com` until the reader taps **Show previews**, once per page. Production builds
-  get `lane === 'production'` from `BINGD_LANE` on the `production` profile in `eas.json`.
+  returns `true` for all lanes as of the prepared production change (PR #239, 2026-11-09).
+  Preview, Beta, development, and **production (once the OTA ships)** all load stills with
+  the page. **Production stills are not yet live**: the production OTA must not be published
+  until the founder confirms F-6 (Play Console "No data shared with third parties" for
+  automatic loads). Until that OTA runs, production builds still compiled from an earlier
+  bundle show the old opt-in behaviour. See `privacy-decision-matrix.md` §16 and the gate
+  table at the bottom of that file.
 
 **Disclosure status.** The live policy at <https://bingd.app/privacy/> (fetched 2026-11-07,
 "Last updated 7 November 2026") already says, under "Who else sees it", that **YouTube
@@ -69,12 +72,13 @@ both the opt-in and the automatic behaviour, for any title page, so the publishe
 not need to change to enable automatic stills in production.
 
 This document's reasoning is that the answers for the TMDB images apply unchanged, so **no
-new data type is declared** for it in §2 or §3. **That reasoning has not been checked against
-either store console, and the consoles may need a change**, which is why production
-still uses the opt-in. One point specific to Play: its definition of
-*sharing* exempts a transfer the user initiates. A tap on Show previews arguably is one; an
-automatic load on page open is not. Turning the gate on in production waits for the founder's
-check in §6 item 8.
+new data type is declared** for it in §2 or §3. The production gate change is prepared
+(PR #239). One point specific to Play: its definition of *sharing* exempts a transfer the
+user initiates; an automatic load on page open is not user-initiated. The analysis in
+`privacy-decision-matrix.md` §16 concludes "No data shared" remains accurate because the
+image CDN request does not transfer any declared user-data row to Google — **but this must
+be confirmed in the live Play console form (F-6) before the production OTA ships.** See §6
+item 8.
 
 **Not collected at all**, and worth stating because the store forms ask: no precise or
 coarse **location**, no **contacts**, no **health or fitness**, no **financial** data, no
@@ -203,8 +207,15 @@ Messages · Gameplay Content · Customer Support.
 
 ### Notes for the reviewer form
 
-- **Data is not used for third-party advertising, Bingd's own advertising, or
-  personalisation.** Only App Functionality and Analytics.
+- **No advertising, no third-party personalisation, no data broker.** Bingd shows no
+  advertising and runs no advertising or attribution SDK. Data is never shared with a
+  third party for their own purposes or sold. Tracking is No for every declared type.
+  **First-party Product Personalization is declared** for Other User Content (rankings
+  and comparisons) because they drive Bingd's own recommendation engine
+  (`match_scores`, `recommendation_*`). That is App functionality by another name — the
+  feature that produces the For You and Similar screens. It is not advertising
+  personalization and it is not third-party personalization. Apple's form has a
+  "Product Personalization" purpose; this is what it is for.
 - **Account deletion:** in-app, Settings › Account & Data. Guideline 5.1.1(v) is met; there
   is no "email us" path.
 - **Sign-in for review:** Apple's *App Review Information* and Play's *App access* both need
@@ -256,7 +267,7 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | Personal info → **User IDs** | Yes | No | Required | App functionality, Analytics |
 | Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility. **Not** declared under Personalisation: DOB-1 retains the date for possible future age-based recommendations, but nothing reads it for that today, and a declared purpose has to describe what ships. Revisit this row, not the collection answer, if a recommender ever consumes it |
 | Photos and videos → **Photos** | Yes | No | Optional | App functionality — profile picture |
-| App activity → **Other user-generated content** | Yes | No | Optional | App functionality |
+| App activity → **Other user-generated content** | Yes | No | Optional | App functionality, **Personalisation** — rankings drive Bingd's own recommendation engine (corrected 2026-11-09; see `privacy-decision-matrix.md` §5). Not advertising personalisation. |
 | App activity → **App interactions** | Yes | No | **Required**² | Analytics |
 | App info and performance → **Crash logs** | Yes | No | **Required**² | App functionality — diagnostics |
 | App info and performance → **Diagnostics** | Yes | No | **Required**² | App functionality — diagnostics |
