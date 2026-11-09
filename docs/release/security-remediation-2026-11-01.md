@@ -2,7 +2,7 @@
 
 Written for: the founder, and the agent carrying out the release once it is approved.
 
-This is the release plan for the fixes to the security audit of 2026-11-01. Nothing here has been applied to production. No agent applies a production migration, merges, or publishes a production update without the founder's approval for that exact commit.
+This is the release plan for the fixes to the security audit of 2026-11-01. **It was released on 2026-11-03**, and the [release record](#release-record-2026-11-03) is at the end, with what is still open. No agent applies a production migration, merges, or publishes a production update without the founder's approval for that exact commit.
 
 ## Release order
 
@@ -162,3 +162,47 @@ select ia.invitee_id, ia.inviter_id, ia.accepted_at, p.created_at, p.visibility
 A row here is not proof of anything, because most will be people who tapped Accept. Private accounts are the ones to look at. What to do about them is your decision: nothing here removes a follow.
 
 **Letterboxd mappings, after step 3.** Paste the whole of [`letterboxd-matches.sql`](../../supabase/audits/letterboxd-matches.sql). [letterboxd-match-audit.md](../ops/letterboxd-match-audit.md) explains the result. The matcher is safe from step 3, and the audit is only about what may already be wrong.
+
+## Release record, 2026-11-03
+
+All times UTC. Approved by the founder for `eab83c9`, covering one publish.
+
+| Step | Result |
+|---|---|
+| Preflight | Production said `prod`, 172 applied, head `20261023000100`. Seven daily physical backups, newest 2026-11-02 06:50, all completed. PITR off. The dry run listed exactly the five files |
+| Migrations | Applied 00:35. 177 applied, head `20261024000500`. B-1 closed here for every installed build |
+| Existing rows | One statement touched any: `20261024000500` revoked 8 device tokens beyond the ten newest on one account. Live tokens went from 30 to 22, and no account is over ten |
+| Production checks | `test:remote --target production` 136 of 136. Public card, private and unknown handles, four wildcards, anon on `profiles` and `media_items`, invitation privileges, and `redeem_invite` inert all as expected |
+| Against staging | Every function, table, grant and policy equal at the same commit, apart from `rls_auto_enable` |
+| Merge | `bebfdfb` at 00:40, a two-parent merge commit containing `eab83c9`. CI and the race suite passed on it |
+| Website | Pages was live within about a minute. `router.mjs` byte-identical to `main`. A public profile shows its name, a private one stays generic, and `/i/` opens the production app |
+| OTA | EAS run `01a19eda-2bb6-74dc-911e-2ec448d48dc8`, published 00:46. Android update `01a19ede-f160-7e82-b8bf-ba815c2d47e3`, group `04afb993`, runtime `ec79e181`. iOS update `01a19ede-f160-7e0d-8c94-9e3cfe34ab31`, group `ffbb473c`, runtime `8ea562b7`. Published commit `eab83c9`, log scan clean, and the served manifests name production and not staging |
+| Push | `push_drain_status()` healthy after the `claim_push_batch` rebuild, nothing queued over 15 minutes |
+
+The `/u/` card was generic for about six minutes, from 00:35 to about 00:41. Invitations could not be accepted from 00:35 until the OTA reaches each phone.
+
+### What differed from the plan
+
+- **The two invitation checks were not run on production.** Both would create accounts there, and the approval did not cover that. They stand on the staging scenarios, on three Android phone runs on the same commit, and on production's functions matching staging's.
+- **So no real invitation has been accepted on production yet.** At release there were no `accept_invite` calls at all.
+- **The phone test was Android only.** There is no iOS Preview binary on the current runtime.
+- **No off-platform `db dump` was taken first**, which `founder-todo.md` suggests before a production migration. The approval did not cover copying production data to a laptop. Only one statement changed existing rows, as above.
+- **The first run of the extra staging comparison failed**, reporting 132 functions different. 131 differed only in line endings, and the other was `rls_auto_enable`. The first website check also failed, on an account whose display name is part of its own handle: the handle appears in the page's deep link because it is in the address. The API answered zero rows, and the name did not appear. Both checks were corrected and rerun before going on, and the merge waited for the first.
+
+### Still open
+
+| Finding | State | Closes when |
+|---|---|---|
+| **M-5** Sentry query strings | Code fix live on 1.1.0 through the OTA. **1.0.1 has only the Sentry rule**, and nobody has confirmed it was added | A transaction from after the rule has an `http.client` span with no `http.query` and no `?` in `http.url` |
+| **M-6** production key in repository secrets | `production` and `nonprod` exist, are `main`-only and are empty. All six repository secrets remain, and the jobs still use them | Secrets added to the Environments, both scheduled jobs pass, the six repository copies are deleted, and both pass again |
+| **M-3 residual** | The anon key is closed. **A free signed-in account can still read every public account** through RLS, because the app has to, and nothing throttles the API | Its own piece of work: API rate limiting, not yet designed. `20261024000400` records this |
+| **m-3** handles in old logs | Code fixed. Nine old public Actions logs still show one or two handles | The founder deletes them, section 3 above |
+| Read-only production audits | Past invitations and Letterboxd matches have not been run | The founder runs them, section 4 above |
+
+Steps for all of these except the M-3 residual are under [Other work, founder only](#other-work-founder-only).
+
+Smaller items, none a security exposure:
+
+- Accept stays on screen for up to 60 seconds after accepting, because the preview is cached and not invalidated. The server refuses the second press, and it writes only a ledger row.
+- `qa-preview-invite-link.bingd.pages.dev` still answers. Its branch is gone, but Cloudflare keeps deployments. It has no Supabase config, and its invitations no longer exist.
+- `feature/proactive-notifications` still must not go to any database as it stands. `integration/proactive-after-security`, #220, is the safe route.
