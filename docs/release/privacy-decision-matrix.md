@@ -97,11 +97,11 @@ Collectively "Other User Content".
 | Linked | Account-linked |
 | Retention | Lifetime of account; deleted on account deletion |
 | Apple declared (two purposes) | User Content → Other User Content, App Functionality; **also** Other User Content under **Product Personalization** |
-| Play declared | App activity → Other user-generated content |
-| Recommended | **Declare under both App Functionality and Product Personalization on Apple.** Rankings and comparisons directly drive `match_scores` and `recommendation_*` tables — what a user ranked influences which titles are recommended to them. Product Personalization is accurate and should stay. The repo inventory previously said "not personalisation"; this was incorrect. |
-| Evidence | `match_scores`, `recommendation_*` tables; `src/features/discovery/` recommendation queries; `for-you` screen |
-| Confidence | High |
-| Unresolved | None — the public Apple label is correct; the old repo inventory line was wrong |
+| Play declared | App activity → Other user-generated content, **App functionality only** (founder Data safety CSV export, 2026-11-08, not committed). Personalisation purpose is **not currently declared** on Play. |
+| Recommended | **Apple: already correctly declared** under both App Functionality and Product Personalization — the public label is accurate and should stay. **Play: Personalisation is a proposed addition, not the current form.** Whether to add it is a store-declaration change requiring founder approval; the current form (App functionality only) is not wrong, it is incomplete if rankings are driving the recommendation engine. |
+| Evidence | `match_scores`, `recommendation_*` tables; `src/features/discovery/` recommendation queries; `for-you` screen; founder Data safety CSV export, 2026-11-08 (not committed) |
+| Confidence | High (Apple — public label confirmed); Medium (Play — current form per CSV export, but Personalisation purpose may be warranted) |
+| Unresolved | **Play Personalisation purpose:** the current form declares App functionality only for Other user-generated content. Adding Personalisation is a store-declaration change that requires a founder console action, is independent of the trailer OTA gate, and is not a correction of an error — the current form is not inaccurate, it is incomplete. |
 
 ### 6 · User ID (account identifier)
 
@@ -112,11 +112,11 @@ Collectively "Other User Content".
 | Linked | Account-linked |
 | Retention | PostHog and Sentry: FOUNDER (check project retention settings); first-party: lifetime of account |
 | Apple declared | Identifiers → User ID, Analytics and App Functionality |
-| Play declared | Personal info → User IDs, Required, App functionality / Analytics |
-| Recommended | **Declare as stated.** Accurate. |
-| Evidence | `src/lib/analytics.ts` — `initAnalytics` sends account id; `src/lib/monitoring.ts` — user object reduced to id |
-| Confidence | High |
-| Unresolved | PostHog and Sentry retention: **FOUNDER** (§6 item 4 in `store-privacy-inventory.md`) |
+| Play declared | **Not currently declared as User IDs** (founder Data safety CSV export, 2026-11-08, not committed). Account identifiers sent to PostHog and Sentry appear to be covered by the declared **Device or other IDs** row (App functionality, Analytics) — see §14 and §10. |
+| Recommended | **Open founder decision (F-8).** The account UUID sent to PostHog (as distinct user identifier, separate from the device UUID in §14) and Sentry may be more accurately described as User IDs than as Device or other IDs. Whether to add Personal info → User IDs, Required, App functionality / Analytics to the Play form is a store-declaration change that requires founder approval and is independent of the trailer OTA gate. |
+| Evidence | `src/lib/analytics.ts` — `initAnalytics` sends account id; `src/lib/monitoring.ts` — user object reduced to id; founder Data safety CSV export, 2026-11-08 (not committed) |
+| Confidence | Medium (Play declared row unverified until CSV export reviewed; F-8 not yet decided) |
+| Unresolved | **F-8 (see below):** whether to add Personal info → User IDs row to Play form. Also: PostHog and Sentry retention — **FOUNDER** (§6 item 4 in `store-privacy-inventory.md`) |
 
 ### 7 · Product analytics / app interactions
 
@@ -279,6 +279,8 @@ Collectively "Other User Content".
 | Apple — Other User Content, Product Personalization | "Not personalisation; only App Functionality and Analytics" | Declared: Other User Content, Product Personalization | **Label is correct; inventory was wrong.** Rankings drive recommendations. Product Personalization is accurate. |
 | Play — Device or other IDs | "Do not declare Device or other IDs" | Declared: Device or other IDs, App functionality, Analytics | **Label is correct; inventory was wrong.** Same reasons as Apple Device ID. |
 | Play — Location | "Do not declare" | Not declared | Both agree. Correct. |
+| Play — User IDs | Earlier inventory described as "Personal info → User IDs, Required, App functionality / Analytics" (declared) | **Not declared** per founder Data safety CSV export, 2026-11-08 | **Inventory was incorrect; CSV export is ground truth.** Whether to add a User IDs row is F-8 (not decided). |
+| Play — Other user-generated content, Personalisation | Inventory proposed "App functionality, Personalisation" (2026-11-09 update) | **App functionality only** per founder Data safety CSV export, 2026-11-08 | **Proposed addition not yet in form.** Current form is not wrong; adding Personalisation purpose is a founder console action (independent of trailer OTA). |
 
 ---
 
@@ -295,6 +297,7 @@ These are the specific questions that cannot be answered from the repository. Ea
 | F-5 | Supabase | Project → Settings → Logs | **Check PostgREST request-log retention.** If logs retain query parameters (search text), declare Search History without the "processed ephemerally" qualifier (already declared on both stores). If logs do not retain them, the ephemeral qualifier may be added to the Play row. | Medium |
 | F-6 | Google Play Console | Data safety → Data collection and security | **Choose Option A or Option B before the production OTA ships.** See §16 Unresolved for the full analysis. **Option A:** no form change; record in the optional notes field that the request carries no declared user data, IP is not a bingd data type, and TMDB posters load identically undeclared. **Option B:** mark App interactions Shared for App functionality, publish the updated form first, then ship the OTA. Also confirm whether any beta binary is live on Play's alpha/beta track — if so, the current form already covers automatic loads, which supports Option A. Note: Google/YouTube is not a service provider processing on bingd's behalf; the service-provider exemption does not apply here. | High (blocks trailer OTA) |
 | F-7 | PostHog + Sentry | Both project dashboards | **Record the actual retention periods** (currently policy says "under their own retention settings"). Add specific numbers to the privacy page under "How long it is kept". This is a legal-copy change; it deploys with `main` and does not require an app update. | Medium |
+| F-8 | Google Play Console | Data safety → Personal info → User IDs | **Decide whether to add a User IDs row.** The founder's Data safety CSV export (2026-11-08, not committed) shows no User IDs row; account identifiers sent to PostHog (analytics user id) and Sentry (user object id) are not currently declared there. If the account UUID is considered a user identifier distinct from device identifiers (§6, §14), add Personal info → User IDs, Required, App functionality / Analytics. If it is treated as covered by Device or other IDs (already declared), no change is needed. Record the decision. Independent of the trailer OTA gate. | Medium |
 
 ---
 

@@ -213,12 +213,15 @@ Messages · Gameplay Content · Customer Support.
 - **No advertising, no third-party personalisation, no data broker.** Bingd shows no
   advertising and runs no advertising or attribution SDK. Data is never shared with a
   third party for their own purposes or sold. Tracking is No for every declared type.
-  **First-party Product Personalization is declared** for Other User Content (rankings
-  and comparisons) because they drive Bingd's own recommendation engine
+  **First-party Product Personalization is declared on Apple** for Other User Content
+  (rankings and comparisons) because they drive Bingd's own recommendation engine
   (`match_scores`, `recommendation_*`). That is App functionality by another name — the
   feature that produces the For You and Similar screens. It is not advertising
   personalization and it is not third-party personalization. Apple's form has a
-  "Product Personalization" purpose; this is what it is for.
+  "Product Personalization" purpose; this is what it is for. **On Play, the current
+  form (founder Data safety CSV export, 2026-11-08) declares App functionality only
+  for Other user-generated content; adding a Personalisation purpose is a proposed
+  addition requiring founder console action (see §3 Play rows table).**
 - **Account deletion:** in-app, Settings › Account & Data. Guideline 5.1.1(v) is met; there
   is no "email us" path.
 - **Sign-in for review:** Apple's *App Review Information* and Play's *App access* both need
@@ -276,10 +279,10 @@ used for advertising."*
 |---|---|---|---|---|
 | Personal info → **Name** | Yes | No | Optional | App functionality |
 | Personal info → **Email address** | Yes | No | Required | App functionality, Account management |
-| Personal info → **User IDs** | Yes | No | Required | App functionality, Analytics |
+| Personal info → **User IDs** *(proposed — not in current form)*⁴ | Yes | No | Required *(proposed)* | App functionality, Analytics — **not currently declared** per founder Data safety CSV export, 2026-11-08. Whether to add this row is F-8 in `privacy-decision-matrix.md`. |
 | Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility. **Not** declared under Personalisation: DOB-1 retains the date for possible future age-based recommendations, but nothing reads it for that today, and a declared purpose has to describe what ships. Revisit this row, not the collection answer, if a recommender ever consumes it |
 | Photos and videos → **Photos** | Yes | No | Optional | App functionality — profile picture |
-| App activity → **Other user-generated content** | Yes | No | Optional | App functionality, **Personalisation** — rankings drive Bingd's own recommendation engine (corrected 2026-11-09; see `privacy-decision-matrix.md` §5). Not advertising personalisation. |
+| App activity → **Other user-generated content** | Yes | No | Optional | App functionality *(current form per founder CSV export, 2026-11-08)*. **Personalisation purpose not yet declared on Play** — proposed addition, requires founder console action. Apple correctly declares Product Personalization (see §2 correction notice). See `privacy-decision-matrix.md` §5. |
 | App activity → **App interactions** | Yes | No | **Required**² | Analytics |
 | App info and performance → **Crash logs** | Yes | No | **Required**² | App functionality — diagnostics |
 | App info and performance → **Diagnostics** | Yes | No | **Required**² | App functionality — diagnostics |
@@ -294,6 +297,8 @@ is the opposite: it exists only because somebody typed it, and Bingd is entirely
 without ever opening search. Google's Optional is exactly that case — the user chooses
 whether to provide the data. This row was Required for one round on the reasoning that
 applies to telemetry; review 28d separated the two and was right to.
+
+⁴ **Not currently declared.** The founder's Data safety CSV export (2026-11-08, not committed) shows no Personal info → User IDs row. Account identifiers are currently covered by Device or other IDs (declared). Whether to add a separate User IDs row is an open founder decision (F-8 in `privacy-decision-matrix.md`).
 
 ¹ **Declare it. Whether you may mark it "processed ephemerally" depends on the same
 homework as Apple's row, and is not settled.**
