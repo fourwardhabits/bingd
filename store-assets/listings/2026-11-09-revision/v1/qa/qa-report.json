@@ -1,0 +1,393 @@
+{
+  "reproduction": [
+    {
+      "id": "01-movies-tv",
+      "maxDiff": 1,
+      "differingSamples": 41,
+      "samples": 9486396
+    },
+    {
+      "id": "03-friends",
+      "maxDiff": 1,
+      "differingSamples": 22,
+      "samples": 9486396
+    },
+    {
+      "id": "04-watchlist",
+      "maxDiff": 1,
+      "differingSamples": 32,
+      "samples": 9486396
+    },
+    {
+      "id": "05-your-year",
+      "maxDiff": 1,
+      "differingSamples": 8,
+      "samples": 9486396
+    },
+    {
+      "id": "06-for-you",
+      "maxDiff": 1,
+      "differingSamples": 51,
+      "samples": 9486396
+    },
+    {
+      "id": "02-head-to-head",
+      "maxDiff": 1,
+      "differingSamples": 17,
+      "samples": 9486396
+    }
+  ],
+  "cards": [
+    {
+      "id": "01-movies-tv",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 3080910,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 547,
+          "phoneTop": 664,
+          "gap": 116,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 547,
+        "mainTop": 662,
+        "mainScreenBottom": 2626,
+        "mainCrop": null,
+        "secTop": 1308,
+        "secBottom": 2376
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryPhoneUnchanged": {
+        "mean": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "02-head-to-head",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 2039559,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 547,
+          "phoneTop": 664,
+          "gap": 116,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 547,
+        "mainTop": 662,
+        "mainScreenBottom": 2624,
+        "mainCrop": {
+          "top": 59,
+          "bottom": 1465,
+          "sourceHeight": 1536
+        }
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "chromeCrop": {
+        "top": 59,
+        "bottom": 1465,
+        "sourceHeight": 1536
+      },
+      "comparisonLeftHalfUnchanged": {
+        "mean": 0,
+        "max": 1
+      }
+    },
+    {
+      "id": "03-friends",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 1528995,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 551,
+          "phoneTop": 785,
+          "gap": 233,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 545,
+          "phoneTop": 664,
+          "gap": 118,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 545,
+        "mainTop": 662,
+        "mainScreenBottom": 2626,
+        "mainCrop": null,
+        "secTop": 1308,
+        "secBottom": 2376
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryPhoneUnchanged": {
+        "mean": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "04-watchlist",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 2160826,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 554,
+          "phoneTop": 785,
+          "gap": 230,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 220,
+          "subtitleBottom": 548,
+          "phoneTop": 664,
+          "gap": 115,
+          "topMargin": 220
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 548,
+        "mainTop": 662,
+        "mainScreenBottom": 2627,
+        "mainCrop": null,
+        "secTop": 1308,
+        "secBottom": 2376
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryPhoneUnchanged": {
+        "mean": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "05-your-year",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 771109,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 547,
+          "phoneTop": 664,
+          "gap": 116,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 547,
+        "mainTop": 662,
+        "mainScreenBottom": 2626,
+        "mainCrop": null,
+        "secTop": 1308,
+        "secBottom": 2376
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryPhoneUnchanged": {
+        "mean": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "06-for-you",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 3056154,
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 547,
+          "phoneTop": 664,
+          "gap": 116,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 547,
+        "mainTop": 662,
+        "mainScreenBottom": 2627,
+        "mainCrop": null
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "mainScreenReachesCardEdge": true,
+        "screensPixelIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      }
+    },
+    {
+      "id": "07-ranked-CANDIDATE",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 1445753,
+      "measured": {
+        "before": null,
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 219,
+          "subtitleBottom": 547,
+          "phoneTop": 664,
+          "gap": 116,
+          "topMargin": 219
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 219,
+        "subtitleInkBottom": 547,
+        "mainTop": 662,
+        "mainScreenBottom": 2624,
+        "mainCrop": {
+          "top": 59,
+          "bottom": 1465,
+          "sourceHeight": 1536
+        }
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": null,
+        "mainScreenReachesCardEdge": true
+      },
+      "chromeCrop": {
+        "top": 59,
+        "bottom": 1465,
+        "sourceHeight": 1536
+      }
+    }
+  ]
+}
