@@ -8,9 +8,13 @@ import {
   facetOptions,
   isAnime,
   isFiltered,
+  nextShuffleSeed,
+  offersRuntime,
+  runtimeOf,
   shuffle,
   sortAxesFor,
   sortItems,
+  visibleItems,
   type CollectionItem,
   type CollectionSortState,
   type SortAxis,
@@ -505,7 +509,7 @@ describe('sorting', () => {
     const same = ['c', 'a', 'b'].map((id) =>
       item({ mediaItemId: id, title: 'Same', score: 5, year: 2000, addedAt: '2026-01-01T00:00:00Z' }),
     );
-    for (const axis of ['rating', 'added', 'year', 'title'] as const) {
+    for (const axis of ['rating', 'added', 'year', 'runtime', 'title'] as const) {
       for (const direction of ['desc', 'asc'] as const) {
         const forwards = ids(sortItems(same, { axis, direction }));
         const backwards = ids(sortItems([...same].reverse(), { axis, direction }));
@@ -614,6 +618,8 @@ describe('which axes are offered', () => {
     expect(COLLECTION_SORT_AXES.added.defaultDirection).toBe('desc');
     expect(COLLECTION_SORT_AXES.year.defaultDirection).toBe('desc');
     expect(COLLECTION_SORT_AXES.title.defaultDirection).toBe('asc');
+    // Approved spec, 2026-11-10: Runtime's first press is Shortest first, never Longest.
+    expect(COLLECTION_SORT_AXES.runtime.defaultDirection).toBe('asc');
   });
 });
 
@@ -799,5 +805,236 @@ describe('Recently watched', () => {
     const a = order([item('b', null), item('a', null)]);
     const b = order([item('a', null), item('b', null)]);
     expect(a).toEqual(b);
+  });
+});
+
+/**
+ * **Runtime** (approved spec, 2026-11-10): shortest first on the first press, longest
+ * first on the second, numeric, missing or unusable runtimes last in both directions, and
+ * ties broken the same way every time.
+ */
+describe('the Runtime axis', () => {
+  const rows = [
+    item({ mediaItemId: 'long', title: 'Long', runtimeMinutes: 201 }),
+    item({ mediaItemId: 'short', title: 'Short', runtimeMinutes: 88 }),
+    item({ mediaItemId: 'mid', title: 'Mid', runtimeMinutes: 120 }),
+    // 9 sorts before 88 as text and after it as a number — the numeric compare is pinned.
+    item({ mediaItemId: 'tiny', title: 'Tiny', runtimeMinutes: 9 }),
+  ];
+
+  it('orders shortest first ascending and longest first descending, numerically', () => {
+    expect(ids(sortItems(rows, at('runtime', 'asc')))).toEqual(['tiny', 'short', 'mid', 'long']);
+    expect(ids(sortItems(rows, at('runtime', 'desc')))).toEqual(['long', 'mid', 'short', 'tiny']);
+  });
+
+  it('names its directions in words, shortest first being the default', () => {
+    expect(COLLECTION_SORT_AXES.runtime).toMatchObject({
+      label: 'Runtime',
+      directions: { asc: 'shortest first', desc: 'longest first' },
+      defaultDirection: 'asc',
+    });
+  });
+
+  it('puts null, missing, zero, negative and non-numeric runtimes last in both directions', () => {
+    const unusable = [
+      item({ mediaItemId: 'u-null', title: 'U1', runtimeMinutes: null }),
+      item({ mediaItemId: 'u-zero', title: 'U2', runtimeMinutes: 0 }),
+      item({ mediaItemId: 'u-negative', title: 'U3', runtimeMinutes: -5 }),
+      item({ mediaItemId: 'u-nan', title: 'U4', runtimeMinutes: Number.NaN }),
+      item({ mediaItemId: 'u-infinite', title: 'U5', runtimeMinutes: Number.POSITIVE_INFINITY }),
+      item({ mediaItemId: 'u-text', title: 'U6', runtimeMinutes: '95' as unknown as number }),
+      item({ mediaItemId: 'u-missing', title: 'U7', runtimeMinutes: undefined as unknown as null }),
+    ];
+    const mixed = [...unusable.slice(0, 3), ...rows, ...unusable.slice(3)];
+    const sunk = unusable.map((row) => row.mediaItemId);
+
+    const asc = ids(sortItems(mixed, at('runtime', 'asc')));
+    const desc = ids(sortItems(mixed, at('runtime', 'desc')));
+    expect(asc.slice(0, 4)).toEqual(['tiny', 'short', 'mid', 'long']);
+    expect(desc.slice(0, 4)).toEqual(['long', 'mid', 'short', 'tiny']);
+    // The unusable keep one fixed order between themselves (by name), whichever way.
+    expect(asc.slice(4)).toEqual(sunk);
+    expect(desc.slice(4)).toEqual(sunk);
+  });
+
+  it('treats only a positive finite number as a runtime', () => {
+    expect(runtimeOf({ runtimeMinutes: 1 })).toBe(1);
+    expect(runtimeOf({ runtimeMinutes: 142 })).toBe(142);
+    for (const value of [null, undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, '90']) {
+      expect(runtimeOf({ runtimeMinutes: value as unknown as number | null })).toBeNull();
+    }
+  });
+
+  it('breaks an equal runtime A–Z by name in both directions, then by id', () => {
+    const tied = [
+      item({ mediaItemId: 'z2', title: 'Zodiac', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'a1', title: 'arrival', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'z1', title: 'Zodiac', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'm1', title: 'Memento', runtimeMinutes: 113 }),
+    ];
+    expect(ids(sortItems(tied, at('runtime', 'asc')))).toEqual(['m1', 'a1', 'z1', 'z2']);
+    expect(ids(sortItems(tied, at('runtime', 'desc')))).toEqual(['a1', 'z1', 'z2', 'm1']);
+    // And in any arrival order.
+    expect(ids(sortItems([...tied].reverse(), at('runtime', 'desc')))).toEqual([
+      'a1',
+      'z1',
+      'z2',
+      'm1',
+    ]);
+  });
+
+  it('orders a TV watchlist by episode length, with seasons (no runtime) last', () => {
+    const tv = [
+      item({ mediaItemId: 'season', kind: 'season', title: 'Season 1', seriesTitle: 'Fargo', runtimeMinutes: null }),
+      item({ mediaItemId: 'drama', kind: 'series', title: 'The Wire', runtimeMinutes: 58 }),
+      item({ mediaItemId: 'sitcom', kind: 'series', title: 'Seinfeld', runtimeMinutes: 22 }),
+    ];
+    expect(ids(sortItems(tv, at('runtime', 'asc')))).toEqual(['sitcom', 'drama', 'season']);
+    expect(ids(sortItems(tv, at('runtime', 'desc')))).toEqual(['drama', 'sitcom', 'season']);
+  });
+
+  it('respects the filters in force', () => {
+    const mixed = [
+      item({ mediaItemId: 'drama-long', genres: ['Drama'], runtimeMinutes: 180 }),
+      item({ mediaItemId: 'comedy', genres: ['Comedy'], runtimeMinutes: 80 }),
+      item({ mediaItemId: 'drama-short', genres: ['Drama'], runtimeMinutes: 95 }),
+    ];
+    const drama = { ...emptyFilters(), genres: ['Drama'] };
+    expect(ids(visibleItems(mixed, drama, at('runtime', 'asc')))).toEqual(['drama-short', 'drama-long']);
+    expect(ids(visibleItems(mixed, drama, at('runtime', 'desc')))).toEqual(['drama-long', 'drama-short']);
+  });
+
+  it('handles an empty and a single-title list', () => {
+    expect(sortItems([], at('runtime', 'asc'))).toEqual([]);
+    expect(ids(sortItems([item({ mediaItemId: 'only' })], at('runtime', 'desc')))).toEqual(['only']);
+  });
+
+  it('does not mutate the input', () => {
+    const before = ids(rows);
+    sortItems(rows, at('runtime', 'asc'));
+    expect(ids(rows)).toEqual(before);
+  });
+});
+
+describe('where Runtime is offered', () => {
+  it('beside Release year on every segment that can have a runtime', () => {
+    for (const segment of ['watched', 'watchlist', 'unranked'] as const) {
+      const axes = sortAxesFor(segment, { runtime: true }).map((option) => option.axis);
+      expect(axes.indexOf('runtime')).toBe(axes.indexOf('year') + 1);
+      expect(axes.at(-1)).toBe('shuffle');
+    }
+  });
+
+  it('not on a list made only of seasons, which carry no runtime', () => {
+    expect(sortAxesFor('watched', { runtime: false }).map((option) => option.axis)).not.toContain(
+      'runtime',
+    );
+    expect(offersRuntime([{ kind: 'season' }, { kind: 'season' }])).toBe(false);
+    expect(offersRuntime([])).toBe(false);
+  });
+
+  it('on films and on series, by kind, whether or not a value is present yet', () => {
+    expect(offersRuntime([{ kind: 'movie' }])).toBe(true);
+    expect(offersRuntime([{ kind: 'season' }, { kind: 'series' }])).toBe(true);
+  });
+
+  it('leaves the other axes exactly as they were', () => {
+    expect(sortAxesFor('watched', { runtime: false }).map((option) => option.axis)).toEqual([
+      'rating',
+      'watched',
+      'year',
+      'title',
+      'shuffle',
+    ]);
+    expect(sortAxesFor('watchlist', { runtime: false }).map((option) => option.axis)).toEqual([
+      'added',
+      'year',
+      'title',
+      'shuffle',
+    ]);
+    expect(sortAxesFor('unranked', { runtime: false }).map((option) => option.axis)).toEqual([
+      'watched',
+      'year',
+      'title',
+      'shuffle',
+    ]);
+  });
+});
+
+/**
+ * **Shuffle** (approved spec, 2026-11-10): every press a new seed and a new order, the
+ * order stable until the next press whatever else happens.
+ */
+describe('Shuffle', () => {
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    item({ mediaItemId: `s${String(i).padStart(2, '0')}`, genres: i % 2 ? ['Drama'] : ['Comedy'] }),
+  );
+  const SHUFFLE = at('shuffle', 'desc');
+  const none = emptyFilters();
+
+  it('ignores the order the titles arrived in, so a refetch does not reshuffle', () => {
+    const forwards = ids(sortItems(rows, SHUFFLE, 9));
+    expect(ids(sortItems([...rows].reverse(), SHUFFLE, 9))).toEqual(forwards);
+    const scrambled = [...rows].sort((a, b) => b.mediaItemId.localeCompare(a.mediaItemId));
+    expect(ids(sortItems(scrambled, SHUFFLE, 9))).toEqual(forwards);
+  });
+
+  it('keeps the shuffled relative order when a filter is applied', () => {
+    const all = ids(visibleItems(rows, none, SHUFFLE, 4));
+    const drama = ids(visibleItems(rows, { ...none, genres: ['Drama'] }, SHUFFLE, 4));
+    expect(drama).toEqual(all.filter((id) => Number(id.slice(1)) % 2 === 1));
+  });
+
+  it('moves to a new seed on every press, and a new seed gives a new order', () => {
+    let seed = 1;
+    let current = ids(visibleItems(rows, none, SHUFFLE, seed));
+    for (let press = 0; press < 25; press += 1) {
+      const next = nextShuffleSeed(rows, none, seed, current);
+      expect(next).toBeGreaterThan(seed);
+      const order = ids(visibleItems(rows, none, SHUFFLE, next));
+      expect(order).not.toEqual(current);
+      seed = next;
+      current = order;
+    }
+  });
+
+  it('never repeats the order on screen when another exists, even over two titles', () => {
+    const two = rows.slice(0, 2);
+    let seed = 1;
+    let current = ids(visibleItems(two, none, SHUFFLE, seed));
+    for (let press = 0; press < 40; press += 1) {
+      seed = nextShuffleSeed(two, none, seed, current);
+      const order = ids(visibleItems(two, none, SHUFFLE, seed));
+      expect(order).not.toEqual(current);
+      current = order;
+    }
+  });
+
+  it('compares against what is drawn, filters applied', () => {
+    const drama = { ...none, genres: ['Drama'] };
+    const current = ids(visibleItems(rows, drama, SHUFFLE, 3));
+    const next = nextShuffleSeed(rows, drama, 3, current);
+    expect(ids(visibleItems(rows, drama, SHUFFLE, next))).not.toEqual(current);
+  });
+
+  it('differs from the order on screen when chosen from another axis', () => {
+    const byRating = ids(visibleItems(rows, none, at('rating', 'desc'), 1));
+    const next = nextShuffleSeed(rows, none, 1, byRating);
+    expect(ids(visibleItems(rows, none, SHUFFLE, next))).not.toEqual(byRating);
+  });
+
+  it('still moves the seed with no other order to find (0 or 1 titles)', () => {
+    expect(nextShuffleSeed([], none, 5, [])).toBe(6);
+    expect(nextShuffleSeed([rows[0] as CollectionItem], none, 5, ['s00'])).toBe(6);
+    expect(visibleItems([], none, SHUFFLE, 6)).toEqual([]);
+    expect(ids(visibleItems([rows[0] as CollectionItem], none, SHUFFLE, 6))).toEqual(['s00']);
+  });
+
+  it('carries a hint that pressing it again reshuffles, and has no direction', () => {
+    expect(COLLECTION_SORT_AXES.shuffle).toEqual({
+      axis: 'shuffle',
+      label: 'Shuffle',
+      repeatHint: 'Tap again to reshuffle',
+    });
   });
 });

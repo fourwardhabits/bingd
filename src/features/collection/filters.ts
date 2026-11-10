@@ -144,7 +144,13 @@ export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
  *     labels were a bare *Newest* and *Oldest* sitting one row below a recency axis.
  *   · **title** — alphabetical on the name drawn on the row, so a season files under
  *     its series.
- *   · **shuffle** — the one axis with no order to reverse. Pressing it again reseeds.
+ *   · **runtime** — `runtimeMinutes`, numerically. **Shortest first on the first press,
+ *     longest first on the second** (approved spec, 2026-11-10): the question a reader
+ *     brings to it is "what fits tonight", which is answered from the short end. A title
+ *     with no usable runtime sinks in both directions — see {@link runtimeOf} for what
+ *     counts as unusable and what a TV runtime means.
+ *   · **shuffle** — the one axis with no order to reverse. Every press deals a new
+ *     order, the first one included: see {@link nextShuffleSeed}.
  *
  * **There is no watch-date axis.** There was one, it was called Recently watched, and
  * it never worked: see {@link CollectionItem.addedAt}. Ordering a collection by watch
@@ -152,7 +158,7 @@ export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
  * is a date on every row, which is a product decision about the Log sheet rather than
  * a comparator. Shipping the label without the data is what produced the photograph.
  */
-export type SortAxis = 'rating' | 'watched' | 'added' | 'year' | 'title' | 'shuffle';
+export type SortAxis = 'rating' | 'watched' | 'added' | 'year' | 'runtime' | 'title' | 'shuffle';
 
 /**
  * A collection's whole sort, as one value.
@@ -201,6 +207,13 @@ export const COLLECTION_SORT_AXES = {
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
+  runtime: {
+    axis: 'runtime',
+    label: 'Runtime',
+    directions: { desc: 'longest first', asc: 'shortest first' },
+    // Shortest first on the first press, longest first on the second (approved spec).
+    defaultDirection: 'asc',
+  },
   title: {
     axis: 'title',
     label: 'Title',
@@ -208,7 +221,7 @@ export const COLLECTION_SORT_AXES = {
     defaultDirection: 'asc',
   },
   // No `directions`, which is how `ui/sort.ts` knows there is nothing to reverse.
-  shuffle: { axis: 'shuffle', label: 'Shuffle' },
+  shuffle: { axis: 'shuffle', label: 'Shuffle', repeatHint: 'Tap again to reshuffle' },
 } as const satisfies Record<SortAxis, SortAxisSpec<SortAxis>>;
 
 export const emptyFilters = (): CollectionFilters => ({
@@ -436,9 +449,117 @@ export function sortItems(
   sort: CollectionSortState,
   seed = 0,
 ): CollectionItem[] {
-  if (sort.axis === 'shuffle') return shuffle([...items], seed);
+  if (sort.axis === 'shuffle') return shuffle(byMediaItemId(items), seed);
   return [...items].sort(compareItems(sort));
 }
+
+/**
+ * **The shuffle's input, in one fixed order before the seed touches it.**
+ *
+ * Fisher–Yates is deterministic in the seed *and in its input*, and the input here is a
+ * query result: a refetch that returned the same titles in another order (a ranking
+ * moved, the two watched queries landed the other way round) would have reshuffled the
+ * wall under the reader's thumb with the seed untouched. Sorting by id first makes the
+ * order a function of the seed and the set of titles only.
+ */
+const byMediaItemId = (items: readonly CollectionItem[]): CollectionItem[] =>
+  [...items].sort((a, b) => a.mediaItemId.localeCompare(b.mediaItemId));
+
+/**
+ * What the Collection draws: the segment's titles, filtered, in the order chosen.
+ *
+ * **A shuffle is dealt over the whole segment and then filtered**, rather than dealt over
+ * whatever the filters left. Same seed, same relative order, whichever filters are on:
+ * applying Drama keeps the dramas in the order they already had on the wall, and taking
+ * the filter off puts the others back between them rather than dealing a new hand. For
+ * every other axis, which is a comparator, the two orders of operation are the same.
+ */
+export function visibleItems(
+  items: readonly CollectionItem[],
+  filters: CollectionFilters,
+  sort: CollectionSortState,
+  seed = 0,
+): CollectionItem[] {
+  if (sort.axis === 'shuffle') return applyFilters(sortItems(items, sort, seed), filters);
+  return sortItems(applyFilters(items, filters), sort, seed);
+}
+
+/** How many seeds {@link nextShuffleSeed} tries before settling for a repeat. */
+const RESHUFFLE_ATTEMPTS = 32;
+
+/**
+ * **The seed a press of Shuffle moves to** (approved spec, 2026-11-10).
+ *
+ * Every press is a new seed — choosing Shuffle from another axis as much as pressing it
+ * again — because the seed used to be kept across axes, so Shuffle → Rating → Shuffle
+ * dealt the very hand the reader had already walked away from.
+ *
+ * **A new seed is not enough on its own.** Over two titles half of all seeds give the
+ * order already on screen, and a press that visibly does nothing reads as broken. So the
+ * seed walks forward until the *visible* order — filters applied, exactly as drawn —
+ * differs from `currentIds`, which is what the reader is looking at now. With fewer than
+ * two titles on screen there is no other order to find, and the next seed is returned as
+ * it is. The walk is bounded: past it a repeat is returned rather than a hang, which over
+ * two or more titles needs 32 consecutive coin-flips to land the same way.
+ */
+export function nextShuffleSeed(
+  items: readonly CollectionItem[],
+  filters: CollectionFilters,
+  seed: number,
+  currentIds: readonly string[],
+): number {
+  const shuffled: CollectionSortState = { axis: 'shuffle', direction: 'desc' };
+  const first = seed + 1;
+  if (currentIds.length < 2) return first;
+  for (let candidate = first; candidate < first + RESHUFFLE_ATTEMPTS; candidate += 1) {
+    const order = visibleItems(items, filters, shuffled, candidate);
+    const same =
+      order.length === currentIds.length &&
+      order.every((item, index) => item.mediaItemId === currentIds[index]);
+    if (!same) return candidate;
+  }
+  return first;
+}
+
+/**
+ * **A runtime that can be sorted on, or null** — the one definition both directions use.
+ *
+ * Null, undefined, a non-number, NaN, Infinity, zero and anything negative are all "no
+ * runtime". Zero is TMDB's placeholder for a length it does not have (the adapter's
+ * `countOrNull` says the same of episodes), so a film recorded at `0m` is unknown, not the
+ * shortest thing in the library — putting it first under *Shortest first* would be
+ * answering the question with a blank.
+ *
+ * **What the number means differs by kind, and nothing here pretends otherwise.**
+ *
+ *   · **movie** — the film's length (`detail.runtime`).
+ *   · **series** — the length of *one typical episode*: the adapter stores
+ *     `episode_run_time[0]` (`tmdb-adapter/normalize.ts`), and the list row already prints
+ *     it as `50m`. A series is only ever on the Watchlist (PRD §10), so this answers "how
+ *     long is an episode", which is what somebody deciding what to start is asking.
+ *   · **season** — **none**. `tmdb_upsert_seasons` writes no runtime and a season row
+ *     carries none (`20260820000400_a_season_is_counted_in_episodes.sql`): a season is
+ *     counted in episodes, never in minutes. It is deliberately *not* borrowed from the
+ *     parent series and *not* totalled from episodes — either would be a number nobody
+ *     published. A season sinks, which is why Runtime is not offered on a list made only
+ *     of seasons ({@link offersRuntime}).
+ */
+export function runtimeOf(item: Pick<CollectionItem, 'runtimeMinutes'>): number | null {
+  const minutes: unknown = item.runtimeMinutes;
+  return typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+}
+
+/**
+ * Whether a list has anything Runtime could order: a film or a series.
+ *
+ * Decided by **kind**, not by whether a value happens to be present, so the axis does not
+ * appear and vanish as rows enrich or filters change. Watched and Unranked on the TV side
+ * are seasons only, which have no runtime by construction — offering Runtime there would
+ * be a control that sinks every row together and changes nothing, the defect
+ * `sortAxesFor` exists to refuse. The TV Watchlist holds series, which do have one.
+ */
+export const offersRuntime = (items: readonly Pick<CollectionItem, 'kind'>[]): boolean =>
+  items.some((item) => item.kind === 'movie' || item.kind === 'series');
 
 /**
  * One axis's comparator, **total in every case**, and the totality is the point.
@@ -500,13 +621,26 @@ export function compareItems(sort: CollectionSortState) {
         if (b.year == null) return -1;
         return (a.year - b.year) * flip || byId;
       }
+      /**
+       * **Numeric, with the unusable sunk in both directions** ({@link runtimeOf}).
+       *
+       * An equal runtime is common — much of a library sits between 90 and 120 minutes —
+       * so a tie is broken on the name the row draws, A–Z in *both* directions, then the
+       * id. The tie-break is not flipped: Longest first is about the minutes, and reversing
+       * the alphabet inside a band of 120-minute films would be a second order nobody chose.
+       */
+      case 'runtime': {
+        const left = runtimeOf(a);
+        const right = runtimeOf(b);
+        if (left == null && right == null) return byName(a, b) || byId;
+        if (left == null) return 1;
+        if (right == null) return -1;
+        return (left - right) * flip || byName(a, b) || byId;
+      }
       case 'title':
         // Ascending is A–Z, and a forward code-point compare already reads A before Z —
         // so `flip` applies unchanged here exactly as it does to the numeric axes.
-        return (
-          compareLabels(displayName(a).toLowerCase(), displayName(b).toLowerCase()) * flip ||
-          byId
-        );
+        return byName(a, b) * flip || byId;
       case 'shuffle':
         return byId;
     }
@@ -516,6 +650,10 @@ export function compareItems(sort: CollectionSortState) {
 /** A–Z on what the reader sees, so a season sorts under its show. */
 const displayName = (item: CollectionItem) =>
   item.seriesTitle ? `${item.seriesTitle} ${item.title}` : item.title;
+
+/** The name drawn on the row, case-folded, A before Z. */
+const byName = (a: CollectionItem, b: CollectionItem): number =>
+  compareLabels(displayName(a).toLowerCase(), displayName(b).toLowerCase());
 
 /**
  * Fisher–Yates over a seeded generator.
@@ -574,9 +712,16 @@ function mulberry32(seed: number) {
  */
 export type CollectionSegment = 'watched' | 'watchlist' | 'unranked';
 
-export function sortAxesFor(segment: CollectionSegment): SortAxisSpec<SortAxis>[] {
+export function sortAxesFor(
+  segment: CollectionSegment,
+  { runtime = true }: { runtime?: boolean } = {},
+): SortAxisSpec<SortAxis>[] {
+  // Runtime sits beside Release year, the other fact about the title itself rather than
+  // about the reader's history with it. `runtime: false` is a list made only of seasons,
+  // which have no runtime to order by ({@link offersRuntime}).
   const tail: SortAxisSpec<SortAxis>[] = [
     COLLECTION_SORT_AXES.year,
+    ...(runtime ? [COLLECTION_SORT_AXES.runtime] : []),
     COLLECTION_SORT_AXES.title,
     COLLECTION_SORT_AXES.shuffle,
   ];
