@@ -1913,8 +1913,8 @@ export default function TitleScreen() {
    * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
    * Rank exactly as it was; a ranked one shows the smaller *Log rewatch* (founder,
    * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
-   * the score row, and stays non-interactive. *Update your rating*, the same-watch
-   * correction this button used to open, is still the ⋯ menu's first Ranking row.
+   * the score row. *Update your rating*, the same-watch correction this button used to
+   * open, is still the ⋯ menu's first Ranking row.
    */
   const immersiveActions = cloneElement(actions, {
     rank: rankable
