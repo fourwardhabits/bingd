@@ -21,6 +21,7 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
 | [`recommendations.md`](./recommendations.md) | Candidate generation through delivery, and how each guardrail is enforced |
 | [`recommendations-v2.md`](./recommendations-v2.md) | Engine V2 (off by default): behavioural language/era profile, catalogue coverage, the engine switch |
+| [`recommendations-v2-evaluation.md`](./recommendations-v2-evaluation.md) | A3: reproducible offline comparison of V1, V2 metadata and V2 hybrid (synthetic data), and rollout readiness |
 | [`taste-affinity-v2-gap-analysis.md`](./taste-affinity-v2-gap-analysis.md) | Taste Score / Engine V2 / Affinity notifications against the 2026-11-10 founder spec |
 | [`client.md`](./client.md) | App structure, navigation, state, device cache |
 | [`push.md`](./push.md) | Device tokens, the outbox, the sender, and why push needs a new production binary |

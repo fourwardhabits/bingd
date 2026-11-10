@@ -83,8 +83,11 @@ needed in either direction. Telemetry: `for_you_slate_shown.engine`, `.wall_lang
   titles enter the pool and are selected for a reader whose evidence is Japanese, following
   has no effect, the switch defaults off and rolls back, inputs are bounded, anon is refused.
 - **Hypothesis, not evidence:** that V2 orders titles better for real readers. The weights
-  are V1's proportions plus a small era term chosen so a difference can be attributed; A3
-  compares engines on held-out data, and only staging/production telemetry can say more.
+  are V1's proportions plus a small era term chosen so a difference can be attributed. A3
+  ([`recommendations-v2-evaluation.md`](./recommendations-v2-evaluation.md)) compares the
+  engines on labelled-synthetic held-out data: language and era coverage rise as designed,
+  following is inert, and pool recall and cold start get worse. Only staging/production
+  telemetry can say what that trade is worth.
 
 ## 2. A2 — collaborative evidence from taste-compatible people
 
@@ -195,4 +198,6 @@ release is needed.
   binds; TV rolls up per show; anon and internals are refused; the engine switch gates it;
   concurrent refreshes deduplicate.
 - **Hypothesis:** that taste neighbours' loves are good recommendations for real readers, and
-  every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only.
+  every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only: the source added
+  pool recall over V2 metadata (+0.024 ± 0.008) and reached 139 of 400 test readers; V2 hybrid
+  is classed experimental.
