@@ -209,7 +209,7 @@ filter *values*, and the internal group score. Saves made from a pick reuse
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `for_you_slate_shown` | a genuinely new wall was put in front of the reader — once per distinct slate, from the same guard `noteImpressions` uses, never per render or per page already recorded | the reader | `medium`, `size`, `repeat_count`, `liked_titles`, `anchors_used`, `pool_size` |
+| `for_you_slate_shown` | a genuinely new wall was put in front of the reader — once per distinct slate, from the same guard `noteImpressions` uses, never per render or per page already recorded | the reader | `medium`, `size`, `repeat_count`, `liked_titles`, `anchors_used`, `pool_size`, `engine`, `wall_languages` |
 
 One event, and it exists to make repetition a number. Opens and saves cannot answer
 whether the wall is getting fresher: a reader shown the same nine films every week and
@@ -224,6 +224,12 @@ through: the liked band anchors are drawn from, how many of this launch's drawn 
 had a TMDB list, and how many candidates survived eligibility. Anchor rotation can only
 help a reader whose `liked_titles` is above eight, so this is the split that says whether a
 high `repeat_count` is rotation's problem or a small band's.
+
+`engine` and `wall_languages` (2026-11-10, Recommendation Engine V2) say which scorer drew
+the wall — `v1` or `v2_metadata`, chosen server-side by `recommendation_engine()` and `v1`
+for everybody until an operator turns V2 on — and how many distinct original languages are
+on it. The second is the one number the V2 language work is answerable by in production; it
+is a count, so no language code, title or person travels.
 
 **Until 2026-09-13 only `medium` of this event reached PostHog** (and only from 2026-09-11):
 `size` and `repeat_count` were declared but never on the `ALLOWED_PROPERTY_KEYS` list, so

@@ -5,6 +5,7 @@ import { bandSizes, scoreFor } from '@/features/collection/score';
 import {
   useLoggedCollection,
   useRankedCollection,
+  type LoggedEntry,
   type RankedEntry,
 } from '@/features/collection/use-collection';
 import {
@@ -25,6 +26,7 @@ import {
   tasteFrom,
   type Anchor,
   type Candidate,
+  type EngineId,
   type Scored,
   type Taste,
 } from './rank';
@@ -46,7 +48,10 @@ import {
   recommendationAnchorSeed,
   useRecommendationArrangement,
 } from './session-seed';
+import { coverageFill } from './coverage';
+import { profileFrom, sourceDecades, sourceLanguages, type Profile, type ProfileEntry } from './profile';
 import { useDismissedTitles } from './use-dismissed';
+import { useRecommendationEngine } from './use-engine';
 import { drawSlate } from './selection';
 import { useRecommendationExposure } from './use-exposure';
 
@@ -69,6 +74,13 @@ import { useRecommendationExposure } from './use-exposure';
  *      now" and this is "what is worth watching", which is a slower question. It is also
  *      what makes a slate possible for somebody who has ranked nothing, and a wall drawn
  *      from it alone is still labelled "Popular right now" (`popularityOnlyFor`).
+ *
+ * **Engine V2** (`recommendation_engine`, off by default) changes the sources, not just
+ * the scorer: anchors cover the reader's liked languages (`selectAnchors` `languages`),
+ * `catalogue_candidates` fills any language or decade the lists under-supply
+ * (`coverage.ts`), and `social_candidates` is not read at all — following somebody is not
+ * evidence about taste, and under V2 it has no effect on the wall (founder spec
+ * 2026-11-10, §2).
  */
 
 export type Medium = 'movies' | 'tv';
@@ -166,6 +178,10 @@ export type ForYouScoring = {
    * covered `headlineFor` and not its caller. Independent review found it.
    */
   taste: Taste;
+  /** Which engine scored this slate. `v1` unless the server chose otherwise. */
+  engine: EngineId;
+  /** The ids the V2 catalogue source added. Empty under V1. Ids only, like `socialIds`. */
+  catalogueIds: string[];
 };
 
 /**
@@ -303,6 +319,7 @@ export function likedFrom(
       // A season's genres are its show's (`resolveMetadata`), so a TV anchor covers what
       // the show covers.
       genres: entry.genres,
+      language: entry.language,
     });
   }
 
@@ -457,7 +474,74 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
     .eq('kind', KIND_FOR[medium]);
   if (error) throw error;
 
-  return ((data ?? []) as unknown as CandidateRow[]).map((row) => ({
+  return ((data ?? []) as unknown as CandidateRow[]).map(candidateFrom);
+}
+
+/**
+ * Engine V2's catalogue source: titles in the reader's languages and liked decades.
+ *
+ * The languages and decades come from the reader's own profile and are bounded again by
+ * the server. Answers empty under V1, and fails to empty: it is an enrichment of the pool,
+ * like `social_candidates` was.
+ */
+async function catalogueCandidates(
+  medium: Medium,
+  languages: readonly string[],
+  decades: readonly number[],
+  seed: number,
+): Promise<Candidate[]> {
+  if (languages.length === 0 && decades.length === 0) return [];
+  const { data, error } = await supabase.rpc('catalogue_candidates', {
+    p_kind: KIND_FOR[medium],
+    p_languages: languages as string[],
+    p_decades: decades as number[],
+    p_per_source: 20,
+    // A 32-bit integer for the server; the launch seed is the same per process.
+    p_seed: seed % 2_147_483_647,
+  });
+  if (error || !Array.isArray(data)) return [];
+  return (data as unknown as CandidateRow[]).map(candidateFrom);
+}
+
+/** What the profile reads from the reader's collection: ranked titles first, so they win. */
+export function profileEntriesFrom(
+  movies: readonly RankedEntry[],
+  seasons: readonly RankedEntry[],
+  logged: readonly LoggedEntry[],
+): ProfileEntry[] {
+  const ranked = (list: readonly RankedEntry[]) => {
+    const sizes = bandSizes(list);
+    return list.map(
+      (entry): ProfileEntry => ({
+        mediaItemId: entry.mediaItemId,
+        score: scoreFor(entry.bucket, entry.position, sizes),
+        bucket: entry.bucket,
+        language: entry.language,
+        year: entry.year,
+        kind: entry.kind,
+        genres: entry.genres,
+      }),
+    );
+  };
+  return [
+    ...ranked(movies),
+    ...ranked(seasons),
+    ...logged.map(
+      (entry): ProfileEntry => ({
+        mediaItemId: entry.mediaItemId,
+        score: null,
+        bucket: entry.bucket,
+        language: entry.language,
+        year: entry.year,
+        kind: entry.kind,
+        genres: entry.genres,
+      }),
+    ),
+  ];
+}
+
+function candidateFrom(row: CandidateRow): Candidate {
+  return {
     mediaItemId: row.id,
     title: row.title,
     year: row.release_date ? Number(row.release_date.slice(0, 4)) : null,
@@ -475,7 +559,7 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
     }),
     language: row.original_language,
     popularity: row.popularity,
-  }));
+  };
 }
 
 /**
@@ -657,6 +741,15 @@ export function useForYou(
    * is a pure function of what its key says, and the viewer's vetoes are an overlay.
    */
   const dismissed = useDismissedTitles(userId);
+  /**
+   * Which engine scores this wall (`use-engine.ts`). Settles to `v1` on any failure, so
+   * gating on it never strands the wall; it is in the key, so a rollout or a rollback is a
+   * new slate rather than a cached one scored by the other engine.
+   */
+  const engineQuery = useRecommendationEngine(userId);
+  const engine: EngineId = engineQuery.data ?? 'v1';
+  /** V2 profiles from every logged title, so it needs the collection on both walls. */
+  const needsLogged = medium === 'tv' || engine !== 'v1';
 
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
@@ -788,7 +881,7 @@ export function useForYou(
     // The filters are part of the key: the same anchors and the same candidates with
     // a different genre picked are a different slate, and a shared key would serve
     // whichever the reader asked for first.
-    queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters()],
+    queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters(), engine],
     // The dismissed read gates too — settled, not necessarily successful: waiting
     // for it stops a cold wall drawing a tile the reader vetoed last week and
     // yanking it a beat later, while a *failed* read fails open. A wall without
@@ -798,7 +891,8 @@ export function useForYou(
       movies.isSuccess &&
       seasons.isSuccess &&
       watched.isSuccess &&
-      (medium !== 'tv' || logged.isSuccess) &&
+      (!needsLogged || logged.isSuccess) &&
+      !engineQuery.isPending &&
       !dismissed.isPending,
     // See the note on `inputs`: everything the viewer can change is in the key, and
     // what is left changes on a six-hour clock at fastest.
@@ -843,7 +937,13 @@ export function useForYou(
         return {
           ...scoring,
           // Said of the wall that is actually drawn, not of the pool it was drawn from.
-          popularityOnly: popularityOnlyFor(scoring.anchorsUsed, scoring.socialIds, items),
+          // A catalogue title came from the reader's own languages and decades, so a wall
+          // holding one is not "popular right now" either.
+          popularityOnly: popularityOnlyFor(
+            scoring.anchorsUsed,
+            [...scoring.socialIds, ...scoring.catalogueIds],
+            items,
+          ),
           // The pool feeds the filter sheet's facet counts, so it takes the veto
           // too — a dismissed title must not keep a genre option alive, or inflate
           // a count, for a wall it can never appear on (review 66, Minor 5).
@@ -874,6 +974,17 @@ export function useForYou(
           language: entry.language,
         })),
       );
+      const v2 = engine !== 'v1';
+      const profile: Profile | undefined = v2
+        ? profileFrom(profileEntriesFrom(movies.data ?? [], seasons.data ?? [], logged.data?.entries ?? []))
+        : undefined;
+      const catalogueRequest = profile
+        ? {
+            kind: KIND_FOR[medium],
+            languages: sourceLanguages(profile),
+            decades: sourceDecades(profile, KIND_FOR[medium]),
+          }
+        : null;
 
       /**
        * **Which lists the liked band already has, before choosing** (2026-09-13).
@@ -899,7 +1010,11 @@ export function useForYou(
        * TV wall still gets no popularity padding.
        */
       const trendingReads = Promise.all(TRENDING_FOR[medium].map(trendingFallback));
-      const socialRead = socialCandidates(medium);
+      // Under V2 the follow graph is not a candidate source: following alone has no effect.
+      const socialRead = v2 ? Promise.resolve<string[]>([]) : socialCandidates(medium);
+      const catalogueRead = catalogueRequest
+        ? catalogueCandidates(medium, catalogueRequest.languages, catalogueRequest.decades, anchorSeed)
+        : Promise.resolve<Candidate[]>([]);
       let lists = await cachedSimilar(readIds);
       const selectionKey = [
         userId,
@@ -907,6 +1022,7 @@ export function useForYou(
         medium,
         JSON.stringify(filters ?? emptyFilters()),
         liked.map((anchor) => `${anchor.mediaItemId}:${anchor.score}`).join(','),
+        engine,
       ].join('|');
       // An empty cached list is a title TMDB has nothing for: known, but no breadth.
       const cachedWithBreadth = new Set(
@@ -919,6 +1035,7 @@ export function useForYou(
               seed: anchorSeed,
               budget: ANCHOR_BUDGET,
               cached: cachedWithBreadth,
+              languages: v2,
             }),
           ),
         ),
@@ -1011,7 +1128,12 @@ export function useForYou(
       const social = await socialRead;
       const candidateIds = candidateIdsFrom(anchors, social, fallback);
 
-      const candidates = await candidatesFor(candidateIds, medium);
+      const listed = await candidatesFor(candidateIds, medium);
+      const filled =
+        profile && catalogueRequest
+          ? coverageFill(listed, await catalogueRead, profile, catalogueRequest)
+          : [];
+      const candidates = filled.length > 0 ? [...listed, ...filled] : listed;
 
       // `user_media` is everything logged, bucketed or dated — the collection —
       // and is excluded outright: recommending someone a film they logged last week
@@ -1047,12 +1169,14 @@ export function useForYou(
       // Scored, and stopping there. The arrangement is `select`'s job, so that changing
       // it costs a sort rather than everything above this line.
       return {
-        scored: scoreSlate({ candidates: pool, anchors, taste, exclude }),
+        scored: scoreSlate({ candidates: pool, anchors, taste, exclude, engine, profile }),
         candidatePool: candidates.map(asCollectionItem),
         anchorsUsed,
         lowData: anchorsUsed === 0,
         socialIds: social,
         taste,
+        engine,
+        catalogueIds: filled.map((candidate) => candidate.mediaItemId),
       };
     },
   });
@@ -1075,6 +1199,7 @@ export function useForYou(
   const items = slate.data?.items;
   const anchorsUsed = slate.data?.anchorsUsed;
   const poolSize = slate.data?.scored.length;
+  const slateEngine = slate.data?.engine ?? 'v1';
   // Read once per process (see `useRecommendationExposure`), which is exactly the
   // baseline this measurement wants: how repetitive the wall is against what previous
   // sessions showed, not against what this render just recorded.
@@ -1124,6 +1249,8 @@ export function useForYou(
           liked_titles: likedCount,
           anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
+          engine: slateEngine,
+          wall_languages: 0,
         },
       });
       return;
@@ -1161,10 +1288,14 @@ export function useForYou(
           liked_titles: likedCount,
           anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
+          // Which engine drew it, and how many distinct original languages are on it — the
+          // one number V2's language work is answerable by. A count, never a code.
+          engine: slateEngine,
+          wall_languages: new Set(items.map((item) => item.language ?? '')).size,
         },
       });
     });
-  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize, slateEngine]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.
@@ -1190,7 +1321,7 @@ export function useForYou(
     movies.error ??
     seasons.error ??
     watched.error ??
-    (medium === 'tv' ? logged.error : null) ??
+    (needsLogged ? logged.error : null) ??
     null;
 
   return {
@@ -1208,7 +1339,7 @@ export function useForYou(
         void movies.refetch();
         void seasons.refetch();
         void watched.refetch();
-        if (medium === 'tv') void logged.refetch();
+        if (needsLogged) void logged.refetch();
         return;
       }
       void slate.refetch();
