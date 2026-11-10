@@ -49,14 +49,19 @@ export async function contactSheet(items, title) {
     gap = 28,
     top = 110;
   const th = Math.round((H * tw) / W);
-  const layers = [at(await label(title, 34, INK, 'sansSemi'), pad, 64)];
+  const heading = await label(title, 34, INK, 'sansSemi');
+  const layers = [at(heading, pad, 64)];
   for (const [i, it] of items.entries()) {
     const left = pad + i * (tw + gap);
     layers.push({ input: (await scaled(it.png, tw)).input, left, top });
     layers.push(at(await label(it.label, 24, it.flag ? MAROON : INK), left, top + th + 40));
     if (it.note) layers.push(at(await label(it.note, 20, MUTED, 'sans'), left, top + th + 72));
   }
-  return canvas(pad * 2 + items.length * tw + (items.length - 1) * gap, top + th + 100, layers);
+  const width = Math.max(
+    pad * 2 + items.length * tw + (items.length - 1) * gap,
+    pad * 2 + Math.ceil(heading.ink.x1 - heading.ink.x0),
+  );
+  return canvas(width, top + th + 100, layers);
 }
 
 /**
@@ -165,4 +170,41 @@ export async function card02Large(png) {
     { input: await sharp(png).extract(crop).png().toBuffer(), left: pad + tw + gap, top },
   ];
   return canvas(pad * 2 + tw + gap + crop.width, top + Math.max(th, crop.height) + pad, layers);
+}
+
+/** The bottom 360 px of each card at 50%, to check what each phone shows at the edge. */
+export async function bottomEdges(items) {
+  const s = 0.5,
+    strip = 360,
+    tw = Math.round(W * s),
+    th = Math.round(strip * s);
+  const pad = 40,
+    gap = 32,
+    head = 44,
+    cols = 2,
+    top = 100;
+  const rows = Math.ceil(items.length / cols);
+  const layers = [
+    at(
+      await label('Bottom edge of every card (bottom 360 px, 50%)', 30, INK, 'sansSemi'),
+      pad,
+      60,
+    ),
+  ];
+  for (const [i, it] of items.entries()) {
+    const left = pad + (i % cols) * (tw + gap);
+    const y = top + Math.floor(i / cols) * (head + th + gap);
+    layers.push(at(await label(it.label, 22, INK), left, y + 30));
+    const img = await sharp(it.png)
+      .extract({ left: 0, top: H - strip, width: W, height: strip })
+      .resize(tw, th)
+      .png()
+      .toBuffer();
+    layers.push({ input: img, left, top: y + head });
+  }
+  return canvas(
+    pad * 2 + cols * tw + (cols - 1) * gap,
+    top + rows * (head + th + gap) + pad,
+    layers,
+  );
 }

@@ -1,7 +1,8 @@
 /**
- * Card specs and the two layouts:
+ * Card specs and the layouts:
  *   LEGACY    the approved 2026-11-09 geometry (used only to prove this renderer reproduces the approved exports)
- *   REVISION  the proposed geometry: no eyebrow, tighter subtitle-to-phone gap
+ *   REVISION  the proposed geometry: approved phones, no eyebrow, type moved down, larger secondary phone
+ *   BALANCED  a review alternative for one dual-phone card
  */
 import { join } from 'node:path';
 
@@ -37,22 +38,50 @@ export const LEGACY = {
   sec: { ...SEC, cy: 1963 },
 };
 
+/** Moves the headline and subtitle down; the main phone keeps the approved placement. */
+const TEXT_DOWN = 112;
+
+/** A phone frame at a new width, with bezel and corner radius scaled from `base`. */
+const scaledFrame = (base, w) => ({
+  w,
+  bezel: Math.round((base.bezel * w) / base.w),
+  radius: Math.round((base.radius * w) / base.w),
+});
+
 /**
- * The main phone's screen is ~1946 px tall at this width. With its top at 662 the
- * screen ends at the card's bottom edge, so the app's own tab bar sits on that edge
- * instead of being cut through. Moving the phone any higher would show empty frame
- * under the tab bar; the rest of the gap is closed by setting the text 6 px higher.
- * The secondary phone moves up by the same 121 px, so what it covers on the main
- * screen is unchanged.
+ * Main phone exactly as approved; the type moves down TEXT_DOWN to close the gap.
+ * The secondary phone is 609 px wide (60% of the main phone) and keeps the approved
+ * right edge. Any wider and it cuts the card 03 "RECENT ACTIVITY" header, which the
+ * approved card shows in full. It runs past the card's bottom edge far enough to
+ * hide its tab bar (`hideTabBar`).
  */
 export const REVISION = {
   name: 'revision',
   eyebrow: null,
-  headline: [290, 415],
-  subtitle: 536,
-  main: { ...MAIN, y: 662 },
-  sec: { ...SEC, cy: 1963 - 121 },
+  headline: LEGACY.headline.map((b) => b + TEXT_DOWN),
+  subtitle: LEGACY.subtitle + TEXT_DOWN,
+  main: LEGACY.main,
+  sec: { ...scaledFrame(SEC, 615), x: SEC.x + SEC.w - 615, hideTabBar: true },
 };
+
+/**
+ * Review alternative for one dual-phone card: the pair is narrowed and centred as a
+ * group (40 px side margins) so a 65% secondary phone clears the main screen's
+ * left text column. Main phone 960 px wide, secondary 624 px.
+ */
+export const BALANCED = {
+  ...REVISION,
+  name: 'balanced',
+  main: { ...scaledFrame(MAIN, 960), x: 40, y: LEGACY.main.y },
+  sec: { ...scaledFrame(SEC, 624), x: W - 40 - 624, hideTabBar: true },
+};
+
+/**
+ * Tallest secondary tab bar as a fraction of screen width: 145 source px on the
+ * 945 px captures (04, 05). Card 01's is 100 of 832; the comments screen has none.
+ */
+const TAB_BAR = 145 / 945;
+const TAB_BAR_MARGIN = 12;
 export function cardSpecs(src) {
   const layer = (name) => ({ file: join(src, 'layers', `${name}.png`) });
   const capture = (name) => ({ file: join(src, 'captures', name), rawCapture: true });
@@ -153,6 +182,7 @@ export async function renderCard(spec, layout) {
   const ms = await shadowOf(main.buffer, { sigma: 18, opacity: 0.28, dy: 10 });
   layers.push(await visible(ms.input, M.x - ms.pad, M.y - ms.pad + ms.dy));
   layers.push(await visible(main.buffer, M.x, M.y));
+  geo.mainW = M.w;
   geo.mainTop = M.y;
   geo.mainScreenBottom = M.y + M.bezel + main.scaledH;
   geo.mainCrop = mainScr.crop ?? null;
@@ -165,7 +195,9 @@ export async function renderCard(spec, layout) {
     // Held to the frame height of the full-height captures (the comments capture is shorter).
     const ih = Math.min(natural, Math.round((1876 / 945) * innerW));
     const outerH = ih + 2 * S.bezel;
-    const top = Math.round(S.cy - outerH / 2);
+    const top = S.hideTabBar
+      ? H + S.bezel + Math.ceil(TAB_BAR * innerW) + TAB_BAR_MARGIN - outerH
+      : Math.round(S.cy - outerH / 2);
     const sec = await phone({
       scr: secScr,
       outerW: S.w,
@@ -175,9 +207,13 @@ export async function renderCard(spec, layout) {
     });
     const ss = await shadowOf(sec.buffer, { sigma: 22, opacity: 0.5, dy: 16 });
     layers.push(await visible(ss.input, S.x - ss.pad, top - ss.pad + ss.dy));
-    layers.push({ input: sec.buffer, left: S.x, top });
+    layers.push(await visible(sec.buffer, S.x, top));
+    geo.secX = S.x;
+    geo.secW = S.w;
     geo.secTop = top;
     geo.secBottom = top + outerH;
+    geo.secScreenBottom = top + S.bezel + sec.screenH;
+    geo.secTabBarPx = Math.ceil(TAB_BAR * innerW);
   }
   const png = await encodeCard(sharp(await background()).composite(layers));
   return { png, geo };

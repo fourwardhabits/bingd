@@ -1,32 +1,36 @@
 {
   "files": {
     "apple-1206x2622/01-movies-tv.png": {
-      "sha256": "267cfc76dfb85b6ffa5790ceee1f2df21b1c1142ebc2648ce6d76c89c67261ec",
-      "bytes": 3080910
+      "sha256": "f1b72af88acd8f059c50d3865bcc1c07f106311be0b0d23f2588835bd61ec687",
+      "bytes": 3046617
     },
     "apple-1206x2622/02-head-to-head.png": {
-      "sha256": "67a47dc303092c5703e0a474c63ae1df3b93fcb8b0919945d44cc8d63ca2f65d",
-      "bytes": 2039559
+      "sha256": "23e63aa8f611e73822f3fc449e196d3fe0c15d9b8ee18bf199e0f8d9846b4bcd",
+      "bytes": 2038413
     },
     "apple-1206x2622/03-friends.png": {
-      "sha256": "9ec055fa979da6d357504781420cad7615226796742459ad2d055de84211bc2f",
-      "bytes": 1528995
+      "sha256": "c712f8e457add0bc6f75e5ca5770b9998b678cbee5fcf181255304d468f54f63",
+      "bytes": 1392852
     },
     "apple-1206x2622/04-watchlist.png": {
-      "sha256": "add296a025d1a03ce17dfc04accba0588b5dbca005101458e43d74903d1943cb",
-      "bytes": 2160826
+      "sha256": "a242a635c621ab1850a392de12d96ecd0173e43397908ff78971ee5281d17381",
+      "bytes": 2023670
     },
     "apple-1206x2622/05-your-year.png": {
-      "sha256": "8e57e339fb3ddde7a8659b5a864030c8b58ecca46238e7cdd9a1ee46166755ca",
-      "bytes": 771109
+      "sha256": "b0bcae21e2e69d2ad3d911327893647b114db92e0cedc33233f20acc949549f2",
+      "bytes": 745395
     },
     "apple-1206x2622/06-for-you.png": {
-      "sha256": "b8466be254064704248e67b017345e850180726fbf1969ea29129d003e9f153b",
-      "bytes": 3056154
+      "sha256": "f8b938566af2be82e751c70a15799c2f2ae7e7a8baaed897e23a3f999342aad6",
+      "bytes": 3003783
     },
     "candidate/07-ranked-CANDIDATE.png": {
-      "sha256": "c35b9edd58eee9442ade14bcb623376d703603c798d7baf1b68075b8995090f4",
-      "bytes": 1445753
+      "sha256": "0dffab1a149f4900ffe853b458af94bb03bb38e6ac63e1d5a7b7d7a0c186f9f9",
+      "bytes": 1387452
+    },
+    "alternatives/05-your-year_ALT-balanced.png": {
+      "sha256": "0a4f598eaa6b46f9c02bdefcebeb229f48f15f7248e1fcae24cee808259d9215",
+      "bytes": 765772
     }
   }
 }
