@@ -147,7 +147,10 @@ export async function beforeAfter({ id, before, after, mBefore, mAfter, note }) 
 }
 
 /** The revised card 02 at half size next to a 1:1 crop of its comparison sheet. */
-export async function card02Large(png) {
+export async function card02Large(
+  png,
+  title = 'Card 02: full card at 50% (left) and the comparison at 100% (right)',
+) {
   const s = 0.5,
     tw = Math.round(W * s),
     th = Math.round(H * s);
@@ -156,16 +159,7 @@ export async function card02Large(png) {
     top = 120,
     gap = 48;
   const layers = [
-    at(
-      await label(
-        'Card 02, revised: full card at 50% (left) and the comparison at 100% (right)',
-        30,
-        INK,
-        'sansSemi',
-      ),
-      pad,
-      66,
-    ),
+    at(await label(title, 30, INK, 'sansSemi'), pad, 66),
     { input: (await scaled(png, tw)).input, left: pad, top },
     { input: await sharp(png).extract(crop).png().toBuffer(), left: pad + tw + gap, top },
   ];
@@ -207,4 +201,38 @@ export async function bottomEdges(items) {
     top + rows * (head + th + gap) + pad,
     layers,
   );
+}
+
+/**
+ * Copy before/after: the top of each card (type and the top of the main phone) at
+ * 50%, the v2 copy on the left and the new copy on the right, one row per position.
+ */
+export async function copyBeforeAfter(rows, { title, beforeLabel, afterLabel }) {
+  const s = 0.5,
+    cropH = 960,
+    tw = Math.round(W * s),
+    th = Math.round(cropH * s);
+  const pad = 40,
+    gap = 32,
+    head = 48,
+    top = 150,
+    rowH = head + th + 36;
+  const layers = [
+    at(await label(title, 32, INK, 'sansSemi'), pad, 62),
+    at(await label(beforeLabel, 22, MUTED, 'sansSemi'), pad, top - 22),
+    at(await label(afterLabel, 22, MAROON, 'sansSemi'), pad + tw + gap, top - 22),
+  ];
+  const top960 = (png) =>
+    sharp(png)
+      .extract({ left: 0, top: 0, width: W, height: cropH })
+      .resize(tw, th)
+      .png()
+      .toBuffer();
+  for (const [r, row] of rows.entries()) {
+    const y = top + r * rowH;
+    layers.push(at(await label(row.title, 24, INK, 'sansSemi'), pad, y + 32));
+    layers.push({ input: await top960(row.before), left: pad, top: y + head });
+    layers.push({ input: await top960(row.after), left: pad + tw + gap, top: y + head });
+  }
+  return canvas(pad * 2 + tw * 2 + gap, top + rows.length * rowH, layers);
 }

@@ -57,6 +57,53 @@ export async function measureCard(file) {
 }
 
 /**
+ * Lines of type above the main phone, from pixels: runs of rows with light ink,
+ * merged across gaps of up to `join` rows (dots and accents). Each line reports its
+ * ink box, so the count proves the line breaks and x0/x1 prove nothing is clipped.
+ */
+export async function measureTextLines(file, { join = 10 } = {}) {
+  const { phoneTop } = await measureCard(file);
+  const { data, info } = await sharp(file)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const w = info.width;
+  const l = (x, y) => {
+    const i = (y * w + x) * 3;
+    return lum(data[i], data[i + 1], data[i + 2]);
+  };
+  const lines = [];
+  let open = null;
+  for (let y = 0; y < phoneTop - 30; y++) {
+    const bg = l(12, y);
+    let x0 = -1;
+    let x1 = -1;
+    for (let x = 0; x < w; x++)
+      if (l(x, y) > bg + 45) {
+        if (x0 < 0) x0 = x;
+        x1 = x;
+      }
+    if (x0 < 0) continue;
+    if (open && y - open.y1 <= join + 1) {
+      open.y1 = y;
+      open.x0 = Math.min(open.x0, x0);
+      open.x1 = Math.max(open.x1, x1);
+    } else {
+      open = { y0: y, y1: y, x0, x1 };
+      lines.push(open);
+    }
+  }
+  return lines.map((b) => ({
+    ...b,
+    width: b.x1 - b.x0 + 1,
+    height: b.y1 - b.y0 + 1,
+    centre: (b.x0 + b.x1 + 1) / 2,
+    marginLeft: b.x0,
+    marginRight: w - 1 - b.x1,
+  }));
+}
+
+/**
  * Bezel-to-bezel width of a phone frame, from pixels: the leftmost and rightmost
  * columns in [xFrom, xTo) that are frame-dark on every row in [y0, y1). Screen
  * content is never that dark for hundreds of rows, so only bezels match. The 1 px

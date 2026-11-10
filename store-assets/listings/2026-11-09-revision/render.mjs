@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Renders the proposed 2026-11-09 revision of the App Store cards, and the
- * review sheets the founder approves them from.
+ * Renders the v3 App Store cards (v2 geometry, final copy, new upload order) and
+ * the review sheets the founder approves them from.
  *
  *   node store-assets/listings/2026-11-09-revision/render.mjs
  *
@@ -10,32 +10,43 @@
  *   2. Reproduction check: the approved layout, rendered by this code, matches the
  *      approved exports in ../2026-11-09/apple-1206x2622 to within 2 levels per
  *      channel, over the whole card.
- *   3. The proposed six cards → apple-1206x2622/, the ranking candidate → candidate/,
- *      the card 05 balanced-layout alternative → alternatives/.
- *   4. Review sheets → review/.
- *   5. QA → qa/qa-report.json (format, measured gaps and phone widths, unchanged
- *      screen content, secondary tab bars hidden).
+ *   3. Baseline check: the v2 cards (approved copy, v2 geometry), rendered by this
+ *      code, are byte-identical to the committed v2/ render.
+ *   4. The v3 cards → apple-1206x2622/ (original card names), alternatives/ (card 05
+ *      balanced layout), and store-order/ (upload order, with manifest.json).
+ *   5. Review sheets → review/.
+ *   6. QA → qa/qa-report.json and qa/qa-report.md.
  *
  * Nothing here uploads, publishes or touches the approved set.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { BALANCED, LEGACY, REVISION, cardSpecs, renderCard } from './cards.mjs';
-import { H, W, sha256, sharp } from './lib.mjs';
-import { measureCard, measureFrameWidth } from './measure.mjs';
-import { beforeAfter, bottomEdges, browseSheet, card02Large, contactSheet } from './review.mjs';
+import { format } from 'prettier';
+
+import { BALANCED, LEGACY, REVISION, TYPE, cardSpecs, renderCard } from './cards.mjs';
+import { H, W, line, sha256, sharp } from './lib.mjs';
+import { measureCard, measureFrameWidth, measureTextLines } from './measure.mjs';
+import {
+  bottomEdges,
+  browseSheet,
+  card02Large,
+  contactSheet,
+  copyBeforeAfter,
+} from './review.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, 'sources');
 const APPROVED = join(here, '..', '2026-11-09', 'apple-1206x2622');
+const V2 = join(here, 'v2');
 const OUT = join(here, 'apple-1206x2622');
-const CANDIDATE = join(here, 'candidate');
-const REVIEW = join(here, 'review');
 const ALTERNATIVES = join(here, 'alternatives');
+const STORE_ORDER_DIR = join(here, 'store-order');
+const REVIEW = join(here, 'review');
 const QA = join(here, 'qa');
-for (const d of [OUT, CANDIDATE, ALTERNATIVES, REVIEW, join(REVIEW, 'before-after'), QA])
+await rm(STORE_ORDER_DIR, { recursive: true, force: true });
+for (const d of [OUT, ALTERNATIVES, STORE_ORDER_DIR, REVIEW, QA])
   await mkdir(d, { recursive: true });
 
 const fail = (msg) => {
@@ -43,6 +54,9 @@ const fail = (msg) => {
   process.exit(1);
 };
 const step = (msg) => console.log(`\n== ${msg}`);
+/** Generated text files are written as the repo's prettier would leave them. */
+const writeFormatted = async (file, text) =>
+  writeFile(file, await format(text, { filepath: file }));
 
 // 1 -------------------------------------------------------------------------
 step('1. sources');
@@ -64,7 +78,7 @@ const REPRO_TOLERANCE = 2;
 const repro = [];
 const legacyGeo = {};
 for (const spec of [
-  ...specs.lineup.filter((c) => c.id !== '02-head-to-head'),
+  ...specs.approved.filter((c) => c.id !== '02-head-to-head'),
   specs.legacyCard02,
 ]) {
   const { png, geo } = await renderCard(spec, LEGACY);
@@ -86,167 +100,146 @@ for (const spec of [
 }
 
 // 3 -------------------------------------------------------------------------
-step('3. proposed cards');
+step('3. v2 baseline check');
+const ALT_ID = '05-your-year_ALT-balanced';
+const { files: v2Sums } = JSON.parse(await readFile(join(V2, 'checksums.json'), 'utf8'));
+const v2 = {};
+for (const [spec, layout, key] of [
+  ...specs.approved.map((s) => [s, REVISION, s.id]),
+  [specs.approved.find((s) => s.id === '05-your-year'), BALANCED, ALT_ID],
+]) {
+  const { png } = await renderCard(spec, layout);
+  const file = key === ALT_ID ? `alternatives/${ALT_ID}.png` : `apple-1206x2622/${key}.png`;
+  if (sha256(png) !== v2Sums[file]?.sha256) fail(`${file} no longer matches the v2 render`);
+  v2[key] = png;
+  console.log(`PASS  ${file} byte-identical to v2/`);
+}
+
+// 4 -------------------------------------------------------------------------
+step('4. v3 cards');
 const rendered = {};
 const checksums = {};
-const ALT_ID = '05-your-year_ALT-balanced';
-const jobs = [
-  ...specs.lineup.map((spec) => ({
-    spec,
-    layout: REVISION,
-    dir: 'apple-1206x2622',
-    id: spec.id,
-  })),
-  { spec: specs.candidate, layout: REVISION, dir: 'candidate', id: specs.candidate.id },
-  { spec: specs.lineup[4], layout: BALANCED, dir: 'alternatives', id: ALT_ID },
-];
-for (const { spec, layout, dir, id } of jobs) {
-  const { png, geo } = await renderCard(spec, layout);
-  await writeFile(join(here, dir, `${id}.png`), png);
-  rendered[id] = { png, geo, spec, layout };
-  checksums[`${dir}/${id}.png`] = { sha256: sha256(png), bytes: png.length };
-  console.log(`      ${dir}/${id}.png  ${Math.round(png.length / 1024)} KB`);
+const record = (rel, png) => (checksums[rel] = { sha256: sha256(png), bytes: png.length });
+const pos = (n) => String(n).padStart(2, '0');
+const manifest = {
+  note: 'Upload order for the App Store (iPhone 6.9", 1206 x 2622). Review only: not uploaded.',
+  positions: [],
+};
+for (const spec of specs.lineup) {
+  const jobs = [{ layout: REVISION, key: spec.id, rel: `apple-1206x2622/${spec.id}.png` }];
+  if (spec.id === '05-your-year')
+    jobs.push({ layout: BALANCED, key: ALT_ID, rel: `alternatives/${ALT_ID}.png` });
+  for (const { layout, key, rel } of jobs) {
+    const { png, geo } = await renderCard(spec, layout);
+    await writeFile(join(here, rel), png);
+    record(rel, png);
+    rendered[key] = { png, geo, spec, layout };
+    console.log(`      ${rel}  ${Math.round(png.length / 1024)} KB`);
+  }
+  const orderRel = `store-order/${pos(spec.position)}-${spec.slot}__${spec.id}.png`;
+  await writeFile(join(here, orderRel), rendered[spec.id].png);
+  record(orderRel, rendered[spec.id].png);
+  const entry = {
+    position: spec.position,
+    slot: spec.slot,
+    card: spec.id,
+    file: orderRel,
+    sameBytesAs: `apple-1206x2622/${spec.id}.png`,
+    headline: spec.headline,
+    subtitle: spec.subtitle,
+    sha256: checksums[orderRel].sha256,
+  };
+  if (spec.id === '05-your-year')
+    entry.alternative = {
+      file: `alternatives/${ALT_ID}.png`,
+      sha256: checksums[`alternatives/${ALT_ID}.png`].sha256,
+      note: 'Balanced layout, same copy. Kept for review; not selected.',
+    };
+  manifest.positions.push(entry);
+  console.log(`      ${orderRel}`);
 }
+await writeFormatted(join(STORE_ORDER_DIR, 'manifest.json'), JSON.stringify(manifest));
 await writeFile(
   join(here, 'checksums.json'),
   `${JSON.stringify({ files: checksums }, null, 2)}\n`,
 );
 
-// Measurements, from pixels, for the approved and proposed cards.
-const lineupIds = specs.lineup.map((c) => c.id);
-const approvedPng = Object.fromEntries(
-  await Promise.all(
-    lineupIds.map(async (id) => [id, await readFile(join(APPROVED, `${id}.png`))]),
-  ),
-);
-/** Main phone measured above the secondary phone; secondary measured over its own rows. */
-async function widths(png, geo) {
-  const primary = await measureFrameWidth(png, [900, 1400], [0, W]);
-  if (!geo.secTop) return { primary: primary.width };
-  const secondary = await measureFrameWidth(
-    png,
-    [geo.secTop + 150, Math.min(geo.secBottom, H) - 80],
-    [300, W],
-  );
-  return {
-    primary: primary.width,
-    secondary: secondary.width,
-    ratio: +(secondary.width / primary.width).toFixed(3),
-  };
-}
-const measures = {};
-for (const id of Object.keys(rendered)) {
-  const approvedId = rendered[id].spec.id;
-  const before =
-    approvedPng[approvedId] && id !== specs.candidate.id ? approvedPng[approvedId] : null;
-  measures[id] = {
-    before: before ? await measureCard(before) : null,
-    after: await measureCard(rendered[id].png),
-    widthsBefore: before
-      ? await widths(before, approvedId === '02-head-to-head' ? {} : legacyGeo[approvedId])
-      : null,
-    widthsAfter: await widths(rendered[id].png, rendered[id].geo),
-  };
-}
-
-// 4 -------------------------------------------------------------------------
-step('4. review sheets');
-const cand = rendered[specs.candidate.id].png;
-const alt = rendered[ALT_ID].png;
+// 5 -------------------------------------------------------------------------
+step('5. review sheets');
 const NAMES = {
-  '01-movies-tv': 'Movies + TV',
-  '02-head-to-head': 'Head to head',
-  '03-friends': 'Friends',
-  '04-watchlist': 'Watchlist',
-  '05-your-year': 'Your year',
-  '06-for-you': 'For you',
+  collection: 'Collection',
+  'head-to-head': 'Head-to-head',
+  friends: 'Friends',
+  'for-you': 'For You',
+  watchlist: 'Watchlist',
+  'goals-awards': 'Goals & Awards',
 };
-const pct = (r) => `${Math.round(r * 100)}%`;
-function note(id) {
-  const { widthsBefore: b, widthsAfter: a } = measures[id];
-  const type = 'No eyebrow, type 112 px lower, main phone as approved.';
-  if (id === '02-head-to-head') return `${type} No result phone.`;
-  if (!a.secondary) return type;
-  return `${type} Secondary ${b.secondary} → ${a.secondary} px (${pct(b.ratio)} → ${pct(a.ratio)}), tab bar off-card.`;
-}
+const order = specs.lineup;
 const sheets = {
   'contact-sheet.png': await contactSheet(
-    lineupIds.map((id, i) => ({ png: rendered[id].png, label: `${i + 1}. ${NAMES[id]}` })),
-    'bingd App Store cards, proposed revision v2 (store order). Not uploaded.',
+    order.map((s) => ({
+      png: rendered[s.id].png,
+      label: `${s.position}. ${NAMES[s.slot]}`,
+      note: `card ${s.id}`,
+    })),
+    'bingd App Store cards v3: final copy, upload order. Not uploaded.',
   ),
-  'contact-sheet-with-candidate.png': await contactSheet(
-    [
-      ...lineupIds.map((id, i) => ({ png: rendered[id].png, label: `${i + 1}. ${NAMES[id]}` })),
-      { png: cand, label: 'CANDIDATE: Ranked', flag: true, note: 'not in the six-card lineup' },
-    ],
-    'Proposed six + the ranking-payoff candidate (for decision only)',
+  'browse-first-three.png': await browseSheet([
+    {
+      title: 'v3: first three, as an App Store search result (250 px wide)',
+      items: order.slice(0, 3).map((s) => rendered[s.id].png),
+      flag: true,
+    },
+    {
+      title: 'v2 copy (PR #244) for comparison',
+      items: order.slice(0, 3).map((s) => v2[s.id]),
+    },
+  ]),
+  'before-after-copy.png': await copyBeforeAfter(
+    order.map((s) => ({
+      title: `${s.position}. ${NAMES[s.slot]} (${s.id})`,
+      before: v2[s.id],
+      after: rendered[s.id].png,
+    })),
+    {
+      title: 'Copy before/after, in the new upload order (top 960 px of each card, 50%)',
+      beforeLabel: 'v2 COPY (PR #244)',
+      afterLabel: 'v3 COPY',
+    },
   ),
-  'alternative-05-balanced.png': await contactSheet(
+  'position-06-layouts.png': await contactSheet(
     [
-      { png: approvedPng['05-your-year'], label: 'Approved (PR #240)' },
       {
         png: rendered['05-your-year'].png,
-        label: 'Proposed v2',
+        label: '6. v2 layout',
         note: 'secondary 60% of main',
       },
       {
-        png: alt,
-        label: 'ALTERNATIVE: balanced',
+        png: rendered[ALT_ID].png,
+        label: '6. Balanced alternative',
         flag: true,
-        note: 'main 960, secondary 624 (65%)',
+        note: 'main 960, secondary 65%',
       },
     ],
-    'Card 05: optional balanced layout (Award names stay readable with a 65% secondary)',
+    'Position 6 with the new copy: both layouts, for review',
   ),
-  'browse-size-preview.png': await browseSheet([
-    {
-      title: 'Proposed v2: first three, as an App Store search result (250 px wide)',
-      items: lineupIds.slice(0, 3).map((id) => rendered[id].png),
-      flag: true,
-    },
-    {
-      title: 'Approved (PR #240) for comparison',
-      items: lineupIds.slice(0, 3).map((id) => approvedPng[id]),
-    },
-    {
-      title: 'Proposed v2: cards 4 to 6',
-      items: lineupIds.slice(3).map((id) => rendered[id].png),
-      flag: true,
-    },
-    { title: 'Approved: cards 4 to 6', items: lineupIds.slice(3).map((id) => approvedPng[id]) },
-    {
-      title: 'Card 05 alternative (balanced) and the ranking candidate',
-      items: [rendered['05-your-year'].png, alt, cand],
-      flag: true,
-    },
-  ]),
   'bottom-edges.png': await bottomEdges(
-    [...lineupIds, ALT_ID, specs.candidate.id].map((id) => ({
-      png: rendered[id].png,
-      label: id,
-    })),
+    [...order.map((s) => s.id), ALT_ID].map((id) => ({ png: rendered[id].png, label: id })),
   ),
   'card02-large.png': await card02Large(rendered['02-head-to-head'].png),
 };
-for (const id of lineupIds) {
-  sheets[`before-after/${id}.png`] = await beforeAfter({
-    id,
-    before: approvedPng[id],
-    after: rendered[id].png,
-    mBefore: measures[id].before,
-    mAfter: measures[id].after,
-    note: note(id),
-  });
-}
 for (const [name, png] of Object.entries(sheets)) {
   await writeFile(join(REVIEW, name), png);
   console.log(`      review/${name}`);
 }
 
-// 5 -------------------------------------------------------------------------
-step('5. QA');
-const qa = { reproduction: repro, cards: [] };
-let failed = 0;
+// 6 -------------------------------------------------------------------------
+step('6. QA');
+const approvedPng = Object.fromEntries(
+  await Promise.all(
+    specs.approved.map(async (s) => [s.id, await readFile(join(APPROVED, `${s.id}.png`))]),
+  ),
+);
 /** Mean and max abs difference between two cards inside a rectangle. */
 async function regionDiff(pngA, pngB, [x0, x1], [y0, y1]) {
   const [a, b] = await Promise.all([raw(pngA), raw(pngB)]);
@@ -309,10 +302,61 @@ async function secondaryContentDiff(id) {
       }
   return { mean: +(sum / n).toFixed(3), comparedRows: rows - skip };
 }
-for (const [id, { png, geo, spec, layout }] of Object.entries(rendered)) {
+/** Ink width of one line as rendered on its own, before compositing. */
+const glyphWidth = async (text, type) => {
+  const l = await line({ text, ...type });
+  return l.ink.x1 - l.ink.x0 + 1;
+};
+const capHeight = async (type) => {
+  const l = await line({ text: 'H', ...type });
+  return l.baseline - l.capTop;
+};
+const BROWSE = 250 / W;
+const browse = {
+  headlineCapPx: +((await capHeight(TYPE.headline)) * BROWSE).toFixed(1),
+  subtitleCapPx: +((await capHeight(TYPE.subtitle)) * BROWSE).toFixed(1),
+};
+/** Upload order required by the 2026-11-10 brief. */
+const BRIEF_ORDER = [
+  '01-movies-tv',
+  '02-head-to-head',
+  '03-friends',
+  '06-for-you',
+  '04-watchlist',
+  '05-your-year',
+];
+/** Rows from here down are phones and background only; type ends well above. */
+const BELOW_TYPE = 700;
+const MIN_SIDE_MARGIN = 100;
+const MIN_BALANCE = 0.7;
+
+const qa = {
+  reproduction: repro,
+  order: {
+    expected: BRIEF_ORDER,
+    actual: order.map((s) => s.id),
+    pass:
+      order.every((s, i) => s.id === BRIEF_ORDER[i] && s.position === i + 1) &&
+      order.length === 6,
+  },
+  browse,
+  cards: [],
+};
+console.log(`${qa.order.pass ? 'PASS' : 'FAIL'}  upload order ${qa.order.actual.join(', ')}`);
+let failed = qa.order.pass ? 0 : 1;
+for (const [key, { png, geo, spec, layout }] of Object.entries(rendered)) {
   const meta = await sharp(png).metadata();
-  const m = measures[id];
-  const reduction = m.before ? (m.before.gap - m.after.gap) / m.before.gap : null;
+  const lines = await measureTextLines(png);
+  const texts = [...spec.headline, spec.subtitle];
+  const types = [TYPE.headline, TYPE.headline, TYPE.subtitle];
+  const expectedWidths = await Promise.all(texts.map((t, i) => glyphWidth(t, types[i])));
+  const [h1, h2] = lines;
+  const balance =
+    h1 && h2 ? +(Math.min(h1.width, h2.width) / Math.max(h1.width, h2.width)).toFixed(3) : null;
+  const m = await measureCard(png);
+  const mApproved = await measureCard(approvedPng[spec.id]);
+  const reduction = (mApproved.gap - m.gap) / mApproved.gap;
+  const below = await regionDiff(png, v2[key], [0, W], [BELOW_TYPE, H]);
   const checks = {
     format:
       meta.format === 'png' &&
@@ -321,69 +365,123 @@ for (const [id, { png, geo, spec, layout }] of Object.entries(rendered)) {
       meta.channels === 3 &&
       !meta.hasAlpha &&
       meta.space === 'srgb',
-    gapReduced45to55: reduction === null ? null : reduction >= 0.45 && reduction <= 0.55,
-    secondaryWidth60to70: m.widthsAfter.ratio
-      ? m.widthsAfter.ratio >= 0.6 && m.widthsAfter.ratio <= 0.7
-      : null,
+    threeTextLines: lines.length === 3,
+    eachLineSingle: lines.every((l, i) => l.height <= 1.4 * types[i].px),
+    widthsMatchGlyphs: lines.every((l, i) => Math.abs(l.width - expectedWidths[i]) <= 2),
+    centred: lines.every((l) => Math.abs(l.centre - W / 2) <= 1.5),
+    sideMargins: lines.every((l) => Math.min(l.marginLeft, l.marginRight) >= MIN_SIDE_MARGIN),
+    headlineBalanced: balance !== null && balance >= MIN_BALANCE,
+    gapReduced45to55vsApproved: reduction >= 0.45 && reduction <= 0.55,
+    belowTypeIdenticalToV2: below.max === 0,
     secondaryTabBarBelowEdge: geo.secTop ? geo.secScreenBottom - H >= geo.secTabBarPx : null,
   };
   const card = {
-    id,
+    card: key,
+    position: spec.position,
     layout: layout.name,
-    width: meta.width,
-    height: meta.height,
-    channels: meta.channels,
-    hasAlpha: meta.hasAlpha,
-    space: meta.space,
-    bytes: png.length,
-    gap: {
-      before: m.before?.gap ?? null,
-      after: m.after.gap,
-      reduction: reduction && +reduction.toFixed(3),
+    format: {
+      width: meta.width,
+      height: meta.height,
+      channels: meta.channels,
+      hasAlpha: meta.hasAlpha,
+      space: meta.space,
     },
-    widths: { before: m.widthsBefore, after: m.widthsAfter },
-    measured: { before: m.before, after: m.after },
+    text: lines.map((l, i) => ({ text: texts[i], glyphWidth: expectedWidths[i], ...l })),
+    headlineBalance: balance,
+    gap: { approved: mApproved.gap, v3: m.gap, reduction: +reduction.toFixed(3) },
+    belowTypeVsV2: below,
     geometry: geo,
     checks,
   };
-  if (spec.main.rawCapture) card.chromeCrop = geo.mainCrop;
-  if (layout === REVISION && approvedPng[id]) {
-    // The main phone is where the approved card put it: compare the screen left of both
-    // secondary phones and their shadows (or the whole screen when there is none).
+  if (layout === REVISION) {
     const M = LEGACY.main;
     const right =
-      id === '02-head-to-head'
+      spec.id === '02-head-to-head'
         ? 540
         : geo.secX
           ? Math.min(geo.secX, LEGACY.sec.x) - 70
           : M.x + M.w - M.bezel - 4;
-    card.mainScreenUnchanged = await regionDiff(
+    card.mainScreenVsApproved = await regionDiff(
       png,
-      approvedPng[id],
+      approvedPng[spec.id],
       [M.x + M.bezel + 4, right],
       [M.y + 140, H],
     );
-    checks.mainScreenIdenticalToApproved = card.mainScreenUnchanged.max <= 2;
+    checks.mainScreenIdenticalToApproved = card.mainScreenVsApproved.max <= 2;
     if (geo.secTop) {
-      card.secondaryContentVsApproved = await secondaryContentDiff(id);
+      card.secondaryContentVsApproved = await secondaryContentDiff(spec.id);
       checks.secondaryContentMatchesApproved = card.secondaryContentVsApproved.mean <= 4;
     }
+  }
+  if (geo.secTop) {
+    const primary = await measureFrameWidth(png, [900, 1400], [0, W]);
+    const secondary = await measureFrameWidth(
+      png,
+      [geo.secTop + 150, Math.min(geo.secBottom, H) - 80],
+      [300, W],
+    );
+    card.phoneWidths = {
+      primary: primary.width,
+      secondary: secondary.width,
+      ratio: +(secondary.width / primary.width).toFixed(3),
+    };
   }
   const bad = Object.entries(checks)
     .filter(([, v]) => v === false)
     .map(([k]) => k);
-  failed += bad.length ? 1 : 0;
+  if (bad.length) failed++;
   qa.cards.push(card);
-  const g = m.before ? `gap ${m.before.gap} → ${m.after.gap} px` : `gap ${m.after.gap} px`;
-  const wd = m.widthsAfter.secondary
-    ? `  widths ${m.widthsAfter.primary}/${m.widthsAfter.secondary} = ${pct(m.widthsAfter.ratio)}`
-    : `  width ${m.widthsAfter.primary}`;
   console.log(
-    `${bad.length ? 'FAIL' : 'PASS'}  ${id}  ${meta.width}x${meta.height} ch=${meta.channels} alpha=${meta.hasAlpha}  ${g}${wd}${bad.length ? `  [${bad.join(', ')}]` : ''}`,
+    `${bad.length ? 'FAIL' : 'PASS'}  ${pos(spec.position)} ${key}  lines ${lines.map((l) => l.width).join(' / ')}  balance ${balance}  gap ${mApproved.gap} → ${m.gap}${bad.length ? `  [${bad.join(', ')}]` : ''}`,
   );
 }
 await writeFile(join(QA, 'qa-report.json'), `${JSON.stringify(qa, null, 2)}\n`);
-if (failed) fail(`${failed} card(s) failed QA, see qa/qa-report.json`);
+
+const allChecks = [...new Set(qa.cards.flatMap((c) => Object.keys(c.checks)))];
+const md = [
+  '# QA report: v3 copy and order',
+  '',
+  'Generated by `render.mjs` from the rendered PNGs. Widths are measured ink extents in px on the 1206 px card. Full data: `qa-report.json`.',
+  '',
+  `**Result: ${failed ? `${failed} FAILED` : 'all checks pass'}.** Upload order: ${qa.order.actual.join(', ')} (${qa.order.pass ? 'matches the brief' : 'DOES NOT match the brief'}).`,
+  '',
+  '## Text, measured',
+  '',
+  '| Pos | Card | Headline line 1 | px | Headline line 2 | px | Balance | Subtitle | px | Tightest side margin |',
+  '| --: | --- | --- | --: | --- | --: | --: | --- | --: | --: |',
+  ...qa.cards.map((c) => {
+    const [a, b, s] = c.text;
+    const margin = Math.min(...c.text.map((t) => Math.min(t.marginLeft, t.marginRight)));
+    return `| ${c.position} | ${c.card} | ${a.text} | ${a.width} | ${b.text} | ${b.width} | ${c.headlineBalance} | ${s.text} | ${s.width} | ${margin} |`;
+  }),
+  '',
+  `Balance is the shorter headline line divided by the longer one. Every card renders exactly three lines of type (two headline, one subtitle); each line is drawn on its own with no wrap width, so no automatic breaks are possible. Pixel widths match the glyph widths of each string rendered alone to within 2 px. Headlines are DM Serif Display ${TYPE.headline.px} px and subtitles Inter ${TYPE.subtitle.px} px, unchanged; baselines unchanged at v2 positions.`,
+  '',
+  `At App Store browse size (250 px wide) the headline cap height is ${browse.headlineCapPx} px and the subtitle cap height ${browse.subtitleCapPx} px, the same as v2 and the approved set.`,
+  '',
+  '## Spacing and screens',
+  '',
+  '| Pos | Card | Gap approved → v3 | Reduction | Rows ≥ 700 vs v2 (max diff) | Main screen vs approved (max) | Secondary vs approved (mean) | Phone widths |',
+  '| --: | --- | --- | --: | --: | --: | --: | --- |',
+  ...qa.cards.map(
+    (c) =>
+      `| ${c.position} | ${c.card} | ${c.gap.approved} → ${c.gap.v3} px | ${(c.gap.reduction * 100).toFixed(1)}% | ${c.belowTypeVsV2.max} | ${c.mainScreenVsApproved?.max ?? '—'} | ${c.secondaryContentVsApproved?.mean ?? '—'} | ${c.phoneWidths ? `${c.phoneWidths.primary} / ${c.phoneWidths.secondary} (${(c.phoneWidths.ratio * 100).toFixed(1)}%)` : '1011'} |`,
+  ),
+  '',
+  'A max diff of 0 on rows 700 to 2622 means every phone, screen, blur, crop and bottom edge is byte-for-byte the v2 card: only the type changed.',
+  '',
+  '## Checks',
+  '',
+  `| Check | ${qa.cards.map((c) => `${c.position}${c.layout === 'balanced' ? ' ALT' : ''}`).join(' | ')} |`,
+  `| --- | ${qa.cards.map(() => ':-:').join(' | ')} |`,
+  ...allChecks.map(
+    (k) =>
+      `| ${k} | ${qa.cards.map((c) => (c.checks[k] === undefined || c.checks[k] === null ? '—' : c.checks[k] ? 'pass' : '**FAIL**')).join(' | ')} |`,
+  ),
+  '',
+];
+await writeFormatted(join(QA, 'qa-report.md'), md.join('\n'));
+if (failed) fail(`${failed} QA failure(s), see qa/qa-report.md`);
 console.log(
-  '\nDone. Cards in apple-1206x2622/, candidate/ and alternatives/, sheets in review/, report in qa/qa-report.json',
+  '\nDone. Cards in apple-1206x2622/, alternatives/ and store-order/, sheets in review/, report in qa/',
 );

@@ -37,52 +37,91 @@
       "samples": 9486396
     }
   ],
+  "order": {
+    "expected": [
+      "01-movies-tv",
+      "02-head-to-head",
+      "03-friends",
+      "06-for-you",
+      "04-watchlist",
+      "05-your-year"
+    ],
+    "actual": [
+      "01-movies-tv",
+      "02-head-to-head",
+      "03-friends",
+      "06-for-you",
+      "04-watchlist",
+      "05-your-year"
+    ],
+    "pass": true
+  },
+  "browse": {
+    "headlineCapPx": 14.7,
+    "subtitleCapPx": 7.9
+  },
   "cards": [
     {
-      "id": "01-movies-tv",
+      "card": "01-movies-tv",
+      "position": 1,
       "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 3046617,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "Your favorites,",
+          "glyphWidth": 683,
+          "y0": 337,
+          "y1": 429,
+          "x0": 263,
+          "x1": 944,
+          "width": 682,
+          "height": 93,
+          "centre": 604,
+          "marginLeft": 263,
+          "marginRight": 261
+        },
+        {
+          "text": "ranked your way",
+          "glyphWidth": 793,
+          "y0": 462,
+          "y1": 562,
+          "x0": 207,
+          "x1": 999,
+          "width": 793,
+          "height": 101,
+          "centre": 603.5,
+          "marginLeft": 207,
+          "marginRight": 206
+        },
+        {
+          "text": "Movies and TV, scored by your taste",
+          "glyphWidth": 889,
+          "y0": 616,
+          "y1": 665,
+          "x0": 159,
+          "x1": 1047,
+          "width": 889,
+          "height": 50,
+          "centre": 603.5,
+          "marginLeft": 159,
+          "marginRight": 158
+        }
+      ],
+      "headlineBalance": 0.86,
       "gap": {
-        "before": 231,
-        "after": 119,
+        "approved": 231,
+        "v3": 119,
         "reduction": 0.485
       },
-      "widths": {
-        "before": {
-          "primary": 1011,
-          "secondary": 541,
-          "ratio": 0.535
-        },
-        "after": {
-          "primary": 1011,
-          "secondary": 611,
-          "ratio": 0.604
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 553,
-          "phoneTop": 785,
-          "gap": 231,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
@@ -100,62 +139,93 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": true,
         "mainScreenIdenticalToApproved": true,
         "secondaryContentMatchesApproved": true
       },
-      "mainScreenUnchanged": {
+      "mainScreenVsApproved": {
         "mean": 0,
         "max": 1
       },
       "secondaryContentVsApproved": {
         "mean": 0.915,
         "comparedRows": 893
+      },
+      "phoneWidths": {
+        "primary": 1011,
+        "secondary": 611,
+        "ratio": 0.604
       }
     },
     {
-      "id": "02-head-to-head",
+      "card": "02-head-to-head",
+      "position": 2,
       "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 2038413,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "Pick a favorite",
+          "glyphWidth": 670,
+          "y0": 337,
+          "y1": 413,
+          "x0": 268,
+          "x1": 937,
+          "width": 670,
+          "height": 77,
+          "centre": 603,
+          "marginLeft": 268,
+          "marginRight": 268
+        },
+        {
+          "text": "Build your ranking",
+          "glyphWidth": 882,
+          "y0": 462,
+          "y1": 562,
+          "x0": 162,
+          "x1": 1043,
+          "width": 882,
+          "height": 101,
+          "centre": 603,
+          "marginLeft": 162,
+          "marginRight": 162
+        },
+        {
+          "text": "Head-to-head picks shape your list",
+          "glyphWidth": 864,
+          "y0": 616,
+          "y1": 665,
+          "x0": 171,
+          "x1": 1033,
+          "width": 863,
+          "height": 50,
+          "centre": 602.5,
+          "marginLeft": 171,
+          "marginRight": 172
+        }
+      ],
+      "headlineBalance": 0.76,
       "gap": {
-        "before": 231,
-        "after": 119,
+        "approved": 231,
+        "v3": 119,
         "reduction": 0.485
       },
-      "widths": {
-        "before": {
-          "primary": 1011
-        },
-        "after": {
-          "primary": 1011
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 553,
-          "phoneTop": 785,
-          "gap": 231,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
@@ -171,70 +241,87 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": null,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": null,
         "mainScreenIdenticalToApproved": true
       },
-      "chromeCrop": {
-        "top": 59,
-        "bottom": 1465,
-        "sourceHeight": 1536
-      },
-      "mainScreenUnchanged": {
+      "mainScreenVsApproved": {
         "mean": 0,
         "max": 1
       }
     },
     {
-      "id": "03-friends",
+      "card": "03-friends",
+      "position": 3,
       "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 1392852,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "See their picks",
+          "glyphWidth": 688,
+          "y0": 337,
+          "y1": 436,
+          "x0": 259,
+          "x1": 946,
+          "width": 688,
+          "height": 100,
+          "centre": 603,
+          "marginLeft": 259,
+          "marginRight": 259
+        },
+        {
+          "text": "Share your takes",
+          "glyphWidth": 786,
+          "y0": 462,
+          "y1": 562,
+          "x0": 210,
+          "x1": 995,
+          "width": 786,
+          "height": 101,
+          "centre": 603,
+          "marginLeft": 210,
+          "marginRight": 210
+        },
+        {
+          "text": "Follow friends, react, and send recs",
+          "glyphWidth": 873,
+          "y0": 616,
+          "y1": 664,
+          "x0": 167,
+          "x1": 1039,
+          "width": 873,
+          "height": 49,
+          "centre": 603.5,
+          "marginLeft": 167,
+          "marginRight": 166
+        }
+      ],
+      "headlineBalance": 0.875,
       "gap": {
-        "before": 233,
-        "after": 121,
-        "reduction": 0.481
+        "approved": 233,
+        "v3": 120,
+        "reduction": 0.485
       },
-      "widths": {
-        "before": {
-          "primary": 1011,
-          "secondary": 541,
-          "ratio": 0.535
-        },
-        "after": {
-          "primary": 1011,
-          "secondary": 611,
-          "ratio": 0.604
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 551,
-          "phoneTop": 785,
-          "gap": 233,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 663,
-          "phoneTop": 785,
-          "gap": 121,
-          "topMargin": 337
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
-        "subtitleInkBottom": 663,
+        "subtitleInkBottom": 664,
         "mainW": 1015,
         "mainTop": 783,
         "mainScreenBottom": 2747,
@@ -248,66 +335,181 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": true,
         "mainScreenIdenticalToApproved": true,
         "secondaryContentMatchesApproved": true
       },
-      "mainScreenUnchanged": {
+      "mainScreenVsApproved": {
         "mean": 0,
         "max": 1
       },
       "secondaryContentVsApproved": {
         "mean": 1.123,
         "comparedRows": 893
+      },
+      "phoneWidths": {
+        "primary": 1011,
+        "secondary": 611,
+        "ratio": 0.604
       }
     },
     {
-      "id": "04-watchlist",
+      "card": "06-for-you",
+      "position": 4,
       "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 2023670,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "Less scrolling",
+          "glyphWidth": 640,
+          "y0": 337,
+          "y1": 436,
+          "x0": 283,
+          "x1": 922,
+          "width": 640,
+          "height": 100,
+          "centre": 603,
+          "marginLeft": 283,
+          "marginRight": 283
+        },
+        {
+          "text": "More watching",
+          "glyphWidth": 695,
+          "y0": 462,
+          "y1": 561,
+          "x0": 256,
+          "x1": 950,
+          "width": 695,
+          "height": 100,
+          "centre": 603.5,
+          "marginLeft": 256,
+          "marginRight": 255
+        },
+        {
+          "text": "Discover picks shaped by your rankings",
+          "glyphWidth": 977,
+          "y0": 616,
+          "y1": 665,
+          "x0": 115,
+          "x1": 1091,
+          "width": 977,
+          "height": 50,
+          "centre": 603.5,
+          "marginLeft": 115,
+          "marginRight": 114
+        }
+      ],
+      "headlineBalance": 0.921,
       "gap": {
-        "before": 230,
-        "after": 118,
+        "approved": 231,
+        "v3": 119,
+        "reduction": 0.485
+      },
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2748,
+        "mainCrop": null
+      },
+      "checks": {
+        "format": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
+        "secondaryTabBarBelowEdge": null,
+        "mainScreenIdenticalToApproved": true
+      },
+      "mainScreenVsApproved": {
+        "mean": 0,
+        "max": 1
+      }
+    },
+    {
+      "card": "04-watchlist",
+      "position": 5,
+      "layout": "revision",
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "Save it now",
+          "glyphWidth": 532,
+          "y0": 337,
+          "y1": 412,
+          "x0": 337,
+          "x1": 868,
+          "width": 532,
+          "height": 76,
+          "centre": 603,
+          "marginLeft": 337,
+          "marginRight": 337
+        },
+        {
+          "text": "Watch it later",
+          "glyphWidth": 633,
+          "y0": 462,
+          "y1": 537,
+          "x0": 287,
+          "x1": 919,
+          "width": 633,
+          "height": 76,
+          "centre": 603.5,
+          "marginLeft": 287,
+          "marginRight": 286
+        },
+        {
+          "text": "Keep your watchlist and friends’ picks",
+          "glyphWidth": 931,
+          "y0": 616,
+          "y1": 666,
+          "x0": 138,
+          "x1": 1068,
+          "width": 931,
+          "height": 51,
+          "centre": 603.5,
+          "marginLeft": 138,
+          "marginRight": 137
+        }
+      ],
+      "headlineBalance": 0.84,
+      "gap": {
+        "approved": 230,
+        "v3": 118,
         "reduction": 0.487
       },
-      "widths": {
-        "before": {
-          "primary": 1011,
-          "secondary": 541,
-          "ratio": 0.535
-        },
-        "after": {
-          "primary": 1011,
-          "secondary": 611,
-          "ratio": 0.604
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 554,
-          "phoneTop": 785,
-          "gap": 230,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 338,
-          "subtitleBottom": 666,
-          "phoneTop": 785,
-          "gap": 118,
-          "topMargin": 338
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
@@ -325,66 +527,93 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": true,
         "mainScreenIdenticalToApproved": true,
         "secondaryContentMatchesApproved": true
       },
-      "mainScreenUnchanged": {
+      "mainScreenVsApproved": {
         "mean": 0,
         "max": 1
       },
       "secondaryContentVsApproved": {
         "mean": 0.546,
         "comparedRows": 893
+      },
+      "phoneWidths": {
+        "primary": 1011,
+        "secondary": 611,
+        "ratio": 0.604
       }
     },
     {
-      "id": "05-your-year",
+      "card": "05-your-year",
+      "position": 6,
       "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 745395,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "A little progress",
+          "glyphWidth": 751,
+          "y0": 337,
+          "y1": 436,
+          "x0": 229,
+          "x1": 978,
+          "width": 750,
+          "height": 100,
+          "centre": 604,
+          "marginLeft": 229,
+          "marginRight": 227
+        },
+        {
+          "text": "A lot to celebrate",
+          "glyphWidth": 803,
+          "y0": 462,
+          "y1": 537,
+          "x0": 203,
+          "x1": 1004,
+          "width": 802,
+          "height": 76,
+          "centre": 604,
+          "marginLeft": 203,
+          "marginRight": 201
+        },
+        {
+          "text": "Set watch goals and earn Awards",
+          "glyphWidth": 817,
+          "y0": 616,
+          "y1": 665,
+          "x0": 195,
+          "x1": 1011,
+          "width": 817,
+          "height": 50,
+          "centre": 603.5,
+          "marginLeft": 195,
+          "marginRight": 194
+        }
+      ],
+      "headlineBalance": 0.935,
       "gap": {
-        "before": 231,
-        "after": 119,
+        "approved": 231,
+        "v3": 119,
         "reduction": 0.485
       },
-      "widths": {
-        "before": {
-          "primary": 1011,
-          "secondary": 541,
-          "ratio": 0.535
-        },
-        "after": {
-          "primary": 1011,
-          "secondary": 611,
-          "ratio": 0.604
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 553,
-          "phoneTop": 785,
-          "gap": 231,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
@@ -402,184 +631,93 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": true,
         "mainScreenIdenticalToApproved": true,
         "secondaryContentMatchesApproved": true
       },
-      "mainScreenUnchanged": {
+      "mainScreenVsApproved": {
         "mean": 0,
         "max": 1
       },
       "secondaryContentVsApproved": {
         "mean": 0.354,
         "comparedRows": 893
+      },
+      "phoneWidths": {
+        "primary": 1011,
+        "secondary": 611,
+        "ratio": 0.604
       }
     },
     {
-      "id": "06-for-you",
-      "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 3003783,
-      "gap": {
-        "before": 231,
-        "after": 119,
-        "reduction": 0.485
-      },
-      "widths": {
-        "before": {
-          "primary": 1011
-        },
-        "after": {
-          "primary": 1011
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 553,
-          "phoneTop": 785,
-          "gap": 231,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
-      },
-      "geometry": {
-        "headlineCapTop": 337,
-        "subtitleInkBottom": 665,
-        "mainW": 1015,
-        "mainTop": 783,
-        "mainScreenBottom": 2748,
-        "mainCrop": null
-      },
-      "checks": {
-        "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": null,
-        "secondaryTabBarBelowEdge": null,
-        "mainScreenIdenticalToApproved": true
-      },
-      "mainScreenUnchanged": {
-        "mean": 0,
-        "max": 1
-      }
-    },
-    {
-      "id": "07-ranked-CANDIDATE",
-      "layout": "revision",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 1387452,
-      "gap": {
-        "before": null,
-        "after": 119,
-        "reduction": null
-      },
-      "widths": {
-        "before": null,
-        "after": {
-          "primary": 1011
-        }
-      },
-      "measured": {
-        "before": null,
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
-      },
-      "geometry": {
-        "headlineCapTop": 337,
-        "subtitleInkBottom": 665,
-        "mainW": 1015,
-        "mainTop": 783,
-        "mainScreenBottom": 2745,
-        "mainCrop": {
-          "top": 59,
-          "bottom": 1465,
-          "sourceHeight": 1536
-        }
-      },
-      "checks": {
-        "format": true,
-        "gapReduced45to55": null,
-        "secondaryWidth60to70": null,
-        "secondaryTabBarBelowEdge": null
-      },
-      "chromeCrop": {
-        "top": 59,
-        "bottom": 1465,
-        "sourceHeight": 1536
-      }
-    },
-    {
-      "id": "05-your-year_ALT-balanced",
+      "card": "05-your-year_ALT-balanced",
+      "position": 6,
       "layout": "balanced",
-      "width": 1206,
-      "height": 2622,
-      "channels": 3,
-      "hasAlpha": false,
-      "space": "srgb",
-      "bytes": 765772,
+      "format": {
+        "width": 1206,
+        "height": 2622,
+        "channels": 3,
+        "hasAlpha": false,
+        "space": "srgb"
+      },
+      "text": [
+        {
+          "text": "A little progress",
+          "glyphWidth": 751,
+          "y0": 337,
+          "y1": 436,
+          "x0": 229,
+          "x1": 978,
+          "width": 750,
+          "height": 100,
+          "centre": 604,
+          "marginLeft": 229,
+          "marginRight": 227
+        },
+        {
+          "text": "A lot to celebrate",
+          "glyphWidth": 803,
+          "y0": 462,
+          "y1": 537,
+          "x0": 203,
+          "x1": 1004,
+          "width": 802,
+          "height": 76,
+          "centre": 604,
+          "marginLeft": 203,
+          "marginRight": 201
+        },
+        {
+          "text": "Set watch goals and earn Awards",
+          "glyphWidth": 817,
+          "y0": 616,
+          "y1": 665,
+          "x0": 195,
+          "x1": 1011,
+          "width": 817,
+          "height": 50,
+          "centre": 603.5,
+          "marginLeft": 195,
+          "marginRight": 194
+        }
+      ],
+      "headlineBalance": 0.935,
       "gap": {
-        "before": 231,
-        "after": 119,
+        "approved": 231,
+        "v3": 119,
         "reduction": 0.485
       },
-      "widths": {
-        "before": {
-          "primary": 1011,
-          "secondary": 541,
-          "ratio": 0.535
-        },
-        "after": {
-          "primary": 956,
-          "secondary": 620,
-          "ratio": 0.649
-        }
-      },
-      "measured": {
-        "before": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 153,
-          "subtitleBottom": 553,
-          "phoneTop": 785,
-          "gap": 231,
-          "topMargin": 153
-        },
-        "after": {
-          "width": 1206,
-          "height": 2622,
-          "topInk": 337,
-          "subtitleBottom": 665,
-          "phoneTop": 785,
-          "gap": 119,
-          "topMargin": 337
-        }
+      "belowTypeVsV2": {
+        "mean": 0,
+        "max": 0
       },
       "geometry": {
         "headlineCapTop": 337,
@@ -597,9 +735,20 @@
       },
       "checks": {
         "format": true,
-        "gapReduced45to55": true,
-        "secondaryWidth60to70": true,
+        "threeTextLines": true,
+        "eachLineSingle": true,
+        "widthsMatchGlyphs": true,
+        "centred": true,
+        "sideMargins": true,
+        "headlineBalanced": true,
+        "gapReduced45to55vsApproved": true,
+        "belowTypeIdenticalToV2": true,
         "secondaryTabBarBelowEdge": true
+      },
+      "phoneWidths": {
+        "primary": 956,
+        "secondary": 620,
+        "ratio": 0.649
       }
     }
   ]

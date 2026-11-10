@@ -1,8 +1,9 @@
 /**
- * Card specs and the layouts:
- *   LEGACY    the approved 2026-11-09 geometry (used only to prove this renderer reproduces the approved exports)
- *   REVISION  the proposed geometry: approved phones, no eyebrow, type moved down, larger secondary phone
- *   BALANCED  a review alternative for one dual-phone card
+ * Card specs, the store order and the layouts:
+ *   STORE_ORDER  the v3 upload order and copy, keyed to the original card identities
+ *   LEGACY       the approved 2026-11-09 geometry (used only to prove this renderer reproduces the approved exports)
+ *   REVISION     the v2 geometry: approved phones, no eyebrow, type moved down, larger secondary phone
+ *   BALANCED     the review alternative for card 05
  */
 import { join } from 'node:path';
 
@@ -50,9 +51,9 @@ const scaledFrame = (base, w) => ({
 
 /**
  * Main phone exactly as approved; the type moves down TEXT_DOWN to close the gap.
- * The secondary phone is 609 px wide (60% of the main phone) and keeps the approved
- * right edge. Any wider and it cuts the card 03 "RECENT ACTIVITY" header, which the
- * approved card shows in full. It runs past the card's bottom edge far enough to
+ * The secondary phone is 615 px wide (60% of the main phone, as measured) and keeps
+ * the approved right edge. Any wider and it cuts the card 03 "RECENT ACTIVITY" header,
+ * which the approved card shows in full. It runs past the card's bottom edge far enough to
  * hide its tab bar (`hideTabBar`).
  */
 export const REVISION = {
@@ -82,65 +83,113 @@ export const BALANCED = {
  */
 const TAB_BAR = 145 / 945;
 const TAB_BAR_MARGIN = 12;
+
+/**
+ * Upload position → original card, with the founder's final copy (2026-11-10 brief).
+ * Headlines are exactly two lines and carry no added punctuation.
+ */
+export const STORE_ORDER = [
+  {
+    position: 1,
+    slot: 'collection',
+    id: '01-movies-tv',
+    headline: ['Your favorites,', 'ranked your way'],
+    subtitle: 'Movies and TV, scored by your taste',
+  },
+  {
+    position: 2,
+    slot: 'head-to-head',
+    id: '02-head-to-head',
+    headline: ['Pick a favorite', 'Build your ranking'],
+    subtitle: 'Head-to-head picks shape your list',
+  },
+  {
+    position: 3,
+    slot: 'friends',
+    id: '03-friends',
+    headline: ['See their picks', 'Share your takes'],
+    subtitle: 'Follow friends, react, and send recs',
+  },
+  {
+    position: 4,
+    slot: 'for-you',
+    id: '06-for-you',
+    headline: ['Less scrolling', 'More watching'],
+    subtitle: 'Discover picks shaped by your rankings',
+  },
+  {
+    position: 5,
+    slot: 'watchlist',
+    id: '04-watchlist',
+    headline: ['Save it now', 'Watch it later'],
+    subtitle: 'Keep your watchlist and friends\u2019 picks',
+  },
+  {
+    position: 6,
+    slot: 'goals-awards',
+    id: '05-your-year',
+    headline: ['A little progress', 'A lot to celebrate'],
+    subtitle: 'Set watch goals and earn Awards',
+  },
+];
+
 export function cardSpecs(src) {
   const layer = (name) => ({ file: join(src, 'layers', `${name}.png`) });
   const capture = (name) => ({ file: join(src, 'captures', name), rawCapture: true });
-  return {
-    lineup: [
-      {
-        id: '01-movies-tv',
-        eyebrow: 'MOVIES + TV',
-        headline: ['Movies and TV,', 'one place'],
-        subtitle: 'Rank movies and TV seasons separately',
-        main: layer('01-movies-tv__main-screen'),
-        sec: layer('01-movies-tv__secondary-screen'),
-      },
-      {
-        id: '02-head-to-head',
-        eyebrow: 'HOW IT WORKS',
-        headline: ['Put your favorites', 'head to head'],
-        subtitle: 'Quick comparisons build your ranking',
-        main: capture('1000087685.jpg'),
-      },
-      {
-        id: '03-friends',
-        eyebrow: 'FRIENDS',
-        headline: ['See what your', 'friends are watching'],
-        subtitle: 'React, comment, send recommendations',
-        main: layer('03-friends__main-screen'),
-        sec: layer('03-friends__secondary-screen'),
-      },
-      {
-        id: '04-watchlist',
-        eyebrow: 'WATCHLIST',
-        headline: ['Save your', 'next watch'],
-        subtitle: 'Your watchlist, plus picks from friends',
-        main: layer('04-watchlist__main-screen'),
-        sec: layer('04-watchlist__secondary-screen'),
-      },
-      {
-        id: '05-your-year',
-        eyebrow: 'YOUR YEAR',
-        headline: ['Your taste,', 'on the record'],
-        subtitle: 'Set goals and unlock Awards',
-        main: layer('05-your-year__main-screen'),
-        sec: layer('05-your-year__secondary-screen'),
-      },
-      {
-        id: '06-for-you',
-        eyebrow: 'FOR YOU',
-        headline: ['Find something', 'worth watching'],
-        subtitle: 'Recommendations shaped by your taste',
-        main: layer('06-for-you__main-screen'),
-      },
-    ],
-    candidate: {
-      id: '07-ranked-CANDIDATE',
-      eyebrow: 'RANKED',
-      headline: ['Your favorites,', 'ranked'],
-      subtitle: 'Every comparison sharpens your list',
-      main: capture('ranked-movies-list.jpg'),
+  const approved = [
+    {
+      id: '01-movies-tv',
+      eyebrow: 'MOVIES + TV',
+      headline: ['Movies and TV,', 'one place'],
+      subtitle: 'Rank movies and TV seasons separately',
+      main: layer('01-movies-tv__main-screen'),
+      sec: layer('01-movies-tv__secondary-screen'),
     },
+    {
+      id: '02-head-to-head',
+      eyebrow: 'HOW IT WORKS',
+      headline: ['Put your favorites', 'head to head'],
+      subtitle: 'Quick comparisons build your ranking',
+      main: capture('1000087685.jpg'),
+    },
+    {
+      id: '03-friends',
+      eyebrow: 'FRIENDS',
+      headline: ['See what your', 'friends are watching'],
+      subtitle: 'React, comment, send recommendations',
+      main: layer('03-friends__main-screen'),
+      sec: layer('03-friends__secondary-screen'),
+    },
+    {
+      id: '04-watchlist',
+      eyebrow: 'WATCHLIST',
+      headline: ['Save your', 'next watch'],
+      subtitle: 'Your watchlist, plus picks from friends',
+      main: layer('04-watchlist__main-screen'),
+      sec: layer('04-watchlist__secondary-screen'),
+    },
+    {
+      id: '05-your-year',
+      eyebrow: 'YOUR YEAR',
+      headline: ['Your taste,', 'on the record'],
+      subtitle: 'Set goals and unlock Awards',
+      main: layer('05-your-year__main-screen'),
+      sec: layer('05-your-year__secondary-screen'),
+    },
+    {
+      id: '06-for-you',
+      eyebrow: 'FOR YOU',
+      headline: ['Find something', 'worth watching'],
+      subtitle: 'Recommendations shaped by your taste',
+      main: layer('06-for-you__main-screen'),
+    },
+  ];
+  const byId = Object.fromEntries(approved.map((c) => [c.id, c]));
+  return {
+    /** The approved copy, by original identity: the reproduction check and the v2 baseline. */
+    approved,
+    /** The v3 cards in upload order: approved screens, new copy. */
+    lineup: STORE_ORDER.map((o) => ({ ...byId[o.id], ...o })),
     /** The approved card 02 (comparison behind, 9.8 result in front), for the reproduction check only. */
     legacyCard02: {
       id: '02-head-to-head',

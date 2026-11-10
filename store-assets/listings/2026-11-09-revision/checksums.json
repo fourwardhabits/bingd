@@ -1,36 +1,56 @@
 {
   "files": {
     "apple-1206x2622/01-movies-tv.png": {
-      "sha256": "f1b72af88acd8f059c50d3865bcc1c07f106311be0b0d23f2588835bd61ec687",
-      "bytes": 3046617
+      "sha256": "dd356e82187b4226c430b7213bebc2b2ced8bc27f224f000dd8b491e182c2b1a",
+      "bytes": 3051759
+    },
+    "store-order/01-collection__01-movies-tv.png": {
+      "sha256": "dd356e82187b4226c430b7213bebc2b2ced8bc27f224f000dd8b491e182c2b1a",
+      "bytes": 3051759
     },
     "apple-1206x2622/02-head-to-head.png": {
-      "sha256": "23e63aa8f611e73822f3fc449e196d3fe0c15d9b8ee18bf199e0f8d9846b4bcd",
-      "bytes": 2038413
+      "sha256": "78e9098b848a7bddf81c4b0eb87f0b5c49fca43379a6e3ce13368f92ac1a7084",
+      "bytes": 2039148
+    },
+    "store-order/02-head-to-head__02-head-to-head.png": {
+      "sha256": "78e9098b848a7bddf81c4b0eb87f0b5c49fca43379a6e3ce13368f92ac1a7084",
+      "bytes": 2039148
     },
     "apple-1206x2622/03-friends.png": {
-      "sha256": "c712f8e457add0bc6f75e5ca5770b9998b678cbee5fcf181255304d468f54f63",
-      "bytes": 1392852
+      "sha256": "54b1cf6bb4a5654fe01e715817ddf0eacef5535b481fb9c3112dd4ca63babc73",
+      "bytes": 1388870
     },
-    "apple-1206x2622/04-watchlist.png": {
-      "sha256": "a242a635c621ab1850a392de12d96ecd0173e43397908ff78971ee5281d17381",
-      "bytes": 2023670
-    },
-    "apple-1206x2622/05-your-year.png": {
-      "sha256": "b0bcae21e2e69d2ad3d911327893647b114db92e0cedc33233f20acc949549f2",
-      "bytes": 745395
+    "store-order/03-friends__03-friends.png": {
+      "sha256": "54b1cf6bb4a5654fe01e715817ddf0eacef5535b481fb9c3112dd4ca63babc73",
+      "bytes": 1388870
     },
     "apple-1206x2622/06-for-you.png": {
-      "sha256": "f8b938566af2be82e751c70a15799c2f2ae7e7a8baaed897e23a3f999342aad6",
-      "bytes": 3003783
+      "sha256": "bf9a8dd62d43692a590dd8479157522ec21a93312f559c878fed1ef0b5a23238",
+      "bytes": 3003615
     },
-    "candidate/07-ranked-CANDIDATE.png": {
-      "sha256": "0dffab1a149f4900ffe853b458af94bb03bb38e6ac63e1d5a7b7d7a0c186f9f9",
-      "bytes": 1387452
+    "store-order/04-for-you__06-for-you.png": {
+      "sha256": "bf9a8dd62d43692a590dd8479157522ec21a93312f559c878fed1ef0b5a23238",
+      "bytes": 3003615
+    },
+    "apple-1206x2622/04-watchlist.png": {
+      "sha256": "1b087156477b162abdb3442d8cc0aa15a03127911650d742700741d3e164cec7",
+      "bytes": 2027627
+    },
+    "store-order/05-watchlist__04-watchlist.png": {
+      "sha256": "1b087156477b162abdb3442d8cc0aa15a03127911650d742700741d3e164cec7",
+      "bytes": 2027627
+    },
+    "apple-1206x2622/05-your-year.png": {
+      "sha256": "0b9ab870df9e58f98fe40c307bae8ea92e904e648f53258f289f673c3fa05cdb",
+      "bytes": 753004
     },
     "alternatives/05-your-year_ALT-balanced.png": {
-      "sha256": "0a4f598eaa6b46f9c02bdefcebeb229f48f15f7248e1fcae24cee808259d9215",
-      "bytes": 765772
+      "sha256": "51e6da3532f0e7441f4f5730ba667cf52d98574fc21aa053886893a4739a4e35",
+      "bytes": 774341
+    },
+    "store-order/06-goals-awards__05-your-year.png": {
+      "sha256": "0b9ab870df9e58f98fe40c307bae8ea92e904e648f53258f289f673c3fa05cdb",
+      "bytes": 753004
     }
   }
 }
