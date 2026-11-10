@@ -1059,6 +1059,25 @@ describe('who reacted to a comment', () => {
     ).toEqual([{ p_comment_id: 'c1' }]);
   });
 
+  /**
+   * **No reaction to your own comment** (founder, 2026-11-10), the same rule as a post:
+   * no heart to react with, and other people's reactions still open the list.
+   */
+  it('offers the author no reaction on their own comment, and still opens the people', async () => {
+    mockCommentRows = [{ ...reacted(), author_id: VIEWER, username: 'sai', display_name: 'Sai' }];
+    mockReactorRows = reactors;
+    const view = await open();
+
+    const cluster = await waitFor(() => view.getByLabelText('2 reactions. See who reacted.'));
+    expect(view.queryByLabelText(/^React to/)).toBeNull();
+    expect(view.queryByTestId('reaction-action')).toBeNull();
+
+    await fireEvent.press(cluster);
+    await waitFor(() =>
+      expect(view.getByLabelText('Abisola, Laugh. Open their profile.')).toBeTruthy(),
+    );
+  });
+
   it('opens on a plain tap too — a target this small does not demand the rarer gesture', async () => {
     mockCommentRows = [reacted()];
     mockReactorRows = reactors;

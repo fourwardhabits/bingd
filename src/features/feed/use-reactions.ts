@@ -55,6 +55,12 @@ export type Reactor = {
   name: string;
   avatarUri: string | null;
   kind: ReactionKind;
+  /**
+   * When they first reacted — `reactions.created_at`, which a change of kind does not
+   * move. The tie-breaker, and today the whole rule, for whom a summary names
+   * (`reaction-summary.ts`). Null where a surface's read does not carry it.
+   */
+  reactedAt?: string | null;
 };
 
 export type ReactionSummary = {
@@ -83,6 +89,8 @@ type ReactionRow = {
   feed_event_id: string;
   user_id: string;
   kind: ReactionKind;
+  created_at?: string | null;
+  event?: { actor_id: string } | { actor_id: string }[] | null;
   profiles:
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }[]
@@ -120,7 +128,7 @@ async function readReactions(
   const { data, error } = await supabase
     .from('reactions')
     .select(
-      'feed_event_id, user_id, kind, profiles:user_id(id, display_name, username, avatar_path)',
+      'feed_event_id, user_id, kind, created_at, event:feed_event_id(actor_id), profiles:user_id(id, display_name, username, avatar_path)',
     )
     .in('feed_event_id', eventIds);
   if (error) throw error;
@@ -128,6 +136,19 @@ async function readReactions(
   const byEvent = new Map<string, ReactionSummary>();
 
   for (const row of (data ?? []) as unknown as ReactionRow[]) {
+    /**
+     * **A reaction to your own activity is not shown** (founder, 2026-11-10).
+     *
+     * The control that made them is gone from your own posts and `set_reaction` refuses
+     * new ones once 20261110000100 is applied, but rows written before either are still
+     * in the table and are not deleted. They are left out of every count, glyph and name
+     * here instead — a self-like is not engagement, and counting it would leave the
+     * author a reaction on their own post they can no longer see a way to take back.
+     * The embed is the event's own actor, which `reactions_read` already required this
+     * viewer to be able to see.
+     */
+    if (one(row.event ?? null)?.actor_id === row.user_id) continue;
+
     const summary =
       byEvent.get(row.feed_event_id) ?? { ...EMPTY, kinds: [], byKind: {}, people: [] };
     summary.total += 1;
@@ -147,6 +168,7 @@ async function readReactions(
         name,
         avatarUri: avatarUri(profile.avatar_path),
         kind: row.kind,
+        reactedAt: row.created_at ?? null,
       });
     }
 

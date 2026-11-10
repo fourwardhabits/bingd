@@ -12,10 +12,9 @@ import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { metadataFor, tailFor, verbFor, watchLabel } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
+import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
-  REACTION_GLYPH,
-  REACTION_LABEL,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -335,14 +334,15 @@ export default function ActivityScreen() {
              */
             reaction={
               reactionsResolved
-                ? {
-                    count: summary?.total ?? 0,
-                    mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-                    mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
-                    glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-                    onPress: () => void toggleDefault(),
-                    onLongPress: () => setPickerOpen(true),
-                    onPressSummary: () => setDetailOpen(true),
+                ? activityReaction({
+                    summary,
+                    viewerId,
+                    // The founder's own Logan ranking, opened from a notification, is
+                    // where an author was offered a heart on their own post (2026-11-10).
+                    isOwn: event.actorId === viewerId,
+                    onToggle: () => void toggleDefault(),
+                    onOpenPicker: () => setPickerOpen(true),
+                    onOpenDetail: () => setDetailOpen(true),
                     picker: pickerOpen ? (
                       <ReactionPill
                         current={summary?.mine ?? null}
@@ -350,7 +350,7 @@ export default function ActivityScreen() {
                         onDismiss={() => setPickerOpen(false)}
                       />
                     ) : null,
-                  }
+                  })
                 : undefined
             }
           />

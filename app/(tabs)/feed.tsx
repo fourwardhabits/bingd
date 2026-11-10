@@ -42,10 +42,9 @@ import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
+import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
-  REACTION_GLYPH,
-  REACTION_LABEL,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -986,7 +985,7 @@ export default function FeedScreen() {
                         : null
                     }
                     onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
-                    reaction={reactionFor(event.id)}
+                    reaction={reactionFor(event.id, event.actorId)}
                     onPressComments={() => setCommentsFor(event.id)}
                     commentCount={commentCounts.data?.get(event.id) ?? 0}
                     onPressSave={
@@ -1117,7 +1116,7 @@ export default function FeedScreen() {
                       ? () => openRecommend(event)
                       : undefined
                   }
-                  reaction={reactionFor(event.id)}
+                  reaction={reactionFor(event.id, event.actorId)}
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
@@ -1238,16 +1237,15 @@ export default function FeedScreen() {
     </Screen>
   );
 
-  function reactionFor(eventId: string) {
+  function reactionFor(eventId: string, actorId: string) {
     const summary = reactions.data?.get(eventId);
-    return {
-      count: summary?.total ?? 0,
-      mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-      mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
-      glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-      onPress: () => void toggleDefault(eventId),
-      onLongPress: () => setPickerFor(eventId),
-      onPressSummary: () => setDetailFor(eventId),
+    return activityReaction({
+      summary,
+      viewerId: profile.id,
+      isOwn: actorId === profile.id,
+      onToggle: () => void toggleDefault(eventId),
+      onOpenPicker: () => setPickerFor(eventId),
+      onOpenDetail: () => setDetailFor(eventId),
       picker:
         pickerFor === eventId ? (
           <ReactionPill
@@ -1256,7 +1254,7 @@ export default function FeedScreen() {
             onDismiss={() => setPickerFor(null)}
           />
         ) : null,
-    };
+    });
   }
 }
 

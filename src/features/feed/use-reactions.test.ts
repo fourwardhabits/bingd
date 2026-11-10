@@ -232,6 +232,44 @@ describe('useReactions', () => {
   });
 });
 
+/**
+ * **A reaction comes from somebody else** (20261110000100). Rows written before the
+ * server refused self-reactions are not deleted; the read leaves them out, so the count,
+ * the glyphs and the names never include the author reacting to themselves.
+ */
+describe('a self-reaction from before the rule', () => {
+  it('is left out of the count, the kinds, mine and the people', async () => {
+    mockRows = [
+      row({ user_id: 'me', kind: 'wow', event: { actor_id: 'me' }, profiles: null }),
+      row({ user_id: 'jerry', kind: 'love', event: { actor_id: 'me' } }),
+    ];
+    const summary = (await summaries('me'))?.get('event-1');
+    expect(summary?.total).toBe(1);
+    expect(summary?.mine).toBeNull();
+    expect(summary?.kinds).toEqual(['love']);
+    expect(summary?.people.map((person) => person.userId)).toEqual(['jerry']);
+  });
+
+  it('is left out for every reader, not only the author', async () => {
+    mockRows = [
+      row({ user_id: 'anna', kind: 'love', event: [{ actor_id: 'anna' }] }),
+      row({ user_id: 'jerry', kind: 'love', event: { actor_id: 'anna' } }),
+    ];
+    expect((await summaries('someone-else'))?.get('event-1')?.total).toBe(1);
+  });
+
+  it('carries when each person reacted, for the summary’s tie-break', async () => {
+    mockRows = [row({ created_at: '2026-11-09T10:00:00Z' })];
+    const summary = (await summaries('me'))?.get('event-1');
+    expect(summary?.people[0]?.reactedAt).toBe('2026-11-09T10:00:00Z');
+  });
+
+  it('still counts a row whose event did not embed', async () => {
+    mockRows = [row({ event: null })];
+    expect((await summaries('me'))?.get('event-1')?.total).toBe(1);
+  });
+});
+
 describe('the reaction set', () => {
   it('is exactly PRD §14’s six, stored as meanings', async () => {
     expect(REACTIONS.map((r) => r.kind)).toEqual([
