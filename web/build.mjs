@@ -1264,9 +1264,9 @@ const LIST_BODY = `        <div id="list" class="list" hidden>
  * one, and the install button is what matters above it.
  */
 const SHOWCASE = `      <div class="showcase" aria-hidden="false">
-        <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1447"
+        <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1430"
              alt="A bingd. collection of ranked series, each with a score out of ten." />
-        <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="811"
+        <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="989"
              loading="lazy"
              alt="Two films side by side in bingd., under the question which did you like more." />
       </div>`;
@@ -2830,14 +2830,14 @@ const SHOT = {
   compare: {
     src: '/shot-compare.webp',
     w: 640,
-    h: 1285,
-    alt: 'The bingd. ranking sheet asking which did you like more, Harry Potter and the Goblet of Fire or Spider-Man: Far From Home',
+    h: 1269,
+    alt: 'The bingd. ranking sheet asking which did you like more, You Can See Everything or Inception',
   },
   score: {
     src: '/shot-score.webp',
     w: 640,
-    h: 1285,
-    alt: 'The score a bingd. ranking lands on, 9.1 for Harry Potter and the Goblet of Fire, in the sheet shown after ranking',
+    h: 1269,
+    alt: 'The score a bingd. ranking lands on, 9.8 for You Can See Everything, in the sheet shown after ranking',
   },
   comments: {
     src: '/shot-comments.webp',
@@ -2848,26 +2848,26 @@ const SHOT = {
   movies: {
     src: '/shot-movies.webp',
     w: 640,
-    h: 1286,
+    h: 1270,
     alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
   },
   tv: {
     src: '/shot-tv.webp',
     w: 640,
-    h: 1285,
+    h: 1271,
     alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
   },
   feed: {
     src: '/shot-feed.webp',
     w: 640,
-    h: 1285,
+    h: 1271,
     alt: 'The bingd. feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
   },
   recommended: {
     src: '/shot-recommended.webp',
     w: 640,
-    h: 1286,
-    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to you, Group Picks and Filters',
+    h: 1271,
+    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
   },
   grouppicks: {
     src: '/shot-grouppicks.webp',

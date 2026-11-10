@@ -4462,3 +4462,245 @@ describe('the ranking demo, painted', () => {
     }
   });
 });
+/**
+ * Pixel size from an image's own header: PNG, JPEG and the three WebP variants. Read by
+ * hand so the check needs nothing the site build does not.
+ */
+const imageSize = (buf) => {
+  if (buf.readUInt32BE(0) === 0x89504e47) {
+    return { format: 'png', width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    for (let at = 2; at < buf.length;) {
+      const marker = buf[at + 1];
+      const sof = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+      if (sof) {
+        return {
+          format: 'jpeg',
+          width: buf.readUInt16BE(at + 7),
+          height: buf.readUInt16BE(at + 5),
+        };
+      }
+      at += 2 + buf.readUInt16BE(at + 2);
+    }
+  }
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+    const chunk = buf.toString('ascii', 12, 16);
+    if (chunk === 'VP8 ') {
+      return {
+        format: 'webp',
+        width: buf.readUInt16LE(26) & 0x3fff,
+        height: buf.readUInt16LE(28) & 0x3fff,
+      };
+    }
+    if (chunk === 'VP8L') {
+      const bits = buf.readUInt32LE(21);
+      return {
+        format: 'webp',
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >> 14) & 0x3fff) + 1,
+      };
+    }
+    if (chunk === 'VP8X') {
+      return {
+        format: 'webp',
+        width: buf.readUIntLE(24, 3) + 1,
+        height: buf.readUIntLE(27, 3) + 1,
+      };
+    }
+  }
+  return null;
+};
+
+/**
+ * Every picture a built page draws, checked against the file it points at.
+ *
+ * The heights in `SHOT` and `SHOWCASE` are typed in by hand from `web/shots.mjs`'s
+ * output. A replaced screenshot whose height was not updated still passes every check
+ * above, because they only ask that a number is present — and the browser then reserves
+ * the old box and stretches the new pixels into it.
+ */
+describe('the images the built pages draw', () => {
+  const pages = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.html')) pages.push(path);
+    }
+  };
+
+  before(() => {
+    execFileSync(process.execPath, [join(here, 'build.mjs')], { stdio: 'pipe' });
+    walk(dist);
+  });
+
+  it('resolves every image to a shipped file whose pixels match its declared size', () => {
+    let checked = 0;
+    for (const page of pages) {
+      const html = readFileSync(page, 'utf8');
+      for (const [img] of html.matchAll(/<img\b[^>]*>/g)) {
+        // The ranking demo's poster slots ship empty and hidden; page.mjs fills them.
+        const src = img.match(/\bsrc="([^"]+)"/)?.[1];
+        if (!src || /^https?:/.test(src)) continue;
+        assert.ok(src.startsWith('/'), `${src} is not root-relative in ${page}`);
+
+        const file = join(dist, src.slice(1));
+        assert.ok(existsSync(file), `${src} is drawn by ${page} and not shipped`);
+        const size = imageSize(readFileSync(file));
+        assert.ok(size, `${src} is not a PNG, JPEG or WebP`);
+
+        const width = Number(img.match(/\bwidth="(\d+)"/)?.[1]);
+        const height = Number(img.match(/\bheight="(\d+)"/)?.[1]);
+        const declared = `${src} is declared ${width}x${height} in ${page} but is ${size.width}x${size.height}`;
+        // A screenshot is declared at its pixel size. The masthead mark is drawn smaller
+        // than its file on purpose, so for it only the proportions have to hold.
+        if (src.startsWith('/shot-')) {
+          assert.deepEqual([width, height], [size.width, size.height], declared);
+        } else {
+          assert.ok(Math.abs(height - (width * size.height) / size.width) <= 1, declared);
+        }
+        checked++;
+      }
+    }
+    assert.ok(checked >= 10, `only ${checked} images were checked`);
+  });
+});
+
+/**
+ * `web/shots.mjs --layers`, run for real against stand-in layers.
+ *
+ * The founder's prepared layers are untracked, so this cannot reproduce the committed
+ * bytes. What it can pin is the contract the committed files were made under: a layer
+ * is scaled whole, with no TOP/BOTTOM trim and no masks, the router's two come out as
+ * JPEG, `shot-ranking` is cropped to the comparison sheet, and nothing is written into
+ * `web/src/` when `--out` points elsewhere.
+ */
+describe('web/shots.mjs --layers', () => {
+  const layers = mkdtempSync(join(tmpdir(), 'bingd-layers-'));
+  const out = mkdtempSync(join(tmpdir(), 'bingd-layers-out-'));
+  const empty = mkdtempSync(join(tmpdir(), 'bingd-layers-empty-'));
+  const W = 709;
+  const H = 1408;
+  const SHEET_TOP = 388;
+  const sources = [
+    '01-movies-tv__main-screen.png',
+    '01-movies-tv__secondary-screen.png',
+    '02-head-to-head__main-screen.png',
+    '02-head-to-head__secondary-screen.png',
+    '03-friends__main-screen.png',
+    '06-for-you__main-screen.png',
+  ];
+  const committed = () =>
+    Object.fromEntries(
+      readdirSync(join(here, 'src'))
+        .filter((f) => f.startsWith('shot-'))
+        .map((f) => [f, readFileSync(join(here, 'src', f)).toString('base64')]),
+    );
+
+  let sharp;
+  let run;
+  let before_;
+
+  before(async () => {
+    sharp = (await import('sharp')).default;
+    // Red above the comparison sheet's top edge, blue below, so the crop is visible in
+    // the output's first row.
+    const above = await sharp({
+      create: {
+        width: W,
+        height: SHEET_TOP,
+        channels: 4,
+        background: { r: 255, g: 0, b: 0, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+    for (const name of sources) {
+      await sharp({
+        create: {
+          width: W,
+          height: H,
+          channels: 4,
+          background: { r: 0, g: 0, b: 255, alpha: 1 },
+        },
+      })
+        .composite([{ input: above, left: 0, top: 0 }])
+        .png()
+        .toFile(join(layers, name));
+    }
+    before_ = committed();
+    run = spawnSync(
+      process.execPath,
+      [join(here, 'shots.mjs'), '--layers', layers, '--out', out],
+      { encoding: 'utf8' },
+    );
+  });
+
+  after(() => {
+    for (const dir of [layers, out, empty]) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes the eight refreshed shots, scaled whole', () => {
+    assert.equal(run.status, 0, run.stderr);
+    const scaled = (width) => Math.round((H * width) / W);
+    const expected = {
+      'shot-movies.webp': [640, scaled(640)],
+      'shot-tv.webp': [640, scaled(640)],
+      'shot-compare.webp': [640, scaled(640)],
+      'shot-score.webp': [640, scaled(640)],
+      'shot-feed.webp': [640, scaled(640)],
+      'shot-recommended.webp': [640, scaled(640)],
+      'shot-collection.jpg': [720, scaled(720)],
+      'shot-ranking.jpg': [720, Math.round((974 * 720) / W)],
+    };
+    assert.deepEqual(readdirSync(out).sort(), Object.keys(expected).sort());
+    for (const [file, [width, height]] of Object.entries(expected)) {
+      const size = imageSize(readFileSync(join(out, file)));
+      assert.equal(size.format, file.endsWith('.jpg') ? 'jpeg' : 'webp', file);
+      assert.deepEqual([size.width, size.height], [width, height], file);
+    }
+  });
+
+  it('crops shot-ranking to the sheet and keeps the top of every other layer', async () => {
+    const firstRow = async (file) => {
+      const { data } = await sharp(join(out, file))
+        .extract({ left: 0, top: 0, width: 1, height: 1 })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      return data[0] > data[2] ? 'red' : 'blue';
+    };
+    assert.equal(await firstRow('shot-ranking.jpg'), 'blue');
+    assert.equal(await firstRow('shot-collection.jpg'), 'red');
+    assert.equal(await firstRow('shot-movies.webp'), 'red');
+  });
+
+  it('prints the alt text build.mjs ships for each one', () => {
+    const manifest = JSON.parse(run.stdout.split('--- paste into build.mjs ---')[1]);
+    assert.equal(manifest.length, 8);
+    const built = ['index.html', 'title.html']
+      .map((f) => readFileSync(join(dist, f), 'utf8'))
+      .join('\n')
+      .replaceAll('&rsquo;', '’');
+    for (const { name, alt } of manifest) {
+      assert.ok(
+        built.includes(`alt="${alt}"`),
+        `${name}'s alt in shots.mjs is not the one built`,
+      );
+    }
+  });
+
+  it('leaves web/src alone when --out points elsewhere', () => {
+    assert.deepEqual(committed(), before_);
+  });
+
+  it('fails loudly when a layer is missing', () => {
+    const missing = spawnSync(
+      process.execPath,
+      [join(here, 'shots.mjs'), '--layers', empty, '--out', out],
+      { encoding: 'utf8' },
+    );
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /missing source: .*01-movies-tv__main-screen\.png/);
+  });
+});
