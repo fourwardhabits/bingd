@@ -183,14 +183,14 @@ describe('the visible list', () => {
 
 describe('a thread the reader may not open', () => {
   it('answers a private actor’s thread with the same emptiness as an unreacted comment', async () => {
-    // Gate 1. bob is inside the circle: he can comment and react. carol is not, and
+    // Gate 1. bob is inside the circle: he can comment, and shy reacts to it. carol is not, and
     // for her the list must be empty rather than refused — a refusal would confirm
     // the thread exists, which is what "indistinguishable" is protecting.
     const shy = await t.createUser({ username: 'shy_cr', visibility: 'private' });
     const privateEvent = await eventOf(shy, await movie('cr_private'));
     await follow(bob, shy);
     const privateComment = await addComment(bob, privateEvent, 'inside the circle');
-    await react(bob, privateComment, 'love');
+    await react(shy, privateComment, 'love');
 
     assert.equal(
       (await reactorsFor(bob, privateComment)).length,
