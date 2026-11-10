@@ -4115,7 +4115,6 @@ describe('the ranking demo, built', () => {
     assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), 'Suraj, founder');
     assert.match(front, /\.founder-note::before \{\s*content: '\\201C';/, 'no opening quotation mark');
     assert.doesNotMatch(section, /<img|<h[1-6]|class="kicker"/, 'a portrait or heading came back');
-    assert.match(front, /your new post-watch ritual/);
   });
 
   /**
@@ -4141,40 +4140,130 @@ describe('the ranking demo, built', () => {
   });
 
   /**
-   * "Find your next binge", which buried Group Picks mid-paragraph. The second thought
-   * starts its own paragraph.
+   * The founder's approved copy (website copy refresh, 2026-11-10), word for word, in the
+   * approved order: rank, compare, collect, friends, discover, the note, start. Friends
+   * comes before discovery, and each section keeps its own two screenshots.
+   *
+   * The section shells do not move with their copy, so the backgrounds still alternate
+   * (plain, band, plain, band...) and the copy still alternates sides beside the phones.
+   *
+   * The approved blurbs end with a full stop, which supersedes the 2026-10-28 visual QA
+   * that dropped them. The demo's own two lines are unchanged and keep that rule.
    */
-  it('gives Group Picks its own line in "Find your next binge"', () => {
+  it('tells the approved story, in the approved order', () => {
     const front = read('index.html');
-    const start = front.indexOf('<p class="kicker">Find your next binge</p>');
-    const section = front.slice(start, front.indexOf('</section>', start));
-    const ledes = [...section.matchAll(/<p class="section-lede">([\s\S]*?)<\/p>/g)].map((m) =>
-      m[1].replace(/\s+/g, ' ').trim(),
-    );
-    assert.deepEqual(ledes, [
-      'Save what you want to watch, and get stronger recommendations through a better rating system',
-      'Plus Group Picks generates recommendations based on shared taste (a favorite feature for couples and movie clubs)',
+    const main = front.slice(front.indexOf('<main>'), front.indexOf('</main>'));
+    const words = (html) =>
+      html.replace(/<[^>]+>/g, ' ').replace(/&rsquo;/g, '’').replace(/\s+/g, ' ').trim();
+
+    const sections = main.split(/(?=<section\b)/).slice(1).map((html) => {
+      const copy = html.includes('<div class="demo"') ? html.slice(0, html.indexOf('<div class="demo"')) : html;
+      return {
+        shell: /<section(?: class="([^"]*)")?[^>]*>/.exec(html)[1] ?? '',
+        flip: /class="wrap split flip"/.test(html),
+        kicker: words(/<p class="kicker">([\s\S]*?)<\/p>/.exec(copy)?.[1] ?? ''),
+        heading: words(/<h[12]>([\s\S]*?)<\/h[12]>/.exec(copy)?.[1] ?? ''),
+        ledes: [...copy.matchAll(/<p class="(?:lede|section-lede)">([\s\S]*?)<\/p>/g)].map((m) => words(m[1])),
+        shots: [...html.matchAll(/src="\/shot-([a-z]+)\.webp"/g)].map((m) => m[1]),
+      };
+    });
+
+    assert.deepEqual(sections, [
+      {
+        shell: 'hero wrap',
+        flip: false,
+        kicker: '',
+        heading: 'Rank what you watch. Keep the fun going.',
+        ledes: [
+          'Put movies and TV head-to-head, build rankings that reflect your taste, and compare favorites with friends. Then find your next binge.',
+        ],
+        shots: [],
+      },
+      {
+        shell: 'band',
+        flip: true,
+        kicker: 'How it works',
+        heading: 'Stop guessing between 3.5 and 4 stars.',
+        ledes: [
+          'Which did you like more? Make quick head-to-head picks, and bingd turns your choices into a ranked list and personalized scores. No more guessing at a number.',
+        ],
+        shots: ['compare', 'score'],
+      },
+      {
+        shell: '',
+        flip: false,
+        kicker: 'Your collection',
+        heading: 'Your favorites, in your order.',
+        ledes: [
+          'Build separate movie and TV season rankings with scores shaped by your picks, so your collection reflects what you actually like.',
+        ],
+        shots: ['movies', 'tv'],
+      },
+      {
+        shell: 'band',
+        flip: true,
+        kicker: 'Better with friends',
+        heading: 'Compare taste. Trade takes.',
+        ledes: [
+          'Follow friends, see what they’re watching, react to their rankings, and swap recommendations. Because watching something great is only half the fun.',
+        ],
+        shots: ['feed', 'comments'],
+      },
+      {
+        shell: '',
+        flip: false,
+        kicker: 'Find your next binge',
+        heading: 'Less scrolling. More watching.',
+        ledes: [
+          'Get movie and TV recommendations shaped by your rankings, and save what catches your eye.',
+          'Watching together? Group Picks suggests titles based on everyone’s taste.',
+        ],
+        shots: ['recommended', 'grouppicks'],
+      },
+      {
+        shell: 'band founder-section',
+        flip: false,
+        kicker: '',
+        heading: '',
+        ledes: [],
+        shots: [],
+      },
+      {
+        shell: 'closer',
+        flip: false,
+        kicker: '',
+        heading: 'Start with five favorites.',
+        ledes: ['Pick five movies or TV seasons you love. A few quick comparisons get your ranking started.'],
+        shots: [],
+      },
     ]);
+
+    for (const blurb of front.matchAll(/<p class="(?:demo-prompt|demo-honest)"[^>]*>([\s\S]*?)<\/p>/g)) {
+      assert.doesNotMatch(words(blurb[1]), /\.$/, blurb[1]);
+    }
   });
 
-  /**
-   * The landing page's short blurbs end without a full stop (founder visual QA,
-   * 2026-10-28). Only the blurbs: headings, buttons, the founder quote, alt text,
-   * metadata and the legal pages keep their punctuation, and a full stop inside a blurb
-   * stays where it separates two sentences.
-   */
-  it('ends the landing page blurbs without a full stop', () => {
+  it('carries the approved title, description and link-preview text', () => {
     const front = read('index.html');
-    const blurbs = [
-      ...front.matchAll(/<p class="(?:lede|section-lede|demo-prompt|demo-honest)"[^>]*>([\s\S]*?)<\/p>/g),
-    ].map((m) => m[1].replace(/\s+/g, ' ').trim());
-    assert.ok(blurbs.length >= 9, `only ${blurbs.length} blurbs found`);
-    for (const blurb of blurbs) assert.doesNotMatch(blurb, /\.$/, blurb);
+    const meta = (attr, name) =>
+      new RegExp(`<meta ${attr}="${name}" content="([^"]*)" />`).exec(front)?.[1];
 
-    // Sentences inside a blurb keep theirs.
-    assert.match(front, /bingd is your new post-watch ritual\. A movie and TV logging app/);
-    // And the founder quote is quoted, not restyled.
-    assert.match(front, /Happy binging,<\/p>/);
+    assert.match(front, /<title>bingd \| Rank Movies &amp; TV Your Way<\/title>/);
+    const description =
+      'Rank movies and TV with head-to-head picks, build your own rankings, compare taste with friends, and find your next binge on bingd.';
+    assert.equal(meta('name', 'description'), description);
+    for (const [attr, prefix] of [['property', 'og'], ['name', 'twitter']]) {
+      assert.equal(meta(attr, `${prefix}:title`), 'bingd | Rank What You Watch');
+      assert.equal(
+        meta(attr, `${prefix}:description`),
+        'Pick favorites head-to-head, compare taste with friends, and find your next binge.',
+      );
+    }
+
+    const structured = JSON.parse(
+      /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(front)[1],
+    );
+    assert.equal(structured.description, description);
   });
 });
 
