@@ -55,3 +55,38 @@ export async function measureCard(file) {
     topMargin: topInk,
   };
 }
+
+/**
+ * Bezel-to-bezel width of a phone frame, from pixels: the leftmost and rightmost
+ * columns in [xFrom, xTo) that are frame-dark on every row in [y0, y1). Screen
+ * content is never that dark for hundreds of rows, so only bezels match. The 1 px
+ * lighter edge stroke on each side is not counted.
+ */
+export async function measureFrameWidth(file, [y0, y1], [xFrom, xTo]) {
+  const { data, info } = await sharp(file)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const w = info.width;
+  const dark = (x, y) => {
+    const i = (y * w + x) * 3;
+    return lum(data[i], data[i + 1], data[i + 2]) < 34;
+  };
+  const bezel = (x) => {
+    for (let y = y0; y < y1; y++) if (!dark(x, y)) return false;
+    return true;
+  };
+  let left = -1;
+  let right = -1;
+  for (let x = xFrom; x < xTo; x++)
+    if (bezel(x)) {
+      left = x;
+      break;
+    }
+  for (let x = xTo - 1; x >= xFrom; x--)
+    if (bezel(x)) {
+      right = x;
+      break;
+    }
+  return { left, right, width: right - left + 1 };
+}

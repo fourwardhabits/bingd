@@ -10,9 +10,11 @@
  *   2. Reproduction check: the approved layout, rendered by this code, matches the
  *      approved exports in ../2026-11-09/apple-1206x2622 to within 2 levels per
  *      channel, over the whole card.
- *   3. The proposed six cards → apple-1206x2622/, the ranking candidate → candidate/.
+ *   3. The proposed six cards → apple-1206x2622/, the ranking candidate → candidate/,
+ *      the card 05 balanced-layout alternative → alternatives/.
  *   4. Review sheets → review/.
- *   5. QA → qa/qa-report.json (format, measured gaps, unchanged screen content).
+ *   5. QA → qa/qa-report.json (format, measured gaps and phone widths, unchanged
+ *      screen content, secondary tab bars hidden).
  *
  * Nothing here uploads, publishes or touches the approved set.
  */
@@ -20,10 +22,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LEGACY, REVISION, cardSpecs, renderCard } from './cards.mjs';
+import { BALANCED, LEGACY, REVISION, cardSpecs, renderCard } from './cards.mjs';
 import { H, W, sha256, sharp } from './lib.mjs';
-import { measureCard } from './measure.mjs';
-import { beforeAfter, browseSheet, card02Large, contactSheet } from './review.mjs';
+import { measureCard, measureFrameWidth } from './measure.mjs';
+import { beforeAfter, bottomEdges, browseSheet, card02Large, contactSheet } from './review.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, 'sources');
@@ -31,8 +33,9 @@ const APPROVED = join(here, '..', '2026-11-09', 'apple-1206x2622');
 const OUT = join(here, 'apple-1206x2622');
 const CANDIDATE = join(here, 'candidate');
 const REVIEW = join(here, 'review');
+const ALTERNATIVES = join(here, 'alternatives');
 const QA = join(here, 'qa');
-for (const d of [OUT, CANDIDATE, REVIEW, join(REVIEW, 'before-after'), QA])
+for (const d of [OUT, CANDIDATE, ALTERNATIVES, REVIEW, join(REVIEW, 'before-after'), QA])
   await mkdir(d, { recursive: true });
 
 const fail = (msg) => {
@@ -59,11 +62,13 @@ step('2. reproduction check against the approved exports');
 /** Largest per-channel difference allowed anywhere on the card (encoder rounding). */
 const REPRO_TOLERANCE = 2;
 const repro = [];
+const legacyGeo = {};
 for (const spec of [
   ...specs.lineup.filter((c) => c.id !== '02-head-to-head'),
   specs.legacyCard02,
 ]) {
-  const { png } = await renderCard(spec, LEGACY);
+  const { png, geo } = await renderCard(spec, LEGACY);
+  legacyGeo[spec.id] = geo;
   const [a, b] = await Promise.all([raw(png), raw(join(APPROVED, `${spec.id}.png`))]);
   let maxDiff = 0,
     differing = 0;
@@ -84,31 +89,70 @@ for (const spec of [
 step('3. proposed cards');
 const rendered = {};
 const checksums = {};
-for (const spec of [...specs.lineup, specs.candidate]) {
-  const { png, geo } = await renderCard(spec, REVISION);
-  const dir = spec === specs.candidate ? CANDIDATE : OUT;
-  await writeFile(join(dir, `${spec.id}.png`), png);
-  rendered[spec.id] = { png, geo, spec };
-  checksums[`${spec === specs.candidate ? 'candidate' : 'apple-1206x2622'}/${spec.id}.png`] = {
-    sha256: sha256(png),
-    bytes: png.length,
-  };
-  console.log(`      ${spec.id}.png  ${Math.round(png.length / 1024)} KB`);
+const ALT_ID = '05-your-year_ALT-balanced';
+const jobs = [
+  ...specs.lineup.map((spec) => ({
+    spec,
+    layout: REVISION,
+    dir: 'apple-1206x2622',
+    id: spec.id,
+  })),
+  { spec: specs.candidate, layout: REVISION, dir: 'candidate', id: specs.candidate.id },
+  { spec: specs.lineup[4], layout: BALANCED, dir: 'alternatives', id: ALT_ID },
+];
+for (const { spec, layout, dir, id } of jobs) {
+  const { png, geo } = await renderCard(spec, layout);
+  await writeFile(join(here, dir, `${id}.png`), png);
+  rendered[id] = { png, geo, spec, layout };
+  checksums[`${dir}/${id}.png`] = { sha256: sha256(png), bytes: png.length };
+  console.log(`      ${dir}/${id}.png  ${Math.round(png.length / 1024)} KB`);
 }
 await writeFile(
   join(here, 'checksums.json'),
   `${JSON.stringify({ files: checksums }, null, 2)}\n`,
 );
 
-// 4 -------------------------------------------------------------------------
-step('4. review sheets');
+// Measurements, from pixels, for the approved and proposed cards.
 const lineupIds = specs.lineup.map((c) => c.id);
 const approvedPng = Object.fromEntries(
   await Promise.all(
     lineupIds.map(async (id) => [id, await readFile(join(APPROVED, `${id}.png`))]),
   ),
 );
+/** Main phone measured above the secondary phone; secondary measured over its own rows. */
+async function widths(png, geo) {
+  const primary = await measureFrameWidth(png, [900, 1400], [0, W]);
+  if (!geo.secTop) return { primary: primary.width };
+  const secondary = await measureFrameWidth(
+    png,
+    [geo.secTop + 150, Math.min(geo.secBottom, H) - 80],
+    [300, W],
+  );
+  return {
+    primary: primary.width,
+    secondary: secondary.width,
+    ratio: +(secondary.width / primary.width).toFixed(3),
+  };
+}
+const measures = {};
+for (const id of Object.keys(rendered)) {
+  const approvedId = rendered[id].spec.id;
+  const before =
+    approvedPng[approvedId] && id !== specs.candidate.id ? approvedPng[approvedId] : null;
+  measures[id] = {
+    before: before ? await measureCard(before) : null,
+    after: await measureCard(rendered[id].png),
+    widthsBefore: before
+      ? await widths(before, approvedId === '02-head-to-head' ? {} : legacyGeo[approvedId])
+      : null,
+    widthsAfter: await widths(rendered[id].png, rendered[id].geo),
+  };
+}
+
+// 4 -------------------------------------------------------------------------
+step('4. review sheets');
 const cand = rendered[specs.candidate.id].png;
+const alt = rendered[ALT_ID].png;
 const NAMES = {
   '01-movies-tv': 'Movies + TV',
   '02-head-to-head': 'Head to head',
@@ -117,11 +161,18 @@ const NAMES = {
   '05-your-year': 'Your year',
   '06-for-you': 'For you',
 };
-
+const pct = (r) => `${Math.round(r * 100)}%`;
+function note(id) {
+  const { widthsBefore: b, widthsAfter: a } = measures[id];
+  const type = 'No eyebrow, type 112 px lower, main phone as approved.';
+  if (id === '02-head-to-head') return `${type} No result phone.`;
+  if (!a.secondary) return type;
+  return `${type} Secondary ${b.secondary} → ${a.secondary} px (${pct(b.ratio)} → ${pct(a.ratio)}), tab bar off-card.`;
+}
 const sheets = {
   'contact-sheet.png': await contactSheet(
     lineupIds.map((id, i) => ({ png: rendered[id].png, label: `${i + 1}. ${NAMES[id]}` })),
-    'bingd App Store cards, proposed revision (store order). Not uploaded.',
+    'bingd App Store cards, proposed revision v2 (store order). Not uploaded.',
   ),
   'contact-sheet-with-candidate.png': await contactSheet(
     [
@@ -130,9 +181,26 @@ const sheets = {
     ],
     'Proposed six + the ranking-payoff candidate (for decision only)',
   ),
+  'alternative-05-balanced.png': await contactSheet(
+    [
+      { png: approvedPng['05-your-year'], label: 'Approved (PR #240)' },
+      {
+        png: rendered['05-your-year'].png,
+        label: 'Proposed v2',
+        note: 'secondary 60% of main',
+      },
+      {
+        png: alt,
+        label: 'ALTERNATIVE: balanced',
+        flag: true,
+        note: 'main 960, secondary 624 (65%)',
+      },
+    ],
+    'Card 05: optional balanced layout (Award names stay readable with a 65% secondary)',
+  ),
   'browse-size-preview.png': await browseSheet([
     {
-      title: 'Proposed: first three, as an App Store search result (250 px wide)',
+      title: 'Proposed v2: first three, as an App Store search result (250 px wide)',
       items: lineupIds.slice(0, 3).map((id) => rendered[id].png),
       flag: true,
     },
@@ -141,46 +209,35 @@ const sheets = {
       items: lineupIds.slice(0, 3).map((id) => approvedPng[id]),
     },
     {
-      title: 'Proposed: cards 4 to 6',
+      title: 'Proposed v2: cards 4 to 6',
       items: lineupIds.slice(3).map((id) => rendered[id].png),
       flag: true,
     },
     { title: 'Approved: cards 4 to 6', items: lineupIds.slice(3).map((id) => approvedPng[id]) },
     {
-      title: 'Candidate next to the cards it overlaps with (01 and 02)',
-      items: [rendered['01-movies-tv'].png, rendered['02-head-to-head'].png, cand],
+      title: 'Card 05 alternative (balanced) and the ranking candidate',
+      items: [rendered['05-your-year'].png, alt, cand],
       flag: true,
     },
   ]),
+  'bottom-edges.png': await bottomEdges(
+    [...lineupIds, ALT_ID, specs.candidate.id].map((id) => ({
+      png: rendered[id].png,
+      label: id,
+    })),
+  ),
   'card02-large.png': await card02Large(rendered['02-head-to-head'].png),
 };
-const measures = {};
-const NOTES = {
-  '01-movies-tv':
-    'Eyebrow removed. Both phones up 121 px; the main phone now ends on its own tab bar.',
-  '02-head-to-head':
-    'Result phone removed. One phone: the real You Can See Everything vs Inception comparison.',
-  '03-friends': 'Eyebrow removed. Both phones up 121 px. Witcher comments phone unchanged.',
-  '04-watchlist': 'Eyebrow removed. Both phones up 121 px.',
-  '05-your-year':
-    'Eyebrow removed. Both phones up 121 px; the Awards sheet now shows its own Done footer.',
-  '06-for-you': 'Eyebrow removed. Phone up 121 px; the main phone now ends on its own tab bar.',
-};
 for (const id of lineupIds) {
-  measures[id] = {
-    before: await measureCard(approvedPng[id]),
-    after: await measureCard(rendered[id].png),
-  };
   sheets[`before-after/${id}.png`] = await beforeAfter({
     id,
     before: approvedPng[id],
     after: rendered[id].png,
     mBefore: measures[id].before,
     mAfter: measures[id].after,
-    note: NOTES[id],
+    note: note(id),
   });
 }
-measures[specs.candidate.id] = { before: null, after: await measureCard(cand) };
 for (const [name, png] of Object.entries(sheets)) {
   await writeFile(join(REVIEW, name), png);
   console.log(`      review/${name}`);
@@ -190,26 +247,72 @@ for (const [name, png] of Object.entries(sheets)) {
 step('5. QA');
 const qa = { reproduction: repro, cards: [] };
 let failed = 0;
-const SHIFT = LEGACY.main.y - REVISION.main.y;
-/** Mean abs difference between the new card and the approved card moved up by SHIFT, inside a screen rectangle. */
-async function translatedDiff(id, [x0, x1], [y0, y1]) {
-  const [a, b] = await Promise.all([raw(rendered[id].png), raw(approvedPng[id])]);
+/** Mean and max abs difference between two cards inside a rectangle. */
+async function regionDiff(pngA, pngB, [x0, x1], [y0, y1]) {
+  const [a, b] = await Promise.all([raw(pngA), raw(pngB)]);
   let sum = 0,
     max = 0,
     n = 0;
   for (let y = y0; y < y1; y++)
     for (let x = x0; x < x1; x++)
       for (let c = 0; c < 3; c++) {
-        const d = Math.abs(a[(y * W + x) * 3 + c] - b[((y + SHIFT) * W + x) * 3 + c]);
+        const d = Math.abs(a[(y * W + x) * 3 + c] - b[(y * W + x) * 3 + c]);
         sum += d;
         n++;
         if (d > max) max = d;
       }
   return { mean: +(sum / n).toFixed(4), max };
 }
-for (const [id, { png, geo, spec }] of Object.entries(rendered)) {
+/**
+ * The resized secondary screen against the approved one: the new screen is scaled
+ * to the approved width and compared row for row. Only resampling differs, so the
+ * mean difference stays small; different content or a lost blur would not.
+ */
+async function secondaryContentDiff(id) {
+  const g = rendered[id].geo;
+  const L = LEGACY.sec;
+  const S = rendered[id].layout.sec;
+  const oldInner = {
+    x: L.x + L.bezel,
+    y: legacyGeo[id].secTop + L.bezel,
+    w: L.w - 2 * L.bezel,
+  };
+  const newInner = { x: g.secX + S.bezel, y: g.secTop + S.bezel, w: S.w - 2 * S.bezel };
+  const rows = Math.min(
+    legacyGeo[id].secBottom - L.bezel - oldInner.y,
+    Math.floor(((H - newInner.y) * oldInner.w) / newInner.w),
+  );
+  const resized = await sharp(rendered[id].png)
+    .extract({
+      left: newInner.x,
+      top: newInner.y,
+      width: newInner.w,
+      height: Math.round((rows * newInner.w) / oldInner.w),
+    })
+    .resize(oldInner.w, rows, { fit: 'fill', kernel: 'lanczos3' })
+    .raw()
+    .toBuffer();
+  const old = await sharp(approvedPng[id])
+    .extract({ left: oldInner.x, top: oldInner.y, width: oldInner.w, height: rows })
+    .raw()
+    .toBuffer();
+  let sum = 0;
+  let n = 0;
+  const skip = L.radius + 10;
+  for (let y = skip; y < rows; y++)
+    for (let x = skip; x < oldInner.w - skip; x++)
+      for (let c = 0; c < 3; c++) {
+        sum += Math.abs(
+          resized[(y * oldInner.w + x) * 3 + c] - old[(y * oldInner.w + x) * 3 + c],
+        );
+        n++;
+      }
+  return { mean: +(sum / n).toFixed(3), comparedRows: rows - skip };
+}
+for (const [id, { png, geo, spec, layout }] of Object.entries(rendered)) {
   const meta = await sharp(png).metadata();
   const m = measures[id];
+  const reduction = m.before ? (m.before.gap - m.after.gap) / m.before.gap : null;
   const checks = {
     format:
       meta.format === 'png' &&
@@ -218,54 +321,53 @@ for (const [id, { png, geo, spec }] of Object.entries(rendered)) {
       meta.channels === 3 &&
       !meta.hasAlpha &&
       meta.space === 'srgb',
-    gapReduced45to55: m.before
-      ? (m.before.gap - m.after.gap) / m.before.gap >= 0.45 &&
-        (m.before.gap - m.after.gap) / m.before.gap <= 0.55
+    gapReduced45to55: reduction === null ? null : reduction >= 0.45 && reduction <= 0.55,
+    secondaryWidth60to70: m.widthsAfter.ratio
+      ? m.widthsAfter.ratio >= 0.6 && m.widthsAfter.ratio <= 0.7
       : null,
-    mainScreenReachesCardEdge: geo.mainScreenBottom >= H,
+    secondaryTabBarBelowEdge: geo.secTop ? geo.secScreenBottom - H >= geo.secTabBarPx : null,
   };
   const card = {
     id,
+    layout: layout.name,
     width: meta.width,
     height: meta.height,
     channels: meta.channels,
     hasAlpha: meta.hasAlpha,
     space: meta.space,
     bytes: png.length,
-    measured: m,
+    gap: {
+      before: m.before?.gap ?? null,
+      after: m.after.gap,
+      reduction: reduction && +reduction.toFixed(3),
+    },
+    widths: { before: m.widthsBefore, after: m.widthsAfter },
+    measured: { before: m.before, after: m.after },
     geometry: geo,
     checks,
   };
   if (spec.main.rawCapture) card.chromeCrop = geo.mainCrop;
-  if (m.before && id !== '02-head-to-head') {
-    // Rows the approved card already showed, inside the main phone's screen.
-    card.mainScreenUnchanged = await translatedDiff(
-      id,
-      [
-        LEGACY.main.x + LEGACY.main.bezel + 4,
-        LEGACY.main.x + LEGACY.main.w - LEGACY.main.bezel - 4,
-      ],
-      [REVISION.main.y + 140, H - SHIFT],
+  if (layout === REVISION && approvedPng[id]) {
+    // The main phone is where the approved card put it: compare the screen left of both
+    // secondary phones and their shadows (or the whole screen when there is none).
+    const M = LEGACY.main;
+    const right =
+      id === '02-head-to-head'
+        ? 540
+        : geo.secX
+          ? Math.min(geo.secX, LEGACY.sec.x) - 70
+          : M.x + M.w - M.bezel - 4;
+    card.mainScreenUnchanged = await regionDiff(
+      png,
+      approvedPng[id],
+      [M.x + M.bezel + 4, right],
+      [M.y + 140, H],
     );
-    // Inset past the corner radius: the background gradient behind the corners does not move with the phone.
-    if (geo.secTop)
-      card.secondaryPhoneUnchanged = await translatedDiff(
-        id,
-        [LEGACY.sec.x + 10, LEGACY.sec.x + LEGACY.sec.w - 10],
-        [geo.secTop + LEGACY.sec.radius, geo.secBottom - LEGACY.sec.radius],
-      );
-    checks.screensPixelIdenticalToApproved =
-      card.mainScreenUnchanged.max <= 2 &&
-      (!card.secondaryPhoneUnchanged || card.secondaryPhoneUnchanged.max <= 2);
-  }
-  if (id === '02-head-to-head') {
-    // Left half of the comparison, which the approved card's result phone did not cover.
-    card.comparisonLeftHalfUnchanged = await translatedDiff(
-      id,
-      [LEGACY.main.x + LEGACY.main.bezel + 4, 540],
-      [REVISION.main.y + 140, H - SHIFT],
-    );
-    checks.screensPixelIdenticalToApproved = card.comparisonLeftHalfUnchanged.max <= 2;
+    checks.mainScreenIdenticalToApproved = card.mainScreenUnchanged.max <= 2;
+    if (geo.secTop) {
+      card.secondaryContentVsApproved = await secondaryContentDiff(id);
+      checks.secondaryContentMatchesApproved = card.secondaryContentVsApproved.mean <= 4;
+    }
   }
   const bad = Object.entries(checks)
     .filter(([, v]) => v === false)
@@ -273,12 +375,15 @@ for (const [id, { png, geo, spec }] of Object.entries(rendered)) {
   failed += bad.length ? 1 : 0;
   qa.cards.push(card);
   const g = m.before ? `gap ${m.before.gap} → ${m.after.gap} px` : `gap ${m.after.gap} px`;
+  const wd = m.widthsAfter.secondary
+    ? `  widths ${m.widthsAfter.primary}/${m.widthsAfter.secondary} = ${pct(m.widthsAfter.ratio)}`
+    : `  width ${m.widthsAfter.primary}`;
   console.log(
-    `${bad.length ? 'FAIL' : 'PASS'}  ${id}  ${meta.width}x${meta.height} ch=${meta.channels} alpha=${meta.hasAlpha}  ${g}${bad.length ? `  [${bad.join(', ')}]` : ''}`,
+    `${bad.length ? 'FAIL' : 'PASS'}  ${id}  ${meta.width}x${meta.height} ch=${meta.channels} alpha=${meta.hasAlpha}  ${g}${wd}${bad.length ? `  [${bad.join(', ')}]` : ''}`,
   );
 }
 await writeFile(join(QA, 'qa-report.json'), `${JSON.stringify(qa, null, 2)}\n`);
 if (failed) fail(`${failed} card(s) failed QA, see qa/qa-report.json`);
 console.log(
-  '\nDone. Cards in apple-1206x2622/ and candidate/, sheets in review/, report in qa/qa-report.json',
+  '\nDone. Cards in apple-1206x2622/, candidate/ and alternatives/, sheets in review/, report in qa/qa-report.json',
 );
