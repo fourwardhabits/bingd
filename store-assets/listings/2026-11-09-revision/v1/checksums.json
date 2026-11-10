@@ -1,0 +1,32 @@
+{
+  "files": {
+    "apple-1206x2622/01-movies-tv.png": {
+      "sha256": "267cfc76dfb85b6ffa5790ceee1f2df21b1c1142ebc2648ce6d76c89c67261ec",
+      "bytes": 3080910
+    },
+    "apple-1206x2622/02-head-to-head.png": {
+      "sha256": "67a47dc303092c5703e0a474c63ae1df3b93fcb8b0919945d44cc8d63ca2f65d",
+      "bytes": 2039559
+    },
+    "apple-1206x2622/03-friends.png": {
+      "sha256": "9ec055fa979da6d357504781420cad7615226796742459ad2d055de84211bc2f",
+      "bytes": 1528995
+    },
+    "apple-1206x2622/04-watchlist.png": {
+      "sha256": "add296a025d1a03ce17dfc04accba0588b5dbca005101458e43d74903d1943cb",
+      "bytes": 2160826
+    },
+    "apple-1206x2622/05-your-year.png": {
+      "sha256": "8e57e339fb3ddde7a8659b5a864030c8b58ecca46238e7cdd9a1ee46166755ca",
+      "bytes": 771109
+    },
+    "apple-1206x2622/06-for-you.png": {
+      "sha256": "b8466be254064704248e67b017345e850180726fbf1969ea29129d003e9f153b",
+      "bytes": 3056154
+    },
+    "candidate/07-ranked-CANDIDATE.png": {
+      "sha256": "c35b9edd58eee9442ade14bcb623376d703603c798d7baf1b68075b8995090f4",
+      "bytes": 1445753
+    }
+  }
+}
