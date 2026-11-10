@@ -634,7 +634,30 @@ function genericPage(cfg) {
 function homePage(cfg) {
   const platform = platformNow();
   paintInstall(cfg, platform);
+  wireShotRails();
   wireDemo(cfg, platform);
+}
+
+/**
+ * The screenshot pairs take keyboard focus only while they scroll.
+ *
+ * On a phone each pair is a horizontal scroller, and a scroller with nothing focusable
+ * in it has to be focusable itself, or a keyboard can never bring the second picture
+ * into view. Anywhere wider the pair sits side by side and does not scroll, and a tab
+ * stop there would do nothing, so the attribute follows the layout rather than being
+ * written into the markup. Once focused, the arrow keys scroll it natively.
+ */
+function wireShotRails() {
+  const rails = [...document.querySelectorAll('.phone-pair.stack-narrow')];
+  if (rails.length === 0) return;
+  const sync = () => {
+    for (const rail of rails) {
+      if (rail.scrollWidth > rail.clientWidth + 1) rail.tabIndex = 0;
+      else rail.removeAttribute('tabindex');
+    }
+  };
+  sync();
+  globalThis.addEventListener?.('resize', sync);
 }
 
 /** Whether the visitor has asked the system for less motion. */
