@@ -2724,18 +2724,70 @@ const LANDING_STYLES = `
          .band and the inset: auto 0 0 0 sticky bar. */
       .phone-pair .phone { max-width: 13rem; margin-inline: 0; min-width: 0; flex: 0 1 auto; }
 
+      /* The swipe hint is for the phone layout only, where the pair scrolls. */
+      .shot-hint { display: none; }
+
       /* And the breakpoint, corrected with it. Two phones stop being legible at about
          29.5rem rather than 26, which is the width the pair actually needs. */
       @media (max-width: 30rem) {
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
 
-        /* Except where the second picture is the point: the TV collection beside the Movies
-           one in the hero, the score a ranking lands on, the conversation under a friend's
-           ranking, and Group Picks beside the recommendations. Those pairs stack instead
-           of dropping their second half. */
-        .phone-pair.stack-narrow { flex-direction: column; }
+        /* Except where the second picture is the point: the score a comparison lands on,
+           TV beside Movies, the conversation under a friend's ranking, and Group Picks
+           beside For you. Those pairs used to stack, which made each section two full
+           phone screens tall. They are a swipe rail instead: one screenshot across most
+           of the width and about a fifth of the next one showing at the edge, which is
+           the whole affordance. Native overflow and scroll-snap, so a finger, a trackpad
+           and the arrow keys all move it the way they move anything else, and nothing
+           moves on its own.
+
+           The rail runs to the screen's edges: the negative inline margin undoes .wrap's
+           gutter and the padding puts it back inside the scroller, so the peek is cut by
+           the edge of the phone rather than by an invisible box. Exactly to the edges
+           and no further, so the page never scrolls sideways. A scroller clips what
+           overflows it, so the block padding is room for the phones' shadow, and the
+           negative top margin hands that room back to the gap above. */
+        .phone-pair.stack-narrow {
+          --rail-gutter: 1.25rem;
+          --rail-gap: 0.75rem;
+          justify-content: flex-start;
+          gap: var(--rail-gap);
+          margin: -0.75rem calc(-1 * var(--rail-gutter)) 0;
+          padding: 0.75rem var(--rail-gutter) 2.5rem;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+          scroll-snap-type: x mandatory;
+          scroll-padding-inline: var(--rail-gutter);
+          scrollbar-width: none;
+        }
+        .phone-pair.stack-narrow::-webkit-scrollbar { display: none; }
+        .phone-pair.stack-narrow:focus-visible { outline: 2px solid var(--maroon); outline-offset: -2px; }
+
+        /* 100% is the rail's content box, the screen less both gutters, so this is the
+           width that leaves 22% of the next phone in view at every phone width. The cap
+           keeps a 480px screen from getting a phone taller than it can show. Width only:
+           .phone's height: auto keeps every screenshot at its own proportions. */
+        .phone-pair.stack-narrow .phone {
+          flex: none;
+          width: calc((100% + var(--rail-gutter) - var(--rail-gap)) / 1.22);
+          max-width: 22rem;
+          scroll-snap-align: start;
+        }
         .phone-pair.stack-narrow .phone + .phone { display: block; }
+
+        /* Sits in the rail's bottom padding, which is only there for the shadow. It takes
+           no touches, so a swipe that starts on it still moves the rail. */
+        .shot-hint {
+          display: block;
+          position: relative;
+          margin-top: -1.5rem;
+          text-align: center;
+          font-size: 0.8125rem;
+          color: var(--tertiary);
+          pointer-events: none;
+        }
       }
 
       /* -------------------------------------------------------------- final CTA */
@@ -2884,6 +2936,21 @@ const shot = (key, { eager = false } = {}) => {
   return `<img class="phone" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
                alt="${s.alt}" />`;
 };
+
+/**
+ * A section's two screenshots: side by side from 30rem up, a swipe rail below it.
+ *
+ * The rail is a labelled group so a screen reader names it when it takes focus, and
+ * `page.mjs` makes it focusable only while it actually scrolls. The hint is hidden from
+ * assistive technology, which reads both pictures in order and has nothing to swipe.
+ */
+const shotPair = (label, first, second) => `<div class="shots">
+            <div class="phone-pair stack-narrow" role="group" aria-label="${label}">
+              ${shot(first)}
+              ${shot(second)}
+            </div>
+            <p class="shot-hint" aria-hidden="true">Swipe for more &rarr;</p>
+          </div>`;
 
 /**
  * The install row, which the page needs in three places.
@@ -3209,10 +3276,7 @@ ${DEMO}
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('compare')}
-            ${shot('score')}
-          </div>
+          ${shotPair('Ranking screenshots', 'compare', 'score')}
         </div>
       </section>
 
@@ -3227,10 +3291,7 @@ ${DEMO}
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('movies')}
-            ${shot('tv')}
-          </div>
+          ${shotPair('Collection screenshots', 'movies', 'tv')}
         </div>
       </section>
 
@@ -3245,10 +3306,7 @@ ${DEMO}
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('feed')}
-            ${shot('comments')}
-          </div>
+          ${shotPair('Friends screenshots', 'feed', 'comments')}
         </div>
       </section>
 
@@ -3266,10 +3324,7 @@ ${DEMO}
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('recommended')}
-            ${shot('grouppicks')}
-          </div>
+          ${shotPair('Discovery screenshots', 'recommended', 'grouppicks')}
         </div>
       </section>
 

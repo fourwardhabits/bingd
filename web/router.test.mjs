@@ -3799,11 +3799,13 @@ async function paintHome({ userAgent = ANDROID_UA, reduceMotion = false, list = 
     location: globalThis.location,
     fetch: globalThis.fetch,
     matchMedia: globalThis.matchMedia,
+    addEventListener: globalThis.addEventListener,
   };
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
   globalThis.document = dom.window.document;
   globalThis.location = dom.window.location;
+  globalThis.addEventListener = dom.window.addEventListener.bind(dom.window);
   Object.defineProperty(globalThis, 'navigator', {
     value: { userAgent, maxTouchPoints: 0 },
     configurable: true,
@@ -3826,6 +3828,8 @@ async function paintHome({ userAgent = ANDROID_UA, reduceMotion = false, list = 
     globalThis.fetch = saved.fetch;
     if (saved.matchMedia) globalThis.matchMedia = saved.matchMedia;
     else delete globalThis.matchMedia;
+    if (saved.addEventListener) globalThis.addEventListener = saved.addEventListener;
+    else delete globalThis.addEventListener;
     if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
   };
 
@@ -4264,6 +4268,112 @@ describe('the ranking demo, built', () => {
       /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(front)[1],
     );
     assert.equal(structured.description, description);
+  });
+});
+
+/**
+ * The four screenshot pairs, which are a swipe rail on a phone (2026-11-10).
+ *
+ * Stacked, each pair was two full phone screens of scrolling. Below 30rem they are now
+ * one native horizontal scroller each, with scroll-snap and a peek of the second
+ * picture, and above it they are the side-by-side pair they always were. These pin the
+ * parts a later edit could quietly lose: the label and the focusability a keyboard and
+ * a screen reader need, the image attributes, and a rail that never crops a picture.
+ */
+describe('the screenshot rails', () => {
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+  const rails = () =>
+    [
+      ...read('index.html').matchAll(
+        /<div class="shots">\s*<div class="phone-pair stack-narrow" role="group" aria-label="([^"]+)">([\s\S]*?)<\/div>\s*<p class="shot-hint" aria-hidden="true">([^<]*)<\/p>\s*<\/div>/g,
+      ),
+    ].map((m) => ({ label: m[1], shots: [...m[2].matchAll(/<img\b[^>]*>/g)].map((i) => i[0]), hint: m[3] }));
+  const narrow = () => {
+    const front = read('index.html');
+    const from = front.indexOf('.shot-hint { display: none; }');
+    assert.ok(from >= 0, 'the hint is not hidden outside the phone layout');
+    const block = /@media \(max-width: 30rem\) \{([\s\S]*?)\n {6}\}/.exec(front.slice(from));
+    assert.ok(block, 'no phone block after the hint rule');
+    return block[1];
+  };
+  const rule = (css, selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start >= 0, `${selector} has no rule`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+
+  it('makes each of the four pairs a labelled rail with its two shots and a hint', () => {
+    const found = rails();
+    assert.deepEqual(
+      found.map((r) => [r.label, r.shots.map((s) => /src="\/shot-([a-z]+)\.webp"/.exec(s)[1])]),
+      [
+        ['Ranking screenshots', ['compare', 'score']],
+        ['Collection screenshots', ['movies', 'tv']],
+        ['Friends screenshots', ['feed', 'comments']],
+        ['Discovery screenshots', ['recommended', 'grouppicks']],
+      ],
+    );
+    for (const rail of found) {
+      assert.equal(rail.hint, 'Swipe for more &rarr;', rail.label);
+      for (const img of rail.shots) {
+        assert.match(img, /\bloading="lazy" decoding="async"/, `${rail.label} lost lazy loading`);
+        assert.match(img, /\bwidth="\d+" height="\d+"/, `${rail.label} lost its dimensions`);
+        assert.match(img, /\balt="[^"]{20,}"/, `${rail.label} lost its alt text`);
+      }
+    }
+    // The tab stop is page.mjs's to give, and only while a rail scrolls.
+    assert.doesNotMatch(read('index.html'), /class="phone-pair[^"]*"[^>]*tabindex/);
+  });
+
+  it('scrolls and snaps natively on a phone, without cropping or stretching a shot', () => {
+    const css = narrow();
+    const rail = rule(css, '.phone-pair.stack-narrow');
+    assert.match(rail, /overflow-x: auto;/);
+    assert.match(rail, /scroll-snap-type: x mandatory;/);
+    assert.match(rail, /overscroll-behavior-x: contain;/);
+    assert.doesNotMatch(rail, /flex-direction: column/, 'the pairs stack again');
+
+    const phone = rule(css, '.phone-pair.stack-narrow .phone');
+    assert.match(phone, /scroll-snap-align: start;/);
+    assert.match(phone, /flex: none;/, 'a shrinking phone is a squashed screenshot');
+    // Width only. A height or object-fit here is what would crop or distort a picture.
+    assert.doesNotMatch(phone, /(?:^|[\s;{])height:|object-fit/);
+
+    assert.match(rule(css, '.shot-hint'), /display: block;/);
+    assert.match(rule(css, '.shot-hint'), /pointer-events: none;/);
+  });
+
+  it('adds no script, library or animation to do it', () => {
+    const front = read('index.html');
+    assert.deepEqual(
+      [...front.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]),
+      ['/page.mjs'],
+    );
+    assert.doesNotMatch(narrow(), /animation|transition|@keyframes/);
+  });
+
+  it('gives a rail a tab stop while it scrolls, and takes it back when it does not', async () => {
+    const page = await paintHome();
+    try {
+      const found = [...page.document.querySelectorAll('.phone-pair.stack-narrow')];
+      assert.equal(found.length, 4);
+      // jsdom does no layout, so every rail measures 0 wide: the desktop answer.
+      for (const rail of found) assert.equal(rail.getAttribute('tabindex'), null);
+
+      const size = (rail, scrollWidth, clientWidth) => {
+        Object.defineProperty(rail, 'scrollWidth', { value: scrollWidth, configurable: true });
+        Object.defineProperty(rail, 'clientWidth', { value: clientWidth, configurable: true });
+      };
+      for (const rail of found) size(rail, 639, 390);
+      page.window.dispatchEvent(new page.window.Event('resize'));
+      for (const rail of found) assert.equal(rail.getAttribute('tabindex'), '0');
+
+      for (const rail of found) size(rail, 600, 600);
+      page.window.dispatchEvent(new page.window.Event('resize'));
+      for (const rail of found) assert.equal(rail.getAttribute('tabindex'), null);
+    } finally {
+      page.restore();
+    }
   });
 });
 
