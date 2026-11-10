@@ -555,6 +555,12 @@ const ALLOWED = {
   // window, capped server-side; still only the caller's own rows, still `auth.uid()` only.
   'recommendation_exposure_within(integer)': ['authenticated'],
   'social_candidates(integer)': ['authenticated'],
+  // 20261111000100, Engine V2 A1. Both are about the caller only. `recommendation_engine`
+  // takes no argument; `catalogue_candidates` reads the public catalogue and excludes the
+  // caller's own collection, and answers empty while the caller's engine is v1.
+  // `_recommendation_cohort` takes an identity and is granted to nobody.
+  'recommendation_engine()': ['authenticated'],
+  'catalogue_candidates(text,text[],integer[],integer,integer)': ['authenticated'],
 
   // Added 2026-09-03 (20260907000100). Group Picks. **Security invoker**, which is the
   // argument for the grant in one word: it runs as the caller, so every cross-member
