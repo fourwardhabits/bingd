@@ -7,7 +7,9 @@ import { brand, theme } from '@/ui/tokens';
 import {
   ALL_CATEGORIES,
   categoriesIn,
+  MAX_PERMISSION_CONTROLS,
   masterOn,
+  VISIBLE_SWITCHES,
   SECTION_COVERAGE,
   SECTIONS,
   type NotificationCategory,
@@ -48,7 +50,10 @@ jest.mock('@/features/auth', () => ({
   }),
 }));
 
-/** What the server answers by default: every category at its own default. */
+/**
+ * What the server answers by default: every category at its own default. Reactions is the
+ * one that defaults off (20261031000100); the rest default on.
+ */
 const DEFAULTS: Record<NotificationCategory, boolean> = {
   follows: true,
   follow_accepted: true,
@@ -57,7 +62,8 @@ const DEFAULTS: Record<NotificationCategory, boolean> = {
   watch_tags: true,
   recommendations: true,
   invites: true,
-  awards: false,
+  awards: true,
+  watchlist_discovery: true,
 };
 
 const answerWith = (prefs: Partial<Record<NotificationCategory, boolean>> = {}) => {
@@ -91,8 +97,8 @@ const CHECKING = 'Checking your current setting…';
  *
  * **Every switch here reads `false` while the query is in flight**, and that is
  * deliberate: the screen draws `prefs ? prefs[key] : false` rather than inventing a
- * default, because two of these categories genuinely default off and a guessed render is
- * indistinguishable from a confirmed one. Independent review 14 found that defect on the
+ * default, because one of these categories (Reactions) genuinely defaults off and a guessed
+ * render is indistinguishable from a confirmed one. Independent review 14 found that defect on the
  * privacy switch and the screen is written to avoid it.
  *
  * The cost lands in the tests. `false` on this screen is two different statements —
@@ -133,13 +139,40 @@ describe('the sections cover the vocabulary', () => {
     expect(new Set(SECTION_COVERAGE).size).toBe(SECTION_COVERAGE.length);
   });
 
-  it('is the three groups the founder asked for', () => {
-    expect(SECTIONS.map((s) => s.key)).toEqual(['social', 'recommendations', 'achievements']);
+  // Watching joined on 20261028000100 with one switch for all three proactive kinds.
+  it('is the four groups the founder asked for', () => {
+    expect(SECTIONS.map((s) => s.key)).toEqual([
+      'social',
+      'recommendations',
+      'achievements',
+      'watching',
+    ]);
   });
 
-  it('gives every section a master and at least one child', () => {
+  it('adds one category for Watching, and no toggle per internal event', () => {
+    const watching = SECTIONS.find((s) => s.key === 'watching');
+    expect(watching && categoriesIn(watching)).toEqual(['watchlist_discovery']);
+    expect(watching?.settings[0]?.label).toBe('Watchlist & discovery');
+  });
+
+  /**
+   * Founder, 2026-10-28: five to ten visible controls. One switch per category and no
+   * section masters (a master stored nothing and governed nothing a child does not), so
+   * nine switches plus at most one permission-card button. A global "Turn all off" would
+   * make eleven, which is why it is a recorded follow-up rather than part of this change.
+   */
+  it('is one switch per category, and at most ten controls with the permission card', () => {
+    expect(VISIBLE_SWITCHES.map((s) => s.key)).toEqual([
+      'follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags',
+      'recommendations', 'invites', 'awards', 'watchlist_discovery',
+    ]);
+    const controls = VISIBLE_SWITCHES.length + MAX_PERMISSION_CONTROLS;
+    expect(controls).toBeGreaterThanOrEqual(5);
+    expect(controls).toBeLessThanOrEqual(10);
+  });
+
+  it('gives every section at least one child', () => {
     for (const section of SECTIONS) {
-      expect(section.masterLabel.length).toBeGreaterThan(0);
       expect(categoriesIn(section).length).toBeGreaterThan(0);
     }
   });
@@ -200,8 +233,8 @@ describe('what a master switch reads', () => {
   /**
    * Undefined is not off. While the query is in flight the screen knows nothing, and
    * drawing a master in the off position asserts a state nobody has confirmed — which
-   * matters most here, because two categories genuinely are off by default and a wrong
-   * render is indistinguishable from a right one.
+   * matters most here, because a category genuinely is off by default (Reactions) and a
+   * wrong render is indistinguishable from a right one.
    */
   it('does not claim to be on before anything has been read', () => {
     expect(masterOn(social, undefined)).toBe(false);
@@ -218,20 +251,24 @@ describe('the screen', () => {
     expect(view.getByLabelText('Social')).toBeTruthy();
     expect(view.getByLabelText('Recommendations & invites')).toBeTruthy();
     expect(view.getByLabelText('Achievements')).toBeTruthy();
+    expect(view.getByLabelText('Watching')).toBeTruthy();
 
     for (const section of SECTIONS) {
-      expect(view.getByLabelText(section.masterLabel)).toBeTruthy();
+      // No section master is drawn (2026-10-28), and every category is.
+      expect(view.queryByLabelText(section.masterLabel)).toBeNull();
       for (const setting of section.settings) {
         expect(view.getByLabelText(setting.label)).toBeTruthy();
       }
     }
+    // The rendered count, not the declared one: nine switches on the screen.
+    expect(view.getAllByRole('switch')).toHaveLength(9);
   });
 
-  it('draws the two default-off categories off and the rest on', async () => {
+  it('draws the default-off category off and the rest on', async () => {
     const view = await renderLoaded();
 
     expect(view.getByLabelText('Reactions').props.value).toBe(false);
-    expect(view.getByLabelText('bingd Awards').props.value).toBe(false);
+    expect(view.getByLabelText('bingd Awards').props.value).toBe(true);
     expect(view.getByLabelText('Comments').props.value).toBe(true);
     expect(view.getByLabelText('Follows').props.value).toBe(true);
     expect(view.getByLabelText('Recommendations').props.value).toBe(true);
@@ -259,77 +296,37 @@ describe('the screen', () => {
   });
 
   /**
-   * One call, not five. A master applied by several sequential writes has an outcome
-   * for each subset that commits, and the reader is left with a master disagreeing
-   * with its own children — which is exactly the state a section control exists to
-   * make impossible.
+   * The master switches are gone from the screen (2026-10-28), and with them every
+   * multi-category write: each switch writes its own category and nothing else, so no
+   * tap can change a preference the reader is not looking at.
    */
-  it('writes a whole section in one call when the master goes off', async () => {
+  it('never writes more than the one category a switch shows', async () => {
     const view = await renderLoaded();
 
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', false);
+    for (const setting of VISIBLE_SWITCHES) {
+      fireEvent(view.getByLabelText(setting.label), 'valueChange', false);
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith('set_notification_preference', {
+          p_category: setting.key,
+          p_enabled: false,
+        }),
+      );
+      // One write at a time: the next tap only counts once the screen has settled.
+      await waitFor(() => expect(view.getByLabelText(setting.label).props.disabled).toBe(false));
+    }
+    expect(mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preferences')).toHaveLength(0);
+  });
+
+  it('writes the Watching switch as the one category it is', async () => {
+    const view = await renderLoaded();
+
+    expect(view.getByLabelText('Watchlist & discovery').props.value).toBe(true);
+    fireEvent(view.getByLabelText('Watchlist & discovery'), 'valueChange', false);
 
     await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags'],
+      expect(mockRpc).toHaveBeenCalledWith('set_notification_preference', {
+        p_category: 'watchlist_discovery',
         p_enabled: false,
-      }),
-    );
-    expect(
-      mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preference'),
-    ).toHaveLength(0);
-  });
-
-  it('turns every child on when the master goes on, including one that defaults off', async () => {
-    // "All social notifications" has one deterministic reading, and it does not depend
-    // on which children happened to be off first.
-    answerWith({
-      follows: false,
-      follow_accepted: false,
-      comments: false,
-      reactions: false,
-      watch_tags: false,
-    });
-    const view = await renderLoaded();
-    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
-
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', true);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags'],
-        p_enabled: true,
-      }),
-    );
-  });
-
-  it('shows the master off exactly when the whole section is off', async () => {
-    answerWith({
-      follows: false,
-      follow_accepted: false,
-      comments: false,
-      reactions: false,
-      watch_tags: false,
-    });
-    const view = await renderLoaded();
-
-    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
-    // Recommendations & invites was untouched, so its master is still on. A master
-    // that reported the whole app rather than its own section would fail here.
-    expect(view.getByLabelText('All Recommendations & invites notifications').props.value).toBe(
-      true,
-    );
-  });
-
-  it('leaves other sections alone when one master is used', async () => {
-    const view = await renderLoaded();
-
-    fireEvent(view.getByLabelText('All Achievement notifications'), 'valueChange', true);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['awards'],
-        p_enabled: true,
       }),
     );
   });
@@ -352,14 +349,14 @@ describe('the screen', () => {
    * defect independent review 21e found in four screens.
    */
   it('refetches after an unknown outcome, not only after success', async () => {
-    mockRpcErrors.set_notification_preferences = [{ code: '', message: 'socket died' }];
+    mockRpcErrors.set_notification_preference = [{ code: '', message: 'socket died' }];
     const view = await renderLoaded();
 
     const readsBefore = mockRpc.mock.calls.filter(
       (c) => c[0] === 'my_notification_preferences',
     ).length;
 
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', false);
+    fireEvent(view.getByLabelText('Comments'), 'valueChange', false);
 
     await waitFor(() =>
       expect(
