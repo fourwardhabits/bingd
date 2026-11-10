@@ -817,6 +817,48 @@ creates nothing while generation is off. The Reactions default and the `goal_com
 push copy are not behind those switches, so the release as a whole is not behaviourally
 inert.
 
+### R.1 Affinity brought forward onto main (`20261112000100`, Affinity notifications B1)
+
+The founder spec of 2026-11-10 keeps this affinity as the relationship-strength signal for
+friend-activity notifications. B1 merges this branch onto `main` unchanged (every migration
+above, byte for byte) and adds one migration. No weight, window or half-life changes.
+
+**A block ends affinity.** `_proactive_affinity` now answers 0 when either person has blocked
+the other or either account is not active, whatever their history. Before, the comment and
+comment-reaction families forgot activity whose *owner* the reader could no longer view (a
+third person's block), but the pair itself was never checked: a blocked pair kept its
+recommendations, co-watches and reactions. No caller acted on that, because
+`_proactive_social_actors` re-checks visibility; the guard is for the next caller
+(friend-activity eligibility, a reaction summary) that should not need to know. The original
+is renamed `_proactive_affinity_unguarded`, not copied, so its body is exactly what was
+reviewed. Pinned in `proactive-affinity-guard.test.mjs`, including a mutant run with the
+guard removed.
+
+**Lifting a block restores the history.** `blocks` keeps nothing once a block is lifted, and
+`block()` deletes both follows, so a pair that unblocks and follows each other again gets
+back whatever interaction is still inside the 90-day window. Recorded for a founder decision
+(keep, or remember lifted blocks for 90 days).
+
+**Reactions alone cannot reach 1.5.** The structure of the score sets a floor for any
+"high affinity" threshold: a mutual follow is 0.5 and the reactions family caps at 1, and
+reactions do not count towards reciprocity, so mutual follow plus any amount of reacting is
+at most 1.5. A threshold strictly above 1.5 therefore always requires a comment,
+recommendation or co-watch, which is what the spec means by meaningful interaction.
+
+**Choosing the threshold.** `proactive_affinity_distribution(sample)` (service role only)
+scores a bounded random sample of mutual pairs (50 to 20,000; `tablesample bernoulli` on
+`follows`, oversampled four times) and returns the mean, p50/p75/p90/p95/p99, the share at or
+above 0.75, 1, 1.5, 2, 3, 4 and 6, and the share at the 0.5 baseline. It returns no pair, no
+id and no individual value. Run it on staging and on production before setting the friend
+threshold (B2), and record the result with the date:
+
+```sql
+select proactive_affinity_distribution(5000);
+```
+
+Its cost is one `_proactive_affinity` per sampled pair (see the scale notes in B2's
+benchmark); 5,000 pairs is an operator query, not something to run from a cron.
+
 ## S. Staging application and Preview QA (do not run without approval)
 
 Rewritten for the second tranche (Codex re-review): three migrations, client version 2,
