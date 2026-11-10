@@ -258,4 +258,25 @@ describe('proactive_affinity_distribution', () => {
     assert.ok(Number(rows[0].big.pairs) <= 20000);
     assert.ok(Number(rows[0].small.pairs) <= 50);
   });
+
+  // Found by the B2 synthetic distribution run (24 ms a pair against 2.5 ms scored directly):
+  // an inlined CTE re-evaluates the score in each of the fourteen aggregates.
+  it('scores each sampled pair once', async () => {
+    const original = (await t.sql(`select pg_get_functiondef('_proactive_affinity(uuid, uuid, timestamptz)'::regprocedure) as d`))
+      .rows[0].d;
+    await t.exec(`create sequence if not exists affinity_calls`);
+    // Stable, like the real one, so the planner is as free to inline as it is in production.
+    await t.exec(`create or replace function _proactive_affinity(p_reader uuid, p_actor uuid, p_now timestamptz)
+      returns numeric language plpgsql stable security definer set search_path = public as $$
+      begin perform nextval('affinity_calls'); return 2; end $$`);
+    try {
+      const before = Number((await t.sql(`select nextval('affinity_calls') as n`)).rows[0].n);
+      const { rows } = await t.sql(`select proactive_affinity_distribution(50) as d`);
+      const after = Number((await t.sql(`select nextval('affinity_calls') as n`)).rows[0].n);
+      assert.ok(Number(rows[0].d.pairs) > 0);
+      assert.equal(after - before - 1, Number(rows[0].d.pairs));
+    } finally {
+      await t.exec(original);
+    }
+  });
 });

@@ -86,7 +86,9 @@ begin
                       where back.follower_id = f.followee_id and back.followee_id = f.follower_id
                         and back.state = 'approved')
        limit %s
-    ), scored as (
+    -- Materialized: referenced once, the CTE would be inlined and the score recomputed
+    -- in every aggregate below (fourteen times a pair).
+    ), scored as materialized (
       select _proactive_affinity(reader, actor, $1) as a from sampled
     )
     select jsonb_build_object(
