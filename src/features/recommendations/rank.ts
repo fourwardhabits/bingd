@@ -83,7 +83,19 @@ export type Candidate = {
   genres: readonly string[];
   language: string | null;
   popularity: number | null;
+  /**
+   * Engine V2 hybrid only: what the reader's taste neighbours think of it, as the server's
+   * aggregate (`collaborative_candidates`). Never a person; absent everywhere else.
+   */
+  collaborative?: Collaborative | null;
 };
+
+/**
+ * Taste-compatible collaborative evidence for one title: a confidence-weighted, shrunk mean
+ * valence (−1…+1, positive only by the time it reaches the client) and how many neighbours
+ * scored it 7 or more (always at least two).
+ */
+export type Collaborative = { support: number; endorsers: number };
 
 /** How much the viewer's ranking history leans toward each genre and language. */
 export type Taste = {
@@ -339,9 +351,11 @@ export type Explanation = {
   /** 0–1, the bounded popularity prior. */
   popularity: number;
   /** Which signal actually carried it. Drives the sentence and the debug view. */
-  lead: 'anchors' | 'genre' | 'language' | 'era' | 'popular';
+  lead: 'anchors' | 'genre' | 'language' | 'era' | 'collaborative' | 'popular';
   /** Engine V2 only: the candidate's decade and the reader's era affinity for it. */
   era?: { decade: number; affinity: number } | null;
+  /** Engine V2 hybrid only: the neighbours' aggregate, when it contributed. */
+  collaborative?: Collaborative | null;
   /** The `ENGINES` version that scored it. Absent on V1, which predates the field. */
   engine?: string;
 };
@@ -467,7 +481,7 @@ function leadOf(terms: {
  * (`recommendation_engine`), defaulting to `v1`; an unrecognised value is `v1`, so a
  * client that predates an engine never guesses at it.
  */
-export type EngineId = 'v1' | 'v2_metadata';
+export type EngineId = 'v1' | 'v2_metadata' | 'v2_hybrid';
 
 export type EngineWeights = {
   anchor: number;
@@ -475,6 +489,7 @@ export type EngineWeights = {
   language: number;
   era: number;
   popularity: number;
+  collaborative: number;
 };
 
 /**
@@ -495,12 +510,30 @@ export type EngineWeights = {
  * given the least room that still lets it break near-ties.
  */
 export const ENGINES: Record<EngineId, { version: string; weights: EngineWeights }> = {
-  v1: { version: CONFIG_VERSION, weights: { ...WEIGHTS, era: 0 } },
+  v1: { version: CONFIG_VERSION, weights: { ...WEIGHTS, era: 0, collaborative: 0 } },
   v2_metadata: {
     version: 'foryou-v2-metadata-2026-11-10',
-    weights: { anchor: 0.56, genre: 0.17, language: 0.11, era: 0.07, popularity: 0.09 },
+    weights: { anchor: 0.56, genre: 0.17, language: 0.11, era: 0.07, popularity: 0.09, collaborative: 0 },
+  },
+  /**
+   * `v2_metadata` × 0.85, rounded, plus collaborative evidence at 0.15 — the same "add one
+   * thing at a time" rule. 0.15 is a starting hypothesis, not a measured optimum: A3's
+   * sensitivity sweep reports how ordering moves across 0.05–0.35 on synthetic readers.
+   */
+  v2_hybrid: {
+    version: 'foryou-v2-hybrid-2026-11-10',
+    weights: { anchor: 0.48, genre: 0.14, language: 0.09, era: 0.06, popularity: 0.08, collaborative: 0.15 },
   },
 };
+
+/**
+ * The neighbours' support at which the collaborative term is full strength: a cohort whose
+ * shrunk mean valence is +0.5, i.e. well-matched people who on average scored it about 7.5.
+ */
+export const COLLABORATIVE_FULL = 0.5;
+
+/** Under this many endorsers, collaborative evidence scores but is never named as the reason. */
+export const COLLABORATIVE_NAMED_AT = 3;
 
 export function engineFrom(value: unknown): EngineId {
   return typeof value === 'string' && value in ENGINES ? (value as EngineId) : 'v1';
@@ -542,13 +575,18 @@ export function scoreCandidateV2(
   const eraValue = eraAffinity(profile, kind, candidate.year);
   const decade = decadeOf(candidate.year);
   const popularity = v1.explanation.popularity;
+  const collaborative = weights.collaborative > 0 ? (candidate.collaborative ?? null) : null;
+  const collaborativeValue = collaborative
+    ? Math.min(1, Math.max(0, collaborative.support) / COLLABORATIVE_FULL)
+    : 0;
 
   const total =
     weights.anchor * anchorSignal +
     weights.genre * genreValue +
     weights.language * languageValue +
     weights.era * eraValue +
-    weights.popularity * popularity;
+    weights.popularity * popularity +
+    weights.collaborative * collaborativeValue;
 
   const excess = {
     anchor: weights.anchor * anchorSignal,
@@ -556,12 +594,14 @@ export function scoreCandidateV2(
     language: weights.language * Math.max(0, languageValue - NEUTRAL.language),
     era: weights.era * Math.max(0, eraValue - NEUTRAL.era),
     popularity: weights.popularity * popularity,
+    collaborative: weights.collaborative * collaborativeValue,
   };
   const ordered: [Explanation['lead'], number][] = [
     ['anchors', excess.anchor],
     ['genre', excess.genre],
     ['language', excess.language],
     ['era', excess.era],
+    ['collaborative', excess.collaborative],
     ['popular', excess.popularity],
   ];
   ordered.sort((a, b) => b[1] - a[1]);
@@ -578,6 +618,7 @@ export function scoreCandidateV2(
           ? { code: candidate.language, affinity: languageValue }
           : null,
       era: decade != null && eraValue > NEUTRAL.era ? { decade, affinity: eraValue } : null,
+      collaborative: collaborativeValue > 0 ? collaborative : null,
       popularity,
       lead: value > 0 ? lead : 'popular',
       engine: engine.version,
@@ -1235,6 +1276,17 @@ export function headlineFor(
 
   if (explanation.lead === 'era' && explanation.era && taste.sampleSize >= CONFIDENT_AT) {
     return `More from the ${explanation.era.decade}s, which you rank highly`;
+  }
+
+  // Never a name, and never on fewer than three people: the sentence must not be a way to
+  // learn what one particular account thought.
+  if (
+    explanation.lead === 'collaborative' &&
+    explanation.collaborative &&
+    explanation.collaborative.endorsers >= COLLABORATIVE_NAMED_AT &&
+    taste.sampleSize >= CONFIDENT_AT
+  ) {
+    return 'Loved by people with taste like yours';
   }
 
   // Named for what it is. "Recommended for you" over a popularity ranking is exactly

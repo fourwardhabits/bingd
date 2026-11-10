@@ -17,6 +17,9 @@ import { useForYou } from './use-for-you';
  *     only evidence is that they loved some Japanese films; and
  *   - **following alone has no effect**: under V2 `social_candidates` is never asked, so
  *     what the people a reader follows loved cannot reach the wall by that route.
+ *
+ * And A2's: under `v2_hybrid` the taste-compatible cohort's titles reach the pool as ids
+ * with an aggregate, carry it into scoring, and lift a title on merit.
  */
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
@@ -93,7 +96,7 @@ const loggedFilm = (id: string, language: string, bucket: 'loved' | 'fine' | 'no
 const english = Array.from({ length: 24 }, (_, index) => film(`en-${index}`, 'en', 300));
 const japanese = Array.from({ length: 8 }, (_, index) => film(`ja-${index}`, 'ja', 300));
 
-const setup = (engine: 'v1' | 'v2_metadata') => {
+const setup = (engine: 'v1' | 'v2_metadata' | 'v2_hybrid') => {
   mockTables.user_media = ['seen-1', 'seen-2', 'seen-3', 'seen-4'].map((id) => loggedFilm(id, 'ja', 'loved'));
   // The popularity fallback is all English, which is the pool V1 builds for this reader.
   mockTables.provider_list_cache = [{ payload: { ids: english.map((row) => row.id) } }];
@@ -105,6 +108,11 @@ const setup = (engine: 'v1' | 'v2_metadata') => {
     catalogue_candidates: japanese.map((row) => ({ ...row, source: 'language:ja' })),
     // Somebody the reader follows loved these. Under V1 they join the pool.
     social_candidates: [{ media_item_id: 'followed-1', endorsers: 2 }],
+    // What taste-compatible strangers loved, as the server aggregates it.
+    collaborative_candidates: [
+      { media_item_id: 'cohort-1', support: 0.45, endorsers: 5 },
+      { media_item_id: 'cohort-2', support: 0.2, endorsers: 2 },
+    ],
   };
 };
 
@@ -188,5 +196,36 @@ describe('Engine V2 on the For You wall', () => {
     await waitFor(() => expect(result.current.data?.engine).toBe('v2_metadata'));
 
     expect(result.current.data?.catalogueIds).toEqual([]);
+  });
+
+  it('never asks for collaborative evidence below the hybrid engine', async () => {
+    setup('v2_metadata');
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_metadata'));
+    expect(called('collaborative_candidates')).toBe(false);
+    expect(result.current.data?.collaborativeIds).toEqual([]);
+  });
+
+  it('brings in what taste-compatible strangers loved, and scores it on that evidence', async () => {
+    setup('v2_hybrid');
+    mockTables.media_items = [...english, film('cohort-1', 'en', 300), film('cohort-2', 'en', 300)];
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_hybrid'));
+    const data = result.current.data!;
+
+    expect(mockRpcCalls.find((call) => call.name === 'collaborative_candidates')?.args).toMatchObject({
+      p_kind: 'movie',
+    });
+    // Still V2: the follow graph is not a source.
+    expect(called('social_candidates')).toBe(false);
+    expect(data.collaborativeIds).toEqual(['cohort-1', 'cohort-2']);
+
+    const byId = new Map(data.scored.map((item) => [item.mediaItemId, item]));
+    const strong = byId.get('cohort-1')!;
+    const weak = byId.get('cohort-2')!;
+    const plain = byId.get('en-0')!;
+    expect(strong.explanation.collaborative).toEqual({ support: 0.45, endorsers: 5 });
+    expect(strong.explanation.total).toBeGreaterThan(weak.explanation.total);
+    expect(weak.explanation.total).toBeGreaterThan(plain.explanation.total);
   });
 });

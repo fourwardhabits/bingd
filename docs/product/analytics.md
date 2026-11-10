@@ -226,7 +226,7 @@ help a reader whose `liked_titles` is above eight, so this is the split that say
 high `repeat_count` is rotation's problem or a small band's.
 
 `engine` and `wall_languages` (2026-11-10, Recommendation Engine V2) say which scorer drew
-the wall — `v1` or `v2_metadata`, chosen server-side by `recommendation_engine()` and `v1`
+the wall — `v1`, `v2_metadata` or `v2_hybrid` (A2, taste-compatible collaborative evidence), chosen server-side by `recommendation_engine()` and `v1`
 for everybody until an operator turns V2 on — and how many distinct original languages are
 on it. The second is the one number the V2 language work is answerable by in production; it
 is a count, so no language code, title or person travels.

@@ -85,3 +85,114 @@ needed in either direction. Telemetry: `for_you_slate_shown.engine`, `.wall_lang
 - **Hypothesis, not evidence:** that V2 orders titles better for real readers. The weights
   are V1's proportions plus a small era term chosen so a difference can be attributed; A3
   compares engines on held-out data, and only staging/production telemetry can say more.
+
+## 2. A2 — collaborative evidence from taste-compatible people
+
+Migration `20261111000200_people_whose_taste_you_share.sql`; client in `rank.ts`
+(`ENGINES.v2_hybrid`) and `use-for-you.ts` (`collaborative_candidates`). Engine
+`v2_hybrid` is everything `v2_metadata` does plus one source and one scoring term.
+
+### 2.1 Who counts as a neighbour
+
+A **public**, active account the reader may discover (`can_discover_profile`: not blocked
+either way, not suspended) with a Taste Match on at least `taste.min_common` (5) shared
+ranked titles. The Match is `taste_match`'s own arithmetic, run for one reader against many
+(`_taste_matches`); equality with `taste_match` is tested on random rankings.
+
+- **Following plays no part.** A followed account with the same rankings gets the same Match,
+  the same weight and the same effect as a stranger (tested). A **private** account is never
+  a neighbour, followed or not — otherwise following would decide whose evidence counts, and
+  a private account's rankings would reach somebody it never approved.
+- **Re-checked on every read.** A cached neighbour who goes private, blocks or is blocked,
+  or is suspended stops counting on the next read without waiting for a refresh (tested).
+- **Low compatibility is not opposite taste.** Below `recommendations.neighbour_min_match`
+  (55) the weight is zero, never negative; a poor match's dislikes are never read as the
+  reader's likes (tested).
+
+### 2.2 Weights: a weak high Match cannot dominate
+
+`weight = (match − 55)/45 × common/(common + 10)`, in 0–1.
+
+The Match is already shrunk toward 50 by `n/(n + 5)`, so a five-title "100%" is at most 75.
+The second factor is a stricter reliability term on top: a five-title 75 weighs
+`(20/45)(5/15) ≈ 0.15`; a forty-title 70 weighs `(15/45)(40/50) ≈ 0.27`; a forty-title 85
+weighs `≈ 0.53`. One thin, high Match therefore moves a title less than an established
+cohort does. The constants are starting values; A3 sweeps them on synthetic readers.
+
+### 2.3 Bounded retrieval (no all-pairs)
+
+`_refresh_taste_neighbours(reader)`:
+
+1. **Probe** the reader's 40 most opinionated ranked titles (`|score − 5|`, less popular first
+   among equals — a shared love of an obscure film says more than a shared love of a hit).
+2. **Sample** at most 50 raters per probe title from a daily-rotating point in the new
+   `rankings (media_item_id, user_id)` index, wrapping around. A title ranked by a million
+   people costs 50 index rows, not a million (a test shows the cap binding).
+3. **Shortlist** the 200 most frequent co-raters who are public and discoverable.
+4. **Score** those 200 with `_taste_matches` and cache the best 40 with weight > 0 in
+   `taste_neighbours`, for 24 hours (`taste_neighbour_refresh` records "computed, nobody
+   qualified" too, so an isolated reader is not recomputed per read).
+
+Worst case per refresh: 40 × 50 = 2,000 index probes, 200 users' rankings scored. Nothing
+runs on a write path and nothing compares a reader with every account. The refresh happens
+inside the first stale read; concurrent stale reads by one reader refresh once (a
+per-reader advisory lock plus a re-check, observed with real sessions in
+`concurrency/races/taste-neighbours.mjs`, mutation-checked), and different readers do not
+contend. Capacity at scale is measured in the benchmark section, not asserted here.
+
+**Sampling trade-off:** a rotating sample means a reader may not find their single best
+neighbour on a given day if a probe title has thousands of raters. Rotation finds different
+ones on different days; the cache keeps the best 40 of each pass. Exact top-k would need
+all-pairs work, which §7 rules out.
+
+### 2.4 What the client receives
+
+`collaborative_candidates(kind, limit ≤ 100)` returns `(media_item_id, support, endorsers)`:
+
+- `support` = Σ weight × (score − 5)/5 over neighbours who ranked the title, divided by
+  Σ weight + 1 (one full-weight neutral opinion as a prior). Neighbours' dislikes count
+  against a title; only positive support is returned.
+- `endorsers` = how many neighbours scored it 7 or more; **at least two**, so no title appears
+  on one person's say-so.
+- Never a person, a neighbour id, one person's score, or a Match. Every neighbour is a public
+  account whose rankings the reader could already open, so the aggregate reveals nothing the
+  reader could not already see; it only saves them the search.
+- On TV, a neighbour's seasons count once per show, at their best season.
+- Excludes whatever the reader has logged or ranked, and shows with a logged season.
+
+### 2.5 Scoring
+
+`ENGINES.v2_hybrid` = `v2_metadata`'s weights × 0.85 (rounded) + `collaborative` 0.15.
+The term is `min(1, support / 0.5)`: full strength at a cohort mean of about 7.5. It is one
+term among six, so it lifts a title but cannot by itself outrank a strong anchor match
+(tested). The ids take the slot `social_candidates` had in V1's source order.
+
+Headline: "Loved by people with taste like yours", only when the collaborative term leads,
+at least three neighbours endorsed it, and the reader has five or more rankings. No name, no
+count, no Match.
+
+### 2.6 Flags and rollback
+
+| Key | Seed | Meaning |
+|---|---|---|
+| `recommendations.v2_engine` = `"v2_hybrid"` | (`"v1"`) | Turns A2 on for the cohort/allowlist in §1.5. |
+| `recommendations.neighbour_probe_titles` | `40` | Probe titles per refresh (clamped 5–100). |
+| `recommendations.neighbour_raters_per_title` | `50` | Raters sampled per probe title (5–200). |
+| `recommendations.neighbour_limit` | `40` | Neighbours kept (1–100). |
+| `recommendations.neighbour_ttl_hours` | `24` | Cache lifetime (1–336). |
+| `recommendations.neighbour_min_match` | `55` | Zero-weight floor (50–95). |
+
+**Rollback:** write `"v2_metadata"` (keep A1) or `"v1"` to `recommendations.v2_engine`.
+`collaborative_candidates` then answers empty and never refreshes; the cache is inert and can
+be truncated at leisure (`truncate taste_neighbours, taste_neighbour_refresh`). No client
+release is needed.
+
+### 2.7 Validated vs hypothesis
+
+- **Tested (DB, hook, unit, race):** Match arithmetic equals `taste_match`; following has no
+  effect; private, blocked and suspended accounts never count, including from cache; low
+  Match gives zero weight; one lover is not enough; negatives lower support; the rater cap
+  binds; TV rolls up per show; anon and internals are refused; the engine switch gates it;
+  concurrent refreshes deduplicate.
+- **Hypothesis:** that taste neighbours' loves are good recommendations for real readers, and
+  every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only.
