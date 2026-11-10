@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, Linking, StyleSheet } from 'react-native';
 
@@ -4222,11 +4223,11 @@ describe('the immersive title page (experiment)', () => {
     });
 
     /**
-     * **Rank and Edit ranking are never cut** (UI cohesion pass, 2026-11-06): in the card the
+     * **Rank and Log rewatch are never cut** (UI cohesion pass, 2026-11-06): in the card the
      * control may take the row's full width and the icons wrap, at any text size; the
      * original page's narrow column keeps its ceiling.
      */
-    it('lets Edit ranking take the card’s width rather than truncating', async () => {
+    it('lets Log rewatch take the card’s width rather than truncating', async () => {
       ranked();
       const view = await open();
       const control = await waitFor(() => view.getByTestId('title-action-ranked'));
@@ -4237,20 +4238,164 @@ describe('the immersive title page (experiment)', () => {
       );
       expect(style.maxWidth).toBe('100%');
       expect(style.flexShrink).toBe(0);
+      // One line, and the bookmark, list and recommend controls stay in the same cluster.
+      expect(within(control).getByText('Log rewatch').props.numberOfLines).toBe(1);
+      const cluster = within(view.getByTestId('title-actions'));
+      for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+        expect(cluster.getByTestId(id)).toBeTruthy();
+      }
     });
 
-    it('keeps a smaller Edit ranking on a ranked title, and no second Rank', async () => {
-      ranked();
+    /**
+     * **Log rewatch, in place of Edit ranking** (founder, 2026-11-10). The ranked title's
+     * primary action is another viewing: the existing *Log another watch* sheet, opened
+     * directly, with no chooser between log and edit. *Update your rating* stays in ⋯.
+     */
+    describe('Log rewatch on a ranked title', () => {
+      const rewatchCalls = () =>
+        mockRpc.mock.calls.filter(([name]: [string]) => name === 'log_rewatch_with_details');
+      const againCalls = () => mockRpc.mock.calls.filter(([name]: [string]) => name === 'rank_again');
+
+      it('reads Log rewatch with the repeat icon, and no second Rank', async () => {
+        ranked();
+        const view = await open();
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+        expect(within(control).queryByText('Edit ranking')).toBeNull();
+        // An Ionicon renders as its glyph, so the icon is asserted by its character.
+        const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+          String.fromCodePoint(Ionicons.glyphMap[name] as number);
+        expect(within(control).getByText(glyph('repeat-outline'))).toBeTruthy();
+        expect(within(control).queryByText(glyph('create-outline'))).toBeNull();
+        expect(control.props.accessibilityLabel).toBe('Log a rewatch of Inception');
+        expect(control.props.accessibilityHint).toBe('Opens a sheet to record another viewing');
+        expect(view.queryByTestId('title-action-rank')).toBeNull();
+        // The reader's own score is the prominent one, stated once.
+        await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
+      });
+
+      it('opens the rewatch sheet directly, and records nothing by opening it', async () => {
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch of Inception')).toBeTruthy();
+        // Not the rating sheet, and no menu or chooser in between.
+        expect(view.queryByLabelText('Update your rating')).toBeNull();
+        expect(view.queryByLabelText('Options for Inception')).toBeNull();
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
+
+      it('does the same for a ranked season', async () => {
+        mockOpenId = 'season-1';
+        tableRows.media_items = [
+          {
+            ...film,
+            id: 'season-1',
+            kind: 'season',
+            title: 'Season 1',
+            release_date: '2023-04-01',
+            runtime_minutes: null,
+            parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+          },
+        ];
+        tableRows.rankings = [
+          { user_id: 'user-1', media_item_id: 'season-1', position: 1, category: 'tv_seasons', bucket: 'loved' },
+        ];
+        tableRows.user_media = [
+          { user_id: 'user-1', media_item_id: 'season-1', bucket: 'loved', watched_on: null, note: null },
+        ];
+        const view = await renderWithProviders(<TitleScreen />);
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+
+        await fireEvent.press(control);
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+        expect(rewatchCalls()).toHaveLength(0);
+      });
+
+      it('records no watch when the sheet is closed', async () => {
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+
+        await waitFor(() => expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull());
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+        expect(within(view.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
+      });
+
+      it('saves exactly one viewing, then re-checks on that viewing rather than a new one', async () => {
+        mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        await fireEvent.press(view.getByText('I liked it'));
+
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(rewatchCalls()).toHaveLength(1);
+        // The comparisons are tied to the viewing just saved, so finishing them enriches
+        // that one activity rather than writing a second (§K).
+        expect(againCalls()[0]![1]).toEqual(
+          expect.objectContaining({ p_bucket: 'loved', p_watch_event_id: 'event-2' }),
+        );
+        // Nothing else that records a viewing, or moves the ranking outside the session.
+        for (const name of ['log_rewatch', 'log_title', 'set_watch_date', 'rank_rebucket', 'rank_unrank']) {
+          expect(mockRpc).not.toHaveBeenCalledWith(name, expect.anything());
+        }
+      });
+
+      it('keeps Update your rating in the menu, as a correction that records no watch', async () => {
+        ranked();
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+        await fireEvent.press(view.getByTestId('title-more'));
+        await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+
+        await fireEvent.press(view.getByLabelText('Update your rating'));
+        await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+        await fireEvent.press(view.getByText('I liked it'));
+
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
+        expect(rewatchCalls()).toHaveLength(0);
+      });
+    });
+
+    it('still resumes an unfinished ranking from Rank', async () => {
+      tableRows.user_media = [
+        {
+          user_id: 'user-1',
+          media_item_id: 'film-1',
+          bucket: 'fine',
+          watched_on: null,
+          note: null,
+          note_visibility: 'private',
+          note_has_spoilers: false,
+        },
+      ];
       const view = await open();
-      await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+      const control = await waitFor(() => view.getByTestId('title-action-rank'));
+      expect(within(control).getByText('Rank')).toBeTruthy();
+      expect(view.queryByText('Log rewatch')).toBeNull();
 
-      expect(within(view.getByTestId('title-action-ranked')).getByText('Edit ranking')).toBeTruthy();
-      expect(view.queryByTestId('title-action-rank')).toBeNull();
-      // The reader's own score is the prominent one, stated once.
-      await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
-
-      await fireEvent.press(view.getByTestId('title-action-ranked'));
-      await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      await fireEvent.press(control);
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith(
+          'rank_start',
+          expect.objectContaining({ p_media_item_id: 'film-1', p_bucket: 'fine' }),
+        ),
+      );
+      expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull();
     });
 
     it('saves to the watchlist from the bookmark', async () => {

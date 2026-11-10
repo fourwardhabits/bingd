@@ -187,16 +187,16 @@ describe('the immersive score strip', () => {
 describe('the action cluster on artwork', () => {
   const icon = { accessibilityLabel: 'x', onPress: () => {} };
 
-  it('reads Edit ranking for a ranked title when asked, and Ranked otherwise', async () => {
+  it('reads Log rewatch for a ranked title when asked, and Ranked otherwise', async () => {
     const edit = await render(
       <TitleActions
         tone="artwork"
-        rank={{ ranked: true, label: 'Edit ranking', accessibilityLabel: 'Edit', onPress: () => {} }}
+        rank={{ ranked: true, label: 'Log rewatch', accessibilityLabel: 'Log', onPress: () => {} }}
         save={icon}
         recommend={icon}
       />,
     );
-    expect(within(edit.getByTestId('title-action-ranked')).getByText('Edit ranking')).toBeTruthy();
+    expect(within(edit.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
 
     const original = await render(
       <TitleActions rank={{ ranked: true, accessibilityLabel: 'R', onPress: () => {} }} save={icon} recommend={icon} />,
