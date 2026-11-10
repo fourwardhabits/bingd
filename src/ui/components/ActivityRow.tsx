@@ -7,6 +7,7 @@ import { fontFamily, theme } from '../tokens';
 import { Avatar } from './Avatar';
 import { Poster } from './Poster';
 import { ReactionControl } from './ReactionControl';
+import { ReactionSummary } from './ReactionSummary';
 import { ScoreBadge } from './ScoreBadge';
 import { SpoilerNote } from './SpoilerNote';
 import { Text } from './Text';
@@ -28,6 +29,15 @@ export type ActivityReaction = {
   onPressSummary?: () => void;
   /** Rendered inside the row, above the actions — see `ReactionPill`. */
   picker?: React.ReactNode;
+  /**
+   * False on the viewer's own activity: no heart and no picker, only everyone else's
+   * reactions on the summary line (founder, 2026-11-10). Defaults to true.
+   */
+  canReact?: boolean;
+  /** "Priya and 3 others like this", longest first (`summaryForms`). */
+  summaryForms?: string[];
+  /** The summary's glyphs, the viewer's own first (`clusterKinds`). Falls back to `glyphs`. */
+  summaryGlyphs?: string[];
 };
 
 export type ActivityRowProps = {
@@ -428,21 +438,39 @@ export function ActivityRow({
         </View>
       ) : null}
 
+      {/* Who reacted, as a sentence on its own line — the Feed card's placement, so the
+          two surfaces read reactions the same way (founder, 2026-11-10). Absent with no
+          reactions. */}
+      {reaction && reaction.count > 0 ? (
+        <ReactionSummary
+          glyphs={reaction.summaryGlyphs ?? reaction.glyphs ?? []}
+          forms={
+            reaction.summaryForms?.length
+              ? reaction.summaryForms
+              : [`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}`]
+          }
+          onPress={reaction.onPressSummary}
+          style={styles.summary}
+          testID="activity-reactions"
+        />
+      ) : null}
+
       {/* Above the actions and inside the row — the comment thread's placement, which
           the founder preferred on the device (§17): the pill sits directly on top of
           the heart it belongs to, not in a floating band of its own. */}
-      {reaction?.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
+      {reaction?.picker && reaction.canReact !== false ? (
+        <View style={styles.picker}>{reaction.picker}</View>
+      ) : null}
 
       <View style={styles.actions}>
-        {reaction ? (
+        {reaction && reaction.canReact !== false ? (
           /**
-           * The one reaction control (§17) — the comment grammar, shared. Heart
-           * first; the glyphs people used and the total inline beside it, no
-           * per-kind tally: `disagree` is countable on the activity it belongs to
-           * and nowhere else, which is the difference between banter and a
-           * scoreboard (PRD §14). The breakdown lives behind the cluster — tap or
-           * hold it and the people are named (§18), where the old summary band's
-           * tap used to lead.
+           * The one reaction control (§17) — the comment grammar, shared, as the
+           * heart alone: the glyphs and who reacted are the summary line above
+           * (2026-11-10), and still no per-kind tally — `disagree` is countable on
+           * the activity it belongs to and nowhere else, which is the difference
+           * between banter and a scoreboard (PRD §14). Absent on the reader's own
+           * activity.
            */
           <ReactionControl
             label={
@@ -451,15 +479,16 @@ export function ActivityRow({
                 : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
             }
             active={Boolean(reaction.mineGlyph)}
-            // The reader's own kind, which the control puts in the action slot and
-            // subtracts from the cluster beside it (§6). Already on this prop — every
-            // caller computes it, and `active` was derived from it here anyway.
+            // The reader's own kind, which the control puts in the action slot (§6).
+            // Already on this prop — every caller computes it, and `active` was
+            // derived from it here anyway.
             mineGlyph={reaction.mineGlyph}
             glyphs={reaction.glyphs ?? []}
             count={reaction.count}
             onToggle={reaction.onPress}
             onOpenPicker={reaction.onLongPress}
             onOpenDetail={reaction.onPressSummary}
+            showSummary={false}
           />
         ) : null}
 
@@ -675,6 +704,7 @@ const styles = StyleSheet.create({
   // not merely with the poster it clears.
   note: { paddingLeft: textEdge },
   picker: { paddingLeft: textEdge },
+  summary: { marginLeft: textEdge },
   /**
    * Four icons and a timestamp, on the narrowest screen this app supports.
    *

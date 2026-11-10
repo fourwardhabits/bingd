@@ -558,16 +558,13 @@ describe('the reaction control', () => {
     expect(onLongPress).toHaveBeenCalled();
   });
 
-  it('marks the control as mine without repeating the glyph beside the summary', async () => {
+  it('marks the control as mine, and leads the summary line with the same kind', async () => {
     /**
-     * The same emoji appeared twice — once counted in the cluster, once on the control
-     * — and read as a duplicate rather than as two different statements.
-     *
-     * Which of the two survives changed on 2026-08-28 (founder §6) and the count did
-     * not: the row used to keep a filled heart on the control and the emoji in the
-     * cluster, and now the reader's own kind *is* the control and the cluster no longer
-     * repeats it. This row's job is to hand `ReactionControl` the glyph it needs to do
-     * that — `ReactionControl.test.tsx` owns the grammar itself.
+     * Until 2026-11-10 the cluster sat inline beside the control, and the same emoji
+     * twice in one run of glyphs read as a duplicate (founder §6, 2026-08-28). The
+     * summary is now its own line, the one `FeedCard` draws, and that line has always
+     * led with the reader's kind: it says what everybody did, the control says what you
+     * did. `ReactionControl.test.tsx` owns the control's grammar.
      */
     const view = await render(
       <ActivityRow
@@ -579,16 +576,12 @@ describe('the reaction control', () => {
     const control = view.getByLabelText(
       'You reacted to Inception. Tap to remove, long press to change.',
     );
-    expect(control).toBeTruthy();
-    expect(view.queryByText('You')).toBeNull();
-    // Exactly once on the row, and it is the action slot that has it.
-    expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
     expect(within(control).queryAllByText('😂')).toHaveLength(1);
+    const summary = view.getByTestId('activity-reactions');
+    expect(within(summary).getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
   });
 
   it('leaves the other kinds in the cluster beside the reader’s own', async () => {
-    // Only the reader's kind is de-duplicated. Everybody else's is still on the row,
-    // and the total is still everybody's.
     const view = await render(
       <ActivityRow
         {...props}
@@ -602,9 +595,34 @@ describe('the reaction control', () => {
       />,
     );
 
-    expect(view.getAllByText('❤️', { includeHiddenElements: true })).toHaveLength(1);
-    expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
-    expect(view.getByText('3')).toBeTruthy();
+    const summary = view.getByTestId('activity-reactions');
+    expect(within(summary).getAllByText('❤️', { includeHiddenElements: true })).toHaveLength(1);
+    expect(within(summary).getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
+    expect(view.getByText('3 reactions')).toBeTruthy();
+  });
+
+  it('offers no control at all on the reader’s own activity, and keeps the summary', async () => {
+    const onPressSummary = jest.fn();
+    const view = await render(
+      <ActivityRow
+        {...props}
+        reaction={{
+          count: 1,
+          canReact: false,
+          glyphs: ['❤️'],
+          summaryForms: ['Priya likes this', 'Priya', '1 like'],
+          onPress: jest.fn(),
+          onPressSummary,
+          picker: <Text>PICKER</Text>,
+        }}
+      />,
+    );
+
+    expect(view.queryByLabelText(/React to|You reacted/)).toBeNull();
+    expect(view.queryByTestId('reaction-action')).toBeNull();
+    expect(view.queryByText('PICKER')).toBeNull();
+    await fireEvent.press(view.getByLabelText('Priya likes this. See who reacted.'));
+    expect(onPressSummary).toHaveBeenCalled();
   });
 
   /** The compact summary: glyphs and a total, never a per-kind tally in the row. */
@@ -617,7 +635,7 @@ describe('the reaction control', () => {
         />,
       );
 
-      expect(view.getByText('12')).toBeTruthy();
+      expect(view.getByText('12 reactions')).toBeTruthy();
       // A per-kind breakdown in the row would put a scoreboard beside the film.
       expect(view.queryByText('❤️ 5')).toBeNull();
     });
