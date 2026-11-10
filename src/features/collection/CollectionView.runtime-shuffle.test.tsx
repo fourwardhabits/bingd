@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { AccessibilityInfo, StyleSheet, Text } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -101,12 +101,14 @@ const openSheet = async (view: View) => {
 const sortRadio = (view: View, name: RegExp | string) =>
   within(view.getByTestId('collection-sort-section')).getByRole('radio', { name });
 
-const styleOf = (node: { props: { style: unknown } }) =>
-  StyleSheet.flatten(
-    typeof node.props.style === 'function'
-      ? (node.props.style as (state: { pressed: boolean }) => unknown)({ pressed: false })
-      : node.props.style,
+const styleOf = (node: { props: Record<string, unknown> }) => {
+  const style = node.props.style;
+  return StyleSheet.flatten(
+    (typeof style === 'function'
+      ? (style as (state: { pressed: boolean }) => unknown)({ pressed: false })
+      : style) as never,
   ) as { backgroundColor?: string };
+};
 
 /**
  * **The order a state draws, read from a fresh mount.**
@@ -256,9 +258,11 @@ describe.each(['poster', 'list'] as const)('in %s view', (mode) => {
     it('orders a TV watchlist by episode length, seasons last', async () => {
       const tv = [
         film(1, { kind: 'series', runtimeMinutes: 58, score: null, bucket: null }),
+        // A season row is drawn under its series' name ("Film 02, S1"), so it is read too.
         film(2, {
           kind: 'season',
-          seriesTitle: 'Show',
+          seriesTitle: 'Film 02',
+          seasonNumber: 1,
           runtimeMinutes: null,
           score: null,
           bucket: null,
@@ -270,7 +274,7 @@ describe.each(['poster', 'list'] as const)('in %s view', (mode) => {
         segment: 'watchlist',
         initial: { sort: { axis: 'runtime', direction: 'desc' } },
       });
-      expect(drawn(view).filter((name) => name !== 'Film 02')).toEqual(['Film 01', 'Film 03']);
+      expect(drawn(view)).toEqual(['Film 01', 'Film 03', 'Film 02']);
       await openSheet(view);
       expect(sortRadio(view, /^Runtime/).props.accessibilityState).toMatchObject({
         selected: true,
@@ -391,6 +395,32 @@ describe.each(['poster', 'list'] as const)('in %s view', (mode) => {
       expect(seen.at(-1)?.filters.genres).toEqual(['Drama']);
       await view.unmount();
       expect((await orderOf(LIBRARY, seen.at(-1)!)).sort()).toEqual(['Film 02', 'Film 04']);
+    });
+
+    it('moves nobody else when a refetch removes one title or adds one', async () => {
+      const state = {
+        ...initialViewState(),
+        mode,
+        sort: { axis: 'shuffle', direction: 'desc' },
+        seed: 11,
+      } as const;
+      const before = await orderOf(LIBRARY, state);
+      // Ranked out of Unranked, or taken off the Watchlist: one title leaves.
+      const leaving = before[2]!;
+      const without = LIBRARY.filter((row) => row.title !== leaving);
+      expect(await orderOf(without, state)).toEqual(before.filter((name) => name !== leaving));
+      // A title logged elsewhere arrives: it takes a place, and the others keep theirs.
+      const joined = await orderOf([...LIBRARY, film(9)], state);
+      expect(joined.filter((name) => name !== 'Film 09')).toEqual(before);
+    });
+
+    it('tells a screen reader it shuffled, since the sheet closes', async () => {
+      const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      const view = await draw();
+      await openSheet(view);
+      await fireEvent.press(sortRadio(view, 'Shuffle'));
+      expect(announce).toHaveBeenCalledWith('Shuffled');
+      announce.mockRestore();
     });
 
     it('holds its order through re-renders, a refetch and Grid/List switches', async () => {

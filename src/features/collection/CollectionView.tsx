@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import { useState, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -190,6 +190,9 @@ export function CollectionView({
    */
   const shuffleNow = () => {
     setFilterOpen(false);
+    // The sheet closes on the press, so nothing on screen says the order changed; a screen
+    // reader is told in words.
+    AccessibilityInfo.announceForAccessibility('Shuffled');
     onChange({
       ...state,
       sort: { axis: COLLECTION_SORT_AXES.shuffle.axis, direction: 'desc' },

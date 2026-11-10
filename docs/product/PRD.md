@@ -1316,10 +1316,11 @@ pressed again while selected. The seed walks forward until the visible order dif
 one on screen. Shuffle applies at once and closes the sheet; it never waits for Filter Apply
 and never applies an unapplied filter draft. The toolbar reshuffle glyph is gone with no
 replacement. The selected Shuffle row stays enabled, with the accessibility hint *Tap again
-to reshuffle*. The hand is dealt over the whole segment in media-item-id order and then
-filtered. Scrolling, re-renders, refetches that return the same titles in another order,
-filter changes and Grid ↔ List switches therefore never reorder it. A refetch that adds or
-removes a title deals a new hand, since Fisher–Yates is over the set.
+to reshuffle*. Each title's place is drawn from the existing seeded generator (`mulberry32`), seeded
+by the shuffle seed mixed with a hash of the title's id. So the order depends only on the
+seed and the titles themselves. Scrolling, re-renders, refetches (in any arrival order),
+filter changes and Grid ↔ List switches never reorder it. A title that joins or leaves the
+list (ranked out of Unranked, taken off the Watchlist) moves nobody else.
 
 > **Current state (2026-09-24, #208; frozen at `9d9683a`).** The table above is the current one.
 > On Watched and Unranked, **Recently watched replaced Recently added**: seven hundred titles

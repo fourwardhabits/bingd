@@ -449,30 +449,60 @@ export function sortItems(
   sort: CollectionSortState,
   seed = 0,
 ): CollectionItem[] {
-  if (sort.axis === 'shuffle') return shuffle(byMediaItemId(items), seed);
+  if (sort.axis === 'shuffle') return shuffleByTitle(items, seed);
   return [...items].sort(compareItems(sort));
 }
 
 /**
- * **The shuffle's input, in one fixed order before the seed touches it.**
+ * **The Collection's shuffle: each title's place is drawn from the seed and its own id.**
  *
- * Fisher–Yates is deterministic in the seed *and in its input*, and the input here is a
- * query result: a refetch that returned the same titles in another order (a ranking
- * moved, the two watched queries landed the other way round) would have reshuffled the
- * wall under the reader's thumb with the seed untouched. Sorting by id first makes the
- * order a function of the seed and the set of titles only.
+ * The same seeded generator as {@link shuffle} (`mulberry32`), drawn once per title from
+ * the seed mixed with a hash of the title's id, and the titles ordered by what they drew.
+ * Fisher–Yates over the list was the earlier form and it had two ways to reshuffle the
+ * wall under the reader's thumb with the seed untouched (independent review, 2026-11-10):
+ *
+ *   · it is deterministic in its *input order*, which is a query result — a refetch that
+ *     returned the same titles in another order dealt a different hand;
+ *   · it is a walk over the whole set, so a refetch that added or removed **one** title
+ *     (ranking one out of Unranked, taking one off the Watchlist, a log from another
+ *     device) moved almost every other title too.
+ *
+ * Drawn per title, a place depends on nothing but the seed and that title: the arrival
+ * order is irrelevant, a title that leaves takes only its own place with it, and a new
+ * one slots in without moving anybody. Filtering keeps the relative order for the same
+ * reason. The id breaks the (astronomically unlikely) equal draw, so the order is total.
  */
-const byMediaItemId = (items: readonly CollectionItem[]): CollectionItem[] =>
-  [...items].sort((a, b) => a.mediaItemId.localeCompare(b.mediaItemId));
+function shuffleByTitle(items: readonly CollectionItem[], seed: number): CollectionItem[] {
+  const placed = items.map((item) => ({ item, place: placeOf(item.mediaItemId, seed) }));
+  placed.sort(
+    (a, b) => a.place - b.place || a.item.mediaItemId.localeCompare(b.item.mediaItemId),
+  );
+  return placed.map(({ item }) => item);
+}
+
+/** One draw of the seeded generator for one title: the seed, mixed with its id's hash. */
+const placeOf = (id: string, seed: number): number =>
+  mulberry32((fnv1a(id) ^ Math.imul(seed >>> 0, 0x9e3779b1)) >>> 0)();
+
+/** FNV-1a, 32-bit: a stable number for an id, the same on every device and every run. */
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
 
 /**
  * What the Collection draws: the segment's titles, filtered, in the order chosen.
  *
- * **A shuffle is dealt over the whole segment and then filtered**, rather than dealt over
- * whatever the filters left. Same seed, same relative order, whichever filters are on:
- * applying Drama keeps the dramas in the order they already had on the wall, and taking
- * the filter off puts the others back between them rather than dealing a new hand. For
- * every other axis, which is a comparator, the two orders of operation are the same.
+ * **A shuffle keeps its relative order whichever filters are on**: applying Drama keeps
+ * the dramas in the order they already had on the wall, and taking the filter off puts the
+ * others back between them rather than dealing a new hand. That falls out of
+ * {@link shuffleByTitle} drawing each place per title; dealing first and filtering after
+ * says so in the code as well. For every other axis, which is a comparator, the two orders
+ * of operation are the same.
  */
 export function visibleItems(
   items: readonly CollectionItem[],
@@ -657,6 +687,10 @@ const byName = (a: CollectionItem, b: CollectionItem): number =>
 
 /**
  * Fisher–Yates over a seeded generator.
+ *
+ * Generic, and no longer what the Collection's Shuffle axis deals with: that is
+ * {@link shuffleByTitle}, which draws from the same generator per title so that a title
+ * joining or leaving the list moves nobody else.
  *
  * `Math.random` would reshuffle on every render, which is the defect the brief names
  * outright. Mulberry32 is four lines, has no dependency, and is deterministic in the

@@ -979,6 +979,29 @@ describe('Shuffle', () => {
     expect(ids(sortItems(scrambled, SHUFFLE, 9))).toEqual(forwards);
   });
 
+  /**
+   * **A title joining or leaving moves nobody else** (independent review, 2026-11-10).
+   * Fisher–Yates over the set scrambled almost every place when one title was ranked out
+   * of Unranked or taken off the Watchlist; the per-title draw does not.
+   */
+  it('keeps every other title in order when one leaves or joins the list', () => {
+    const all = ids(sortItems(rows, SHUFFLE, 5));
+    for (const leaving of ['s00', 's05', 's11']) {
+      const without = rows.filter((row) => row.mediaItemId !== leaving);
+      expect(ids(sortItems(without, SHUFFLE, 5))).toEqual(all.filter((id) => id !== leaving));
+    }
+    const joined = ids(sortItems([...rows, item({ mediaItemId: 'new-title' })], SHUFFLE, 5));
+    expect(joined.filter((id) => id !== 'new-title')).toEqual(all);
+  });
+
+  it('spreads titles over every position rather than favouring the id order', () => {
+    // Over many seeds, the alphabetically first id is not stuck at the top.
+    const firsts = new Set(
+      Array.from({ length: 60 }, (_, seed) => ids(sortItems(rows, SHUFFLE, seed))[0]),
+    );
+    expect(firsts.size).toBeGreaterThan(6);
+  });
+
   it('keeps the shuffled relative order when a filter is applied', () => {
     const all = ids(visibleItems(rows, none, SHUFFLE, 4));
     const drama = ids(visibleItems(rows, { ...none, genres: ['Drama'] }, SHUFFLE, 4));
