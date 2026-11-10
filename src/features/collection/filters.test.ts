@@ -866,20 +866,22 @@ describe('the Runtime axis', () => {
   });
 
   it('breaks an equal runtime A–Z by name in both directions, then by id', () => {
+    // Ids deliberately disagree with names, so an id-only tie-break would fail this.
     const tied = [
-      item({ mediaItemId: 'z2', title: 'Zodiac', runtimeMinutes: 120 }),
-      item({ mediaItemId: 'a1', title: 'arrival', runtimeMinutes: 120 }),
-      item({ mediaItemId: 'z1', title: 'Zodiac', runtimeMinutes: 120 }),
-      item({ mediaItemId: 'm1', title: 'Memento', runtimeMinutes: 113 }),
+      item({ mediaItemId: 'id-2', title: 'Zodiac', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'id-9', title: 'arrival', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'id-1', title: 'Zodiac', runtimeMinutes: 120 }),
+      item({ mediaItemId: 'id-0', title: 'Memento', runtimeMinutes: 113 }),
     ];
-    expect(ids(sortItems(tied, at('runtime', 'asc')))).toEqual(['m1', 'a1', 'z1', 'z2']);
-    expect(ids(sortItems(tied, at('runtime', 'desc')))).toEqual(['a1', 'z1', 'z2', 'm1']);
+    // Equal runtimes: A–Z by name (case-folded), then by id, in both directions.
+    expect(ids(sortItems(tied, at('runtime', 'asc')))).toEqual(['id-0', 'id-9', 'id-1', 'id-2']);
+    expect(ids(sortItems(tied, at('runtime', 'desc')))).toEqual(['id-9', 'id-1', 'id-2', 'id-0']);
     // And in any arrival order.
     expect(ids(sortItems([...tied].reverse(), at('runtime', 'desc')))).toEqual([
-      'a1',
-      'z1',
-      'z2',
-      'm1',
+      'id-9',
+      'id-1',
+      'id-2',
+      'id-0',
     ]);
   });
 
