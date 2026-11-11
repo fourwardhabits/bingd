@@ -722,13 +722,18 @@ function Summary({
   const watchlisted = counts.watchlist ?? 0;
   const diary = counts.viewings ?? 0;
   // **The heading asks whether anything arrived, not whether the job finished.** A
-  // re-import that changed nothing must not announce a history arriving.
+  // re-import that changed nothing must not announce a history arriving, and a file whose
+  // films all went unmatched must not be told they were already here (2026-11-11).
   const arrived = added + watchlisted > 0;
 
   return (
     <View style={styles.block}>
       <Text variant="display">
-        {arrived ? 'Your Letterboxd history is in' : 'Your Letterboxd history is already here'}
+        {arrived
+          ? 'Your Letterboxd history is in'
+          : alreadyHere > 0
+            ? 'Your Letterboxd history is already here'
+            : 'Nothing was added'}
       </Text>
 
       <View style={styles.card}>
@@ -1149,7 +1154,9 @@ function ImdbPreviewView({
 
       <View style={styles.card}>
         <Stat label="Movies" value={counts.movies} />
-        {counts.tvShows > 0 ? <Stat label="TV shows, not added" value={counts.tvShows} /> : null}
+        {counts.tvShows > 0 ? (
+          <Stat label="TV shows, not added" value={counts.tvShows} />
+        ) : null}
         <Stat label="Ratings" value={counts.rated} />
         {unsupported > 0 ? <Stat label="Not supported" value={unsupported} /> : null}
       </View>
@@ -1247,8 +1254,14 @@ function ImdbSummary({
 
   return (
     <View style={styles.block}>
+      {/* "Already here" only when something was: a file that added nothing because
+          nothing matched says that instead, with the lines below saying why (2026-11-11). */}
       <Text variant="display">
-        {added > 0 ? 'Your IMDb history is in' : 'Your IMDb history is already here'}
+        {added > 0
+          ? 'Your IMDb history is in'
+          : inCollection + previously > 0
+            ? 'Your IMDb history is already here'
+            : 'Nothing was added'}
       </Text>
 
       <View style={styles.card}>

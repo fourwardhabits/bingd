@@ -815,12 +815,32 @@ Deno.test(
     const one = contentFor(importJob('import_completed', { import_counts: { watched: 1 } }))!;
     assertEquals(one.body, '1 movie added as watched. Ready to rank.');
 
+    // Nothing watched but something saved: the Watchlist, not "history is in".
+    const saved = contentFor(
+      importJob('import_completed', { import_counts: { watched: 0, watchlist: 4 } }),
+    )!;
+    assertEquals(saved.title, 'Your Letterboxd history is ready');
+    assertEquals(saved.body, '4 films added to your Watchlist.');
+    const savedOne = contentFor(
+      importJob('import_completed', { import_counts: { watched: 0, watchlist: 1 } }),
+    )!;
+    assertEquals(savedOne.body, '1 film added to your Watchlist.');
+
+    // Watched wins when there are both: the ranking is the next step.
+    const both = contentFor(
+      importJob('import_completed', { import_counts: { watched: 2, watchlist: 5 } }),
+    )!;
+    assertEquals(both.body, '2 movies added as watched. Ready to rank.');
+
+    // Nothing added at all (a re-import, or every film unmatched): never "history is in"
+    // (2026-11-11).
     const none = contentFor(importJob('import_completed', { import_counts: { watched: 0 } }))!;
-    assertEquals(none.body, 'Your Letterboxd history is now in bingd.');
+    assertEquals(none.body, 'Nothing new to add. Open bingd to see the summary.');
+    assert(!/is now in/.test(none.body), none.body);
 
     // A database from before the claim carried counts.
     const unknown = contentFor(importJob('import_completed', { import_counts: undefined }))!;
-    assertEquals(unknown.body, 'Your Letterboxd history is now in bingd.');
+    assertEquals(unknown.body, 'Nothing new to add. Open bingd to see the summary.');
   },
 );
 

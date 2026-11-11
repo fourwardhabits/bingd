@@ -411,6 +411,37 @@ describe('the IMDb summary', () => {
     expect(view.queryByLabelText(/Couldn’t match/)).toBeNull();
     expect(view.queryByRole('button', { name: 'Rank imported movies' })).toBeNull();
   });
+
+  it('says nothing was added when nothing matched and nothing was already here', async () => {
+    // 2026-11-11: "already here" used to be the heading for every import that added no
+    // movie, including one where nothing matched at all.
+    finished({
+      watched: 0,
+      unmatched: 4,
+      unsupported: 3,
+      unsupported_tv: 2,
+      unsupported_episode: 1,
+    });
+    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    await waitFor(() => expect(view.getByText('Nothing was added')).toBeTruthy());
+    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
+    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    expect(view.getByLabelText('4 Couldn’t match')).toBeTruthy();
+    expect(view.getByLabelText('2 TV shows matched, not added')).toBeTruthy();
+    expect(view.getByText(/We couldn’t match 4 titles from your file/)).toBeTruthy();
+    expect(view.getByText(/2 TV shows were matched but not added/)).toBeTruthy();
+    expect(view.getByText(/1 TV episode wasn’t added/)).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Rank imported movies' })).toBeNull();
+  });
+
+  it('says already here when what was in the file was already in the collection', async () => {
+    finished({ watched: 0, kept: 5 });
+    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    await waitFor(() =>
+      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+    );
+    expect(view.getByLabelText('5 Already in your collection')).toBeTruthy();
+  });
 });
 
 describe('a failed IMDb import, reopened from its notification', () => {

@@ -338,8 +338,9 @@ function commentExcerpt(job: PushJob): string | null {
  * arrive. The inbox rows say the same headlines (`verbFor` in `use-notifications.ts`).
  *
  * The completion quotes one number, the films added as watched, because it is the one the
- * next action is about. A job that added none (every film was already here) says the
- * history is in rather than "0 movies added", which reads as a failure.
+ * next action is about. A job that added none quotes the films saved to the Watchlist, and a
+ * job that added nothing says so plainly rather than "0 movies added", which reads as a
+ * failure, or "your history is in", which is not true of it (2026-11-11).
  */
 function importContent(job: PushJob): PushContent | null {
   const data = (): PushData => ({
@@ -363,12 +364,23 @@ function importContent(job: PushJob): PushContent | null {
       };
     case 'import_completed': {
       const watched = Number(job.import_counts?.watched ?? 0);
+      const watchlist = Number(job.import_counts?.watchlist ?? 0);
+      /**
+       * **Says what was added, and never that history arrived when nothing did**
+       * (2026-11-11). The old fallback, "Your Letterboxd history is now in bingd.", was
+       * sent for every job that added no watched film, including a re-import that added
+       * nothing at all and a file whose films all went unmatched. The payload already
+       * carries both counts, so the body says which happened; the screen has the detail.
+       */
+      const body =
+        watched > 0
+          ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
+          : watchlist > 0
+            ? `${watchlist} ${watchlist === 1 ? 'film' : 'films'} added to your Watchlist.`
+            : 'Nothing new to add. Open bingd to see the summary.';
       return {
         title: `Your ${service} history is ready`,
-        body:
-          watched > 0
-            ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
-            : `Your ${service} history is now in bingd.`,
+        body,
         data: data(),
       };
     }

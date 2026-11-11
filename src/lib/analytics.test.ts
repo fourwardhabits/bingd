@@ -271,13 +271,22 @@ describe('the privacy boundary', () => {
       name: 'import_started',
       props: { films: 7, tv_shows: 3, viewings: 0, provider: 'imdb' },
     });
-    expect(propertiesOf()).toMatchObject({ films: 7, tv_shows: 3, viewings: 0, provider: 'imdb' });
+    expect(propertiesOf()).toMatchObject({
+      films: 7,
+      tv_shows: 3,
+      viewings: 0,
+      provider: 'imdb',
+    });
 
     track({
       name: 'import_completed',
       props: { applied: 2, unresolved: 1, provider: 'letterboxd' },
     });
-    expect(propertiesOf(1)).toMatchObject({ applied: 2, unresolved: 1, provider: 'letterboxd' });
+    expect(propertiesOf(1)).toMatchObject({
+      applied: 2,
+      unresolved: 1,
+      provider: 'letterboxd',
+    });
 
     track({ name: 'import_opened', props: { surface: 'settings', provider: 'imdb' } });
     expect(propertiesOf(2)).toMatchObject({ surface: 'settings', provider: 'imdb' });

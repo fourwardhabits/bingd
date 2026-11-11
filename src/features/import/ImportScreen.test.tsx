@@ -526,6 +526,38 @@ describe('when it is over', () => {
     // Nothing arrived, so there is nothing to rank.
     expect(screen.queryByText('Rank imported movies')).toBeNull();
   });
+
+  it('says nothing was added, not "already here", when nothing matched', async () => {
+    // 2026-11-11: a file whose films all went unmatched used to be told its history was
+    // already here, which nothing on the server made true.
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 0, watched: 0, kept: 0, watchlist: 0, unmatched: 2 },
+              completed_at: '2026-09-11T00:00:00.000Z',
+            };
+      },
+    };
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('Nothing was added')).toBeTruthy());
+    expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
+    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    // The unmatched line still says why.
+    expect(screen.getByText(/couldn.+t find 2 films/)).toBeTruthy();
+    expect(screen.queryByText('Rank imported movies')).toBeNull();
+  });
 });
 
 /**
