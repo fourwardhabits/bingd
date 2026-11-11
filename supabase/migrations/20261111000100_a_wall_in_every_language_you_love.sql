@@ -20,8 +20,14 @@
 --   recommendations.v2_rollout_percent  0–100. Deterministic per-account cohort.
 --   recommendations.v2_allowlist        [uuid, ...]. Dogfood/staging accounts, regardless
 --                                       of the percentage.
+--   recommendations.v2_allowlist_engine null, or an engine the allowlist gets instead of
+--                                       `v2_engine` — so one engine can run on a small
+--                                       percentage while a more experimental one is
+--                                       dogfooded on the allowlist (independent review,
+--                                       2026-11-11). Null means "the same as v2_engine".
 --
--- While `v2_engine` is "v1", `recommendation_engine()` answers 'v1' for every caller and
+-- **`v2_engine` is the master switch.** While it is "v1", `recommendation_engine()` answers
+-- 'v1' for every caller, allowlisted or not, whatever the override says, and
 -- `catalogue_candidates` returns nothing, so this migration changes no behaviour until an
 -- operator writes the key. Rollback is writing "v1" back: clients re-read the engine on
 -- their next For You fetch (30-minute stale time) and fall to V1, which never stopped
@@ -32,9 +38,10 @@
 -- ever adds accounts: a reader in the 5% cohort is in the 10% one.
 
 insert into app_config (key, value) values
-  ('recommendations.v2_engine',          '"v1"'::jsonb),
-  ('recommendations.v2_rollout_percent', '0'::jsonb),
-  ('recommendations.v2_allowlist',       '[]'::jsonb)
+  ('recommendations.v2_engine',           '"v1"'::jsonb),
+  ('recommendations.v2_rollout_percent',  '0'::jsonb),
+  ('recommendations.v2_allowlist',        '[]'::jsonb),
+  ('recommendations.v2_allowlist_engine', 'null'::jsonb)
 on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -62,10 +69,11 @@ security definer
 set search_path = public
 as $$
 declare
-  v_me      uuid := auth.uid();
-  v_engine  text;
-  v_allow   jsonb;
-  v_percent numeric;
+  v_me       uuid := auth.uid();
+  v_engine   text;
+  v_override text;
+  v_allow    jsonb;
+  v_percent  numeric;
 begin
   if v_me is null then
     return 'v1';
@@ -81,6 +89,12 @@ begin
   select value into v_allow
     from app_config where key = 'recommendations.v2_allowlist';
   if jsonb_typeof(v_allow) = 'array' and v_allow ? v_me::text then
+    -- The allowlist's own engine when one is set and known; otherwise the cohort's.
+    select value #>> '{}' into v_override
+      from app_config where key = 'recommendations.v2_allowlist_engine';
+    if v_override in ('v2_metadata') then
+      return v_override;
+    end if;
     return v_engine;
   end if;
 
@@ -101,14 +115,28 @@ grant execute on function recommendation_engine() to authenticated;
 -- The catalogue source.
 -- ---------------------------------------------------------------------------
 --
--- One index per question it asks. Partial, because a season, a title with no poster and
--- an unreleased row can never be a For You tile, and those are a large share of the table.
+-- One index per question it asks, each in the order the question reads it, so a window is
+-- the first rows of one index range rather than a sort of everything in a language or a
+-- decade. Partial, because a season and a title with no poster can never be a For You tile,
+-- and those are a large share of the table.
+--
+-- The era index keys on the decade itself (an immutable expression of the date), not the
+-- date: an index on `(kind, release_date)` cannot hand back a decade in popularity order,
+-- so every call read every title of the decade and sorted them (independent review,
+-- 2026-11-11). The query below repeats the expression exactly, which is what lets the
+-- planner use it.
+--
+-- **Building these on a large table.** `create index` without `concurrently` blocks writes
+-- to `media_items` (catalogue upserts) while it runs, and Supabase runs a migration inside a
+-- transaction, where `concurrently` is not allowed. On a large production catalogue, build
+-- both by hand with `create index concurrently if not exists …` (same definitions) before
+-- `db push`; these statements are then no-ops. `recommendations-v2.md` §1.5 has the steps.
 create index if not exists media_items_catalogue_language
   on media_items (kind, original_language, popularity desc nulls last)
   where kind in ('movie', 'series') and poster_path is not null;
 
-create index if not exists media_items_catalogue_era
-  on media_items (kind, release_date)
+create index if not exists media_items_catalogue_decade
+  on media_items (kind, ((extract(year from release_date)::integer / 10) * 10), popularity desc nulls last)
   where kind in ('movie', 'series') and poster_path is not null;
 
 -- Candidates in the reader's languages and decades, for the wall they are looking at.
@@ -222,8 +250,8 @@ begin
          from media_items mi
         where mi.kind = v_kind
           and mi.poster_path is not null
-          and mi.release_date >= make_date(d.decade, 1, 1)
-          and mi.release_date <  make_date(d.decade + 10, 1, 1)
+          -- Exactly the index expression, so the decade is one ordered index range.
+          and ((extract(year from mi.release_date)::integer / 10) * 10) = d.decade
           and mi.release_date <= current_date
           and not exists (select 1 from user_media um
                            where um.user_id = v_me and um.media_item_id = mi.id)

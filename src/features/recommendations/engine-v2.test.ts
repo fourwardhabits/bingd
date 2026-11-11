@@ -212,6 +212,25 @@ describe('the catalogue fills a shortfall and nothing more', () => {
     expect(coverageFill(pool, japanese(10), profile, request)).toEqual([]);
   });
 
+  it('does not count titles the slate will drop as coverage', () => {
+    // The anchor lists held twelve Japanese films — enough to cover the facet — all already
+    // in the reader's collection.
+    const logged = japanese(12);
+    const pool = [...englishPool, ...logged];
+    const ineligible = new Set(logged.map((row) => row.mediaItemId));
+    const added = coverageFill(pool, japanese(30), profile, request, ineligible);
+    expect(added.length).toBeGreaterThanOrEqual(MIN_PER_FACET);
+    expect(added.some((row) => ineligible.has(row.mediaItemId))).toBe(false);
+    // And the same pool with nothing ineligible is already covered.
+    expect(coverageFill(pool, japanese(30), profile, request)).toEqual([]);
+  });
+
+  it('never adds an ineligible catalogue row', () => {
+    const owned = candidate({ language: 'ja' });
+    const added = coverageFill(englishPool, [owned, ...japanese(10)], profile, request, new Set([owned.mediaItemId]));
+    expect(added.map((row) => row.mediaItemId)).not.toContain(owned.mediaItemId);
+  });
+
   it('never adds a title already in the pool, or one that serves no facet', () => {
     const existing = candidate({ language: 'ja' });
     const added = coverageFill([existing, ...englishPool], [existing, candidate({ language: 'it' })], profile, request);
@@ -258,6 +277,8 @@ describe('the V2 scorer', () => {
     expect(engineFrom('v9')).toBe('v1');
     expect(engineFrom(null)).toBe('v1');
     expect(engineFrom(undefined)).toBe('v1');
+    expect(engineFrom('toString')).toBe('v1');
+    expect(engineFrom('__proto__')).toBe('v1');
   });
 
   it('leaves V1 exactly as it was when no engine is given', () => {
@@ -303,6 +324,22 @@ describe('the V2 scorer', () => {
     expect(slate).toHaveLength(2);
     const [h, w] = slate;
     expect(h!.explanation.total).toBeLessThan(w!.explanation.total);
+  });
+
+  it('lets a disliked genre lower a title that also carries a neutral or a loved one', () => {
+    const profile = profileFrom([
+      ...many(8, { genres: ['Horror'], score: 1.5, bucket: 'not_for_me' }),
+      ...many(8, { genres: ['Drama'], score: 9 }),
+    ]);
+    const score = (genres: string[]) =>
+      scoreCandidateV2(candidate({ genres }), [], profile, ENGINES.v2_metadata).explanation.total;
+    // A Horror-Thriller is below a Western, which carries no evidence at all.
+    expect(score(['Horror', 'Thriller'])).toBeLessThan(score(['Western']));
+    // A loved genre still lifts a title that also carries a disliked one, but by less.
+    expect(score(['Drama', 'Horror'])).toBeLessThan(score(['Drama']));
+    expect(score(['Drama', 'Horror'])).toBeGreaterThan(score(['Horror']));
+    // An unknown second genre costs nothing.
+    expect(score(['Drama', 'Western'])).toBeCloseTo(score(['Drama']), 10);
   });
 
   it('can lead with era, and only says so with enough rankings', () => {

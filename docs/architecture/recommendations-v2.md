@@ -30,6 +30,12 @@ valence when bucketed but unranked (imports); 0.35 and no valence when only logg
   Neutral is 0.3: no evidence is neither interest nor rejection. Four loved Japanese films
   reach roughly the same affinity as forty English ones of mixed opinion; Not-for-me
   evidence pulls a facet below 0.3, never to 0.
+- **A title's genre term** is its best genre's affinity minus how far its worst genre sits
+  *below* neutral (`max(0, best − (0.3 − worst))`). A loved genre still lifts a title, and a
+  disliked one now lowers it even when the title also carries another genre: a Horror-Thriller
+  scores below a Western for a reader who keeps putting horror in Not for me. Unknown genres
+  cost nothing. (Before the 2026-11-11 independent review only the best genre counted, so
+  negative evidence reached only titles whose every genre was disliked.)
 - **Era:** `0.5 + 0.5 × interest × clamp((mean − readerMean)/0.5, −1, 1)` per decade, films
   and TV separately, each decade lending half its evidence to its neighbours. Watching
   mostly recent titles moves nothing; liking a decade *more than you like things generally*
@@ -40,7 +46,10 @@ valence when bucketed but unranked (imports); 0.35 and no valence when only logg
 `catalogue_candidates(kind, languages[≤5], decades[≤3], per ≤40, seed)` returns, per
 requested language or decade, a seeded draw from the top `3 × per` catalogue titles by
 popularity, excluding what the caller logged (and, on TV, shows with a logged season). It
-answers empty while the caller is on V1.
+answers empty while the caller is on V1. Each window is the first rows of one ordered index
+range: `media_items_catalogue_language (kind, original_language, popularity)` and
+`media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
+not grow with the size of a language or a decade (measured in the scale benchmark).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -48,6 +57,9 @@ decades, in parallel with the anchor work, then `coverageFill` keeps only what b
 facet up to its fair share of the pool: `min(20, max(6, ⌈share × pool⌉))`, share being the
 facet's share of the reader's positive evidence. An English reader with English-full anchor
 lists gets nothing from it, so it is not popularity padding (review of 2026-09-13, M2).
+Only candidates that will survive eligibility count as coverage: titles already in the
+reader's collection and the anchors themselves are dropped by `scoreSlate`, so they neither
+count toward a facet nor are added (independent review, 2026-11-11).
 
 **Known limitation:** the catalogue is `media_items` — what bingd's readers have searched,
 logged or been shown. A language nobody on bingd has touched has nothing to return.
@@ -68,6 +80,26 @@ compatibility, where a followee counts exactly as much as a stranger with the sa
 | `recommendations.v2_engine` | `"v1"` | The engine under rollout. `"v1"` = off. Unknown values are V1. |
 | `recommendations.v2_rollout_percent` | `0` | Deterministic cohort: `md5(user id ‖ ':recommendations.v2')` → 0–99. Raising it only adds accounts. |
 | `recommendations.v2_allowlist` | `[]` | Accounts that get the engine regardless of the percentage (staging, dogfood). |
+| `recommendations.v2_allowlist_engine` | `null` | Optional: the engine the allowlist gets instead of `v2_engine`, so `v2_metadata` can run on a small percentage while `v2_hybrid` is dogfooded on the allowlist. Null or unknown = same as `v2_engine`. |
+
+`v2_engine` is the master switch: while it is `"v1"`, every reader is on V1, allowlisted or
+not, whatever the override says.
+
+**Before `db push` on a large production database.** Supabase applies a migration inside a
+transaction, so its `create index` statements cannot be `concurrently`, and a plain build
+blocks writes to the table for its duration. Build the new indexes by hand first, with the
+same definitions, so the migration's `create index if not exists` statements are no-ops:
+
+```sql
+create index concurrently if not exists media_items_catalogue_language
+  on media_items (kind, original_language, popularity desc nulls last)
+  where kind in ('movie', 'series') and poster_path is not null;
+create index concurrently if not exists media_items_catalogue_decade
+  on media_items (kind, ((extract(year from release_date)::integer / 10) * 10), popularity desc nulls last)
+  where kind in ('movie', 'series') and poster_path is not null;
+```
+
+A2 adds a third, on `rankings` (§2.6). An operator step, run only with founder approval.
 
 **Rollback:** write `"v1"` to `recommendations.v2_engine`. `recommendation_engine()` then
 answers V1 for everybody and `catalogue_candidates` answers empty. Clients pick it up on the
