@@ -77,7 +77,7 @@ export type Claim = {
   name: string;
   year: number | null;
   /**
-   * 20261111000100. The job's provider: `imdb` routes the claim to `resolveImdb`, and
+   * 20261111000300. The job's provider: `imdb` routes the claim to `resolveImdb`, and
    * `letterboxd` (or the field's absence, against a database older than that migration)
    * keeps the Letterboxd path. The three fields below are null on a Letterboxd row.
    */
@@ -204,7 +204,7 @@ async function searchTv(
 type Outcome = { matched: boolean; empty: boolean; unconfident: boolean; unwritable: boolean };
 
 /**
- * **An IMDb claim** (20261111000100): the identifier first, a title second.
+ * **An IMDb claim** (20261111000300): the identifier first, a title second.
  *
  *   Tier 2  TMDB `/find/{tt}?external_source=imdb_id`. An answer of the expected kind that
  *           agrees with the row places it, and is the ONLY path that hands the database

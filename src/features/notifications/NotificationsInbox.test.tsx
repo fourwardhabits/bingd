@@ -1075,7 +1075,7 @@ describe('a Letterboxd import', () => {
     ['import_started', 'IMDb import started'],
     ['import_completed', 'Your IMDb history is ready'],
     ['import_failed', 'We couldn’t finish your IMDb import'],
-  ])('names IMDb on %s when the payload says so (20261111000100)', async (kind, headline) => {
+  ])('names IMDb on %s when the payload says so (20261111000300)', async (kind, headline) => {
     mockNotifications.length = 0;
     mockNotifications.push(
       importRow(kind, { id: `${kind}-imdb`, payload: { job_id: 'job-9', provider: 'imdb' } }),

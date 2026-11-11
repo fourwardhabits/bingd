@@ -1,4 +1,4 @@
-// Generates supabase/migrations/20261111000100_an_import_from_more_than_one_place.sql.
+// Generates supabase/migrations/20261111000300_an_import_from_more_than_one_place.sql.
 //
 // Every function the IMDb import has to touch is copied VERBATIM from the migration that
 // last defined it and edited only through `edit`, which throws unless each anchor occurs
@@ -13,7 +13,7 @@ import { edit, fn, MIG } from './extract.mjs';
 // committed file must be byte-identical to what this prints, which CI-free review can check
 // with git diff after running it).
 
-const OUT = join(MIG, '20261111000100_an_import_from_more_than_one_place.sql');
+const OUT = join(MIG, '20261111000300_an_import_from_more_than_one_place.sql');
 
 const REDACT_FROM = "array['filmUri', 'rating', 'bucket', 'watchedOn', 'watches']";
 const REDACT_TO =
@@ -86,7 +86,7 @@ const importStage = edit(
     ],
     [
       lbInsert,
-      `  -- 20261111000100: which projection is the job's provider's. A row is read only through
+      `  -- 20261111000300: which projection is the job's provider's. A row is read only through
   -- its own provider's field list, so a Letterboxd field sent to an IMDb job (or the
   -- reverse) is discarded exactly as an unknown field always was.
   if v_provider = 'imdb' then
@@ -109,7 +109,7 @@ const matchBatch = edit(
       `  select user_id into v_user from import_jobs where id = p_job_id;\n`,
       `  select user_id into v_user from import_jobs where id = p_job_id;
 
-  -- 20261111000100. An IMDb job is matched by its own rules (identifier first); nothing
+  -- 20261111000300. An IMDb job is matched by its own rules (identifier first); nothing
   -- below this line ever sees one of its rows.
   if (select provider from import_jobs where id = p_job_id) = 'imdb' then
     return _import_match_batch_imdb(p_job_id, p_limit);
@@ -130,7 +130,7 @@ const applyBatch = edit(
       `  if v_user is null then return 0; end if;\n`,
       `  if v_user is null then return 0; end if;
 
-  -- 20261111000100. An IMDb job has no diary, no watchlist and no star, and writes its own
+  -- 20261111000300. An IMDb job has no diary, no watchlist and no star, and writes its own
   -- provenance; it is applied by its own function and never reaches the body below.
   if (select provider from import_jobs where id = p_job_id) = 'imdb' then
     return _import_apply_batch_imdb(p_job_id, p_limit);
@@ -141,7 +141,7 @@ const applyBatch = edit(
       `              rating           = coalesce(excluded.rating, imported_titles.rating),
               last_imported_at = now();`,
       `              rating           = coalesce(excluded.rating, imported_titles.rating),
-              -- 20261111000100: a title IMDb brought first keeps that, and gains Letterboxd.
+              -- 20261111000300: a title IMDb brought first keeps that, and gains Letterboxd.
               providers        = case when 'letterboxd' = any(imported_titles.providers)
                                       then imported_titles.providers
                                       else imported_titles.providers || 'letterboxd'::text end,
@@ -170,7 +170,7 @@ const settle = edit(
       `                and r.media_item_id is not null)
   ));
 
-  -- 20261111000100. The buckets only an IMDb file can produce. Added only to an IMDb
+  -- 20261111000300. The buckets only an IMDb file can produce. Added only to an IMDb
   -- job's counts, so a Letterboxd summary is byte-for-byte what it was.
   --
   --   duplicate            a second Const that resolved to a title this job already placed
@@ -202,7 +202,7 @@ const settle = edit(
     [
       `  update import_jobs
      set status = 'done',`,
-      `  -- 20261111000100. An IMDb row's correlation is its tt id. The rows still here are the
+      `  -- 20261111000300. An IMDb row's correlation is its tt id. The rows still here are the
   -- unresolved ones, reduced to name and year above; the id goes with the rest, so what
   -- is kept is what a Letterboxd row keeps (independent review, 2026-11-11).
   if v_provider = 'imdb' then
@@ -228,7 +228,7 @@ const redact = edit(
     [
       `  return null;
 end;`,
-      `  -- 20261111000100: an IMDb row's correlation is its tt id, and goes with the rest.
+      `  -- 20261111000300: an IMDb row's correlation is its tt id, and goes with the rest.
   if new.provider = 'imdb' then
     update import_rows
        set correlation = 'redacted:' || id::text
@@ -310,7 +310,7 @@ const providerResolve = edit(
       `  if v_job is null then return; end if;
 
   -- ---------------------------------------------------------------------------
-  -- 20261111000100. An IMDb row. The Edge Function's answer is checked again here rather
+  -- 20261111000300. An IMDb row. The Edge Function's answer is checked again here rather
   -- than trusted: the destination type must be what the IMDb type implies (IMDb's type
   -- is matching evidence, never a reclassification), and the title and year must agree.
   -- A disagreement settles the row unmatched: asking again would get the same answer.
@@ -376,7 +376,7 @@ returns table (row_id uuid, name text, year integer)`,
       `create function _import_provider_claim(p_limit integer default 50)
 returns table (
   row_id uuid, name text, year integer,
-  -- 20261111000100. Trailing, so an Edge Function that predates them reads exactly the
+  -- 20261111000300. Trailing, so an Edge Function that predates them reads exactly the
   -- three columns it always did. provider is the job's ('letterboxd' or 'imdb'); the
   -- other three are null on a Letterboxd row.
   provider text, imdb_id text, title_type text, original_title text
@@ -418,7 +418,7 @@ const header = `-- An import from more than one place: IMDb ratings beside Lette
 --     switch is _import_imdb_destination_supported(); see the design record's escalation.
 --
 -- Every function below that already existed is copied verbatim from the migration that
--- last defined it and changed only where a 20261111000100 comment says so (the generator
+-- last defined it and changed only where a 20261111000300 comment says so (the generator
 -- asserts each edit lands exactly once).
 
 -- ===========================================================================
@@ -430,7 +430,7 @@ alter table import_jobs
 alter table import_jobs
   add constraint import_jobs_known_provider check (provider in ('letterboxd', 'imdb'));
 comment on column import_jobs.provider is
-  'Whose export this job is. Decides which projection import_stage applies and which matcher and applier run. Every job before 20261111000100 is letterboxd, which is also the default an older client gets from import_create().';
+  'Whose export this job is. Decides which projection import_stage applies and which matcher and applier run. Every job before 20261111000300 is letterboxd, which is also the default an older client gets from import_create().';
 
 alter table media_items add column if not exists imdb_id text;
 alter table media_items
@@ -458,7 +458,7 @@ comment on column imported_titles.imdb_rating is
 comment on column imported_titles.imdb_id is
   'The IMDb Const the person''s own export carried for this title.';
 comment on column imported_titles.providers is
-  'Which imports have contributed this row, in the order they first did. Rows before 20261111000100 are all letterboxd, which the default backfills.';
+  'Which imports have contributed this row, in the order they first did. Rows before 20261111000300 are all letterboxd, which the default backfills.';
 
 -- Two terminal states an IMDb file needs and a Letterboxd one never produces.
 --   unsupported  bingd has no collection destination for it (an episode, a whole show)
@@ -618,7 +618,7 @@ begin
 end;
 $$;
 comment on function import_create(text) is
-  'Opens (or hands back) the caller''s one live import job for p_provider, letterboxd by default so a client that predates 20261111000100 is unchanged. A running job of either provider is handed back; a half-staged job of the other provider is cleared rather than reused.';
+  'Opens (or hands back) the caller''s one live import job for p_provider, letterboxd by default so a client that predates 20261111000300 is unchanged. A running job of either provider is handed back; a half-staged job of the other provider is cleared rather than reused.';
 revoke execute on function import_create(text) from public, anon;
 grant execute on function import_create(text) to authenticated;
 
@@ -637,7 +637,7 @@ as $$
    where j.id = p_job_id;
 $$;
 comment on function import_status(uuid) is
-  'The caller''s own job, under RLS. provider since 20261111000100, as a trailing column so a client reading the first four by name is unchanged.';
+  'The caller''s own job, under RLS. provider since 20261111000300, as a trailing column so a client reading the first four by name is unchanged.';
 grant execute on function import_status(uuid) to authenticated;
 
 -- ===========================================================================

@@ -87,7 +87,7 @@ when TMDB's `/find` says so: that is a canonical destination, not a reclassifica
 
 ---
 
-## 3. Data changes (`20261111000100_an_import_from_more_than_one_place.sql`)
+## 3. Data changes (`20261111000300_an_import_from_more_than_one_place.sql`)
 
 Additive: `import_jobs.provider`, `media_items.imdb_id` (+ shape check, partial index),
 `imported_titles.imdb_id / imdb_rating / providers` (+ checks), two row statuses.
@@ -118,7 +118,7 @@ Regenerate/verify: `node scripts/migration-generators/imdb-import.mjs` rewrites 
    reads as Letterboxd. (The reverse order is safe but lossy: the old function would
    title-search IMDb TV rows as movies, the database would refuse the kind, and those rows
    would settle unmatched for that import. Found by the independent review.)
-2. Apply `20261111000100`. Old app builds keep working: `import_create()` resolves through
+2. Apply `20261111000300`. Old app builds keep working: `import_create()` resolves through
    the default; `import_status` gains a trailing column.
 3. Ship the app update (OTA-eligible: no native change). The new client needs step 2
    (it selects `import_jobs.provider`).

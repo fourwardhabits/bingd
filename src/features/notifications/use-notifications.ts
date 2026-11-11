@@ -237,7 +237,7 @@ export type Notification = {
    */
   mentionInReply: boolean;
   /**
-   * Import lifecycle rows only (20261111000100): whose import it was, from the payload.
+   * Import lifecycle rows only (20261111000300): whose import it was, from the payload.
    * Null on every other kind and on a row written before the payload carried it, which
    * reads as Letterboxd, the only importer there was.
    */
@@ -392,7 +392,7 @@ export function useNotifications(viewerId: string) {
             // reader's own comment rather than a remark under their activity.
             reply_to?: string;
             participant?: boolean;
-            // Import lifecycle rows (20261111000100).
+            // Import lifecycle rows (20261111000300).
             provider?: string;
           } | null;
           // 20260830000100. Optional in the type for the same reason `mentions` is in

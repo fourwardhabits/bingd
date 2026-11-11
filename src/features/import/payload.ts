@@ -50,7 +50,7 @@ export type StagingRow = {
 };
 
 /**
- * One IMDb row as `import_stage` projects it for an IMDb job (20261111000100). Every field
+ * One IMDb row as `import_stage` projects it for an IMDb job (20261111000300). Every field
  * here is named in that RPC's IMDb projection, and nothing else is sent: not `Date Rated`,
  * not the community `IMDb Rating`, not genres, directors, runtime or URL.
  */

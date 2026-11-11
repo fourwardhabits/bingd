@@ -242,7 +242,7 @@ without one). **No new secret is added by this release**: `SUPABASE_URL` and
   `10 seconds` (or a documented one-minute fallback when pg_cron < 1.5), `provider_ready: true`.
   Any other shape: `select unschedule_import_drain();` and stop.
 - `select _push_eligible('import_completed');` → true.
-- The importer switch will work: for `import_create(text)` (`import_create()` before 20261111000100), `import_stage(uuid, jsonb)` and
+- The importer switch will work: for `import_create(text)` (`import_create()` before 20261111000300), `import_stage(uuid, jsonb)` and
   `import_ready(uuid)`, `has_function_privilege('public', f, 'EXECUTE')` and `('anon', …)` are
   false and `('authenticated', …)` is true. If PUBLIC or anon is true, revoke from them now.
 - `select * from profile_title_counts('<founder user id>');` as the founder → sane Movies/TV.

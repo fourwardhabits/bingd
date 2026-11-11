@@ -76,7 +76,7 @@ export const HOW_TO_STEPS = [
 
 /**
  * **IMDb's steps, written to be true under either of the flows IMDb has shipped**
- * (20261111000100).
+ * (20261111000300).
  *
  * Not verified against IMDb's live pages: this environment cannot reach imdb.com, so, as with
  * Letterboxd's first copy (`letterboxd-import.md` §4), the wording stays soft where the flow
