@@ -92,8 +92,9 @@ export type Candidate = {
 
 /**
  * Taste-compatible collaborative evidence for one title: a confidence-weighted, shrunk mean
- * valence (−1…+1, positive only by the time it reaches the client) and how many neighbours
- * scored it 7 or more (always at least two).
+ * valence (−1…+1) and how many neighbours scored it 7 or more. Positive support means at
+ * least two neighbours loved it (an endorsed title, which may be added to the pool);
+ * negative means at least two disliked it (a disputed title, evidence only).
  */
 export type Collaborative = { support: number; endorsers: number };
 
@@ -586,8 +587,11 @@ export function scoreCandidateV2(
   const decade = decadeOf(candidate.year);
   const popularity = v1.explanation.popularity;
   const collaborative = weights.collaborative > 0 ? (candidate.collaborative ?? null) : null;
+  // Signed: a title the reader's taste neighbours disliked is scored down, by the same
+  // scale a liked one is scored up (independent review, 2026-11-11). It only ever applies
+  // to a title already in the pool — disputed titles are never a source.
   const collaborativeValue = collaborative
-    ? Math.min(1, Math.max(0, collaborative.support) / COLLABORATIVE_FULL)
+    ? Math.min(1, Math.max(-1, collaborative.support / COLLABORATIVE_FULL))
     : 0;
 
   const total =
@@ -604,7 +608,7 @@ export function scoreCandidateV2(
     language: weights.language * Math.max(0, languageValue - NEUTRAL.language),
     era: weights.era * Math.max(0, eraValue - NEUTRAL.era),
     popularity: weights.popularity * popularity,
-    collaborative: weights.collaborative * collaborativeValue,
+    collaborative: weights.collaborative * Math.max(0, collaborativeValue),
   };
   const ordered: [Explanation['lead'], number][] = [
     ['anchors', excess.anchor],

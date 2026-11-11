@@ -400,6 +400,18 @@ describe('the hybrid scorer: collaborative evidence (A2)', () => {
     );
   });
 
+  it("lowers a pooled title the reader's taste neighbours disliked, and never names that", () => {
+    const disputed = scoreCandidateV2(candidate({ collaborative: cohort(-0.4, 0) }), [], profile, ENGINES.v2_hybrid);
+    const plain = scoreCandidateV2(candidate({}), [], profile, ENGINES.v2_hybrid);
+    expect(disputed.explanation.total).toBeLessThan(plain.explanation.total);
+    expect(disputed.explanation.collaborative).toBeNull();
+    expect(disputed.explanation.lead).not.toBe('collaborative');
+    // Bounded the same way a liked title's lift is.
+    const floor = scoreCandidateV2(candidate({ collaborative: cohort(-COLLABORATIVE_FULL, 0) }), [], profile, ENGINES.v2_hybrid);
+    const below = scoreCandidateV2(candidate({ collaborative: cohort(-0.95, 0) }), [], profile, ENGINES.v2_hybrid);
+    expect(below.explanation.total).toBeCloseTo(floor.explanation.total, 10);
+  });
+
   it('saturates: a cohort beyond full support adds nothing more', () => {
     const full = scoreCandidateV2(candidate({ collaborative: cohort(COLLABORATIVE_FULL) }), [], profile, ENGINES.v2_hybrid);
     const more = scoreCandidateV2(candidate({ collaborative: cohort(0.95) }), [], profile, ENGINES.v2_hybrid);

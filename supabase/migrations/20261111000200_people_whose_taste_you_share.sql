@@ -49,7 +49,8 @@ insert into app_config (key, value) values
   ('recommendations.neighbour_min_match',        '55'::jsonb)
 on conflict (key) do nothing;
 
--- The engines this schema knows, now including v2_hybrid. Otherwise unchanged.
+-- The engines this schema knows, now including v2_hybrid (for v2_engine and for the
+-- allowlist override). Otherwise unchanged.
 create or replace function recommendation_engine()
 returns text
 language plpgsql
@@ -58,10 +59,11 @@ security definer
 set search_path = public
 as $$
 declare
-  v_me      uuid := auth.uid();
-  v_engine  text;
-  v_allow   jsonb;
-  v_percent numeric;
+  v_me       uuid := auth.uid();
+  v_engine   text;
+  v_override text;
+  v_allow    jsonb;
+  v_percent  numeric;
 begin
   if v_me is null then
     return 'v1';
@@ -76,6 +78,13 @@ begin
   select value into v_allow
     from app_config where key = 'recommendations.v2_allowlist';
   if jsonb_typeof(v_allow) = 'array' and v_allow ? v_me::text then
+    -- 20261111000100's allowlist override, with the engines this schema now knows: e.g.
+    -- `v2_metadata` on a small percentage while `v2_hybrid` is dogfooded on the allowlist.
+    select value #>> '{}' into v_override
+      from app_config where key = 'recommendations.v2_allowlist_engine';
+    if v_override in ('v2_metadata', 'v2_hybrid') then
+      return v_override;
+    end if;
     return v_engine;
   end if;
 
@@ -92,7 +101,13 @@ $$;
 revoke execute on function recommendation_engine() from public, anon;
 grant execute on function recommendation_engine() to authenticated;
 
--- Rater sampling walks this from a rotating user id, so a popular title is never read whole.
+-- Rater sampling walks this from a rotating user id, so a popular title is never read whole,
+-- and `_taste_matches` reads the shortlist's rankings of the reader's titles through it.
+--
+-- A plain build blocks ranking writes while it runs (1.4 s per 1.5M rankings in the scale
+-- benchmark) and a migration cannot build `concurrently`. On a large production table, run
+-- `create index concurrently if not exists rankings_by_media_user on rankings (media_item_id,
+-- user_id);` by hand before `db push`, and this statement is a no-op.
 create index if not exists rankings_by_media_user on rankings (media_item_id, user_id);
 
 -- ---------------------------------------------------------------------------
@@ -101,7 +116,17 @@ create index if not exists rankings_by_media_user on rankings (media_item_id, us
 --
 -- `band_bounds` + `score_for`, for many users in one pass: a band's start is the count of
 -- the bands above it, so a title's rank within its band is its position less that count.
-create or replace function _scored_rankings(p_users uuid[])
+--
+-- Two optional filters keep the work proportional to what the caller needs (independent
+-- review, 2026-11-11): `p_category` scores one category only (a score depends only on its
+-- own category's band sizes, so this changes no score), and `p_items` returns only those
+-- titles' rows. Band sizes are always counted over the whole category, so a filtered row
+-- scores exactly what it scores unfiltered.
+create or replace function _scored_rankings(
+  p_users    uuid[],
+  p_category ranking_category default null,
+  p_items    uuid[] default null
+)
 returns table (user_id uuid, media_item_id uuid, category ranking_category, score numeric)
 language sql
 stable
@@ -114,6 +139,7 @@ as $$
            count(*) filter (where r.bucket = 'not_for_me') as nfm
       from rankings r
      where r.user_id = any(p_users)
+       and (p_category is null or r.category = p_category)
      group by r.user_id, r.category
   )
   select r.user_id, r.media_item_id, r.category,
@@ -128,10 +154,12 @@ as $$
          ), 1)
     from rankings r
     join counts c on c.user_id = r.user_id and c.category = r.category
-   where r.user_id = any(p_users);
+   where r.user_id = any(p_users)
+     and (p_category is null or r.category = p_category)
+     and (p_items is null or r.media_item_id = any(p_items));
 $$;
 
-revoke execute on function _scored_rankings(uuid[]) from public, anon, authenticated;
+revoke execute on function _scored_rankings(uuid[], ranking_category, uuid[]) from public, anon, authenticated;
 
 -- `taste_match`'s arithmetic — proximity, midrank Spearman, the n/(n+p) shrink — for one
 -- reader against many. **No visibility check**: it takes identities, is granted to nobody,
@@ -150,9 +178,13 @@ as $$
   mine as (
     select s.media_item_id, s.score as a from _scored_rankings(array[p_reader]) s
   ),
+  -- Only the others' rankings of titles the reader ranked. Scoring each other's whole
+  -- history first made a refresh cost grow with how much its 200 shortlisted people had
+  -- ever ranked rather than with the overlap (independent review, 2026-11-11; measured in
+  -- the scale benchmark). Band sizes are still counted over each whole category.
   theirs as (
     select s.user_id, s.media_item_id, s.score as b
-      from _scored_rankings(p_others) s
+      from _scored_rankings(p_others, null, array(select media_item_id from mine)) s
      where s.user_id <> p_reader
   ),
   common as (
@@ -355,10 +387,22 @@ revoke execute on function _refresh_taste_neighbours(uuid) from public, anon, au
 --
 -- `support` is a confidence-weighted, shrunk mean valence: Σ weight × (score − 5)/5 over
 -- neighbours who ranked it, divided by Σ weight plus a prior of one full-weight neutral
--- opinion. Neighbours' dislikes count against a title (spec: consider negatives). A title
--- needs at least two neighbours who scored it 7 or more, so no single person's ranking is
--- ever the reason a title appears. On TV, a neighbour's seasons count once per show, at the
--- best season.
+-- opinion. Neighbours' dislikes count against a title (spec: consider negatives). On TV, a
+-- neighbour's seasons count once per show, at the best season.
+--
+-- Two kinds of row, told apart by the sign of `support`:
+--
+--   * **Endorsed** (support > 0): at least two neighbours scored it 7 or more. These are
+--     candidates — the client adds them to the pool. Up to `p_limit`, strongest first.
+--   * **Disputed** (support < 0): at least two neighbours scored it 3.4 or less (Not for me)
+--     and the cohort's mean is negative. These are **evidence only**: the client never adds
+--     them to the pool, but a title that reached the pool from another source (an anchor's
+--     list, trending) is scored down by them. Up to half of `p_limit`, most disliked first.
+--     Before the 2026-11-11 independent review only endorsed rows existed, so a title the
+--     reader's taste neighbours disliked was never penalised when it came from elsewhere.
+--
+-- Either way it takes two people, so no single person's ranking is ever the reason a row
+-- exists. `endorsers` is the count of 7+ scores (0 or 1 on a disputed row is possible).
 create or replace function collaborative_candidates(p_kind text, p_limit integer default 40)
 returns table (media_item_id uuid, support real, endorsers integer)
 language plpgsql
@@ -382,9 +426,12 @@ begin
   select least(greatest(coalesce((value)::integer, 24), 1), 24 * 14) into v_ttl
     from app_config where key = 'recommendations.neighbour_ttl_hours';
   v_ttl := coalesce(v_ttl, 24);
+  -- A pass that found nobody is retried after three hours, not a whole TTL: a new reader
+  -- who ranks their first twenty titles today should not wait until tomorrow for evidence.
   select exists (
     select 1 from taste_neighbour_refresh
-     where reader_id = v_me and refreshed_at > now() - make_interval(hours => v_ttl)
+     where reader_id = v_me
+       and refreshed_at > now() - make_interval(hours => case when neighbours = 0 then least(v_ttl, 3) else v_ttl end)
   ) into v_fresh;
   if not v_fresh then
     -- Two stale reads at once (two tabs, a retry) refresh once: the second waits on the lock
@@ -393,7 +440,9 @@ begin
     perform pg_advisory_xact_lock(hashtextextended('taste_neighbours:' || v_me::text, 0));
     select exists (
       select 1 from taste_neighbour_refresh
-       where reader_id = v_me and refreshed_at > clock_timestamp() - make_interval(hours => v_ttl)
+       where reader_id = v_me
+         and refreshed_at > clock_timestamp()
+                            - make_interval(hours => case when neighbours = 0 then least(v_ttl, 3) else v_ttl end)
     ) into v_fresh;
     if not v_fresh then
       perform _refresh_taste_neighbours(v_me);
@@ -412,7 +461,10 @@ begin
   opinions as (
     select case when p_kind = 'series' then coalesce(m.parent_id, m.id) else m.id end as item,
            s.user_id, max(s.score) as score
-      from _scored_rankings(array(select neighbour_id from nb)) s
+      -- One category: a film wall never needs the neighbours' seasons scored, or the reverse.
+      from _scored_rankings(array(select neighbour_id from nb),
+                            case when p_kind = 'series' then 'tv_seasons'::ranking_category
+                                 else 'movies'::ranking_category end) s
       join media_items m on m.id = s.media_item_id
      where (p_kind = 'movie' and m.kind = 'movie')
         or (p_kind = 'series' and m.kind in ('season', 'series'))
@@ -422,23 +474,39 @@ begin
     select o.item,
            sum(nb.weight * ((o.score - 5) / 5.0)) as pull,
            sum(nb.weight) as mass,
-           count(*) filter (where o.score >= 7) as lovers
+           count(*) filter (where o.score >= 7) as lovers,
+           count(*) filter (where o.score <= 3.4) as haters
       from opinions o
       join nb on nb.neighbour_id = o.user_id
      group by o.item
+  ),
+  open_titles as (
+    -- `cohort`, not `support`: the output column of the same name would shadow it.
+    select agg.*, agg.pull / (agg.mass + 1.0) as cohort
+      from agg
+     where ((agg.lovers >= 2 and agg.pull > 0) or (agg.haters >= 2 and agg.pull < 0))
+       and not exists (select 1 from user_media um where um.user_id = v_me and um.media_item_id = agg.item)
+       and not exists (select 1 from rankings rk where rk.user_id = v_me and rk.media_item_id = agg.item)
+       and (p_kind <> 'series' or not exists (
+             select 1 from media_items s
+               join user_media um on um.media_item_id = s.id and um.user_id = v_me
+              where s.parent_id = agg.item))
+  ),
+  endorsed as (
+    select o.item, o.cohort, o.lovers from open_titles o
+     where o.cohort > 0
+     order by o.cohort desc, o.item
+     limit v_limit
+  ),
+  disputed as (
+    select o.item, o.cohort, o.lovers from open_titles o
+     where o.cohort < 0
+     order by o.cohort asc, o.item
+     limit greatest(v_limit / 2, 1)
   )
-  select agg.item, (agg.pull / (agg.mass + 1.0))::real, agg.lovers::integer
-    from agg
-   where agg.lovers >= 2
-     and agg.pull > 0
-     and not exists (select 1 from user_media um where um.user_id = v_me and um.media_item_id = agg.item)
-     and not exists (select 1 from rankings rk where rk.user_id = v_me and rk.media_item_id = agg.item)
-     and (p_kind <> 'series' or not exists (
-           select 1 from media_items s
-             join user_media um on um.media_item_id = s.id and um.user_id = v_me
-            where s.parent_id = agg.item))
-   order by agg.pull / (agg.mass + 1.0) desc, agg.item
-   limit v_limit;
+  select e.item, e.cohort::real, e.lovers::integer from endorsed e
+  union all
+  select d.item, d.cohort::real, d.lovers::integer from disputed d;
 end;
 $$;
 

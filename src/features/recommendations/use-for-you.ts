@@ -512,7 +512,8 @@ async function catalogueCandidates(
 }
 
 /**
- * Engine V2 hybrid's collaborative source, strongest support first.
+ * Engine V2 hybrid's collaborative evidence: endorsed titles (positive support, strongest
+ * first) and disputed ones (negative support, evidence only).
  *
  * Ids, a support figure and an endorser count — the server never names who. Fails to
  * empty for the same reason the catalogue source does.
@@ -1157,7 +1158,11 @@ export function useForYou(
        */
       const social = await socialRead;
       const collaborative = await collaborativeRead;
-      const collaborativeIds = [...collaborative.keys()];
+      // Only endorsed titles are a source. A disputed one is evidence against a title some
+      // other source brought in, and never a reason to show it.
+      const collaborativeIds = [...collaborative]
+        .filter(([, evidence]) => evidence.support > 0)
+        .map(([id]) => id);
       // Under V2 `social` is empty, so the collaborative ids take its place in the order.
       const candidateIds = candidateIdsFrom(anchors, [...social, ...collaborativeIds], fallback);
 
