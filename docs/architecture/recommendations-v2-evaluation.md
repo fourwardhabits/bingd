@@ -126,7 +126,7 @@ What the model says, in order of confidence:
 |---|---|---|
 | `v1` | Shipping default | Unchanged. |
 | `v2_metadata` (A1) | **Candidate for a staged, measured rollout** (allowlist → small percentage), not a default | Does what the spec asked (language and era coverage, following inert) at a cost in pool recall and in cold start that only real telemetry can price. Watch `for_you_slate_shown.wall_languages`, open/add/rank rates by cohort, and readers with fewer than ten rankings. |
-| `v2_hybrid` (A2) | **Experimental** (allowlist / dogfood only) | Its benefit depends on real taste overlap, which a synthetic world cannot establish; its constants are unvalidated. |
+| `v2_hybrid` (A2) | **Experimental** (allowlist / dogfood only) | Its benefit depends on real taste overlap, which a synthetic world cannot establish; its constants are unvalidated. Before anything beyond the allowlist it also needs a per-reader cache of the collaborative read (most of its database time at scale, per the scale benchmark) and a reputation gate on neighbours (`recommendations-v2.md` §2.6). |
 
 Neither V2 engine is switched on by anything in these PRs; `recommendations.v2_engine` seeds
 `"v1"`.
