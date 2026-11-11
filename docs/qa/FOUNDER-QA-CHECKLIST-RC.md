@@ -69,7 +69,7 @@ Use `bingdtest2`. The IMDb steps use the founder's own IMDb export; it is never 
 - After merge only: the store buttons read "Get bingd on Google Play / the App Store / for iPhone / for Android". **Not in this sitting.**
 
 ## 8. TV Rankings (#265) `[ops 3]` `[build]`
-Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8.12 in order on one phone, then repeat 8.4 and 8.9 on the other.
+Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8.12 (and 8.14) in order on one phone, then repeat 8.4 and 8.9 on the other.
 
 ### 8.1 Rank a show
 1. Search "Shameless" and tap **`+`** on the show row.
@@ -172,6 +172,14 @@ Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8
 1. Start a first ranking on a new show, kill the app mid-comparison, reopen, and tap **Rank Show**.
    - **Expected:** it resumes the same comparison.
 
+### 8.14 Actor pages list shows (#262 × #265) `[ops 4b]`
+1. Open an actor from Shameless's cast (title page → Cast).
+2. The **Shameless** row reads **Ranked**, because the reader ranked the show.
+3. A show the reader logged as a show but did not rank reads **Watched**.
+4. A show the reader only saved reads **On your watchlist**.
+5. A show where the reader logged or ranked only seasons claims nothing.
+6. Sorting (#262) works on a filmography that mixes films and shows.
+
 ### 8.13 IMDb import of a TV show (§5 of the RC brief) `[ops 1]` `[ops 3]` `[ops 4b if the key was missing]`
 Use `bingdtest2`, with an IMDb export holding at least one TV Series, one TV Mini Series and one TV Episode.
 1. **Preview:**
@@ -191,6 +199,8 @@ Use `bingdtest2`, with an IMDb export holding at least one TV Series, one TV Min
 - **Seasons and films only:** goals, the monthly board, the season and genre awards, and the TV Top Rated wall. The rankings award counts shows.
 - **Show reviews:** a show page has no Reviews section yet. A note written on a show's log is saved.
 - **IMDb shows are matched and reported, not added** (#261's labelled limitation). Its copy still gives the reason "bingd tracks TV by season", which #265 makes untrue; see the PR's IMDb finding.
+- **Watchlist nudges and TV update posts:** gated off, `proactive.generation_enabled` = false. Once generation is on, a TV ranking edit that moved the title would count as "a friend watched it" for watchlist nudges. This is an open finding on #266, and nothing in this sitting can show it.
+- **Season-premiere notices** (gated off, `proactive.season_enabled` = false) consider season history only. A reader who ranked only the whole show would not be told about its next season. This is an open finding on #266.
 - **Original title layout** (a per-device saved choice) keeps its Ranked pill. The immersive default shows Log rewatch.
 - **#263's open items:** the third-party comment self-reaction count, and the For You / Collection toolbar move (visual sign-off).
 
