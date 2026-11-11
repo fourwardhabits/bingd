@@ -3866,7 +3866,7 @@ describe('the immersive title page (experiment)', () => {
       // The three labels the brief names, inside the one module.
       // Compact since post-QA sprint 2: the rating count rides in the label.
       expect(view.getByTestId('immersive-score-you-label')).toHaveTextContent('Your score');
-      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd\.( \(\d+\))?$/);
+      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd( \(\d+\))?$/);
       expect(view.getByTestId('immersive-score-following-label')).toHaveTextContent(
         /^Following( \(\d+\))?$/,
       );
