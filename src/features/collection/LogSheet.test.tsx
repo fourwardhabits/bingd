@@ -3345,3 +3345,56 @@ describe('the ranking-start order', () => {
     });
   });
 });
+
+/**
+ * **`Watched N times ›` is not drawn on Watch History itself** (UI consistency sprint,
+ * 2026-11-10). Watch History's *Edit ranking* opens this sheet; from there, the row that
+ * pushes Watch History would stack the screen the reader is already on. Everywhere else
+ * the row is unchanged.
+ */
+describe('the watch-history row', () => {
+  const twoWatches = () =>
+    mockFrom.mockImplementation((table: string) => {
+      const chain: Record<string, unknown> = {};
+      Object.assign(chain, {
+        select: () => chain,
+        eq: () => chain,
+        in: () => chain,
+        order: () => chain,
+        or: () => chain,
+        limit: () => chain,
+        gt: () => chain,
+        maybeSingle: () =>
+          Promise.resolve({
+            data: table === 'user_media' ? { bucket: 'loved' } : table === 'rankings' ? { bucket: 'loved' } : null,
+            error: null,
+          }),
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve({
+            data: table === 'watch_events' ? null : [],
+            count: table === 'watch_events' ? 2 : null,
+            error: null,
+          }).then(resolve),
+      });
+      return chain;
+    });
+
+  it('offers Watch history from the second viewing', async () => {
+    twoWatches();
+    const view = await open(filmA);
+    await waitFor(() => expect(view.getByRole('button', { name: 'Watched 2 times' })).toBeTruthy());
+  });
+
+  it('draws neither that row nor a date row when opened from Watch History', async () => {
+    twoWatches();
+    const view = await open(filmA, { inWatchHistory: true });
+    // The sheet itself is open and ready for a band, and the count has been read — so the
+    // absences below are the prop's doing, not a query that has not answered yet.
+    await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await waitFor(() => expect(readsOf('watch_events')).toBeGreaterThan(0));
+    await settle();
+    await settle();
+    expect(view.queryByRole('button', { name: 'Watched 2 times' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Watch date' })).toBeNull();
+  });
+});

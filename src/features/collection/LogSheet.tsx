@@ -164,6 +164,14 @@ export type LogSheetProps = {
    * ranking sheet behind this one is still mounted. Falls back to `onClose`.
    */
   onDone?: () => void;
+  /**
+   * Set by Watch History, which opens this sheet for its **Edit ranking** (UI consistency
+   * sprint, 2026-11-10). From the second viewing the sheet's date row becomes `Watched N
+   * times ›`, a push to Watch History — which, opened from Watch History, would stack the
+   * same screen on itself. The row is simply not drawn there: the reader is already on it.
+   * Nothing else about the sheet changes.
+   */
+  inWatchHistory?: boolean;
 };
 
 /**
@@ -198,6 +206,7 @@ export function LogSheet({
   openWriting,
   openSection,
   onDone,
+  inWatchHistory,
 }: LogSheetProps) {
   if (!title) return null;
 
@@ -218,6 +227,7 @@ export function LogSheet({
       openWriting={openWriting}
       openSection={openSection}
       onDone={onDone}
+      inWatchHistory={inWatchHistory}
     />
   );
 }
@@ -284,6 +294,7 @@ function Body({
   openWriting = null,
   openSection = null,
   onDone,
+  inWatchHistory = false,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -1668,17 +1679,19 @@ function Body({
            * which is also the first moment it says anything the date alone did not.
            */}
           {multipleWatches ? (
-            <SheetRow
-              icon="repeat-outline"
-              label={watchLabel ?? 'Watch history'}
-              onPress={() => {
-                // The sheet closes BEFORE the push, which is the iOS two-modal rule this
-                // codebase has paid for: navigating out from under a presented sheet
-                // leaves a screen that is mounted, visible and dead to touch.
-                close();
-                router.push(`/title/${title.id}/history` as never);
-              }}
-            />
+            inWatchHistory ? null : (
+              <SheetRow
+                icon="repeat-outline"
+                label={watchLabel ?? 'Watch history'}
+                onPress={() => {
+                  // The sheet closes BEFORE the push, which is the iOS two-modal rule this
+                  // codebase has paid for: navigating out from under a presented sheet
+                  // leaves a screen that is mounted, visible and dead to touch.
+                  close();
+                  router.push(`/title/${title.id}/history` as never);
+                }}
+              />
+            )
           ) : (
             <SheetRow
               icon="calendar-outline"

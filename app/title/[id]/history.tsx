@@ -4,12 +4,24 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCurrentProfile } from '@/features/auth/session';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
+import { useLogState } from '@/features/collection/use-log-state';
 import { removeFromCollection } from '@/features/collection/writes';
+import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
-import { EmptyState, LoadingScreen, Screen, Text } from '@/ui/components';
+import {
+  AppHeader,
+  EmptyState,
+  HeaderBoundary,
+  Screen,
+  SectionHeader,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { formatWatchDate } from '@/features/collection/dates';
 
 import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
@@ -19,6 +31,7 @@ import {
   scoresByWatch,
   type WatchEvent,
 } from '@/features/watch-history/watch-history';
+import { useHistoryTitle } from '@/features/watch-history/use-history-title';
 import { useWatchHistory, type Placement } from '@/features/watch-history/use-watch-history';
 import {
   deleteWatchEvent,
@@ -82,6 +95,32 @@ export default function WatchHistoryScreen() {
   const [error, setError] = useState<string | null>(null);
 
   /**
+   * **Edit ranking: the title's existing correction flow, opened from here** (founder, UI
+   * consistency sprint, 2026-11-10).
+   *
+   * The same pair of sheets the title page's *Update your rating* opens, wired the way the
+   * list page wires them: `LogSheet`'s band chooser, then `RankingSheet`'s comparisons,
+   * then back to the sheet with the new score. Nothing about ranking is built here. On a
+   * ranked title the chooser's two paths are `rank_rebucket` (a band change) and
+   * `rank_again` with `p_new_watch: false` (the same band) — corrections of the current
+   * ranking, neither of which records a viewing (`LogSheet.commitBucket`). Closing either
+   * sheet before a placement completes leaves the ranking as it was, because the server
+   * runs the session over the position the title already holds (`20260826000500`).
+   *
+   * **The rows here do not move with it**, except where the founder's rule already says
+   * they do: each watch shows the score frozen at that watch (`scoresByWatch`), and only
+   * the latest watch, while it is the latest, follows a correction. That rule is untouched.
+   */
+  const loggable = useHistoryTitle(mediaItemId);
+  const logState = useLogState(userId, mediaItemId);
+  const celebrate = useCelebrationHandoff();
+  const [rating, setRating] = useState<LoggableTitle | null>(null);
+  const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
+  const [placement, setPlacement] = useState<PostRank | null>(null);
+  const canEditRanking = Boolean(logState.data?.ranked && loggable.data);
+
+  /**
    * Memoised rather than defaulted inline: `?? []` builds a NEW array every render, so
    * every `useMemo` below it would recompute on every render and the list would rebuild
    * its rows for nothing. On a sixty-watch history that is the difference between a
@@ -137,8 +176,36 @@ export default function WatchHistoryScreen() {
   const reconcile = () =>
     invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
 
-  const saveEdit = async (eventId: string, edit: WatchEdit) => {
-    if (edit.watchedOn === undefined && !edit.details) return;
+  /** Back to the title page behind this one, or to it when this page was opened cold. */
+  const leave = () =>
+    router.canGoBack() ? router.back() : router.replace(`/title/${mediaItemId}` as never);
+
+  const editRanking = () => {
+    if (!loggable.data) return;
+    // The inline editor closes first, so one sheet edits the title at a time. The row has
+    // already settled any unsaved date or companions — saved, or discarded by the reader's
+    // choice — and flushed the note (`WatchRow`'s `editRanking`).
+    setEditingId(null);
+    setError(null);
+    setPlacement(null);
+    setRating(loggable.data);
+  };
+
+  const endRating = () => {
+    setRating(null);
+    setPlacement(null);
+    reconcile();
+    celebrate();
+  };
+
+  /**
+   * Writes a watch's edit and says whether all of it landed: `true` when every write
+   * succeeded, `false` (with the error line set) when one failed. Edit ranking's *Save*
+   * waits on it so the ranking only opens over a saved watch (stabilization pass,
+   * 2026-11-11); the editor's own Save does not, as before.
+   */
+  const saveEdit = async (eventId: string, edit: WatchEdit): Promise<boolean> => {
+    if (edit.watchedOn === undefined && !edit.details) return true;
     setBusy(true);
     setError(null);
     const results = [];
@@ -169,9 +236,10 @@ export default function WatchHistoryScreen() {
     for (const result of results) {
       if (result.outcome === 'failed') {
         setError(result.message);
-        break;
+        return false;
       }
     }
+    return true;
   };
 
   /**
@@ -211,7 +279,9 @@ export default function WatchHistoryScreen() {
         setError(result.message);
         return;
       }
-      router.back();
+      // The same way out as the header's Back, so a page opened cold does not stay on a
+      // history for a title that has just left the collection (independent review).
+      leave();
       return;
     }
     setBusy(true);
@@ -226,19 +296,43 @@ export default function WatchHistoryScreen() {
   };
 
   /**
-   * **A pushed page like the others** (founder, marquee cohesion sprint, 2026-11-07): the
-   * stack's own header, with back and a title, as My lists and a list have. This route was
-   * never declared with one, so it opened as a bare page whose only way out was the system
-   * back gesture.
+   * **The bingd. header with Back, as My lists has** (founder, UI consistency sprint,
+   * 2026-11-10). It was the stack's own header titled *Watch history* (marquee cohesion
+   * sprint, 2026-11-07), inside a `Screen` that also padded its top by the status-bar
+   * inset — which a native-stack header had already consumed. That second inset was the
+   * empty band between the header and the summary (`settings/notifications.tsx` met and
+   * documented the same duplication). Now the stack header is off and the page draws
+   * `AppHeader` and its boundary, so the top inset is applied exactly once, by `Screen`.
+   *
+   * The route keeps its title: on iOS it is the back label of anything pushed on top.
+   * Back returns to the title page behind it, or — opened cold with nothing behind —
+   * replaces this page with that title page.
    */
-  const header = <Stack.Screen options={{ headerShown: true, title: 'Watch history' }} />;
+  const header = (
+    <>
+      <Stack.Screen options={{ headerShown: false, title: 'Watch history' }} />
+      <AppHeader
+        back={{ onPress: leave }}
+      />
+      <HeaderBoundary />
+    </>
+  );
 
   if (history.isPending)
     return (
-      <>
+      <Screen includeBottomInset>
         {header}
-        <LoadingScreen message="Loading your watch history" />
-      </>
+        {/* The page's own loading, under its header, as My lists draws it: the brand
+            splash this used to show would put a second bingd. under the header's. */}
+        <View
+          style={styles.loading}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading your watch history"
+          testID="watch-history-loading"
+        >
+          <SkeletonRow count={3} />
+        </View>
+      </Screen>
     );
 
   const count = events.length;
@@ -253,6 +347,7 @@ export default function WatchHistoryScreen() {
     return (
       <Screen includeBottomInset>
         {header}
+        <SectionHeader title="Watch history" size="large" />
         <EmptyState
           kind="nothingYet"
           compact
@@ -275,20 +370,26 @@ export default function WatchHistoryScreen() {
         removeClippedSubviews
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <View style={styles.header}>
-            <Text variant="title2" testID="watch-history-summary">
-              {count === 1 ? 'Watched once' : `Watched ${count} times`}
-            </Text>
-            {span ? (
-              <Text variant="footnote" tone="secondary" testID="watch-history-span">
-                {span}
+          <View>
+            {/* The page's name, now that the stack's title is gone: the section label My
+                lists opens with, in the same 15pt Maroon token. Said once — nothing else
+                on the page repeats it. */}
+            <SectionHeader title="Watch history" size="large" />
+            <View style={styles.header} testID="watch-history-summary-block">
+              <Text variant="title2" testID="watch-history-summary">
+                {count === 1 ? 'Watched once' : `Watched ${count} times`}
               </Text>
-            ) : null}
-            {error ? (
-              <Text variant="caption" tone="action" testID="watch-history-error">
-                {error}
-              </Text>
-            ) : null}
+              {span ? (
+                <Text variant="footnote" tone="secondary" testID="watch-history-span">
+                  {span}
+                </Text>
+              ) : null}
+              {error ? (
+                <Text variant="caption" tone="action" testID="watch-history-error">
+                  {error}
+                </Text>
+              ) : null}
+            </View>
           </View>
         }
         renderItem={({ item, index }) => {
@@ -321,8 +422,9 @@ export default function WatchHistoryScreen() {
                 editing={editingId === item.id}
                 onEdit={() => setEditingId(item.id)}
                 onDismissEdit={() => setEditingId(null)}
-                onSave={(edit) => void saveEdit(item.id, edit)}
+                onSave={(edit) => saveEdit(item.id, edit)}
                 onRemove={() => void remove(item.id, count <= 1)}
+                onEditRanking={canEditRanking ? editRanking : undefined}
                 busy={busy}
               />
               {index === ordered.length - 1 ? null : <View style={styles.rule} />}
@@ -330,17 +432,60 @@ export default function WatchHistoryScreen() {
           );
         }}
       />
+
+      <LogSheet
+        title={rating}
+        surface="title"
+        postRank={placement}
+        inWatchHistory
+        onClose={endRating}
+        onDone={endRating}
+        onRank={(bucket, mode) => {
+          if (!rating) return;
+          setRanking({
+            id: rating.id,
+            title: rating.title,
+            bucket,
+            posterUri: rating.posterUri,
+            kind: rating.kind,
+            mode,
+          });
+          setRankedTitle(rating);
+          setPlacement(null);
+          setRating(null);
+        }}
+      />
+      <RankingSheet
+        subject={ranking}
+        onClose={() => {
+          setRanking(null);
+          reconcile();
+        }}
+        // Back to the rating sheet with the new score, as on the title page: one
+        // implementation of "the rest of your log".
+        onFinishLog={(result) => {
+          setRanking(null);
+          if (!rankedTitle) return;
+          setPlacement(result);
+          setRating(rankedTitle);
+        }}
+        surface="title"
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  /**
+   * The summary straight under WATCH HISTORY: the label's own 44pt row already leaves the
+   * air above and below its words, so this adds none on top (UI consistency sprint).
+   */
   header: {
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
     paddingBottom: theme.space[2],
     gap: theme.space[1],
   },
+  loading: { paddingTop: theme.space[3] },
   year: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
