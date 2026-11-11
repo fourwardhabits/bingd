@@ -3362,8 +3362,10 @@ export default function TitleScreen() {
                  * THE SEMANTICS ARE UNTOUCHED
                  *
                  *   Edit ranking         corrects the current watch. `p_new_watch` false, no
-                 *                        new watch record, no feed activity, no timestamp
-                 *                        heuristic anywhere.
+                 *                        new watch record, no timestamp heuristic anywhere.
+                 *                        No feed activity for a film; for a show or season
+                 *                        (20261114000300), one "updated their ranking of"
+                 *                        post only when the correction moved it.
                  *   Log another watch    an explicit second viewing. `p_new_watch` true, and
                  *                        exactly one `title_ranked` on completion.
                  *
