@@ -8,8 +8,17 @@ import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import { track } from '@/lib/analytics';
 
 /**
- * The optional Letterboxd step: *Already use Letterboxd?*, between *Your First Five* and
- * People (founder, preview QA Round 3, 2026-09-13).
+ * The optional import step: *Already tracking movies somewhere else?*, between *Your First
+ * Five* and People (founder, preview QA Round 3, 2026-09-13; Letterboxd or IMDb since the
+ * founder spec of 2026-11-10, §9).
+ *
+ * **Since 2026-11-10 it opens on a choice**: Letterboxd, IMDb, or Not now, in the same rows
+ * Settings ▸ Import from uses (`ProviderChoice`). Choosing a service opens that service's
+ * page (instructions, picker, Not now, and a way back to the choice). Everything below about
+ * the hand-off, relaunch and the job is unchanged: the route, its `letterboxd` stage name
+ * (kept, because a stored stage is what a relaunch resumes from), and the one importer
+ * machine. Only the presentation of the question changed, as the spec asks; the onboarding
+ * redesign is a separate piece of work and this step drops into it as it stands.
  *
  * ---------------------------------------------------------------------------
  * WHY A STEP, AND NOT THE CARD IT REPLACES
@@ -105,6 +114,7 @@ export default function LetterboxdStepScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <ImportScreen
         surface="onboarding"
+        chooser
         onboarding={{ header: <OnboardingHeader step="letterboxd" />, onLeave: leave }}
       />
     </>

@@ -15,3 +15,14 @@ docblock at the top of that file lists exactly what was changed and why.
 These fixtures document the format for the future list import (T6c,
 `docs/product/letterboxd-lists-import.md`). The current importer reads none of the list
 files.
+
+## IMDb
+
+| File | Source | What it holds |
+|---|---|---|
+| `imdb-synthetic.ts` | **Synthetic.** Written by hand for the IMDb import (2026-11-11) | An IMDb ratings export in the real 14-column schema, covering every Title Type in the founder's sample (Movie, TV Series, TV Mini Series, TV Episode, Short, Video, TV Movie, TV Special) plus a game, duplicate Consts, missing years, a BOM, CRLF, quoted titles with commas and quotes, and malformed rows |
+
+**No real IMDb export is committed, and none may be.** The founder's sample is somebody
+else's viewing history (spec §3). Every title, id, rating and date in the synthetic file is
+invented; the `tt9…` ids are outside the range IMDb has issued for these names. Validation
+against the real file is a private, local step recorded only as counts in the PR.

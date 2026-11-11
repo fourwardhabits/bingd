@@ -245,3 +245,159 @@ export function catalogueItem(result) {
     popularity: typeof result.popularity === 'number' ? result.popularity : null,
   };
 }
+
+// =========================================================================================
+// IMDb (20261113000100)
+//
+// An IMDb row arrives with an identifier, so the order of evidence is the reverse of a
+// Letterboxd row's: TMDB's own /find for the tt id first, and a title search only when
+// /find knows nothing. Both answers are judged here, with no I/O, for the reason the rest
+// of this file is plain JavaScript: it is the part that decides which title somebody's
+// history attaches to, so it is the part `node --test` must be able to reach.
+//
+// The database re-checks every answer (`_import_provider_resolve`), so these functions are
+// the first opinion, not the last.
+// =========================================================================================
+
+/**
+ * An IMDb Title Type folded the way `_import_imdb_title_type` folds it: letters only, lower
+ * case, `other` when unknown. IMDb has written both "TV Mini Series" and "tvMiniSeries".
+ */
+export function imdbTitleType(raw) {
+  const folded = typeof raw === 'string' ? raw.replace(/[^A-Za-z]/g, '').toLowerCase() : '';
+  return IMDB_TYPES.has(folded) ? folded : 'other';
+}
+
+const IMDB_TYPES = new Set([
+  'movie',
+  'tvmovie',
+  'video',
+  'short',
+  'tvshort',
+  'tvspecial',
+  'tvseries',
+  'tvminiseries',
+  'tvepisode',
+  'videogame',
+  'musicvideo',
+  'podcastseries',
+  'podcastepisode',
+]);
+
+/**
+ * The canonical kind a folded IMDb type may resolve to, or null when bingd has none.
+ * Mirrors `_import_imdb_kind`. IMDb's type is evidence, never a reclassification: a title
+ * TMDB files under the other kind is a conflict (`decideFind`).
+ */
+export function imdbKind(titleType) {
+  switch (titleType) {
+    case 'movie':
+    case 'tvmovie':
+    case 'video':
+    case 'short':
+    case 'tvshort':
+    case 'tvspecial':
+      return 'movie';
+    case 'tvseries':
+    case 'tvminiseries':
+      return 'series';
+    default:
+      return null;
+  }
+}
+
+/** A TMDB TV result in the shape `pick` and `isConfident` read. */
+export function tvAsCandidate(result) {
+  return {
+    ...result,
+    title: result?.name ?? result?.title ?? '',
+    original_title: result?.original_name ?? result?.original_title ?? null,
+    release_date: result?.first_air_date ?? result?.release_date ?? null,
+  };
+}
+
+/**
+ * Whether a /find hit is plausibly the title the row names: a squashed title or original
+ * title in common with the row's title or original title, and years within one where both
+ * are known. Mirrors `_import_imdb_identity_agrees`.
+ */
+export function identityAgrees(claim, candidate) {
+  if (!claim || !candidate) return false;
+  const theirs = [squash(candidate.title), squash(candidate.original_title)].filter(Boolean);
+  const ours = [squash(claim.name), squash(claim.original_title)].filter(Boolean);
+  if (!theirs.some((value) => ours.includes(value))) return false;
+  if (claim.year === null || claim.year === undefined) return true;
+  const year = yearOf(candidate);
+  return year === null || Math.abs(year - claim.year) <= 1;
+}
+
+const list = (value) => (Array.isArray(value) ? value : []);
+
+/**
+ * What TMDB's /find answer for the row's tt id means.
+ *
+ *   match        exactly one result of the expected kind, and it agrees with the row
+ *   unsupported  the id names an episode or a season, or the IMDb type has no destination
+ *   conflict     the id names a title of the OTHER kind, or one that disagrees with the row
+ *   ambiguous    more than one result of the expected kind
+ *   none         TMDB has nothing for the id; a title search may still find it
+ *
+ * Every outcome but `match` and `none` is final: asking again returns the same answer.
+ */
+export function decideFind(claim, body) {
+  const expected = imdbKind(imdbTitleType(claim?.title_type));
+  if (expected === null) return { outcome: 'unsupported' };
+
+  const movies = list(body?.movie_results);
+  const shows = list(body?.tv_results);
+  const parts = [...list(body?.tv_episode_results), ...list(body?.tv_season_results)];
+
+  const own = expected === 'movie' ? movies : shows.map(tvAsCandidate);
+  const other = expected === 'movie' ? shows : movies;
+
+  if (own.length > 1) return { outcome: 'ambiguous' };
+  if (own.length === 1) {
+    return identityAgrees(claim, own[0])
+      ? {
+          outcome: 'match',
+          kind: expected,
+          result: expected === 'movie' ? movies[0] : shows[0],
+        }
+      : { outcome: 'conflict' };
+  }
+  if (other.length > 0) return { outcome: 'conflict' };
+  if (parts.length > 0) return { outcome: 'unsupported' };
+  return { outcome: 'none' };
+}
+
+/** `pick`, over TV search results. Returns the raw TMDB result, or null. */
+export function pickTv(claim, results) {
+  const candidates = list(results).map(tvAsCandidate);
+  const chosen = pick(claim, candidates);
+  return chosen ? list(results)[candidates.indexOf(chosen)] : null;
+}
+
+/** `needsWindow`, over TV search results. */
+export function needsWindowTv(claim, results) {
+  return needsWindow(claim, list(results).map(tvAsCandidate));
+}
+
+/**
+ * The catalogue row for a TV result, through the same upsert a search uses (`kind: series`).
+ * The SHOW, never a season: bingd's seasons hang off it and are hydrated by the catalogue's
+ * own path, and nothing here may decide which season somebody watched.
+ */
+export function catalogueSeries(result) {
+  return {
+    kind: 'series',
+    tmdb_id: result.id,
+    title: result.name ?? result.title,
+    original_title: textOrNull(result.original_name ?? result.original_title),
+    release_date: textOrNull(result.first_air_date ?? result.release_date),
+    overview: textOrNull(result.overview),
+    poster_path: textOrNull(result.poster_path),
+    backdrop_path: textOrNull(result.backdrop_path),
+    original_language: textOrNull(result.original_language),
+    popularity: typeof result.popularity === 'number' ? result.popularity : null,
+  };
+}

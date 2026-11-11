@@ -1,5 +1,9 @@
 # Letterboxd import
 
+> **Since 2026-11-11 (branch, unreleased):** Settings ▸ *Import from* offers Letterboxd or
+> IMDb, and the onboarding step asks *Already tracking movies somewhere else?*. The
+> Letterboxd import below is unchanged. See [`imdb-import.md`](./imdb-import.md).
+
 **Current status (2026-09-23, stopping point).** The watched-title importer is **in
 production** (since 2026-09-14, `letterboxd-production-promotion.md`). Since then:
 

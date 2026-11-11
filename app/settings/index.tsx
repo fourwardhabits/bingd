@@ -12,6 +12,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
+import { ProviderLogos } from '@/features/import/ProviderLogo';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
@@ -126,9 +127,15 @@ export default function SettingsScreen() {
 
                 Above Account & Data for the same reason Sign out is below it: this group
                 runs from the things people do often to the things they do once. */}
+            {/* **One row for every service, named by its marks** (founder spec 2026-11-10,
+                §7). "Import from", with the Letterboxd and IMDb logos where a detail would
+                sit, so the row says where history can come from without growing a row
+                per service. It opens the choice of service. */}
             <Row
               icon="download-outline"
-              label="Import from Letterboxd"
+              label="Import from"
+              accessibilityLabel="Import from Letterboxd or IMDb"
+              accessory={<ProviderLogos />}
               onPress={() => router.push('/settings/import')}
             />
             <Row
@@ -293,6 +300,8 @@ function Row({
   last = false,
   external = false,
   hint,
+  accessory,
+  accessibilityLabel: spoken,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -313,12 +322,19 @@ function Row({
    * destination is worse for a screen-reader user than no hint at all.
    */
   hint?: string;
+  /**
+   * Something drawn where `detail` would be, before the chevron: the import row's two
+   * provider marks. Decorative, so the row's own label must say what it shows.
+   */
+  accessory?: React.ReactNode;
+  /** Overrides the spoken label, for a row whose accessory carries meaning. */
+  accessibilityLabel?: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole={external ? 'link' : 'button'}
-      accessibilityLabel={detail ? `${label}, ${detail}` : label}
+      accessibilityLabel={spoken ?? (detail ? `${label}, ${detail}` : label)}
       accessibilityHint={hint ?? (external ? 'Opens in your browser' : undefined)}
       onPress={onPress}
       style={({ pressed }) => [
@@ -336,6 +352,7 @@ function Row({
           {detail}
         </Text>
       ) : null}
+      {accessory}
       <Ionicons
         name={external ? 'open-outline' : 'chevron-forward'}
         size={theme.layout.icon.sm}
