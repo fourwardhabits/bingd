@@ -51,6 +51,18 @@ export type ClampedTextProps = {
    * is reading the one below it.
    */
   collapseLabel?: string;
+  /**
+   * Drawn after the press target, inside the caller's own layout (so it brings its own
+   * inset), once **all of `text`** is on screen — opened, or short enough
+   * never to have been clamped — and never before.
+   *
+   * For a caller whose `text` is itself not the whole of something: the person page's
+   * biography is cut to 1,200 characters by the adapter, and opening it must not read as
+   * a promise that what appears is everything (person page, 2026-11-11). Shown only when
+   * fully open because while collapsed `more` is still honest — there *is* more of this
+   * text — and the caveat is about the text, not about the clamp.
+   */
+  completeFooter?: ReactNode;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -146,6 +158,7 @@ export function ClampedText({
   testIDPrefix,
   expandLabel,
   collapseLabel,
+  completeFooter,
   style,
 }: ClampedTextProps) {
   const [expanded, setExpanded] = useState(false);
@@ -227,6 +240,7 @@ export function ClampedText({
   const acts = expanded ? Boolean(collapseLabel) : truncated || !measured;
 
   return (
+    <>
     <Pressable
       accessibilityRole={acts ? 'button' : undefined}
       accessibilityState={acts ? { expanded } : undefined}
@@ -314,6 +328,10 @@ export function ClampedText({
         </Text>
       </View>
     </Pressable>
+    {/* Outside the press target, so a screen reader reaches it: an open toggle announces
+        as its collapse label, which would otherwise stand in for this as well. */}
+    {completeFooter && (expanded || (measured && !truncated)) ? completeFooter : null}
+    </>
   );
 }
 

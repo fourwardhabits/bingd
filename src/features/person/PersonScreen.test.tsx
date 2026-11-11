@@ -83,7 +83,7 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, back: jest.fn() }),
   useLocalSearchParams: () => ({ id: mockPersonId }),
   Stack: { Screen: () => null },
 }));
@@ -194,7 +194,7 @@ describe('a person as a discovery surface', () => {
     const view = await open();
 
     expect(view.queryByText(/in your catalogue/i)).toBeNull();
-    expect(view.getByLabelText('Known for')).toBeTruthy();
+    expect(view.getByLabelText('Filmography')).toBeTruthy();
   });
 
   it('says who they are before it says what they did', async () => {
