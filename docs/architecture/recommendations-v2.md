@@ -49,7 +49,8 @@ popularity, excluding what the caller logged (and, on TV, shows with a logged se
 answers empty while the caller is on V1. Each window is the first rows of one ordered index
 range: `media_items_catalogue_language (kind, original_language, popularity)` and
 `media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
-not grow with the size of a language or a decade (measured in the scale benchmark).
+not grow with the size of a language or a decade (measured in A3's scale benchmark, PR #253,
+`recommendations-v2-scale-benchmark.md` once that PR lands).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -99,7 +100,7 @@ create index concurrently if not exists media_items_catalogue_decade
   where kind in ('movie', 'series') and poster_path is not null;
 ```
 
-A2 adds a third, on `rankings` (§2.6). An operator step, run only with founder approval.
+A2 (PR #251) adds a third, on `rankings`. An operator step, run only with founder approval.
 
 **Rollback:** write `"v1"` to `recommendations.v2_engine`. `recommendation_engine()` then
 answers V1 for everybody and `catalogue_candidates` answers empty. Clients pick it up on the
