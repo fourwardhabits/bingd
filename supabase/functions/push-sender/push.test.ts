@@ -824,6 +824,33 @@ Deno.test(
   },
 );
 
+Deno.test('an IMDb import names IMDb in all three pushes (20261113000100)', () => {
+  const imdb = { import_counts: { provider: 'imdb', watched: 3 } };
+  assertEquals(contentFor(importJob('import_started', imdb))!.title, 'IMDb import started');
+  assertEquals(
+    contentFor(importJob('import_completed', imdb))!.title,
+    'Your IMDb history is ready',
+  );
+  assertEquals(
+    contentFor(importJob('import_completed', imdb))!.body,
+    '3 movies added as watched. Ready to rank.',
+  );
+  assertEquals(
+    contentFor(importJob('import_failed', imdb))!.title,
+    'We couldn’t finish your IMDb import',
+  );
+  // A Letterboxd payload, and one with no provider at all, read as Letterboxd.
+  assertEquals(
+    contentFor(importJob('import_started', { import_counts: { provider: 'letterboxd' } }))!
+      .title,
+    'Letterboxd import started',
+  );
+  assertEquals(
+    contentFor(importJob('import_failed', { import_counts: null }))!.title,
+    'We couldn’t finish your Letterboxd import',
+  );
+});
+
 Deno.test('no other push grows an import job id', () => {
   const follow = contentFor(job({ type: 'follow' }))!;
   assertEquals('importJobId' in follow.data, false);

@@ -921,7 +921,7 @@ export type AnalyticsEvent =
    * *Import from Letterboxd* or asks how to get the file; the step's own exposure is
    * `onboarding_step_completed` with `step: 'letterboxd'`.
    */
-  | { name: 'import_opened'; props: { surface: ImportSurface } }
+  | { name: 'import_opened'; props: { surface: ImportSurface; provider?: ImportProviderName } }
   /**
    * The "how to export from Letterboxd" instructions were opened.
    *
@@ -944,7 +944,10 @@ export type AnalyticsEvent =
    * **No filename, no path, no size.** A filename is somebody's own words and often their
    * username; the archive is named after their account.
    */
-  | { name: 'import_archive_selected'; props: { outcome: ImportSelectOutcome } }
+  | {
+      name: 'import_archive_selected';
+      props: { outcome: ImportSelectOutcome; provider?: ImportProviderName };
+    }
   /**
    * The preview was accepted and the upload began.
    *
@@ -953,7 +956,10 @@ export type AnalyticsEvent =
    * which is the thing nobody currently knows and which every bound in the pipeline was
    * guessed against.
    */
-  | { name: 'import_started'; props: { films: number; viewings: number } }
+  | {
+      name: 'import_started';
+      props: { films: number; viewings: number; provider?: ImportProviderName };
+    }
   /**
    * The job reached `done` while somebody was still watching.
    *
@@ -1180,7 +1186,22 @@ export type ImportSelectOutcome =
    * what one job may hold. A non-zero count here is either a library nobody anticipated or
    * a client producing rows it should not.
    */
-  | 'too_many_films';
+  | 'too_many_films'
+  /**
+   * The IMDb reader's refusals (20261113000100): a ZIP picked on the IMDb screen, a CSV that
+   * is not an IMDb ratings export, an IMDb list or watchlist export, and a ratings export
+   * holding only types bingd has no destination for (episodes, games).
+   */
+  | 'is_zip'
+  | 'not_imdb'
+  | 'imdb_list'
+  | 'nothing_supported';
+
+/**
+ * Whose export an import event is about. Optional on the events so a Letterboxd event from
+ * a build that predates it reads as what it was.
+ */
+export type ImportProviderName = 'letterboxd' | 'imdb';
 
 /** Which People list. The server's own two, so the event and the chip are one vocabulary. */
 export type PeopleSuggestionMode = 'mutuals' | 'match';

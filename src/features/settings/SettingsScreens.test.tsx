@@ -417,10 +417,16 @@ describe('the Settings hub', () => {
    * only way anybody reaches the importer at all. A cleanup that took it would remove the
    * feature without removing a line of it.
    */
-  it('leads to the Letterboxd importer', async () => {
+  it('leads to the importer, as one row naming both services (founder spec 2026-11-10, §7)', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
-    await fireEvent.press(view.getByLabelText('Import from Letterboxd'));
+    // "Import from", with the two marks where a detail would be; one row, not one per service.
+    expect(view.getByText('Import from')).toBeTruthy();
+    expect(view.getByTestId('logo-letterboxd', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByTestId('logo-imdb', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.queryByText('Import from Letterboxd')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Import from Letterboxd or IMDb'));
 
     expect(mockPush).toHaveBeenCalledWith('/settings/import');
   });

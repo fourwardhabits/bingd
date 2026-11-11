@@ -16,14 +16,14 @@ import { createTestDb } from './harness.mjs';
  * that PUBLIC holds no EXECUTE that would make the revoke a no-op.
  */
 
-const ENTRY = ['import_create()', 'import_stage(uuid, jsonb)', 'import_ready(uuid)'];
+const ENTRY = ['import_create(text)', 'import_stage(uuid, jsonb)', 'import_ready(uuid)'];
 const KEPT = ['import_status(uuid)', 'import_discard(uuid)'];
 
 // From PUBLIC and anon too (review 84b). They hold nothing today, because 20260813001800 revokes
 // PUBLIC's default EXECUTE on every function created in `public`, but the switch must not
 // depend on that staying true.
-const OFF = `revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated`;
-const ON = `grant execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) to authenticated`;
+const OFF = `revoke execute on function import_create(text), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated`;
+const ON = `grant execute on function import_create(text), import_stage(uuid, jsonb), import_ready(uuid) to authenticated`;
 
 let t;
 

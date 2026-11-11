@@ -883,20 +883,25 @@ biased towards the oldest follows (independent review of B1, 2026-11-11).
 `20261028000100`, `20261028000200`, `20261031000100`, `20261101000100` (from #220, dated when
 they were written) and `20261112000100`. The open Engine V2 PRs add `20261111000100` (#250)
 and `20261111000200` (#251), the reaction-summary draft #249 adds `20261110000100`, and the
-IMDb import draft #256 adds `20261111000300`. The Engine V2 migrations define nothing this
-branch defines, so with them a fresh database applies everything correctly in file order
-(checked: the A stack and this branch merged together pass every DB test). #256 does not,
-see below. If any of those newer migrations reaches an environment before this branch does,
+IMDb import (rebuilt on this branch as `claude/imdb-import-on-254`) adds `20261113000100`.
+The Engine V2 migrations define nothing this branch defines, so with them a fresh database
+applies everything correctly in file order (checked: the A stack and this branch merged
+together pass every DB test). The import migration shares one function with this branch,
+`claim_push_batch`, reconciled below. If any of those newer migrations reaches an
+environment before this branch does,
 `db push` refuses the four older files until it is run with `--include-all`, after a
 `--dry-run` that lists exactly this branch's files (the same procedure as
 `letterboxd-production-promotion.md`).
-**#256 and this branch both rebuild `claim_push_batch`.** This branch drops the one-argument
-form and owns `claim_push_batch(integer, timestamptz)`; #256 (written against `main`)
-recreates `claim_push_batch(integer)`. Whichever merges second must rebuild the two-argument
-function with both changes and must not recreate the one-argument form: two overloads make
-push-sender's `rpc('claim_push_batch', { p_limit })` ambiguous and stop every push.
-`security-before-proactive.test.mjs` fails on a second overload, so the combined branch
-cannot go green without that reconciliation.
+**#256 and this branch both rebuilt `claim_push_batch` — resolved on `claude/imdb-import-on-254`
+(founder decision 2026-11-11: #254 is the integration base, #256 is rebuilt on it).** There the
+import migration is renumbered `20261113000100`, after every migration above, and its
+`claim_push_batch` is this branch's two-argument function with the import's one change
+(`import_started` and `import_failed` carry their payload, so push-sender can name IMDb). No
+one-argument form is created, so exactly one `claim_push_batch` exists at every file boundary
+(`security-before-proactive.test.mjs`). Merged anywhere else, #256 as it stood would recreate
+`claim_push_batch(integer)` beside this branch's, and push-sender's
+`rpc('claim_push_batch', { p_limit })` would match both: every push stops.
+`docs/release/claim-push-batch-reconciliation.md` has the sequence.
 
 ## S. Staging application and Preview QA (do not run without approval)
 
