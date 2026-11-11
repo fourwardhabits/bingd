@@ -53,16 +53,23 @@ function eraShares(
  * Pure. `pool` is every candidate the other sources produced, before eligibility; a row
  * already in it is never added twice. Rows are taken per facet in the server's order, and
  * a row serving two facets (a Japanese film of a loved decade) counts toward both.
+ *
+ * `ineligible` is what `scoreSlate` will drop — the reader's collection and the anchors.
+ * Those rows count toward no facet and are never added: an anchor list full of Japanese
+ * films the reader has already logged is not Japanese coverage (independent review,
+ * 2026-11-11), and counting them would leave the facet below its floor once they go.
  */
 export function coverageFill(
   pool: readonly Candidate[],
   catalogue: readonly Candidate[],
   profile: Profile,
   request: { kind: 'movie' | 'series'; languages: readonly string[]; decades: readonly number[] },
+  ineligible: ReadonlySet<string> = new Set(),
 ): Candidate[] {
   if (catalogue.length === 0) return [];
 
-  const size = pool.length;
+  const eligible = pool.filter((candidate) => !ineligible.has(candidate.mediaItemId));
+  const size = eligible.length;
   const target = (share: number) =>
     Math.min(MAX_PER_FACET, Math.max(MIN_PER_FACET, Math.ceil(share * size)));
   const facets: Facet[] = [];
@@ -77,8 +84,10 @@ export function coverageFill(
     });
   }
 
-  const present = new Set(pool.map((candidate) => candidate.mediaItemId));
-  const have = new Map(facets.map((facet) => [facet.key, pool.filter(facet.matches).length]));
+  const present = new Set([...pool.map((candidate) => candidate.mediaItemId), ...ineligible]);
+  // Distinct ids: the same title can arrive from several anchors' lists.
+  const distinct = [...new Map(eligible.map((candidate) => [candidate.mediaItemId, candidate])).values()];
+  const have = new Map(facets.map((facet) => [facet.key, distinct.filter(facet.matches).length]));
   const added: Candidate[] = [];
 
   for (const facet of facets) {

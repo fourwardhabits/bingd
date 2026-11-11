@@ -512,7 +512,8 @@ async function catalogueCandidates(
 }
 
 /**
- * Engine V2 hybrid's collaborative source, strongest support first.
+ * Engine V2 hybrid's collaborative evidence: endorsed titles (positive support, strongest
+ * first) and disputed ones (negative support, evidence only).
  *
  * Ids, a support figure and an endorser count — the server never names who. Fails to
  * empty for the same reason the catalogue source does.
@@ -1157,25 +1158,15 @@ export function useForYou(
        */
       const social = await socialRead;
       const collaborative = await collaborativeRead;
-      const collaborativeIds = [...collaborative.keys()];
+      // Only endorsed titles are a source. A disputed one is evidence against a title some
+      // other source brought in, and never a reason to show it.
+      const collaborativeIds = [...collaborative]
+        .filter(([, evidence]) => evidence.support > 0)
+        .map(([id]) => id);
       // Under V2 `social` is empty, so the collaborative ids take its place in the order.
       const candidateIds = candidateIdsFrom(anchors, [...social, ...collaborativeIds], fallback);
 
       const listed = await candidatesFor(candidateIds, medium);
-      const filled =
-        profile && catalogueRequest
-          ? coverageFill(listed, await catalogueRead, profile, catalogueRequest)
-          : [];
-      const merged = filled.length > 0 ? [...listed, ...filled] : listed;
-      // Every candidate the neighbours have an opinion on carries it, whichever source
-      // brought it in: a title on an anchor's list that the cohort also loved is both.
-      const candidates =
-        collaborative.size > 0
-          ? merged.map((candidate) => {
-              const evidence = collaborative.get(candidate.mediaItemId);
-              return evidence ? { ...candidate, collaborative: evidence } : candidate;
-            })
-          : merged;
 
       // `user_media` is everything logged, bucketed or dated — the collection —
       // and is excluded outright: recommending someone a film they logged last week
@@ -1191,6 +1182,29 @@ export function useForYou(
         metSeries.size > 0
           ? new Set([...(watched.data ?? []), ...metSeries])
           : (watched.data ?? new Set<string>());
+
+      // The catalogue fills only what will survive eligibility: the collection and the
+      // anchors are not coverage, because `scoreSlate` drops both.
+      const filled =
+        profile && catalogueRequest
+          ? coverageFill(
+              listed,
+              await catalogueRead,
+              profile,
+              catalogueRequest,
+              new Set([...exclude, ...anchors.map((anchor) => anchor.mediaItemId)]),
+            )
+          : [];
+      const merged = filled.length > 0 ? [...listed, ...filled] : listed;
+      // Every candidate the neighbours have an opinion on carries it, whichever source
+      // brought it in: a title on an anchor's list that the cohort also loved is both.
+      const candidates =
+        collaborative.size > 0
+          ? merged.map((candidate) => {
+              const evidence = collaborative.get(candidate.mediaItemId);
+              return evidence ? { ...candidate, collaborative: evidence } : candidate;
+            })
+          : merged;
 
       /**
        * Filtered **before** scoring, not after.
@@ -1336,7 +1350,8 @@ export function useForYou(
           // Which engine drew it, and how many distinct original languages are on it — the
           // one number V2's language work is answerable by. A count, never a code.
           engine: slateEngine,
-          wall_languages: new Set(items.map((item) => item.language ?? '')).size,
+          // A title with no recorded language is not a language.
+          wall_languages: new Set(items.flatMap((item) => (item.language ? [item.language] : []))).size,
         },
       });
     });

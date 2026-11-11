@@ -26,12 +26,17 @@ jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 
 let mockTables: Record<string, unknown[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
+/** RPCs that fail, as a server that predates them or an outage would. */
+let mockRpcErrors = new Set<string>();
 const mockRpcCalls: { name: string; args: unknown }[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args?: unknown) => {
       mockRpcCalls.push({ name, args });
+      if (mockRpcErrors.has(name)) {
+        return Promise.resolve({ data: null, error: { code: 'PGRST202', message: `no function ${name}` } });
+      }
       return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
     },
     from: (table: string) => {
@@ -122,6 +127,7 @@ const called = (name: string) => mockRpcCalls.some((call) => call.name === name)
 beforeEach(() => {
   mockTables = {};
   mockRpcResults = {};
+  mockRpcErrors = new Set();
   mockRpcCalls.length = 0;
   resetRecommendationSession();
   resetImpressions();
@@ -173,6 +179,29 @@ describe('Engine V2 on the For You wall', () => {
     expect(called('social_candidates')).toBe(false);
     expect(result.current.data?.socialIds).toEqual([]);
     expect(result.current.data?.scored.some((item) => item.mediaItemId === 'followed-1')).toBe(false);
+  });
+
+  it('falls back to V1 when the engine read fails, as on a server that predates it', async () => {
+    setup('v2_metadata');
+    mockRpcErrors.add('recommendation_engine');
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+
+    expect(result.current.data?.engine).toBe('v1');
+    expect(called('catalogue_candidates')).toBe(false);
+    expect(called('social_candidates')).toBe(true);
+  });
+
+  it('still draws a V2 wall when the catalogue read fails, without the fill', async () => {
+    setup('v2_metadata');
+    mockRpcErrors.add('catalogue_candidates');
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_metadata'));
+
+    expect(called('catalogue_candidates')).toBe(true);
+    expect(result.current.data?.catalogueIds).toEqual([]);
+    expect(result.current.data?.items.length).toBeGreaterThan(0);
+    expect(result.current.isError).toBe(false);
   });
 
   it('adds nothing for a language the lists already cover', async () => {
@@ -227,5 +256,33 @@ describe('Engine V2 on the For You wall', () => {
     expect(strong.explanation.collaborative).toEqual({ support: 0.45, endorsers: 5 });
     expect(strong.explanation.total).toBeGreaterThan(weak.explanation.total);
     expect(weak.explanation.total).toBeGreaterThan(plain.explanation.total);
+  });
+
+  it('uses what the neighbours disliked against a pooled title, and never adds a disputed one', async () => {
+    setup('v2_hybrid');
+    mockRpcResults.collaborative_candidates = [
+      { media_item_id: 'cohort-1', support: 0.45, endorsers: 5 },
+      // A trending title the cohort disliked, and one that no other source brought in.
+      { media_item_id: 'en-3', support: -0.3, endorsers: 0 },
+      { media_item_id: 'disliked-elsewhere', support: -0.4, endorsers: 0 },
+    ];
+    mockTables.media_items = [...english, film('cohort-1', 'en', 300), film('disliked-elsewhere', 'en', 300)];
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_hybrid'));
+    const data = result.current.data!;
+
+    expect(data.collaborativeIds).toEqual(['cohort-1']);
+    const byId = new Map(data.scored.map((item) => [item.mediaItemId, item]));
+    expect(byId.has('disliked-elsewhere')).toBe(false);
+    expect(byId.get('en-3')!.explanation.total).toBeLessThan(byId.get('en-4')!.explanation.total);
+  });
+
+  it('still draws a hybrid wall when the collaborative read fails', async () => {
+    setup('v2_hybrid');
+    mockRpcErrors.add('collaborative_candidates');
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_hybrid'));
+    expect(result.current.data?.collaborativeIds).toEqual([]);
+    expect(result.current.data?.items.length).toBeGreaterThan(0);
   });
 });

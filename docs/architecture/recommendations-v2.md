@@ -30,6 +30,12 @@ valence when bucketed but unranked (imports); 0.35 and no valence when only logg
   Neutral is 0.3: no evidence is neither interest nor rejection. Four loved Japanese films
   reach roughly the same affinity as forty English ones of mixed opinion; Not-for-me
   evidence pulls a facet below 0.3, never to 0.
+- **A title's genre term** is its best genre's affinity minus how far its worst genre sits
+  *below* neutral (`max(0, best − (0.3 − worst))`). A loved genre still lifts a title, and a
+  disliked one now lowers it even when the title also carries another genre: a Horror-Thriller
+  scores below a Western for a reader who keeps putting horror in Not for me. Unknown genres
+  cost nothing. (Before the 2026-11-11 independent review only the best genre counted, so
+  negative evidence reached only titles whose every genre was disliked.)
 - **Era:** `0.5 + 0.5 × interest × clamp((mean − readerMean)/0.5, −1, 1)` per decade, films
   and TV separately, each decade lending half its evidence to its neighbours. Watching
   mostly recent titles moves nothing; liking a decade *more than you like things generally*
@@ -40,7 +46,10 @@ valence when bucketed but unranked (imports); 0.35 and no valence when only logg
 `catalogue_candidates(kind, languages[≤5], decades[≤3], per ≤40, seed)` returns, per
 requested language or decade, a seeded draw from the top `3 × per` catalogue titles by
 popularity, excluding what the caller logged (and, on TV, shows with a logged season). It
-answers empty while the caller is on V1.
+answers empty while the caller is on V1. Each window is the first rows of one ordered index
+range: `media_items_catalogue_language (kind, original_language, popularity)` and
+`media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
+not grow with the size of a language or a decade (measured in the scale benchmark).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -48,6 +57,9 @@ decades, in parallel with the anchor work, then `coverageFill` keeps only what b
 facet up to its fair share of the pool: `min(20, max(6, ⌈share × pool⌉))`, share being the
 facet's share of the reader's positive evidence. An English reader with English-full anchor
 lists gets nothing from it, so it is not popularity padding (review of 2026-09-13, M2).
+Only candidates that will survive eligibility count as coverage: titles already in the
+reader's collection and the anchors themselves are dropped by `scoreSlate`, so they neither
+count toward a facet nor are added (independent review, 2026-11-11).
 
 **Known limitation:** the catalogue is `media_items` — what bingd's readers have searched,
 logged or been shown. A language nobody on bingd has touched has nothing to return.
@@ -68,6 +80,26 @@ compatibility, where a followee counts exactly as much as a stranger with the sa
 | `recommendations.v2_engine` | `"v1"` | The engine under rollout. `"v1"` = off. Unknown values are V1. |
 | `recommendations.v2_rollout_percent` | `0` | Deterministic cohort: `md5(user id ‖ ':recommendations.v2')` → 0–99. Raising it only adds accounts. |
 | `recommendations.v2_allowlist` | `[]` | Accounts that get the engine regardless of the percentage (staging, dogfood). |
+| `recommendations.v2_allowlist_engine` | `null` | Optional: the engine the allowlist gets instead of `v2_engine`, so `v2_metadata` can run on a small percentage while `v2_hybrid` is dogfooded on the allowlist. Null or unknown = same as `v2_engine`. |
+
+`v2_engine` is the master switch: while it is `"v1"`, every reader is on V1, allowlisted or
+not, whatever the override says.
+
+**Before `db push` on a large production database.** Supabase applies a migration inside a
+transaction, so its `create index` statements cannot be `concurrently`, and a plain build
+blocks writes to the table for its duration. Build the new indexes by hand first, with the
+same definitions, so the migration's `create index if not exists` statements are no-ops:
+
+```sql
+create index concurrently if not exists media_items_catalogue_language
+  on media_items (kind, original_language, popularity desc nulls last)
+  where kind in ('movie', 'series') and poster_path is not null;
+create index concurrently if not exists media_items_catalogue_decade
+  on media_items (kind, ((extract(year from release_date)::integer / 10) * 10), popularity desc nulls last)
+  where kind in ('movie', 'series') and poster_path is not null;
+```
+
+A2 adds a third, on `rankings` (§2.6). An operator step, run only with founder approval.
 
 **Rollback:** write `"v1"` to `recommendations.v2_engine`. `recommendation_engine()` then
 answers V1 for everybody and `catalogue_candidates` answers empty. Clients pick it up on the
@@ -134,14 +166,21 @@ cohort does. The constants are starting values; A3 sweeps them on synthetic read
 3. **Shortlist** the 200 most frequent co-raters who are public and discoverable.
 4. **Score** those 200 with `_taste_matches` and cache the best 40 with weight > 0 in
    `taste_neighbours`, for 24 hours (`taste_neighbour_refresh` records "computed, nobody
-   qualified" too, so an isolated reader is not recomputed per read).
+   qualified" too, so an isolated reader is not recomputed per read; that empty result is
+   retried after 3 hours rather than 24, so a new reader's first rankings count the same day).
+   `_taste_matches` scores only the shortlisted people's rankings **of titles the reader
+   ranked**, read through the new index; their band sizes are aggregate counts. Scoring each
+   one's whole history first made the refresh grow with how much they had ever ranked
+   (independent review, 2026-11-11).
 
-Worst case per refresh: 40 × 50 = 2,000 index probes, 200 users' rankings scored. Nothing
-runs on a write path and nothing compares a reader with every account. The refresh happens
-inside the first stale read; concurrent stale reads by one reader refresh once (a
-per-reader advisory lock plus a re-check, observed with real sessions in
-`concurrency/races/taste-neighbours.mjs`, mutation-checked), and different readers do not
-contend. Capacity at scale is measured in the benchmark section, not asserted here.
+Worst case per refresh: 40 × 50 = 2,000 index probes, 200 users' band counts, and at most
+200 × (the reader's ranked titles) scored rows. Nothing runs on a write path and nothing
+compares a reader with every account. The refresh happens inside the first stale read;
+concurrent stale reads by one reader refresh once (a per-reader advisory lock plus a
+re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs`), and
+different readers do not contend. Capacity is **measured**, not asserted, on real
+PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark
+([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md), PR #253).
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
 neighbour on a given day if a probe title has thousands of raters. Rotation finds different
@@ -154,9 +193,18 @@ all-pairs work, which §7 rules out.
 
 - `support` = Σ weight × (score − 5)/5 over neighbours who ranked the title, divided by
   Σ weight + 1 (one full-weight neutral opinion as a prior). Neighbours' dislikes count
-  against a title; only positive support is returned.
-- `endorsers` = how many neighbours scored it 7 or more; **at least two**, so no title appears
-  on one person's say-so.
+  against a title.
+- **Endorsed rows** (support > 0) need at least two neighbours who scored it 7 or more
+  (`endorsers`), up to `limit`, strongest first. These are a candidate source.
+- **Disputed rows** (support < 0) need at least two neighbours who put it in Not for me
+  (≤ 3.4), up to `limit / 2`, most disliked first. These are **evidence only**: the client
+  never adds them to the pool, but a title that arrived from another source (an anchor's
+  list, trending) is scored down by them. Added after the 2026-11-11 independent review,
+  which found that the reader's taste neighbours' dislikes never reached a title from any
+  other source.
+- Either way it takes two people, so no single person's ranking is ever why a row exists.
+- Each read scores the neighbours' rankings in the requested category only (a film wall
+  never scores their seasons).
 - Never a person, a neighbour id, one person's score, or a Match. Every neighbour is a public
   account whose rankings the reader could already open, so the aggregate reveals nothing the
   reader could not already see; it only saves them the search.
@@ -166,9 +214,11 @@ all-pairs work, which §7 rules out.
 ### 2.5 Scoring
 
 `ENGINES.v2_hybrid` = `v2_metadata`'s weights × 0.85 (rounded) + `collaborative` 0.15.
-The term is `min(1, support / 0.5)`: full strength at a cohort mean of about 7.5. It is one
-term among six, so it lifts a title but cannot by itself outrank a strong anchor match
-(tested). The ids take the slot `social_candidates` had in V1's source order.
+The term is `clamp(support / 0.5, −1, 1)`: full strength at a cohort mean of about 7.5, and
+the same bound the other way for a disputed title. It is one term among six, so it lifts a
+title but cannot by itself outrank a strong anchor match (tested). Endorsed ids take the
+slot `social_candidates` had in V1's source order; disputed ids are never a source. Only a
+positive term can lead or be named.
 
 Headline: "Loved by people with taste like yours", only when the collaborative term leads,
 at least three neighbours endorsed it, and the reader has five or more rankings. No name, no
@@ -184,6 +234,21 @@ count, no Match.
 | `recommendations.neighbour_limit` | `40` | Neighbours kept (1–100). |
 | `recommendations.neighbour_ttl_hours` | `24` | Cache lifetime (1–336). |
 | `recommendations.neighbour_min_match` | `55` | Zero-weight floor (50–95). |
+| `recommendations.v2_allowlist_engine` | (`null`, A1) | Set to `"v2_hybrid"` to dogfood the hybrid on the allowlist while `v2_engine = "v2_metadata"` runs on the percentage cohort. |
+
+**Before `db push` on a large production database:** build A2's index by hand first, as A1's
+(§1.5): `create index concurrently if not exists rankings_by_media_user on rankings
+(media_item_id, user_id);`. A plain build inside the migration blocks every ranking write
+for its duration (1.4 s per 1.5M rankings in the scale benchmark, roughly linear). Once it exists, the older single-column
+`rankings_by_media (media_item_id)` is redundant — every lookup it serves is a prefix of the
+new one — but it is **not** dropped here: dropping a production index is a change outside the
+engine switch, and it is left as a follow-up once V2's fate is decided.
+
+**Known risk (accepted for an experimental engine):** neighbours are public accounts with
+no age or reputation gate, so two new public accounts that copy a public reader's rankings
+(which anyone can read) could become that reader's neighbours and push a title. Two-person
+minimums and the reliability weight limit how far; a reputation gate is a prerequisite for
+any rollout beyond the allowlist.
 
 **Rollback:** write `"v2_metadata"` (keep A1) or `"v1"` to `recommendations.v2_engine`.
 `collaborative_candidates` then answers empty and never refreshes; the cache is inert and can

@@ -149,6 +149,24 @@ describe('the batch Taste arithmetic', () => {
       assert.equal(mine?.score ?? null, single.score, `same score for ${other}`);
     }
   });
+
+  it('scores a row the same whether or not the category and title filters are used', async () => {
+    const people = [reader, ...(await t.sql(`select user_id from rankings group by user_id limit 6`)).rows.map((r) => r.user_id)];
+    const key = (row) => `${row.user_id}:${row.media_item_id}`;
+    const all = new Map(
+      (await t.sql(`select * from _scored_rankings($1::uuid[])`, [people])).rows.map((row) => [key(row), String(row.score)]),
+    );
+    const movies = (await t.sql(`select * from _scored_rankings($1::uuid[], 'movies')`, [people])).rows;
+    assert.ok(movies.length > 0);
+    for (const row of movies) assert.equal(String(row.score), all.get(key(row)));
+    const items = shared.slice(0, 5);
+    const some = (await t.sql(`select * from _scored_rankings($1::uuid[], null, $2::uuid[])`, [people, items])).rows;
+    assert.ok(some.length > 0);
+    for (const row of some) {
+      assert.ok(items.includes(row.media_item_id));
+      assert.equal(String(row.score), all.get(key(row)), 'band sizes come from the whole category');
+    }
+  });
 });
 
 describe('collaborative_candidates', () => {
@@ -193,6 +211,18 @@ describe('collaborative_candidates', () => {
     const after = (await collaborative(reader)).find((row) => row.media_item_id === extra[3]);
     assert.ok(!after || after.support < before.support, 'four dislikes outweigh two loves');
     assert.equal(lovers.length, 2);
+  });
+
+  it("returns what two neighbours disliked as evidence against it, never on one person's say-so", async () => {
+    await twin('dis_a', { hates: [extra[5]] });
+    await enable();
+    assert.ok(!(await collaborative(reader)).some((row) => row.media_item_id === extra[5]), 'one dislike is not a row');
+    await twin('dis_b', { hates: [extra[5]] });
+    await forceRefresh(reader);
+    const row = (await collaborative(reader)).find((r) => r.media_item_id === extra[5]);
+    assert.ok(row, 'two dislikes are');
+    assert.ok(row.support < 0, 'and the support says which way');
+    assert.equal(row.endorsers, 0);
   });
 
   it('gives a low-compatibility account no weight rather than opposite weight', async () => {
@@ -289,6 +319,44 @@ describe('bounds and caching', () => {
     const { rows: again } = await t.sql(`select refreshed_at from taste_neighbour_refresh where reader_id = $1`, [reader]);
     assert.equal(String(again[0].refreshed_at), String(stamp[0].refreshed_at), 'no refresh inside the TTL');
     await setConfig('recommendations.neighbour_limit', 40);
+  });
+
+  it('retries a pass that found nobody after three hours, not a whole TTL', async () => {
+    const loner = await user('loner');
+    await rank(loner, (await films(6, 'loner')).map((id) => [id, 'loved']));
+    await enable('v2_hybrid', [loner]);
+    await collaborative(loner);
+    const stamp = async () =>
+      String((await t.sql(`select refreshed_at, neighbours from taste_neighbour_refresh where reader_id = $1`, [loner])).rows[0].refreshed_at);
+    const first = await stamp();
+    await t.sql(`update taste_neighbour_refresh set refreshed_at = now() - interval '2 hours' where reader_id = $1`, [loner]);
+    const twoHours = await stamp();
+    await collaborative(loner);
+    assert.equal(await stamp(), twoHours, 'two hours on, an empty result is still fresh');
+    await t.sql(`update taste_neighbour_refresh set refreshed_at = now() - interval '4 hours' where reader_id = $1`, [loner]);
+    await collaborative(loner);
+    assert.notEqual(await stamp(), twoHours, 'four hours on, it is computed again');
+    assert.ok(first);
+  });
+
+  it('runs the allowlist on its own engine while the percentage cohort stays on v2_engine', async () => {
+    await twin('ovr_a', { loves: [extra[1]] });
+    await twin('ovr_b', { loves: [extra[1]] });
+    const bystander = await user('ovr_bystander');
+    await setConfig('recommendations.v2_engine', 'v2_metadata');
+    await setConfig('recommendations.v2_rollout_percent', 100);
+    await setConfig('recommendations.v2_allowlist', [reader]);
+    await setConfig('recommendations.v2_allowlist_engine', 'v2_hybrid');
+    try {
+      await t.actAs(reader);
+      assert.equal((await t.sql(`select recommendation_engine() as e`)).rows[0].e, 'v2_hybrid');
+      await t.actAs(bystander);
+      assert.equal((await t.sql(`select recommendation_engine() as e`)).rows[0].e, 'v2_metadata');
+      assert.ok((await collaborative(reader)).some((row) => row.media_item_id === extra[1]));
+      assert.equal((await collaborative(bystander)).length, 0, 'the cohort is not on the hybrid');
+    } finally {
+      await setConfig('recommendations.v2_allowlist_engine', null);
+    }
   });
 
   it('samples a bounded number of raters per title', async () => {
