@@ -48,24 +48,25 @@ export type RankAction = {
   accessibilityHint?: string;
   /**
    * Unranked: the log sheet, where a band is chosen and a first ranking begins.
-   * Ranked: the ranking-options menu.
+   * Ranked: the ranking-options menu, or on the immersive page the rewatch sheet.
    *
    * **This control never chooses between the three ranking intents itself.** Adjusting a
    * placement and declaring a rewatch are different things with different consequences,
-   * and the menu is where a reader says which they mean (PRD §10, `20260826000500`). A
-   * control that guessed would be the founder's Terrace House bug rebuilt.
+   * and the reader says which they mean — in the menu, or by a label that names exactly
+   * one of them (PRD §10, `20260826000500`). A control that guessed would be the founder's
+   * Terrace House bug rebuilt.
    */
   onPress: () => void;
   /**
-   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Edit
-   * ranking* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
+   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Log
+   * rewatch* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
    * exactly as it always has.
    */
   label?: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   /**
-   * The smaller, secondary form — the immersive page's *Edit ranking*, where the reader's
-   * score is the emphasis and this is only the way back into the sheet (Cinematic
+   * The smaller, secondary form — the immersive page's *Log rewatch*, where the reader's
+   * score is the emphasis and this is the way into another viewing (Cinematic
    * Editorial brief, §2). Visually 36pt with a quieter label; the touch target stays 44pt
    * through its slop. Absent everywhere else, so every other Rank is unchanged.
    */
@@ -399,7 +400,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.semantic.action,
   },
-  /** Edit ranking on the artwork: a quiet outline, so Rank stays the only filled control. */
+  /** Log rewatch on the artwork: a quiet outline, so Rank stays the only filled control. */
   rankedOnArtwork: {
     backgroundColor: paperAlpha(0.08),
     borderWidth: StyleSheet.hairlineWidth * 2,

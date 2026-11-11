@@ -1379,6 +1379,20 @@ export default function TitleScreen() {
     });
   };
 
+  /**
+   * *Log another watch*, from the immersive page's *Log rewatch*. The same sheet and the
+   * same `rewatchPhase` the ⋯ menu's row opens, so the iOS hand-off to the comparisons
+   * (`onDismissed` → `openRecheck`) is unchanged.
+   *
+   * Straight to `open` on both platforms, without the menu's `menuHandoff`: that wait is
+   * for the menu's own dismissal, and a button on the page is not leaving a presented
+   * sheet, so there is nothing to serialise against.
+   */
+  const openRewatch = () => {
+    setActionError(null);
+    setRewatchPhase('open');
+  };
+
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
@@ -1897,26 +1911,33 @@ export default function TitleScreen() {
   );
   /**
    * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
-   * Rank exactly as it was; a ranked one shows the smaller *Edit ranking*, which opens the
-   * rating sheet (*Update your rating*) — its score is the emphasis, in the score row.
+   * Rank exactly as it was; a ranked one shows the smaller *Log rewatch* (founder,
+   * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
+   * the score row. *Update your rating*, the same-watch correction this button used to
+   * open, is still the ⋯ menu's first Ranking row.
+   *
+   * **No second, prominent Edit ranking beside it** (founder decision, 2026-11-11). Log
+   * rewatch stays the primary action; the ranking correction is reached from ⋯ here and
+   * from *Edit ranking* in an expanded watch on Watch History (the Watch history row
+   * below opens it). Both open the same correction flow, which records no viewing.
    */
   const immersiveActions = cloneElement(actions, {
     rank: rankable
       ? {
           ranked: Boolean(data.ranked),
-          label: data.ranked ? 'Edit ranking' : undefined,
-          icon: data.ranked ? 'create-outline' : undefined,
+          label: data.ranked ? 'Log rewatch' : undefined,
+          icon: data.ranked ? 'repeat-outline' : undefined,
           compact: Boolean(data.ranked),
-          // The card is the full width less 12pt a side: Rank and Edit ranking are never
+          // The card is the full width less 12pt a side: Rank and Log rewatch are never
           // truncated there, at any text size; the icons wrap under them instead.
           unclamped: true,
           accessibilityLabel: data.ranked
-            ? `Edit your ranking of ${displayTitle ?? title.title}`
+            ? `Log a rewatch of ${displayTitle ?? title.title}`
             : `Rank ${displayTitle ?? title.title}`,
           accessibilityHint: data.ranked
-            ? 'Opens the rating sheet, where you can rank it again'
+            ? 'Opens a sheet to record another viewing'
             : 'Opens the rating sheet',
-          onPress: () => (data.ranked ? openLog() : rank()),
+          onPress: () => (data.ranked ? openRewatch() : rank()),
         }
       : null,
   });
