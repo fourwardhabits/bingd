@@ -4427,31 +4427,46 @@ describe('the immersive title page (experiment)', () => {
         ).toEqual(
           ['title-action-list', 'title-action-ranked', 'title-action-recommend', 'title-action-save'].sort(),
         );
-        const labels = first
-          .getAllByRole('button')
-          .map((node) => node.props.accessibilityLabel as string | undefined)
-          .filter((label): label is string => Boolean(label));
-        expect(labels.length).toBeGreaterThan(3);
+        const count = first.getAllByRole('button').length;
+        expect(count).toBeGreaterThan(3);
         await first.unmount();
 
+        /**
+         * A control's name, the way a screen reader reads it: its label, or the words
+         * inside it — the app's own `Button` names itself by its text and sets no label,
+         * so a label-only list would never press one (independent review).
+         */
+        const nameOf = (node: ReturnType<typeof first.getByTestId>) =>
+          (node.props.accessibilityLabel as string | undefined) ??
+          within(node)
+            .queryAllByText(/\S/)
+            .map((text) => String(text.props.children))
+            .join(' ');
         // Back only leaves the page (and this file's router stand-in has no `back`).
         // *Write a review* (Reviews) is the one existing door into the same log sheet: it
         // opens on the review composer, for the reader's note, and is on main unchanged —
         // a writing control, not a ranking one. Anything else that opens the sheet fails.
         const allowed = new Set(['Back', 'Write a review']);
-        for (const label of [...new Set(labels)].filter((l) => !allowed.has(l))) {
+
+        // Every button, by position, each on a fresh page.
+        for (let index = 0; index < count; index += 1) {
           mockRpc.mockClear();
           ranked();
           const view = await open();
           await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
-          const [button] = view.getAllByLabelText(label);
-          await fireEvent.press(button!);
-          // The correction's band chooser never opens, and nothing is re-ranked.
-          expect({ label, chooser: view.queryAllByLabelText('How was it?').length }).toEqual({
-            label,
-            chooser: 0,
-          });
-          expect({ label, writes: correctionWrites().length }).toEqual({ label, writes: 0 });
+          const buttons = view.getAllByRole('button');
+          // The same page each time, so the same button is at the same position.
+          expect(buttons).toHaveLength(count);
+          const name = nameOf(buttons[index]!);
+          if (!allowed.has(name)) {
+            await fireEvent.press(buttons[index]!);
+            // The correction's band chooser never opens, and nothing is re-ranked.
+            expect({ name, chooser: view.queryAllByLabelText('How was it?').length }).toEqual({
+              name,
+              chooser: 0,
+            });
+            expect({ name, writes: correctionWrites().length }).toEqual({ name, writes: 0 });
+          }
           await view.unmount();
         }
       });
