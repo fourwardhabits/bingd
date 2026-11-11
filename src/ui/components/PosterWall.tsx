@@ -27,6 +27,14 @@ export type PosterTile = {
   /** Chipped onto the corner. Only for a title this user has ranked. */
   score?: number | null;
   bucket?: Bucket | null;
+  /**
+   * **A season's number, for its pill** (Candidate A, founder brief §4, 2026-11-14). Set
+   * only by the Collection and profile walls, where a show and its seasons share one grid:
+   * a season's chip reads `S1 9.8` on Parchment with a Maroon border and text, so it can
+   * never be read as the show's own score, which keeps the filled Maroon number. `0` is
+   * Specials, `SP 9.8`. Absent everywhere else, so every other wall is unchanged.
+   */
+  season?: number | null;
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
 };
@@ -344,15 +352,23 @@ function Tile({
             // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
             // wall the old bucket tint was at its worst: nine tiles, three colours,
             // none of them the poster's, all of them restating a number already
-            // printed on top of them.
-            style={styles.chip}
+            // printed on top of them. A season's pill inverts it: Parchment, Maroon.
+            style={[styles.chip, tile.season != null && styles.seasonChip]}
+            testID={tile.season != null ? 'poster-season-pill' : 'poster-score-pill'}
             // Already in the label above, and a chip that announces itself
             // separately makes every tile two stops instead of one.
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            <Text variant="caption" tone="inverse" allowFontScaling={false}>
-              {formatScore(score)}
+            <Text
+              variant="caption"
+              tone={tile.season != null ? 'action' : 'inverse'}
+              allowFontScaling={false}
+              numberOfLines={1}
+            >
+              {tile.season != null
+                ? `${seasonPillLabel(tile.season)} ${formatScore(score)}`
+                : formatScore(score)}
             </Text>
           </View>
         ) : null}
@@ -434,6 +450,12 @@ function Tile({
   );
 }
 
+/**
+ * A season's compact name on its pill: `S1`, `S10`, and `SP` for Specials (TMDB's season
+ * 0), which a bare `S0` would leave a reader to decode.
+ */
+export const seasonPillLabel = (season: number) => (season === 0 ? 'SP' : `S${season}`);
+
 const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
   if (tile.year) parts.push(String(tile.year));
@@ -501,6 +523,14 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     alignItems: 'center',
     backgroundColor: theme.semantic.action,
+  },
+  /** A season's pill: Parchment ground, Maroon border and text (existing tokens only). */
+  seasonChip: {
+    backgroundColor: theme.semantic.scoreInk,
+    borderWidth: 1,
+    borderColor: theme.semantic.score,
+    // The border is inside the box, so the padding gives it back to keep the height.
+    paddingVertical: 1,
   },
   pressed: { opacity: 0.7 },
 });

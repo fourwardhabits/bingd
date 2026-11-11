@@ -249,6 +249,7 @@ export default function ProfileScreen() {
     void queryClient.refetchQueries({ queryKey: queryKeys.goals(profile.id, currentYear()) });
     void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'movies') });
     void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'tv_seasons') });
+    void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'tv_shows') });
   };
 
   return (

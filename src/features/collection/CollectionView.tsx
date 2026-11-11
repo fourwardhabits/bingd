@@ -333,6 +333,8 @@ export function CollectionView({
             // numbers, which is what keeps it from looking like a scoreboard.
             score: item.score,
             bucket: item.bucket,
+            // A ranked season's pill names its season (Candidate A): `S4 9.1`.
+            season: item.kind === 'season' && item.score != null ? (item.seasonNumber ?? null) : null,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
           // The wall's top space follows the header now, rather than preceding it.
