@@ -49,8 +49,8 @@ popularity, excluding what the caller logged (and, on TV, shows with a logged se
 answers empty while the caller is on V1. Each window is the first rows of one ordered index
 range: `media_items_catalogue_language (kind, original_language, popularity)` and
 `media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
-not grow with the size of a language or a decade (measured in A3's scale benchmark, PR #253,
-`recommendations-v2-scale-benchmark.md` once that PR lands).
+not grow with the size of a language or a decade (measured: 3.3 ms p50 over a 302,000-row
+catalogue, [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md)).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -180,8 +180,11 @@ compares a reader with every account. The refresh happens inside the first stale
 concurrent stale reads by one reader refresh once (a per-reader advisory lock plus a
 re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs`), and
 different readers do not contend. Capacity is **measured**, not asserted, on real
-PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark (PR #253, which adds
-`recommendations-v2-scale-benchmark.md`; land it with this PR).
+PostgreSQL with up to 1M synthetic accounts and 16M rankings
+([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md)): a cold
+refresh p50 279 ms / p95 620 ms, a warm read p50 147 ms, about 15 refreshes/s on 4 CPUs with
+ranking writes unaffected. Light readers find fewer neighbours at that scale (median 6 against
+24 at 100k accounts): the price of the rater cap, recorded there.
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
 neighbour on a given day if a probe title has thousands of raters. Rotation finds different
@@ -265,5 +268,5 @@ release is needed.
   concurrent refreshes deduplicate.
 - **Hypothesis:** that taste neighbours' loves are good recommendations for real readers, and
   every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only: the source added
-  pool recall over V2 metadata (+0.024 ± 0.008) and reached 139 of 400 test readers; V2 hybrid
-  is classed experimental.
+  pool recall over V2 metadata (+0.019 ± 0.007 in the 2026-11-11 re-run) and reached 139 of
+  400 test readers; V2 hybrid is classed experimental.

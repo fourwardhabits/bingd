@@ -573,6 +573,24 @@ try {
       sections.push(`### catalogue_candidates, ${tier} reader\n\n${notices.join('\n\n')}`);
       await planned.query(`reset role`);
     }
+    // The catalogue windows themselves, as the superuser: inside the function they finish
+    // under the 5 ms floor and are not logged, and the question is whether the planner
+    // really reads a decade or a language as one ordered index range at this size.
+    await planned.query(`reset role`);
+    await planned.query(`set client_min_messages = 'warning'`);
+    const window = async (label, predicate) => {
+      const { rows } = await planned.query(
+        `explain (analyze, buffers)
+         select mi.id from media_items mi
+          where mi.kind = 'movie' and mi.poster_path is not null and ${predicate}
+            and mi.release_date <= current_date
+          order by mi.popularity desc nulls last
+          limit 60`,
+      );
+      sections.push(`### catalogue window, ${label}\n\n${rows.map((r) => r['QUERY PLAN']).join('\n')}`);
+    };
+    await window('decade 1990', `((extract(year from mi.release_date)::integer / 10) * 10) = 1990`);
+    await window('language ja', `mi.original_language = 'ja' and mi.release_date is not null`);
     await planned.end();
     writeFileSync(join(OUT, 'plans.txt'), `SYNTHETIC DATA. users=${USERS} titles=${TITLES}\n\n${sections.join('\n\n')}\n`);
   }
