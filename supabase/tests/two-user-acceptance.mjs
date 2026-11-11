@@ -796,9 +796,12 @@ try {
       p_recipient_id: b.id,
       p_media_item_id: season.parent_id,
     });
+    // Since 20261114000200 a whole series ranks in its own pool (`tv_shows`), so
+    // `rankable_category('series')` is no longer null and `recommend_title` accepts it, as
+    // the app's Recommend on a show page does. This used to assert the refusal (AD-1).
     check(
-      'a whole series is refused',
-      sentSeries.body?.status === 'refused' && sentSeries.body?.reason === 'not_recommendable',
+      'a whole series can be recommended (20261114000200)',
+      sentSeries.body?.status === 'ok',
       JSON.stringify(sentSeries.body),
     );
   } else {
@@ -1050,9 +1053,15 @@ try {
       );
     }
 
-    // A season is rankable; a whole series is not (AD-1). The negative half is the one
-    // worth having — the catalogue may hold no season at all, which is a skip rather than
-    // a pass, so both are reported honestly.
+    // A season is rankable, and since 20261114000200 so is a whole series, in its own
+    // `tv_shows` pool (it was refused under AD-1 until then). The catalogue may hold no
+    // season at all, which is a skip rather than a pass, so both are reported honestly.
+    //
+    // KNOWN, NOT CHANGED HERE: the two filters below name kinds that do not exist
+    // (`media_kind` is movie | series | season) and the bucket 'liked' is not a
+    // `taste_bucket`, so this block has always skipped. Correcting them would run two
+    // untested rank_start writes against production for the first time; that is its own
+    // change (see #266).
     const seasons = await get(a.token, 'media_items?kind=eq.tv_season&select=id,title&limit=1');
     const season = (seasons.body ?? [])[0];
     if (!season) {
@@ -1079,14 +1088,14 @@ try {
     const series = await get(a.token, 'media_items?kind=eq.tv_series&select=id&limit=1');
     const show = (series.body ?? [])[0];
     if (!show) {
-      skip('but a whole series is refused', 'this project holds no tv_series rows either');
+      skip('and so can a whole series', 'this project holds no tv_series rows either');
     } else {
-      const refused = await rpc(a.token, 'rank_start', {
+      const showStarted = await rpc(a.token, 'rank_start', {
         p_media_item_id: show.id,
         p_bucket: 'liked',
         p_operation_id: uuid(),
       });
-      check('but a whole series is refused', refused.status >= 400, JSON.stringify(refused.body)?.slice(0, 120));
+      check('and so can a whole series', showStarted.status === 200, JSON.stringify(showStarted.body)?.slice(0, 120));
     }
   }
 
