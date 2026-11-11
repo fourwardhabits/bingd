@@ -101,8 +101,16 @@ What the model says, in order of confidence:
    sparse, as it will be in early real data. The scoring term alone moves little at the
    shipped weight; at 0.25–0.35 held-out recall and utility rise slightly while popularity
    rises and language coverage dips. Not acted on (no tuning to synthetic data).
-6. **Ablations:** era term and language anchors each carry their own target metric and little
-   else. Negative evidence still has no measurable effect on disliked-genre share in this
+6. **Ablations: in this world the language gain comes from the scorer, not from candidate
+   generation.** Removing the language anchors changes open languages served by only −0.011,
+   and removing the catalogue fill by −0.002 (pool recall −0.004), against a total gain of
+   +0.155. The synthetic world's similar-title lists already carry plenty of each reader's
+   languages, so there is little for generation to add. **This evaluation therefore does not
+   show the spec's candidate-generation requirement working.** What shows it is narrower: the
+   hook test, where a reader whose only evidence is Japanese gets Japanese titles into the pool
+   and onto the wall only through the catalogue fill. Whether real TMDB lists are as
+   accommodating as the world's is a staging question (`for_you_slate_shown.wall_languages`
+   by engine). The era term moves era share and little else. Negative evidence still has no measurable effect on disliked-genre share in this
    world, even after the review fix that lets a disliked genre lower multi-genre titles: the
    world's disliked genres are rare on the walls under every engine (≈5.5%), so there is
    little for the term to remove. That is a limit of the world, not evidence the term works.

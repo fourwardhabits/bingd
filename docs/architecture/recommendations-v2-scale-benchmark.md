@@ -46,8 +46,9 @@ fingerprint. One run: about 4 minutes at 100k accounts, about 15 at 1M.
 - **What it leaves out.** Follows are not loaded: no V2 function reads them, which is the
   point of V2. `user_media` is loaded for the measured readers only, because every V2 read
   of it is keyed by the caller.
-- **The measured readers.** 28 per tier, all public and active: casual, engaged, power, and
-  non-English-cluster accounts.
+- **The measured readers.** 28 per size tier, all public and active: casual, engaged, power
+  and non-English-cluster accounts (at 1M: 12 casual, 10 engaged, 6 power). Six power readers
+  is a thin sample; their p95 is close to their maximum.
 - **Engine.** Set to `v2_hybrid` at 100% **in the throwaway cluster only**.
 
 ## 3. Results, final code (2026-11-11)
@@ -70,9 +71,14 @@ The 1M tier is the target; the 100k tier is the same workload a tenth the size.
 
 **Concurrency, 1M.** 8 sessions doing cold refreshes for 32 different readers at once took
 2.1 s, which is 14.9 refreshes/s on 4 CPUs (call p50 385 ms, p95 792 ms). Two other sessions
-inserted rankings the whole time: p50 3.9 ms, p95 12 ms, max 25 ms. **A refresh never blocks
-a user-facing write**, because it takes only a per-reader advisory lock and writes only the
-reader's own cache rows.
+inserted rankings the whole time: p50 3.9 ms, p95 12 ms, max 25 ms. No write waited on a
+refresh. That is **by construction** rather than measured: a refresh takes only a per-reader
+advisory lock and writes only the reader's own cache rows, and reads `rankings` without
+locking it. What the writer numbers show is only that nothing blocked. They are bare INSERTs
+with triggers off, on dormant accounts, with no baseline run without refreshes, so they do
+not measure how much CPU contention from refreshes slows a real ranking write (writer p50 was
+1.2 ms at 100k and 3.9 ms at 1M under that contention). The concurrent figure is one 2.1 s
+burst of 32 calls.
 
 **A2's index on `rankings`, 1M.**
 
@@ -112,7 +118,8 @@ What each fix bought:
 ## 4. Plans (EXPLAIN ANALYZE, from `auto_explain` inside the functions)
 
 Full output is written to `plans.txt` by `--plans`. The excerpts here are from the final-code
-100k run; the 1M run's plans have the same shapes.
+100k run. The 1M run's refresh plans have the same shapes (including the hashed semi-join);
+the catalogue-window EXPLAINs were added after the 1M run, so they exist at 100k only.
 
 **The catalogue windows: one ordered index range each, at default planner settings.**
 
@@ -166,17 +173,28 @@ What is left in that statement:
     power reader is the worst case: about 0.5–0.7 s.
   - It happens at most once per reader per 24 h (every 3 h for a reader with no
     neighbours).
-- **Budget.** Assume 1M accounts with 10% opening For You on a given day.
-  - That is about 100,000 refreshes a day: 1.2/s on average, and perhaps 6/s at a 5× peak.
-  - This machine sustains about 15/s on 4 CPUs.
-  - Each warm read is about 150 ms of database time, and a For You fetch makes up to two
-    (films and TV).
-- **The warm read is the next thing to cache, if anything is.**
-  - It rescores up to 40 neighbours' rankings in one category on every call, because only
-    the neighbour list is cached.
-  - If production telemetry shows For You fetches dominating database time, cache the
-    aggregated rows per reader with the same TTL. It is an additive table and needs no
-    redesign.
+- **Budget, both halves.** Assume 1M accounts, 10% opening For You on a given day, about
+  three wall fetches each (the client caches a slate for 30 minutes), and two reads per fetch
+  (films and TV).
+
+  | Database time per day (v2_hybrid for everybody) | | |
+  |---|---|---|
+  | Refreshes | 100,000 × ~0.3 s | ≈ 30,000 s |
+  | Warm reads | 600,000 × ~0.15 s | ≈ 90,000 s |
+  | Total | | ≈ 120,000 s ≈ 1.4 CPUs on average, ~7 at a 5× peak |
+
+  **Warm reads are about three quarters of it.** They rescore up to 40 neighbours' rankings
+  on every call, because only the neighbour list is cached.
+- **So the warm read needs a cache before `v2_hybrid` goes beyond the allowlist.**
+  - Cache the aggregated rows per reader, with the neighbour list's TTL. It is an additive
+    table and needs no redesign.
+  - That reduces the budget to roughly the refresh half.
+  - For the allowlist and dogfood stage the hybrid is classed for, the cost is negligible.
+  - `v2_metadata`, the rollout candidate, never calls `collaborative_candidates`: its server
+    cost is the catalogue read (≈ 3–8 ms).
+- **Cache caveat.** Every timing follows the load on a machine whose 16 GB holds the 4.4 GB
+  rankings table, so the shortlist's rankings are in memory. With a working set larger than
+  RAM, refreshes read from disk and get slower; this benchmark does not show by how much.
 - **Neighbour yield falls with population for light readers.**
   - At 1M a casual reader's median was 6 neighbours, against 24 at 100k.
   - Sampling 50 raters of a title with 250,000 raters finds fewer people who share the
@@ -184,19 +202,23 @@ What is left in that statement:
   - Engaged and power readers still fill all 40.
   - This is the price of the rater cap (§7 rules out exact top-k), and it lowers the hybrid's
     reach for exactly the readers with least evidence. The levers are a larger
-    `neighbour_raters_per_title`, measured here at a linear cost, or probing less popular
-    titles first, which the probe already prefers.
+    `neighbour_raters_per_title` (not measured here; the sampling step's cost should grow
+    roughly linearly with it), or probing less popular titles first, which the probe already
+    prefers.
 - **Index builds** scale linearly: 1.2–1.4 s per 1.5M rankings, 12.7 s per 16M. Build
   `concurrently` by hand on a large table.
-- **`people_taste_matches` does not scale, and it is not V2's.**
+- **`people_taste_matches` fails the 1M target. It is not V2's code, but it is a §7 blocker
+  for the People screen.**
   - The People-screen RPC (`20260826000500`, unchanged here) scans every ranking that shares
     any of the caller's titles before limiting.
   - At 1M accounts it takes 2.9 s for a casual reader and 26–31 s for a power reader. That
     is beyond a typical API statement timeout (Supabase's default for `authenticated` is
     8 s).
-  - The gap analysis named this as a risk. It is now a measured boundary, and a follow-up
-    outside V2: its candidate set should come from the same bounded neighbour retrieval
-    `_refresh_taste_neighbours` uses.
+  - Its p50 over all 1M readers was 8.8 s, so most engaged and power readers would hit the
+    timeout today at that scale. At 100k accounts it is 0.6 s p50 and 2.9 s p95.
+  - The gap analysis named this as a risk. It is now a measured failure at the target scale,
+    raised to the founder. The fix is outside these PRs: its candidate set should come from
+    the same bounded neighbour retrieval `_refresh_taste_neighbours` uses.
 
 ## 6. Limits
 

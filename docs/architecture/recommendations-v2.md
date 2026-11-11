@@ -182,8 +182,10 @@ re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs
 different readers do not contend. Capacity is **measured**, not asserted, on real
 PostgreSQL with up to 1M synthetic accounts and 16M rankings
 ([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md)): a cold
-refresh p50 279 ms / p95 620 ms, a warm read p50 147 ms, about 15 refreshes/s on 4 CPUs with
-ranking writes unaffected. Light readers find fewer neighbours at that scale (median 6 against
+refresh p50 279 ms / p95 620 ms, a warm read p50 147 ms, about 15 refreshes/s on 4 CPUs, and
+no ranking write waiting on a refresh (by construction: a refresh locks only its reader's own
+cache). The warm read is uncached and is most of the hybrid's database time at scale, so it
+needs a per-reader cache before `v2_hybrid` goes beyond the allowlist. Light readers find fewer neighbours at that scale (median 6 against
 24 at 100k accounts): the price of the rater cap, recorded there.
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
