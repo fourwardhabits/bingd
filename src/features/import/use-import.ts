@@ -71,7 +71,7 @@ export type ImportJobStatus = {
   readonly counts: ImportCounts;
   readonly completedAt: string | null;
   /**
-   * Whose import this job is (20261111000300). Absent from a status the client made up
+   * Whose import this job is (20261113000100). Absent from a status the client made up
    * for itself and from a server older than the column; both read as Letterboxd.
    */
   readonly provider?: ImportProvider;
@@ -118,7 +118,7 @@ export type ImportCounts = {
    */
   readonly viewings?: number;
   /**
-   * The IMDb-only buckets (20261111000300). A Letterboxd job never has them.
+   * The IMDb-only buckets (20261113000100). A Letterboxd job never has them.
    *
    *   duplicate            two Consts that resolved to one title; counted once
    *   unsupported          no collection destination (an episode, a game, a whole show)
@@ -452,7 +452,7 @@ export function useImport(
   options?: {
     readonly countOpenOnRequest?: boolean;
     /**
-     * Whose file `pick` reads and `start` sends (20261111000300). Letterboxd when absent,
+     * Whose file `pick` reads and `start` sends (20261113000100). Letterboxd when absent,
      * which is every caller that predates the choice. Only the reader and `import_create`
      * differ; the job, the poll and the summary are the same machine.
      */

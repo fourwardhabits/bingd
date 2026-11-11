@@ -94,7 +94,7 @@ export type PushJob = {
    */
   import_job_id?: string | null;
   /**
-   * The notification's payload, for every import push since 20261111000300 (before it,
+   * The notification's payload, for every import push since 20261113000100 (before it,
    * only the completion's). `provider` names whose import it was; absent is Letterboxd.
    */
   import_counts?: { watched?: number; watchlist?: number; provider?: string } | null;

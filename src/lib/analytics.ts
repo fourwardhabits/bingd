@@ -1188,7 +1188,7 @@ export type ImportSelectOutcome =
    */
   | 'too_many_films'
   /**
-   * The IMDb reader's refusals (20261111000300): a ZIP picked on the IMDb screen, a CSV that
+   * The IMDb reader's refusals (20261113000100): a ZIP picked on the IMDb screen, a CSV that
    * is not an IMDb ratings export, an IMDb list or watchlist export, and a ratings export
    * holding only types bingd has no destination for (episodes, games).
    */

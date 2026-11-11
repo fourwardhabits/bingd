@@ -261,7 +261,7 @@ export type Notification = {
    */
   mentionInReply: boolean;
   /**
-   * Import lifecycle rows only (20261111000300): whose import it was, from the payload.
+   * Import lifecycle rows only (20261113000100): whose import it was, from the payload.
    * Null on every other kind and on a row written before the payload carried it, which
    * reads as Letterboxd, the only importer there was.
    */
@@ -444,7 +444,7 @@ export function useNotifications(viewerId: string) {
             // `season_premiere` (20261031000100).
             available_on?: string;
             season_number?: number | null;
-            // Import lifecycle rows (20261111000300).
+            // Import lifecycle rows (20261113000100).
             provider?: string;
           } | null;
           // 20261028000100, `watchlist_social` only. Optional for the rollout reason above.

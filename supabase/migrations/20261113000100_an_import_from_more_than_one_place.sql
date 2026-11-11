@@ -18,8 +18,13 @@
 --     switch is _import_imdb_destination_supported(); see the design record's escalation.
 --
 -- Every function below that already existed is copied verbatim from the migration that
--- last defined it and changed only where a 20261111000300 comment says so (the generator
--- asserts each edit lands exactly once).
+-- last defined it and changed only where a 20261113000100 comment says so (the generator
+-- asserts each edit lands exactly once). claim_push_batch is #254's two-argument function
+-- (20261101000100): this branch is built on #254, and the import's one change to it is
+-- applied to that body rather than to main's one-argument one.
+--
+-- Version 20261113000100 sorts after every #254 migration (20261028000100 … 20261112000100).
+-- It was 20261111000300 on #256, before it was rebuilt on #254.
 
 -- ===========================================================================
 -- 1. Schema, additive only
@@ -30,7 +35,7 @@ alter table import_jobs
 alter table import_jobs
   add constraint import_jobs_known_provider check (provider in ('letterboxd', 'imdb'));
 comment on column import_jobs.provider is
-  'Whose export this job is. Decides which projection import_stage applies and which matcher and applier run. Every job before 20261111000300 is letterboxd, which is also the default an older client gets from import_create().';
+  'Whose export this job is. Decides which projection import_stage applies and which matcher and applier run. Every job before 20261113000100 is letterboxd, which is also the default an older client gets from import_create().';
 
 alter table media_items add column if not exists imdb_id text;
 alter table media_items
@@ -58,7 +63,7 @@ comment on column imported_titles.imdb_rating is
 comment on column imported_titles.imdb_id is
   'The IMDb Const the person''s own export carried for this title.';
 comment on column imported_titles.providers is
-  'Which imports have contributed this row, in the order they first did. Rows before 20261111000300 are all letterboxd, which the default backfills.';
+  'Which imports have contributed this row, in the order they first did. Rows before 20261113000100 are all letterboxd, which the default backfills.';
 
 -- Two terminal states an IMDb file needs and a Letterboxd one never produces.
 --   unsupported  bingd has no collection destination for it (an episode, a whole show)
@@ -218,7 +223,7 @@ begin
 end;
 $$;
 comment on function import_create(text) is
-  'Opens (or hands back) the caller''s one live import job for p_provider, letterboxd by default so a client that predates 20261111000300 is unchanged. A running job of either provider is handed back; a half-staged job of the other provider is cleared rather than reused.';
+  'Opens (or hands back) the caller''s one live import job for p_provider, letterboxd by default so a client that predates 20261113000100 is unchanged. A running job of either provider is handed back; a half-staged job of the other provider is cleared rather than reused.';
 revoke execute on function import_create(text) from public, anon;
 grant execute on function import_create(text) to authenticated;
 
@@ -305,7 +310,7 @@ begin
             hint = 'Bingd imports libraries up to about ten thousand films. An export larger than that is beyond what this is built for.';
   end if;
 
-  -- 20261111000300: which projection is the job's provider's. A row is read only through
+  -- 20261113000100: which projection is the job's provider's. A row is read only through
   -- its own provider's field list, so a Letterboxd field sent to an IMDb job (or the
   -- reverse) is discarded exactly as an unknown field always was.
   if v_provider = 'imdb' then
@@ -420,7 +425,7 @@ as $$
    where j.id = p_job_id;
 $$;
 comment on function import_status(uuid) is
-  'The caller''s own job, under RLS. provider since 20261111000300, as a trailing column so a client reading the first four by name is unchanged.';
+  'The caller''s own job, under RLS. provider since 20261113000100, as a trailing column so a client reading the first four by name is unchanged.';
 grant execute on function import_status(uuid) to authenticated;
 
 -- ===========================================================================
@@ -529,7 +534,7 @@ declare
 begin
   select user_id into v_user from import_jobs where id = p_job_id;
 
-  -- 20261111000300. An IMDb job is matched by its own rules (identifier first); nothing
+  -- 20261113000100. An IMDb job is matched by its own rules (identifier first); nothing
   -- below this line ever sees one of its rows.
   if (select provider from import_jobs where id = p_job_id) = 'imdb' then
     return _import_match_batch_imdb(p_job_id, p_limit);
@@ -712,7 +717,7 @@ drop function if exists _import_provider_claim(integer);
 create function _import_provider_claim(p_limit integer default 50)
 returns table (
   row_id uuid, name text, year integer,
-  -- 20261111000300. Trailing, so an Edge Function that predates them reads exactly the
+  -- 20261113000100. Trailing, so an Edge Function that predates them reads exactly the
   -- three columns it always did. provider is the job's ('letterboxd' or 'imdb'); the
   -- other three are null on a Letterboxd row.
   provider text, imdb_id text, title_type text, original_title text
@@ -822,7 +827,7 @@ begin
   if v_job is null then return; end if;
 
   -- ---------------------------------------------------------------------------
-  -- 20261111000300. An IMDb row. The Edge Function's answer is checked again here rather
+  -- 20261113000100. An IMDb row. The Edge Function's answer is checked again here rather
   -- than trusted: the destination type must be what the IMDb type implies (IMDb's type
   -- is matching evidence, never a reclassification), and the title and year must agree.
   -- A disagreement settles the row unmatched: asking again would get the same answer.
@@ -1048,7 +1053,7 @@ begin
   select user_id into v_user from import_jobs where id = p_job_id;
   if v_user is null then return 0; end if;
 
-  -- 20261111000300. An IMDb job has no diary, no watchlist and no star, and writes its own
+  -- 20261113000100. An IMDb job has no diary, no watchlist and no star, and writes its own
   -- provenance; it is applied by its own function and never reaches the body below.
   if (select provider from import_jobs where id = p_job_id) = 'imdb' then
     return _import_apply_batch_imdb(p_job_id, p_limit);
@@ -1164,7 +1169,7 @@ begin
               source_name      = excluded.source_name,
               source_year      = excluded.source_year,
               rating           = coalesce(excluded.rating, imported_titles.rating),
-              -- 20261111000300: a title IMDb brought first keeps that, and gains Letterboxd.
+              -- 20261113000100: a title IMDb brought first keeps that, and gains Letterboxd.
               providers        = case when 'letterboxd' = any(imported_titles.providers)
                                       then imported_titles.providers
                                       else imported_titles.providers || 'letterboxd'::text end,
@@ -1378,7 +1383,7 @@ begin
                 and r.media_item_id is not null)
   ));
 
-  -- 20261111000300. The buckets only an IMDb file can produce. Added only to an IMDb
+  -- 20261113000100. The buckets only an IMDb file can produce. Added only to an IMDb
   -- job's counts, so a Letterboxd summary is byte-for-byte what it was.
   --
   --   duplicate            a second Const that resolved to a title this job already placed
@@ -1413,7 +1418,7 @@ begin
      and (raw ?| array['filmUri', 'rating', 'bucket', 'watchedOn', 'watches',
                          'imdbId', 'imdbRating', 'titleType', 'originalTitle']);
 
-  -- 20261111000300. An IMDb row's correlation is its tt id. The rows still here are the
+  -- 20261113000100. An IMDb row's correlation is its tt id. The rows still here are the
   -- unresolved ones, reduced to name and year above; the id goes with the rest, so what
   -- is kept is what a Letterboxd row keeps (independent review, 2026-11-11).
   if v_provider = 'imdb' then
@@ -1459,7 +1464,7 @@ begin
      and raw ?| array['filmUri', 'rating', 'bucket', 'watchedOn', 'watches',
                          'imdbId', 'imdbRating', 'titleType', 'originalTitle'];
 
-  -- 20261111000300: an IMDb row's correlation is its tt id, and goes with the rest.
+  -- 20261113000100: an IMDb row's correlation is its tt id, and goes with the rest.
   if new.provider = 'imdb' then
     update import_rows
        set correlation = 'redacted:' || id::text
@@ -1514,7 +1519,11 @@ begin
 end;
 $$;
 
-create or replace function claim_push_batch(p_limit integer default 20)
+-- 20261113000100. #254's claim_push_batch(integer, timestamptz), with the import's one edit.
+-- `create or replace` keeps its ACL; the grants are restated so the file says what it
+-- means, and a one-argument form must never come back (two overloads make push-sender's
+-- rpc('claim_push_batch', { p_limit }) ambiguous, and every push stops).
+create or replace function claim_push_batch(p_limit integer default 20, p_now timestamptz default now())
 returns jsonb
 language plpgsql
 security definer
@@ -1524,6 +1533,10 @@ declare
   v_claimed uuid[];
   v_jobs    jsonb;
   v_dead    uuid[];
+  v_pro_dead uuid[];
+  v_sent    uuid[];
+  v_mine    uuid[];
+  v_busy    uuid[];
 begin
   delete from push_outbox o
    where (o.failures >= 3 or o.attempts >= 6)
@@ -1557,6 +1570,53 @@ begin
     return jsonb_build_array();
   end if;
 
+  -- 20261028000100. LOCK FIRST, THEN JUDGE, AND NEVER WAIT (Codex final reviews, MAJOR).
+  --
+  -- Every proactive candidate behind this batch is locked before anything about it is
+  -- checked, and stays locked until it is marked sent at the end of this transaction, so
+  -- nothing (a mute, a social writer) can change it between the checks and the send.
+  --
+  -- SKIP LOCKED, so the claim never waits on a candidate row. A candidate another
+  -- transaction owns at this moment (a mute suppressing it, a friend joining its cluster)
+  -- is not judged, not sent and not charged: its job is put back in the queue exactly as
+  -- it was before this claim (pending, no lease, the attempt given back), and the next
+  -- drain judges it afresh with every check, dropping it if it was muted, suppressed or
+  -- expired meanwhile. A claim that waits could close a lock cycle with a writer that
+  -- holds rows of several readers; one that skips cannot be in any cycle. Optional
+  -- delivery prefers late or missed over blocked, deadlocked or duplicated.
+  --
+  -- THIS DEPENDS ON claim_push_batch STAYING VOLATILE (the default; do not mark it stable
+  -- or immutable). Under READ COMMITTED a volatile function takes a fresh snapshot for
+  -- each statement, so the checks below read the very row version this statement locked,
+  -- including a change committed an instant before. A stable function shares one snapshot
+  -- across its whole body and could judge an older version than the one it holds.
+  select coalesce(array_agg(s.notification_id), '{}'::uuid[]) into v_mine
+    from (
+      select pc.notification_id
+        from proactive_candidates pc
+       where pc.notification_id = any (v_claimed)
+       order by pc.id
+         for update skip locked
+    ) s;
+
+  select coalesce(array_agg(pc.notification_id), '{}'::uuid[]) into v_busy
+    from proactive_candidates pc
+   where pc.notification_id = any (v_claimed)
+     and not (pc.notification_id = any (v_mine));
+
+  if array_length(v_busy, 1) is not null then
+    -- Back to a clean, claimable state, as if this claim had never taken it.
+    update push_outbox o
+       set state      = 'pending',
+           claimed_at = null,
+           attempts   = greatest(o.attempts - 1, 0)
+     where o.notification_id = any (v_busy);
+    v_claimed := array(select unnest(v_claimed) except select unnest(v_busy));
+    if array_length(v_claimed, 1) is null then
+      return jsonb_build_array();
+    end if;
+  end if;
+
   select coalesce(array_agg(n.id), '{}'::uuid[]) into v_dead
     from notifications n
    where n.id = any (v_claimed)
@@ -1567,6 +1627,32 @@ begin
           where d.user_id = n.recipient_id and d.revoked_at is null
        )
      );
+
+  -- 20261028000100 (a). The proactive jobs that must not go, and the candidate told why.
+  -- At most once: a job whose candidate is already `sent` (an expired lease, a retry) is
+  -- dropped and its outbox row deleted below; the candidate stays `sent`. Reactive jobs
+  -- are not in this set and keep their at-least-once retries unchanged.
+  with pro as (
+    select pc.id, pc.notification_id, pc.state,
+           _proactive_claim_reason(pc.id, p_now) as reason
+      from proactive_candidates pc
+     where pc.notification_id = any (v_claimed)
+  ),
+  settled as (
+    update proactive_candidates pc
+       set state              = case when pro.reason in ('expired', 'outside_window', 'no_timezone')
+                                     then 'expired' else 'suppressed' end,
+           suppression_reason = pro.reason,
+           decided_at         = p_now
+      from pro
+     where pc.id = pro.id and pro.reason is not null and pc.state = 'selected'
+    returning pc.id
+  )
+  select coalesce(array_agg(pro.notification_id) filter (where pro.reason is not null), '{}'::uuid[])
+    into v_pro_dead
+    from pro;
+
+  v_dead := v_dead || v_pro_dead;
 
   select coalesce(
     jsonb_agg(
@@ -1593,6 +1679,10 @@ begin
         'award_tier',       j.award_tier,
         'award_family',     j.award_family,
         'award_tier_label', j.award_tier_label,
+        -- 20261028000100. goal_completed's year, medium and target. Null otherwise.
+        'goal',            j.goal,
+        -- 20261028000100. A proactive job's copy facts, resolved now. Null otherwise.
+        'proactive',       j.proactive,
         'tokens',          j.tokens
       )
       order by j.created_at
@@ -1622,9 +1712,48 @@ begin
            case when n.type = 'award_earned' then n.payload ->> 'tier' end       as award_tier,
            case when n.type = 'award_earned' then n.payload ->> 'award_name' end as award_family,
            case when n.type = 'award_earned' then n.payload ->> 'tier_label' end as award_tier_label,
+           -- goal_completed only (20261028000100).
+           case when n.type = 'goal_completed' then jsonb_build_object(
+             'year',     n.payload -> 'year',
+             'category', n.payload ->> 'category',
+             'target',   n.payload -> 'target'
+           ) end                                   as goal,
+           -- Proactive only (20261028000100). Ids, dates and display names: nothing
+           -- anybody wrote.
+           case when pc.id is not null then jsonb_build_object(
+             'type',        pc.type,
+             'opens_on',    pc.metadata ->> 'opens_on',
+             'local_today', (p_now at time zone coalesce(ac.timezone, 'UTC'))::date,
+             -- The last instant this push may reach a phone (Codex re-review, MAJOR): the
+             -- earlier of the candidate's own expiry and the close of the evening it was
+             -- selected for, in the reader's zone. push-sender sends it to Expo as the
+             -- message's `expiration`, so a phone that is offline at 19:59 is not woken
+             -- by it the next morning, and drops the message itself if it is already past.
+             'deliver_by',  least(
+                              pc.expires_at,
+                              (pc.selected_local_date
+                                 + make_time(_proactive_int('proactive.window_end_hour', 20), 0, 0))
+                                at time zone coalesce(ac.timezone, 'UTC')),
+             'reason',      pc.metadata ->> 'reason',
+             'actor_count', case when pc.type = 'watchlist_social'
+                              then (select count(*) from _proactive_social_actors(pc.id, n.recipient_id)) end,
+             -- 20261031000100: the two STRONGEST visible friends by affinity, then the
+             -- earliest. Names only; the affinity itself never leaves the database.
+             'actor_names', case when pc.type = 'watchlist_social' then (
+                              select jsonb_agg(coalesce(nullif(s.display_name, ''), s.username)
+                                               order by s.rn)
+                                from (select * from _proactive_ranked_social_actors(pc.id, n.recipient_id, p_now)
+                                       order by rn limit 2) s
+                            ) end,
+             -- 20261031000100, season_premiere only: which season, and the verified date.
+             'season_number', case when pc.type = 'season_premiere'
+                                then (pc.metadata ->> 'season_number')::integer end,
+             'available_on',  case when pc.type = 'season_premiere'
+                                then pc.metadata ->> 'available_on' end
+           ) end                                   as proactive,
            -- Comment jobs only, and `mention` is deliberately not one of them.
            -- See the header: a mention push says who and where, never what.
-           -- Only what the recipient could open and read right now (20261024000300).
+           -- Only what the recipient could open and read right now.
            case when n.type = 'comment' then (
              select left(c.body, 180)
                from comments c
@@ -1638,6 +1767,9 @@ begin
                from device_tokens d
               where d.user_id = n.recipient_id
                 and d.revoked_at is null
+                -- 20261028000100 (b). A proactive job goes only to devices whose build can
+                -- route it; a reactive job, as always, to every live device.
+                and (pc.id is null or _proactive_capable_token(d))
            )                                       as tokens
       from notifications n
       join push_outbox o on o.notification_id = n.id
@@ -1663,6 +1795,10 @@ begin
                        end
       left join media_items parent
              on parent.id = m.parent_id
+      left join proactive_candidates pc
+             on pc.notification_id = n.id
+      left join account_context ac
+             on ac.user_id = n.recipient_id
      where n.id = any (v_claimed)
        and not (n.id = any (v_dead))
        -- **Restored 2026-08-30 (20260904000100).** An actorless notification has nobody
@@ -1676,6 +1812,32 @@ begin
        and (p.id is not null or n.actor_id is null)
   ) j;
 
+  -- 20261028000100 (c). Handed to push-sender. Not Expo acceptance, not delivery.
+  with sent as (
+    update proactive_candidates pc
+       set state               = 'sent',
+           sent_at             = now(),
+           actor_count_at_send = (job -> 'proactive' ->> 'actor_count')::integer
+      from jsonb_array_elements(v_jobs) as job
+     where pc.notification_id = (job ->> 'notification_id')::uuid
+       and pc.state = 'selected'
+    returning pc.notification_id
+  )
+  select coalesce(array_agg(notification_id), '{}'::uuid[]) into v_sent from sent;
+
+  -- A proactive job goes out ONLY if its candidate went selected -> sent in this claim.
+  -- Under the lock above that is every proactive job that passed the checks; this is the
+  -- guarantee written down rather than inferred, so no future path can return a proactive
+  -- job whose ledger row does not say it was sent (and so counted against the caps).
+  -- Reactive jobs carry no proactive facts and are untouched.
+  select coalesce(jsonb_agg(job order by ord), jsonb_build_array())
+    into v_jobs
+    from jsonb_array_elements(v_jobs) with ordinality as e(job, ord)
+   where jsonb_typeof(job -> 'proactive') is distinct from 'object'
+      or (job ->> 'notification_id')::uuid = any (v_sent);
+
+  -- Everything claimed and not returned leaves the queue, including a proactive job the
+  -- line above withheld, so it cannot be claimed again and leak later.
   delete from push_outbox o
    where o.notification_id = any (v_claimed)
      and o.notification_id not in (
@@ -1683,5 +1845,16 @@ begin
      );
 
   return v_jobs;
+end;
+$$;
+
+revoke execute on function claim_push_batch(integer, timestamptz) from public, anon, authenticated;
+grant execute on function claim_push_batch(integer, timestamptz) to service_role;
+
+do $$
+begin
+  execute format('comment on function claim_push_batch(integer, timestamptz) is %L',
+    obj_description('claim_push_batch(integer, timestamptz)'::regprocedure, 'pg_proc')
+    || ' Since 20261113000100: import_started and import_failed carry their payload (the provider) as import_completed does.');
 end;
 $$;

@@ -25,7 +25,7 @@ import {
 } from './use-import';
 
 /**
- * **The words that name a provider, per provider** (20261111000300).
+ * **The words that name a provider, per provider** (20261113000100).
  *
  * The Letterboxd column is the copy this screen has always had, verbatim, so the Letterboxd
  * import reads exactly as it did. The IMDb column says the same things about IMDb. Phases
@@ -139,7 +139,7 @@ export function ImportScreen({
   /** Run as the optional onboarding step. See the header. */
   onboarding?: ImportOnboarding;
   /**
-   * Whose file this screen imports (20261111000300). Letterboxd when absent and `chooser`
+   * Whose file this screen imports (20261113000100). Letterboxd when absent and `chooser`
    * is off, which is every caller that predates the choice and draws what it always drew.
    */
   provider?: ImportProvider;
@@ -413,7 +413,7 @@ function Body({
           <Waiting
             title={copy.onItsWay}
             detail="It keeps running in the background, even if you close bingd. We’ll let you know when it’s done."
-            // The Settings row has been "Import from" since 20261111000300.
+            // The Settings row has been "Import from" since 20261113000100.
             note="You can check on it anytime in Settings, under Import from."
             action={<Button label="Continue" onPress={carryOn} />}
           />
@@ -888,7 +888,7 @@ function explain(
 
   switch (failure.reason) {
     // ---------------------------------------------------------------------------
-    // The IMDb reader's refusals (20261111000300). Each names what the person picked and
+    // The IMDb reader's refusals (20261113000100). Each names what the person picked and
     // what to pick instead.
     // ---------------------------------------------------------------------------
     case 'is_zip':

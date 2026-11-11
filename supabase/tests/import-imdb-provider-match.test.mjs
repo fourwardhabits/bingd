@@ -12,7 +12,7 @@ import {
 } from '../functions/letterboxd-import/match.mjs';
 
 /**
- * The IMDb half of the provider tier's decision rule (20261111000300):
+ * The IMDb half of the provider tier's decision rule (20261113000100):
  * `supabase/functions/letterboxd-import/match.mjs`, from `imdbTitleType` down.
  *
  * TMDB answers below are the documented `/find` shape (movie_results, tv_results,
