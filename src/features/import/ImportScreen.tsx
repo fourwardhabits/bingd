@@ -8,14 +8,53 @@ import { unrankedMovies } from '@/lib/routes';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import { HOW_TO_STEPS, HowToExportSheet } from './HowToExportSheet';
+import { HOW_TO_STEPS, HowToExportSheet, IMDB_HOW_TO_STEPS } from './HowToExportSheet';
+import { ProviderChoice } from './ProviderChoice';
+import { ProviderLogo } from './ProviderLogo';
+import { type ImportProvider } from './providers';
 import type { ArchivePreview } from './read-archive';
+import type { ImdbPreview } from './read-imdb';
 import {
+  isImdbPreview,
   useImport,
   type ImportCounts,
   type ImportFailure,
   type ImportPhase,
+  type ImportPreview,
 } from './use-import';
+
+/**
+ * **The words that name a provider, per provider** (20261111000100).
+ *
+ * The Letterboxd column is the copy this screen has always had, verbatim, so the Letterboxd
+ * import reads exactly as it did. The IMDb column says the same things about IMDb. Phases
+ * that describe a job (running, done, failed) take the JOB's provider, so a notification
+ * about an IMDb import opens on IMDb's words whichever screen it lands on.
+ */
+const COPY = {
+  letterboxd: {
+    importing: 'Importing your Letterboxd history',
+    onItsWay: 'Your Letterboxd import is on its way',
+    couldNotFinish: 'We couldn’t finish your Letterboxd import',
+    choose: 'Choose Letterboxd ZIP',
+    empty:
+      'It’s a real Letterboxd export, but it has no films in it. Log something on Letterboxd, export again, and choose the new file.',
+    tooLarge:
+      'It’s much larger than any Letterboxd export, so bingd won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
+  },
+  imdb: {
+    importing: 'Importing your IMDb history',
+    onItsWay: 'Your IMDb import is on its way',
+    couldNotFinish: 'We couldn’t finish your IMDb import',
+    choose: 'Choose IMDb CSV',
+    empty:
+      'It’s a real IMDb ratings export, but there’s nothing rated in it. Rate something on IMDb, export again, and choose the new file.',
+    tooLarge:
+      'It’s much larger than any IMDb ratings export, so bingd won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
+  },
+} as const satisfies Record<ImportProvider, Record<string, string>>;
+
+type Copy = (typeof COPY)[ImportProvider];
 
 /**
  * The importer, as one screen that changes rather than a flow of several.
@@ -90,20 +129,60 @@ export function ImportScreen({
   surface,
   jobId,
   onboarding,
+  provider: fixedProvider,
+  chooser = false,
 }: {
   surface: ImportSurface;
   /** The job a notification named. See `useImport`. */
   jobId?: string | null;
   /** Run as the optional onboarding step. See the header. */
   onboarding?: ImportOnboarding;
+  /**
+   * Whose file this screen imports (20261111000100). Letterboxd when absent and `chooser`
+   * is off, which is every caller that predates the choice and draws what it always drew.
+   */
+  provider?: ImportProvider;
+  /**
+   * Open on the choice of service instead of one service's page: Settings ▸ Import from,
+   * and the onboarding question (founder spec 2026-11-10, §7 and §9). The choice is this
+   * screen's idle state, so the open-job lookup still runs underneath it and an import
+   * already running is shown as running rather than behind a question.
+   */
+  chooser?: boolean;
 }) {
   const router = useRouter();
+  const [chosen, setChosen] = useState<ImportProvider | null>(null);
+  const provider: ImportProvider = fixedProvider ?? chosen ?? 'letterboxd';
   const { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } = useImport(
     surface,
     jobId,
-    { countOpenOnRequest: onboarding !== undefined },
+    { countOpenOnRequest: onboarding !== undefined, provider },
   );
   const [howTo, setHowTo] = useState(false);
+
+  /** Whether the idle page is the choice of service rather than one service's page. */
+  const choosing =
+    chooser && fixedProvider === undefined && chosen === null && state.phase === 'idle';
+
+  /**
+   * The provider a phase's words are about: the job's own once there is a job, else the one
+   * chosen here.
+   */
+  const jobProvider: ImportProvider =
+    (state.phase === 'working' || state.phase === 'done' ? state.status.provider : undefined) ??
+    (state.phase === 'failed' && state.failure.kind === 'already_running'
+      ? state.failure.status?.provider
+      : undefined) ??
+    provider;
+
+  /** Back to the choice, from a service's page. Only where there is a choice to go back to. */
+  const chooseAgain =
+    chooser && fixedProvider === undefined
+      ? () => {
+          reset();
+          setChosen(null);
+        }
+      : undefined;
 
   /**
    * The step's exits, with the outcome made honest at the one place both buttons meet.
@@ -143,12 +222,21 @@ export function ImportScreen({
    * padding under it (design-system.md, "The bottom edge belongs to whatever is at the
    * bottom").
    */
-  const asking = step !== undefined && state.phase === 'idle';
+  const asking = step !== undefined && state.phase === 'idle' && !chooser;
 
   return (
     <Screen includeBottomInset>
       {onboarding?.header}
-      {asking ? (
+      {choosing ? (
+        <ChooseProvider
+          onboarding={step !== undefined}
+          onChoose={(next) => {
+            opened();
+            setChosen(next);
+          }}
+          onSkip={step ? () => step.onLeave('skipped') : undefined}
+        />
+      ) : asking ? (
         <OnboardingQuestion
           onPick={() => {
             opened();
@@ -172,6 +260,9 @@ export function ImportScreen({
         <ScrollView key={state.phase} contentContainerStyle={styles.page}>
           <Body
             state={state}
+            provider={provider}
+            copy={COPY[jobProvider]}
+            onChooseAgain={chooseAgain}
             onPick={() => {
               // A no-op unless this is the onboarding step, where the count waits for a tap.
               opened();
@@ -194,13 +285,21 @@ export function ImportScreen({
       {/* The only sheet this screen has, so there is nothing to serialise it against. On
           the onboarding step the screen is a plain stack route rather than a presented
           one, so this is not a Modal inside anything either. */}
-      <HowToExportSheet visible={howTo} onClose={() => setHowTo(false)} surface={surface} />
+      <HowToExportSheet
+        visible={howTo}
+        onClose={() => setHowTo(false)}
+        surface={surface}
+        provider={provider}
+      />
     </Screen>
   );
 }
 
 function Body({
   state,
+  provider,
+  copy,
+  onChooseAgain,
   onPick,
   onStart,
   onReset,
@@ -212,8 +311,12 @@ function Body({
   onboarding,
 }: {
   state: ImportPhase;
+  provider: ImportProvider;
+  copy: Copy;
+  /** Back to the choice of service. Absent where there is no choice. */
+  onChooseAgain?: () => void;
   onPick: () => void;
-  onStart: (preview: ArchivePreview) => void;
+  onStart: (preview: ImportPreview) => void;
   onReset: () => void;
   onWatch: () => void;
   onHowTo: () => void;
@@ -231,8 +334,23 @@ function Body({
 
   switch (state.phase) {
     case 'idle':
-      // The onboarding step draws its question outside this page (`OnboardingQuestion`).
-      return <Intro onPick={onPick} onHowTo={onHowTo} />;
+      // The onboarding step draws its question outside this page (`OnboardingQuestion`),
+      // unless it opened on the choice of service, which leads here.
+      return provider === 'imdb' ? (
+        <ImdbIntro
+          onPick={onPick}
+          onHowTo={onHowTo}
+          onChooseAgain={onChooseAgain}
+          exit={skip ? <Button label="Not now" kind="secondary" onPress={skip} /> : undefined}
+        />
+      ) : (
+        <Intro
+          onPick={onPick}
+          onHowTo={onHowTo}
+          onChooseAgain={onChooseAgain}
+          exit={skip ? <Button label="Not now" kind="secondary" onPress={skip} /> : undefined}
+        />
+      );
 
     case 'reading':
       return (
@@ -246,6 +364,17 @@ function Body({
       );
 
     case 'previewing':
+      if (isImdbPreview(state.preview)) {
+        const preview = state.preview;
+        return (
+          <ImdbPreviewView
+            preview={preview}
+            onStart={() => onStart(preview)}
+            onReset={onReset}
+            exit={skip ? <Button label="Not now" kind="secondary" onPress={skip} /> : undefined}
+          />
+        );
+      }
       return (
         <Preview
           preview={state.preview}
@@ -258,7 +387,7 @@ function Body({
     case 'uploading':
       return (
         <Waiting
-          title="Importing your Letterboxd history"
+          title={copy.importing}
           detail={
             state.total > 1
               ? // `Math.min`, because after the last page `sent === total` and the screen
@@ -287,16 +416,17 @@ function Body({
         // still arrives as its summary; Continue unmounts it and leaves the job alone.
         return (
           <Waiting
-            title="Your Letterboxd import is on its way"
+            title={copy.onItsWay}
             detail="It keeps running in the background, even if you close bingd. We’ll let you know when it’s done."
-            note="You can check on it anytime in Settings, under Import from Letterboxd."
+            // The Settings row has been "Import from" since 20261111000100.
+            note="You can check on it anytime in Settings, under Import from."
             action={<Button label="Continue" onPress={carryOn} />}
           />
         );
       }
       return (
         <Waiting
-          title="Importing your Letterboxd history"
+          title={copy.importing}
           detail="You can close bingd. Your import will keep running, and we’ll let you know when it’s done. Come back here anytime to check on it."
           note="This may take a few minutes, especially for larger libraries."
           action={<Button label="Leave it running" kind="secondary" onPress={onLeave} />}
@@ -304,6 +434,17 @@ function Body({
       );
 
     case 'done':
+      if ((state.status.provider ?? provider) === 'imdb') {
+        return (
+          <ImdbSummary
+            counts={state.status.counts}
+            onRank={onRank}
+            onDone={onLeave}
+            onReset={onReset}
+            onContinue={carryOn}
+          />
+        );
+      }
       return (
         <Summary
           counts={state.status.counts}
@@ -330,6 +471,7 @@ function Body({
             ) : undefined
           }
           failure={state.failure}
+          copy={copy}
           onRetry={
             state.failure.kind === 'unchecked'
               ? onRecheck
@@ -338,9 +480,7 @@ function Body({
                 : onPick
           }
           retryLabel={
-            state.failure.kind === 'unchecked' || state.preview
-              ? 'Try again'
-              : 'Choose Letterboxd ZIP'
+            state.failure.kind === 'unchecked' || state.preview ? 'Try again' : copy.choose
           }
           onHowTo={onHowTo}
           onReset={onReset}
@@ -358,7 +498,19 @@ function Body({
 // 2026-09-14).
 const STEPS = HOW_TO_STEPS;
 
-function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void }) {
+function Intro({
+  onPick,
+  onHowTo,
+  onChooseAgain,
+  exit,
+}: {
+  onPick: () => void;
+  onHowTo: () => void;
+  /** Back to the choice of service, where this page was reached from one. */
+  onChooseAgain?: () => void;
+  /** The onboarding step's Not now, where this page is a step of onboarding. */
+  exit?: React.ReactNode;
+}) {
   return (
     <View style={styles.block}>
       <Text variant="display">Bring your Letterboxd history</Text>
@@ -385,7 +537,11 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
 
       <View style={styles.actions}>
         <Button label="Choose Letterboxd ZIP" onPress={onPick} />
+        {exit}
         <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
+        {onChooseAgain ? (
+          <Button label="Choose a different service" kind="tertiary" onPress={onChooseAgain} />
+        ) : null}
       </View>
     </View>
   );
@@ -622,6 +778,7 @@ function Summary({
  */
 function Failed({
   failure,
+  copy,
   onRetry,
   retryLabel,
   onHowTo,
@@ -630,6 +787,7 @@ function Failed({
   exit,
 }: {
   failure: ImportFailure;
+  copy: Copy;
   onRetry: () => void;
   retryLabel: string;
   onHowTo: () => void;
@@ -638,7 +796,7 @@ function Failed({
   /** The onboarding step's way on. */
   exit?: React.ReactNode;
 }) {
-  const { title, detail, showHowTo } = explain(failure);
+  const { title, detail, showHowTo } = explain(failure, copy);
 
   const retryable = failure.kind !== 'already_running' && failure.kind !== 'unknown';
   const watchable = failure.kind === 'already_running' && failure.status !== undefined;
@@ -666,7 +824,10 @@ function Failed({
   );
 }
 
-function explain(failure: ImportFailure): {
+function explain(
+  failure: ImportFailure,
+  copy: Copy = COPY.letterboxd,
+): {
   title: string;
   detail: string;
   showHowTo: boolean;
@@ -712,7 +873,7 @@ function explain(failure: ImportFailure): {
     return {
       // The push's own headline (`push-sender/copy.ts`), because the notification sends
       // people here.
-      title: 'We couldn’t finish your Letterboxd import',
+      title: copy.couldNotFinish,
       // **Not "nothing was changed".** A job dead-lettered while applying has already
       // written the films it got to. What is true is that trying again is safe: an
       // imported title, a watchlist row and a diary entry are each written once.
@@ -731,6 +892,38 @@ function explain(failure: ImportFailure): {
   }
 
   switch (failure.reason) {
+    // ---------------------------------------------------------------------------
+    // The IMDb reader's refusals (20261111000100). Each names what the person picked and
+    // what to pick instead.
+    // ---------------------------------------------------------------------------
+    case 'is_zip':
+      return {
+        title: 'That’s a ZIP, not the IMDb file',
+        detail:
+          'IMDb exports one CSV file. If this is your Letterboxd export, go back and choose Letterboxd instead.',
+        showHowTo: true,
+      };
+    case 'not_imdb':
+      return {
+        title: 'That isn’t an IMDb ratings export',
+        detail:
+          'It doesn’t have the columns IMDb’s ratings export has. Export your ratings from IMDb and choose that CSV.',
+        showHowTo: true,
+      };
+    case 'imdb_list':
+      return {
+        title: 'That’s an IMDb list, not your ratings',
+        detail:
+          'bingd brings in what you’ve rated, from your Ratings export. Watchlists and other lists aren’t imported yet.',
+        showHowTo: true,
+      };
+    case 'nothing_supported':
+      return {
+        title: 'There are no movies in that file',
+        detail:
+          'bingd brings in the movies you’ve rated on IMDb. Everything in this file is a TV show, an episode, or another kind of title bingd doesn’t add from IMDb yet.',
+        showHowTo: false,
+      };
     case 'not_a_zip':
       return {
         title: 'That’s not the Letterboxd ZIP',
@@ -748,8 +941,7 @@ function explain(failure: ImportFailure): {
     case 'empty':
       return {
         title: 'There’s nothing in that file yet',
-        detail:
-          'It’s a real Letterboxd export, but it has no films in it. Log something on Letterboxd, export again, and choose the new file.',
+        detail: copy.empty,
         showHowTo: false,
       };
     case 'damaged':
@@ -764,8 +956,7 @@ function explain(failure: ImportFailure): {
     case 'entry_too_large':
       return {
         title: 'That file is too big',
-        detail:
-          'It’s much larger than any Letterboxd export, so bingd won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
+        detail: copy.tooLarge,
         showHowTo: true,
       };
     case 'unexpected':
@@ -786,6 +977,310 @@ function explain(failure: ImportFailure): {
         showHowTo: false,
       };
   }
+}
+
+/**
+ * The choice of service: Settings ▸ Import from, and the onboarding question (founder spec
+ * 2026-11-10, §7 and §9). One list for both (`ProviderChoice`), so the two cannot drift.
+ *
+ * **On onboarding it keeps the step's shape**: the flow's gutters and type, its actions where
+ * the words end, *Not now* secondary and on the first frame. Choosing a service opens that
+ * service's own page, with its instructions, its picker, and *Not now* still on it.
+ */
+function ChooseProvider({
+  onboarding,
+  onChoose,
+  onSkip,
+}: {
+  onboarding: boolean;
+  onChoose: (provider: ImportProvider) => void;
+  onSkip?: () => void;
+}) {
+  if (onboarding) {
+    return (
+      <ScrollView contentContainerStyle={onboardingStyles.body}>
+        <View style={onboardingStyles.intro}>
+          <Text variant="title1">Already tracking movies somewhere else?</Text>
+          <Text variant="body" tone="secondary">
+            Bring your history over from Letterboxd or IMDb. Imported titles start unranked, so
+            your bingd rankings stay yours.
+          </Text>
+        </View>
+        <View style={onboardingStyles.actions}>
+          <ProviderChoice onChoose={onChoose} />
+          {onSkip ? <Button label="Not now" kind="secondary" onPress={onSkip} /> : null}
+          <Text variant="footnote" tone="tertiary" style={styles.centred}>
+            Your file stays on your phone. bingd only reads the information needed for your
+            import.
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <View style={styles.block}>
+        <Text variant="display">Bring your watch history</Text>
+        <Text variant="body" tone="secondary">
+          Already track movies somewhere else? Bring your history into bingd.
+        </Text>
+        <ProviderChoice onChoose={onChoose} />
+        <Text variant="footnote" tone="tertiary">
+          Imported titles start unranked, so your bingd rankings stay yours.
+        </Text>
+      </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * IMDb's page: what comes in, how to get the file, and the picker.
+ *
+ * **The ratings sentence is the founder's rule made legible** (spec §8): an IMDb rating is
+ * brought along as where the title came from, and never becomes a bingd score. Saying so here
+ * is what stops "8/10 on IMDb" being read as "8.0 in bingd".
+ */
+function ImdbIntro({
+  onPick,
+  onHowTo,
+  onChooseAgain,
+  exit,
+}: {
+  onPick: () => void;
+  onHowTo: () => void;
+  onChooseAgain?: () => void;
+  exit?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.block}>
+      <ProviderLogo provider="imdb" size={28} />
+      <Text variant="display">Bring your IMDb history</Text>
+      <Text variant="body" tone="secondary">
+        Import the movies you’ve rated on IMDb. They join your collection unranked, and your
+        IMDb ratings come along as a note, not as bingd scores. Your bingd rankings stay yours.
+      </Text>
+
+      <View style={styles.card}>
+        <Text variant="headline">How to get your file</Text>
+        {IMDB_HOW_TO_STEPS.map((step, index) => (
+          <View key={step} style={styles.step}>
+            <Text variant="subhead" tone="action" style={styles.stepNumber}>
+              {index + 1}
+            </Text>
+            <Text variant="body" tone="secondary" style={styles.stepText}>
+              {step}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.privacy}>
+        <Ionicons
+          name="lock-closed-outline"
+          size={theme.layout.icon.sm}
+          color={theme.text.tertiary}
+        />
+        {/* True of `imdbStagingRows`: the id, title, original title, year, type and the
+            person's own rating. Never Date Rated, never the community rating. */}
+        <Text variant="footnote" tone="tertiary" style={styles.privacyText}>
+          Your CSV stays on your phone. bingd only gets what it needs: titles, years, IMDb ids,
+          and your ratings. The dates you rated things are never sent.
+        </Text>
+      </View>
+
+      <View style={styles.actions}>
+        <Button label="Choose IMDb CSV" onPress={onPick} />
+        {exit}
+        <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
+        {onChooseAgain ? (
+          <Button label="Choose a different service" kind="tertiary" onPress={onChooseAgain} />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** "1 movie", "2 movies". */
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What the IMDb file holds, before anything is sent.
+ *
+ * Movies and TV shows are counted separately because they will not be treated alike: a movie
+ * joins the collection, and a whole show is recognised and reported, because bingd collects
+ * TV by season and an IMDb rating of a show says nothing about which seasons were watched.
+ * The preview says that now, so the summary is not the first place somebody learns it.
+ */
+function ImdbPreviewView({
+  preview,
+  onStart,
+  onReset,
+  exit,
+}: {
+  preview: ImdbPreview;
+  onStart: () => void;
+  onReset: () => void;
+  exit?: React.ReactNode;
+}) {
+  const { counts } = preview.normalised;
+  const unsupported = counts.episodes + counts.otherUnsupported;
+  const unread = counts.malformed + counts.invalidIds;
+
+  return (
+    <View style={styles.block}>
+      <Text variant="display">Ready to import</Text>
+      <Text variant="body" tone="secondary">
+        Here’s what we found in your IMDb file.
+      </Text>
+
+      <View style={styles.card}>
+        <Stat label="Movies" value={counts.movies} />
+        {counts.tvShows > 0 ? <Stat label="TV shows" value={counts.tvShows} /> : null}
+        <Stat label="Ratings" value={counts.rated} />
+        {unsupported > 0 ? <Stat label="Not supported" value={unsupported} /> : null}
+      </View>
+
+      {counts.tvShows > 0 ? (
+        <Note>
+          {`bingd tracks TV by season, so the ${plural(counts.tvShows, 'show', 'shows')} you rated won’t be added to your collection. We’ll list ${counts.tvShows === 1 ? 'it' : 'them'} in your summary.`}
+        </Note>
+      ) : null}
+      {counts.episodes > 0 ? (
+        <Note>
+          {`${plural(counts.episodes, 'TV episode', 'TV episodes')} won’t come in, because bingd doesn’t track single episodes.`}
+        </Note>
+      ) : null}
+      {counts.damaged || unread > 0 ? (
+        <Note warning>
+          {counts.damaged
+            ? 'Part of your file couldn’t be read, so some titles may be missing. Everything we could read is here.'
+            : `${plural(unread, 'row', 'rows')} couldn’t be read, so we skipped ${unread === 1 ? 'it' : 'them'}.`}
+        </Note>
+      ) : null}
+
+      <Text variant="body" tone="secondary">
+        Your IMDb ratings are kept as a note of where each movie came from. They don’t become
+        bingd scores, and imported movies start unranked.
+      </Text>
+
+      <View style={styles.actions}>
+        <Button
+          label={`Import ${plural(counts.movies, 'movie', 'movies')}`}
+          onPress={onStart}
+        />
+        {exit}
+        <Button label="Choose a different file" kind="tertiary" onPress={onReset} />
+      </View>
+    </View>
+  );
+}
+
+function Note({ children, warning = false }: { children: string; warning?: boolean }) {
+  return (
+    <View style={styles.warning}>
+      <Ionicons
+        name={warning ? 'alert-circle-outline' : 'information-circle-outline'}
+        size={theme.layout.icon.sm}
+        color={theme.text.tertiary}
+      />
+      <Text variant="footnote" tone="tertiary" style={styles.warningText}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * How the IMDb import went, in the founder's six outcomes (spec §10): added to collection,
+ * already in collection, previously imported, unmatched, unsupported, import failed.
+ *
+ * Zero rows are left out, as on the Letterboxd summary, except *Added to collection*, the
+ * number the next step is about. Media-type sentences appear only when they explain a count:
+ * a show and an episode are "not supported" for different reasons, and each gets its own.
+ */
+function ImdbSummary({
+  counts,
+  onRank,
+  onDone,
+  onReset,
+  onContinue,
+}: {
+  counts: ImportCounts;
+  onRank: () => void;
+  onDone: () => void;
+  onReset: () => void;
+  onContinue?: () => void;
+}) {
+  const added = counts.watched ?? 0;
+  // Built here and left alone, plus a second IMDb id that named a title already placed.
+  const inCollection = (counts.kept ?? 0) + (counts.duplicate ?? 0);
+  const previously = counts.already ?? 0;
+  const unmatched =
+    (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
+  const unsupported = counts.unsupported ?? 0;
+  const failed = counts.failed ?? 0;
+  const shows = counts.unsupported_tv ?? 0;
+  const episodes = counts.unsupported_episode ?? 0;
+
+  return (
+    <View style={styles.block}>
+      <Text variant="display">
+        {added > 0 ? 'Your IMDb history is in' : 'Your IMDb history is already here'}
+      </Text>
+
+      <View style={styles.card}>
+        <Count value={added} label="Added to your collection" />
+        {inCollection > 0 ? (
+          <Count value={inCollection} label="Already in your collection" />
+        ) : null}
+        {previously > 0 ? <Count value={previously} label="Imported before" /> : null}
+        {unmatched > 0 ? <Count value={unmatched} label="Couldn’t match" /> : null}
+        {unsupported > 0 ? <Count value={unsupported} label="Not supported" /> : null}
+        {failed > 0 ? <Count value={failed} label="Couldn’t import" /> : null}
+      </View>
+
+      {shows > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {`${plural(shows, 'TV show wasn’t', 'TV shows weren’t')} added. bingd tracks TV by season, so find ${shows === 1 ? 'the show' : 'a show'} in Search and log the seasons you’ve watched.`}
+        </Text>
+      ) : null}
+      {episodes > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {`${plural(episodes, 'TV episode wasn’t', 'TV episodes weren’t')} added. bingd doesn’t track single episodes.`}
+        </Text>
+      ) : null}
+      {unmatched > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {`We couldn’t match ${plural(unmatched, 'title', 'titles')} from your file, so ${unmatched === 1 ? 'it wasn’t' : 'they weren’t'} added.`}
+        </Text>
+      ) : null}
+      {failed > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {`${plural(failed, 'title', 'titles')} couldn’t be saved. Importing the file again is safe: nothing is added twice.`}
+        </Text>
+      ) : null}
+
+      {added > 0 ? (
+        <Text variant="body" tone="secondary">
+          Imported movies start unranked, and your IMDb ratings stay a note rather than a score.
+          Rank them whenever you want. A ranking you make in bingd always wins.
+        </Text>
+      ) : null}
+
+      {onContinue ? (
+        <View style={styles.actions}>
+          <Button label="Continue" onPress={onContinue} />
+        </View>
+      ) : (
+        <View style={styles.actions}>
+          {added > 0 ? <Button label="Rank imported movies" onPress={onRank} /> : null}
+          <Button label="Done" kind={added > 0 ? 'secondary' : 'primary'} onPress={onDone} />
+          <Button label="Import another file" kind="tertiary" onPress={onReset} />
+        </View>
+      )}
+    </View>
+  );
 }
 
 function Waiting({

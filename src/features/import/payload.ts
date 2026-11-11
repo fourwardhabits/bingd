@@ -29,6 +29,7 @@
  * answer to a bug is a refusal rather than a best effort.
  */
 
+import type { ImdbNormalised } from './imdb';
 import type { Normalised, StagedWatch } from './letterboxd';
 
 /** One row as `import_stage` projects it. Every field here is named in that RPC. */
@@ -47,6 +48,42 @@ export type StagingRow = {
     readonly isRewatch: boolean;
   }[];
 };
+
+/**
+ * One IMDb row as `import_stage` projects it for an IMDb job (20261111000100). Every field
+ * here is named in that RPC's IMDb projection, and nothing else is sent: not `Date Rated`,
+ * not the community `IMDb Rating`, not genres, directors, runtime or URL.
+ */
+export type ImdbStagingRow = {
+  readonly kind: 'watched';
+  /** The tt id. The server sets the correlation from `imdbId` regardless. */
+  readonly correlation: string;
+  readonly name: string;
+  /** Only when it differs from `name`. */
+  readonly originalTitle?: string;
+  readonly year: number | null;
+  readonly imdbId: string;
+  readonly titleType: string;
+  /** Only for a title bingd can place. Provenance; never a score. */
+  readonly imdbRating?: number;
+};
+
+/** Either provider's row. Pages are measured the same way whichever it is. */
+export type AnyStagingRow = StagingRow | ImdbStagingRow;
+
+/** Turns a normalised IMDb export into the rows the RPC accepts. */
+export function imdbStagingRows(normalised: ImdbNormalised): ImdbStagingRow[] {
+  return normalised.titles.map((title) => ({
+    kind: 'watched' as const,
+    correlation: title.imdbId,
+    name: title.name,
+    ...(title.originalTitle !== null ? { originalTitle: title.originalTitle } : {}),
+    year: title.year,
+    imdbId: title.imdbId,
+    titleType: title.titleType,
+    ...(title.rating !== null && title.kind !== null ? { imdbRating: title.rating } : {}),
+  }));
+}
 
 /**
  * How many rows one call may carry.
@@ -94,7 +131,7 @@ export const MAX_JOB_ROWS = 50_000;
 export const MAX_JOB_BYTES = 32 * 1024 * 1024;
 
 /** What a whole staged job would weigh, as the server will measure it. */
-export function jobBytes(pages: readonly (readonly StagingRow[])[]): number {
+export function jobBytes(pages: readonly (readonly AnyStagingRow[])[]): number {
   return pages.reduce((total, page) => total + pageBytes(page), 0);
 }
 
@@ -157,12 +194,12 @@ export function stagingRows(normalised: Normalised): StagingRow[] {
  * here would lose a film for being unusual; the server's own bound is what refuses it, and
  * it will not, because every field the server keeps is already length-capped.
  */
-export function paginate(
-  rows: readonly StagingRow[],
+export function paginate<Row extends AnyStagingRow>(
+  rows: readonly Row[],
   { maxRows = PAGE_ROWS, maxBytes = MAX_PAGE_BYTES } = {},
-): StagingRow[][] {
-  const pages: StagingRow[][] = [];
-  let page: StagingRow[] = [];
+): Row[][] {
+  const pages: Row[][] = [];
+  let page: Row[] = [];
   let bytes = 2; // the enclosing `[]`
 
   for (const row of rows) {
@@ -181,7 +218,7 @@ export function paginate(
 }
 
 /** The serialised size of one page, which is what the server measures. */
-export function pageBytes(page: readonly StagingRow[]): number {
+export function pageBytes(page: readonly AnyStagingRow[]): number {
   return utf8Bytes(JSON.stringify(page));
 }
 

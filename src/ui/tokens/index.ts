@@ -11,6 +11,7 @@ export {
   text,
   tier,
   medal,
+  partnerMark,
   type BucketKey,
 } from './color';
 export { fontFamily, inputText, typography, type TypographyToken } from './typography';

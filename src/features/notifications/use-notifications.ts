@@ -237,6 +237,12 @@ export type Notification = {
    */
   mentionInReply: boolean;
   /**
+   * Import lifecycle rows only (20261111000100): whose import it was, from the payload.
+   * Null on every other kind and on a row written before the payload carried it, which
+   * reads as Letterboxd, the only importer there was.
+   */
+  importProvider?: 'letterboxd' | 'imdb' | null;
+  /**
    * `comment` only: whether the row is a reply to this reader's comment rather than a
    * remark under their activity.
    *
@@ -386,6 +392,8 @@ export function useNotifications(viewerId: string) {
             // reader's own comment rather than a remark under their activity.
             reply_to?: string;
             participant?: boolean;
+            // Import lifecycle rows (20261111000100).
+            provider?: string;
           } | null;
           // 20260830000100. Optional in the type for the same reason `mentions` is in
           // `use-comments`: a bundle can be newer than the database it is pointed at
@@ -445,6 +453,11 @@ export function useNotifications(viewerId: string) {
           // how somebody typed and a preview is one line: a comment beginning with a
           // newline would otherwise draw an empty second line under the sentence.
           mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
+          importProvider: IMPORT_KINDS.has(row.kind as NotificationKind)
+            ? row.payload?.provider === 'imdb'
+              ? 'imdb'
+              : 'letterboxd'
+            : null,
           commentIsReply: row.kind === 'comment' && Boolean(row.payload?.reply_to),
           commentIsFollowUp: row.kind === 'comment' && Boolean(row.payload?.participant),
           preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
@@ -562,7 +575,10 @@ export function verbFor(
    * predates the flag.
    */
   reply?: boolean,
+  /** Import lifecycle rows only: whose import. Absent reads as Letterboxd. */
+  importProvider?: 'letterboxd' | 'imdb' | null,
 ): string {
+  const service = importProvider === 'imdb' ? 'IMDb' : 'Letterboxd';
   switch (kind) {
     case 'follow':
       return 'started following you';
@@ -654,11 +670,11 @@ export function verbFor(
     // The same headlines the pushes use (`push-sender/copy.ts`) and the import screen
     // tells the same story in: started, ready, or could not finish.
     case 'import_started':
-      return 'Letterboxd import started';
+      return `${service} import started`;
     case 'import_completed':
-      return 'Your Letterboxd history is ready';
+      return `Your ${service} history is ready`;
     case 'import_failed':
-      return 'We couldn’t finish your Letterboxd import';
+      return `We couldn’t finish your ${service} import`;
   }
 }
 
@@ -777,7 +793,7 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
   // Everything else, and every row whose title could not be resolved: the verb is the
   // whole clause and the title — where there is one — sits on its own line under it.
   return {
-    lead: verbFor(row.kind, row.mediaKind, row.goal, row.mentionInReply),
+    lead: verbFor(row.kind, row.mediaKind, row.goal, row.mentionInReply, row.importProvider),
     subject: null,
     tail: null,
   };

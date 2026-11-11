@@ -93,7 +93,11 @@ export type PushJob = {
    * (20260917001500). Absent from a database that predates it; null for every other type.
    */
   import_job_id?: string | null;
-  import_counts?: { watched?: number; watchlist?: number } | null;
+  /**
+   * The notification's payload, for every import push since 20261111000100 (before it,
+   * only the completion's). `provider` names whose import it was; absent is Letterboxd.
+   */
+  import_counts?: { watched?: number; watchlist?: number; provider?: string } | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -313,27 +317,30 @@ function importContent(job: PushJob): PushContent | null {
     importJobId: job.import_job_id ?? null,
   });
 
+  // Whose import, from the payload; absent (an older row or sender) is Letterboxd.
+  const service = job.import_counts?.provider === 'imdb' ? 'IMDb' : 'Letterboxd';
+
   switch (job.type) {
     case 'import_started':
       return {
-        title: 'Letterboxd import started',
+        title: `${service} import started`,
         body: 'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
         data: data(),
       };
     case 'import_completed': {
       const watched = Number(job.import_counts?.watched ?? 0);
       return {
-        title: 'Your Letterboxd history is ready',
+        title: `Your ${service} history is ready`,
         body:
           watched > 0
             ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
-            : 'Your Letterboxd history is now in bingd.',
+            : `Your ${service} history is now in bingd.`,
         data: data(),
       };
     }
     case 'import_failed':
       return {
-        title: 'We couldn’t finish your Letterboxd import',
+        title: `We couldn’t finish your ${service} import`,
         body: 'Open bingd to see what happened and try again.',
         data: data(),
       };
