@@ -156,7 +156,10 @@ as $$
     join counts c on c.user_id = r.user_id and c.category = r.category
    where r.user_id = any(p_users)
      and (p_category is null or r.category = p_category)
-     and (p_items is null or r.media_item_id = any(p_items));
+     -- A hashed semi-join, not `= any(p_items)`: an array test is linear per row, and a power
+     -- reader's 850 titles against 70,000 shortlisted rows was most of a refresh (scale
+     -- benchmark plan, 2026-11-11).
+     and (p_items is null or r.media_item_id in (select unnest(p_items)));
 $$;
 
 revoke execute on function _scored_rankings(uuid[], ranking_category, uuid[]) from public, anon, authenticated;
