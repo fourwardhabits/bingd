@@ -649,3 +649,71 @@ falls back to the query. No RPC or migration changed.
 
 Full rules and measurements: [`../product/refine-rankings-t5.md`](../product/refine-rankings-t5.md).
 Design: [`../product/watch-history-and-ranking-calibration.md`](../product/watch-history-and-ranking-calibration.md) §E–§I.
+
+---
+
+## 14. TV shows and seasons, ranked independently (2026-11-14, `20261114000100`–`000400`)
+
+Founder brief, TV Show & Season Ranking. **I1–I7 and the session engine are unchanged**;
+a third pool sits beside the two that existed.
+
+### 14.1 The category
+
+`ranking_category` gains `tv_shows`, and `rankable_category('series')` returns it. Every
+ranking RPC resolves its category through that one function, so `rank_start`,
+`rank_again`, `rank_rebucket`, `rank_backlog_start`, `refine_start` and `recommend_title`
+accept a whole show with no other change. `_assert_loggable` no longer refuses a series.
+
+- **Three independent pools.** Shows compare with shows, seasons with seasons, movies with
+  movies. Positions, bands, scores, sessions, the placement ledger, Refine and the backlog
+  are all keyed by `(user, category)`, so a show's bucket sizes never touch a season's.
+- **Nothing is derived across the two TV levels.** No show score is computed from its
+  seasons; ranking a season never creates a show ranking; neither moves when the other
+  changes. A show's score is its own explicit ranking, and so are its community and
+  Following scores (`community_score` and `following_score` read one media item).
+- `comparisons_within_one_category` refuses a comparison row pairing two pools. The engine
+  only ever offers a pivot from the subject's own band, so this was already true by
+  construction; the trigger makes a regression loud.
+
+### 14.2 What a TV correction posts (`20261114000300`)
+
+| Act | Feed |
+|---|---|
+| Rank a show or a season | one `title_ranked` (unchanged) |
+| Update a show or a season on its own, and it moved | one `title_ranked` with `"update": true` |
+| Update that left the title where it was | nothing |
+| Rank a season, then **Update Show** | the season's activity only |
+| Abandon the linked Update Show | the season's activity; the show's ranking is untouched (I6) |
+| Any movie correction | nothing (unchanged) |
+
+**Update Show** is the parent show's ordinary correction (the band chooser, then the
+prior-anchored search, §13.2), carrying `p_linked_placement_id`, the season placement that
+offered it. The link rides on `ranking_sessions.linked_placement_id` to `_rank_finalize`,
+which records it on the show's ledger row and posts nothing: suppression at write time,
+never publish-then-delete. `_assert_linked_show_update` checks, under the media lock, that
+the placement is the caller's own `first`/`rewatch` placement of a season of this show,
+that the show is ranked, and that no placement already used the link. A season's finalise
+reply carries `parent` (is the show ranked, and in which band), read inside the locks, so
+the client never decides from a stale cache. No timestamp decides anything.
+
+`_latest_watch_post` skips update posts, so `_correction_follows_latest_watch` cannot
+rewrite an update post's own score.
+
+### 14.3 Presentation (client)
+
+- **Candidate A** (`watched-rows.ts`, `standsAloneBeside`): the Collection and profile
+  walls draw a show only while none of its seasons is ranked. Presentation only; it is not
+  applied to watchlists, custom lists, the feed or ranking data. `profile_title_counts.tv`
+  applies the same rule to the profile's count.
+- Mixed TV lists sort by score; an equal score between pools falls to a fixed pool order,
+  then the id. Ordinals are never compared across pools.
+- Pills: a show keeps the filled Maroon number; a season reads `S4 9.1` on Parchment with a
+  Maroon border; Specials read `SP`.
+
+### 14.4 Signals (`20261114000400`, `use-for-you.ts`)
+
+Show and season rankings are distinct signals. Taste Match is exact by construction (same
+media item); each shared series is one unit of evidence for its threshold and confidence,
+and its observations share one unit of weight in the gap and the correlation, which reduces
+to the old formula when no series repeats. For You scores each row in its own pool and
+gives the rows of one series one unit of taste weight between them.
