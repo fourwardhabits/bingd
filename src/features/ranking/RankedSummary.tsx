@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import type { RankingCategory } from '@/features/collection/use-collection';
+import { CATEGORY_NAME, type RankingCategory } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
 import { Poster, ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -47,8 +47,15 @@ export type RankedSummaryTitle = {
 /** The title page's words for a standing, so the two surfaces cannot word it differently. */
 export function placeLabel(position: number | null | undefined, medium: RankingCategory) {
   if (typeof position !== 'number' || !Number.isInteger(position) || position <= 0) return null;
-  return `#${position} in ${medium === 'movies' ? 'Movies' : 'TV'}`;
+  return `#${position} in ${CATEGORY_NAME[medium]}`;
 }
+
+/**
+ * The ranking a grouped sitting's "N more" sheet reads, from the kind of title it shows:
+ * a film, a season, or (20261114000100) a whole show, each in its own pool.
+ */
+export const batchMedium = (kind: 'movie' | 'season' | 'series' | null | undefined): RankingCategory =>
+  kind === 'season' ? 'tv_seasons' : kind === 'series' ? 'tv_shows' : 'movies';
 
 /** The server's band name, only when it is one the badge can speak aloud. */
 function bucketOf(bucket: string | null | undefined) {

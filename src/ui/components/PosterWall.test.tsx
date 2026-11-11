@@ -307,14 +307,14 @@ describe('the season pill', () => {
     );
 
     const season = StyleSheet.flatten(
-      view.getAllByTestId('poster-season-pill', { includeHiddenElements: true })[0].props.style,
+      view.getAllByTestId('poster-season-pill', { includeHiddenElements: true })[0]!.props.style,
     ) as ViewStyle;
     expect(season.backgroundColor).toBe(theme.semantic.scoreInk);
     expect(season.borderColor).toBe(theme.semantic.score);
     expect(season.borderWidth).toBeGreaterThan(0);
 
     const show = StyleSheet.flatten(
-      view.getAllByTestId('poster-score-pill', { includeHiddenElements: true })[0].props.style,
+      view.getAllByTestId('poster-score-pill', { includeHiddenElements: true })[0]!.props.style,
     ) as ViewStyle;
     expect(show.backgroundColor).toBe(theme.semantic.action);
     expect(show.borderWidth ?? 0).toBe(0);
