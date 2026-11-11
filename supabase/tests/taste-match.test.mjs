@@ -127,7 +127,10 @@ describe('the founder’s fixtures', () => {
     // The individual bands above could all pass with a metric that ranked them
     // wrongly inside those bands. This asserts the ordering itself, which is the
     // property a reader actually relies on.
-    const identical = await pair('ord_identical', 8, () => ({ mine: 'loved', theirs: 'loved' }));
+    const identical = await pair('ord_identical', 8, () => ({
+      mine: 'loved',
+      theirs: 'loved',
+    }));
     const mostly = await pair('ord_mostly', 8, (i) => ({
       mine: 'loved',
       theirs: i < 6 ? 'loved' : 'fine',
@@ -242,15 +245,15 @@ describe('evidence and confidence (20260827001000)', () => {
 
     const thinScore = (await match(thin)).score;
     const thickScore = (await match(thick)).score;
-    assert.ok(
-      thickScore > thinScore,
-      `expected ${thickScore} (n=18) > ${thinScore} (n=5)`,
-    );
+    assert.ok(thickScore > thinScore, `expected ${thickScore} (n=18) > ${thinScore} (n=5)`);
     // A loose floor, deliberately: alice's shared catalogue keeps growing across
     // this file, so the shared films sit ever deeper in her band and proximity
     // carries some fixture noise. The strict inequality above is the contract;
     // this only guards against the pair somehow reading as strangers.
-    assert.ok(thickScore >= 70, `expected a well-evidenced pair to read high, got ${thickScore}`);
+    assert.ok(
+      thickScore >= 70,
+      `expected a well-evidenced pair to read high, got ${thickScore}`,
+    );
   });
 
   it('shrinks disagreement symmetrically', async () => {
@@ -264,7 +267,10 @@ describe('evidence and confidence (20260827001000)', () => {
 
     const row = await match(other);
     assert.ok(row.score !== null);
-    assert.ok(row.score >= 20 && row.score <= 40, `expected shrunk disagreement, got ${row.score}`);
+    assert.ok(
+      row.score >= 20 && row.score <= 40,
+      `expected shrunk disagreement, got ${row.score}`,
+    );
   });
 });
 
@@ -365,7 +371,10 @@ describe('who may be compared with', () => {
     for (let i = 0; i < 6; i += 1) films.push(await movie(`tm_blocked_${i}`));
     await rankAll(alice, films);
     await rankAll(hostile, films);
-    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [hostile, alice]);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [
+      hostile,
+      alice,
+    ]);
 
     assert.equal((await match(hostile)).common_count, 0);
   });
@@ -384,9 +393,7 @@ describe('who may be compared with', () => {
   });
 
   it('tells an anonymous caller nothing', async () => {
-    const error = await t.asAnon(() =>
-      t.errorFrom(`select * from taste_match($1)`, [alice]),
-    );
+    const error = await t.asAnon(() => t.errorFrom(`select * from taste_match($1)`, [alice]));
     await t.actAs(alice);
     assert.equal(error?.code, '42501');
   });
@@ -410,5 +417,58 @@ describe('what comes back', () => {
     const { rows } = await t.sql(`select * from taste_match($1)`, [stranger]);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].common_count, 0);
+  });
+});
+
+/**
+ * **Shows and seasons in Taste Match** (20261114000400; founder brief §7, 2026-11-14).
+ *
+ * Matching is exact — a show with the same show, a season with the same season — and a
+ * series is one unit of evidence however many of its seasons both people ranked, so a
+ * long show cannot manufacture a match on its own.
+ */
+describe('a whole show and its seasons', () => {
+  let tvSeq = 0;
+  const showWithSeasons = async (name, n) => {
+    tvSeq += 1;
+    const series = await t.createSeries(name, 88000 + tvSeq * 50);
+    const seasons = [];
+    for (let i = 1; i <= n; i += 1)
+      seasons.push(await t.createSeason(series, i, `Season ${i}`));
+    return { series, seasons };
+  };
+
+  it('never matches a show against one of its seasons', async () => {
+    const other = await t.createUser({ username: 'tm_scope' });
+    const { series, seasons } = await showWithSeasons('Scope', 1);
+    await rankAll(alice, [series]);
+    await rankAll(other, [seasons[0]]);
+
+    const result = await match(other);
+    assert.equal(result.common_count, 0);
+  });
+
+  it('counts ten shared seasons of one show as one shared title', async () => {
+    const other = await t.createUser({ username: 'tm_long_show' });
+    const { seasons } = await showWithSeasons('Long Show', 10);
+    await rankAll(alice, seasons);
+    await rankAll(other, seasons);
+
+    const result = await match(other);
+    assert.equal(result.common_count, 1, 'one series, one unit of evidence');
+    assert.equal(result.score, null, 'which is below the threshold on its own');
+  });
+
+  it('counts a show ranking and its seasons together as that one series', async () => {
+    const other = await t.createUser({ username: 'tm_show_and_seasons' });
+    const { series, seasons } = await showWithSeasons('Both Levels', 3);
+    const films = [];
+    for (let i = 0; i < 5; i += 1) films.push(await movie(`tm_both_${i}`));
+    await rankAll(alice, [...films, series, ...seasons]);
+    await rankAll(other, [...films, series, ...seasons]);
+
+    const result = await match(other);
+    assert.equal(result.common_count, 6, 'five films and one series');
+    assert.notEqual(result.score, null, 'six units clear the threshold of five');
   });
 });

@@ -99,7 +99,14 @@ export type FeedItem = {
    * maps to no viewing. The card says `2nd watch` from it.
    */
   watchNumber: number | null;
-  category: 'movies' | 'tv_seasons' | null;
+  category: 'movies' | 'tv_seasons' | 'tv_shows' | null;
+  /**
+   * **A TV ranking update** (20261114000300): a standalone re-ranking of a show or a season
+   * that moved it, which the server posts as a `title_ranked` marked `update`. The row
+   * reads "updated their ranking of" rather than "ranked". A movie's correction posts
+   * nothing, so a film's row is never one of these.
+   */
+  update: boolean;
   /**
    * The actor's public note on this title, live rather than snapshotted.
    *
@@ -230,8 +237,10 @@ type FeedRow = {
   causal_step?: number | null;
   payload: {
     position?: number;
-    category?: 'movies' | 'tv_seasons';
+    category?: 'movies' | 'tv_seasons' | 'tv_shows';
     score?: number;
+    /** A TV ranking update (20261114000300). */
+    update?: boolean;
     bucket?: Bucket;
     /** ranking_batch rows only (20261020000100): how many titles that sitting placed. */
     count?: number;
@@ -811,7 +820,9 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             (award(row)?.title ?? 'bingd Award')
           : // And for a goal it is the goal's own name, so the sentence reads
             // "Abisola hit their 2026 Movies goal" through the same three slots.
-            row.type === 'goal_completed' && row.payload?.year && row.payload?.category
+            row.type === 'goal_completed' &&
+            row.payload?.year &&
+            (row.payload?.category === 'movies' || row.payload?.category === 'tv_seasons')
             ? `${row.payload.year} ${GOAL_LABEL[row.payload.category]} goal`
             : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
@@ -828,6 +839,7 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       score: row.payload?.score ?? null,
       bucket: row.payload?.bucket ?? null,
       category: row.payload?.category ?? null,
+      update: row.type === 'title_ranked' && row.payload?.update === true,
       note: null,
       companions: [],
       watchNumber: null,
@@ -839,7 +851,10 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
           : null,
       award: award(row),
       goal:
-        row.type === 'goal_completed' && row.payload?.year && row.payload?.category
+        row.type === 'goal_completed' &&
+        row.payload?.year &&
+        // A goal counts films or seasons; a whole show is never a goal category.
+        (row.payload?.category === 'movies' || row.payload?.category === 'tv_seasons')
           ? {
               year: Number(row.payload.year),
               category: row.payload.category,
@@ -959,7 +974,7 @@ async function attachNotes(items: FeedItem[]) {
 type ScoreRow = {
   user_id: string;
   media_item_id: string;
-  category: 'movies' | 'tv_seasons';
+  category: 'movies' | 'tv_seasons' | 'tv_shows';
   bucket: Bucket;
   position: number;
   score: number;

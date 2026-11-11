@@ -8,7 +8,7 @@ import {
   useLoggedCollection,
   useRankedCollection,
   useWatchlist,
-  type RankingCategory,
+  type CollectionMedium,
 } from '@/features/collection/use-collection';
 import {
   CollectionView,
@@ -41,7 +41,8 @@ import {
 import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
 type Segment = 'watched' | 'watchlist' | 'unranked';
-type Medium = RankingCategory;
+/** Movies or TV; TV draws two rankings, seasons and shows (`CollectionMedium`). */
+type Medium = CollectionMedium;
 
 type UnrankedNudgePref = {
   dismissedAt: string;
@@ -606,11 +607,23 @@ function Watched({
 }: SectionProps) {
   const router = useRouter();
   const ranked = useRankedCollection(userId, medium);
+  /**
+   * **TV is two rankings** (TV show & season ranking, 2026-11-14): the seasons above and
+   * the whole shows here, each scored against its own bands and drawn together under
+   * Candidate A's precedence (`watchedItems`). Movies never asks for this one.
+   */
+  const shows = useRankedCollection(userId, 'tv_shows', { enabled: medium === 'tv_seasons' });
   const logged = useLoggedCollection(userId);
 
   const items = useMemo(
-    () => watchedItems(ranked.data ?? [], logged.data?.entries ?? [], medium),
-    [ranked.data, logged.data, medium],
+    () =>
+      watchedItems(
+        ranked.data ?? [],
+        logged.data?.entries ?? [],
+        medium,
+        medium === 'tv_seasons' ? (shows.data ?? []) : [],
+      ),
+    [ranked.data, logged.data, medium, shows.data],
   );
 
   // The error said what had happened and offered nothing to do about it, on a screen with
@@ -621,14 +634,15 @@ function Watched({
   // so the marquee is never remounted when the read lands (`CollectionView`'s
   // `placeholder`, 2026-11-11).
   const placeholder =
-    ranked.isError || logged.isError ? (
+    ranked.isError || logged.isError || (medium === 'tv_seasons' && shows.isError) ? (
       <CouldNotLoad
         onRetry={() => {
           void ranked.refetch();
           void logged.refetch();
+          if (medium === 'tv_seasons') void shows.refetch();
         }}
       />
-    ) : ranked.isPending || logged.isPending ? (
+    ) : ranked.isPending || logged.isPending || (medium === 'tv_seasons' && shows.isPending) ? (
       <SkeletonRow count={7} />
     ) : undefined;
 

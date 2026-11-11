@@ -428,11 +428,8 @@ export default function ListScreen() {
   };
 
   const openLog = (item: ListItem) => {
-    // A series is not loggable — its seasons are (AD-1); the title page offers them.
-    if (item.kind === 'series') {
-      router.push(`/title/${item.mediaItemId}`);
-      return;
-    }
+    // A whole show is ranked in its own pool (2026-11-14), so its `+` starts the show's
+    // ranking exactly as a film's does; its seasons are ranked from the show's page.
     const title: LoggableTitle = {
       id: item.mediaItemId,
       title: item.name,

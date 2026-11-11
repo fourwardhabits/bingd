@@ -239,7 +239,8 @@ it('names the medium the way TV is named everywhere else', async () => {
 
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
-  await waitFor(() => expect(view.getByText('#4 in TV')).toBeTruthy());
+  // TV is two rankings since 2026-11-14, so the pool is named, as everywhere else.
+  await waitFor(() => expect(view.getByText('#4 in TV seasons')).toBeTruthy());
   expect(view.getByLabelText('9.1 out of 10, I liked it')).toBeTruthy();
   // The season ranking, never the movie one: the two are separate lists.
   expect(mockReadRanked).toHaveBeenCalledWith('user-1', 'tv_seasons');

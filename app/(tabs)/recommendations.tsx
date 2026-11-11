@@ -54,7 +54,7 @@ import {
   seedFromSentToYou,
   titleRecommendationsKey,
 } from '@/features/recommendations/use-title-recommendations';
-import { track } from '@/lib/analytics';
+import { mediaKindFor, track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { useTabReset } from '@/ui/use-tab-reset';
@@ -632,7 +632,7 @@ export default function RecommendationsScreen() {
     if (!row.openedAt) {
       markOpened.mutate({
         recommendationId: row.id,
-        mediaKind: row.kind === 'movie' ? 'movie' : 'tv_season',
+        mediaKind: mediaKindFor(row.kind),
         hasNote: Boolean(row.message),
       });
     }
@@ -1286,7 +1286,7 @@ function Nothing({
       title={medium === 'tv' ? 'Nothing to suggest yet' : 'Still gathering suggestions'}
       body={
         medium === 'tv'
-          ? 'Rank a season or two and this fills up with shows.'
+          ? 'Rank a show or a season or two and this fills up with shows.'
           : 'This fills in as the catalogue learns what your favourites are near.'
       }
       action={{ label: 'Rank something', onPress: onRank }}

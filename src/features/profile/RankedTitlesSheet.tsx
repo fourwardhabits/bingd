@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { bandSizes, scoreFor } from '@/features/collection/score';
+import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
+import { standaloneShows } from '@/features/collection/watched-rows';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -110,13 +111,18 @@ export const INITIAL_SORT: CollectionSort = { axis: 'rank', direction: 'desc' };
  * list claiming to be newest.
  */
 export function compareBySort(sort: CollectionSort) {
-  return (a: { position: number; rankedAt: string | null; mediaItemId: string },
-          b: { position: number; rankedAt: string | null; mediaItemId: string }): number => {
+  return (
+    a: { position: number; rankedAt: string | null; mediaItemId: string },
+    b: { position: number; rankedAt: string | null; mediaItemId: string },
+  ): number => {
     const tiebreak = a.mediaItemId.localeCompare(b.mediaItemId);
 
     // Position 1 is the top of the band, so "highest first" is ascending in `position`.
     if (sort.axis === 'rank') {
-      return (sort.direction === 'desc' ? a.position - b.position : b.position - a.position) || tiebreak;
+      return (
+        (sort.direction === 'desc' ? a.position - b.position : b.position - a.position) ||
+        tiebreak
+      );
     }
 
     if (!a.rankedAt && !b.rankedAt) return tiebreak;
@@ -228,6 +234,9 @@ export function RankedTitlesSheet({
   const seasons = useRankedCollection(userId, 'tv_seasons', {
     enabled: category === 'tv_seasons',
   });
+  // TV is two rankings since 2026-11-14: the seasons, and the whole shows that stand alone
+  // beside them under Candidate A's precedence. Read only while TV is open.
+  const shows = useRankedCollection(userId, 'tv_shows', { enabled: category === 'tv_seasons' });
   const list = category === 'tv_seasons' ? seasons : movies;
 
   const [sort, setSort] = useState<CollectionSort>(INITIAL_SORT);
@@ -235,20 +244,41 @@ export function RankedTitlesSheet({
   const scroll = useRef<ScrollView>(null);
 
   const rows = useMemo(() => {
-    const entries = list.data ?? [];
+    const own = list.data ?? [];
+    const showRows = category === 'tv_seasons' ? standaloneShows(own, shows.data ?? []) : [];
     // **The band is measured over the whole category, the slice is what gets drawn.**
     // Scoring against the visible slice would give the top row a 10 whatever it is
     // (`TopRanked` records the same rule), so `bandSizes` sees everything and the cap is
-    // applied afterwards.
-    const sizes = bandSizes(entries);
+    // applied afterwards. Each pool against its own bands: a show among shows.
+    const sizes = bandSizes(own);
+    const showSizes = bandSizes(shows.data ?? []);
+    const pooled = [
+      ...own.map((entry) => ({ entry, sizes, pool: 0 })),
+      ...showRows.map((entry) => ({ entry, sizes: showSizes, pool: 1 })),
+    ].map((item) => ({
+      ...item,
+      projected: projectedScore(item.entry.bucket, item.entry.position, item.sizes),
+    }));
+    // **Two pools are ordered by score, never by ordinal.** A show's #2 and a season's #2
+    // are different lists, so the rank order of a mixed TV list is the score each row
+    // prints (unrounded, so each pool keeps its own order), then a fixed pool order, then
+    // the id. One pool keeps `compareBySort` exactly as before.
+    const bySort = compareBySort(sort);
+    const mixed = showRows.length > 0;
+    const compare = (a: (typeof pooled)[number], b: (typeof pooled)[number]) =>
+      mixed && sort.axis === 'rank'
+        ? (sort.direction === 'desc' ? b.projected - a.projected : a.projected - b.projected) ||
+          a.pool - b.pool ||
+          a.entry.mediaItemId.localeCompare(b.entry.mediaItemId)
+        : bySort(a.entry, b.entry);
     // **Sorted before the cap, never after.** A cap applied first would make each order a
     // re-arrangement of the same two hundred titles rather than the first two hundred of
     // that order — so "Oldest first" would silently mean "oldest of their most recent
     // two hundred", which is a different and wrong claim.
-    return [...entries]
-      .sort(compareBySort(sort))
+    return pooled
+      .sort(compare)
       .slice(0, VISIBLE_CAP)
-      .map((entry) => ({
+      .map(({ entry, sizes: poolSizes }) => ({
         mediaItemId: entry.mediaItemId,
         // The canonical compact form, so a season reads "The Bear, S2" here exactly as it
         // does on the wall, in the feed and in search.
@@ -262,13 +292,17 @@ export function RankedTitlesSheet({
         year: entry.year,
         posterUri: posterUri(entry.posterPath),
         position: entry.position,
-        score: scoreFor(entry.bucket, entry.position, sizes),
+        /** A whole show's ordinal counts among shows, and its row says so. */
+        isShow: entry.kind === 'series',
+        score: scoreFor(entry.bucket, entry.position, poolSizes),
         bucket: entry.bucket,
       }));
-  }, [list.data, sort]);
+  }, [category, list.data, shows.data, sort]);
 
   /** How many the category actually holds, for the disclosure under a capped list. */
-  const total = list.data?.length ?? 0;
+  const total =
+    (list.data?.length ?? 0) +
+    (category === 'tv_seasons' ? standaloneShows(list.data ?? [], shows.data ?? []).length : 0);
 
   if (!category) return null;
 
@@ -295,18 +329,18 @@ export function RankedTitlesSheet({
       </View>
 
       {/**
-        * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
-        *
-        * A subtitle stating the order is a subtitle nobody can act on. This is the same
-        * chip-and-menu the Collection tab has used since it had sorting — `FilterChip`
-        * naming the current order, a radio list under it — rather than a second grammar
-        * for the same idea on a second screen. Four options, no filters, no third axis:
-        * the founder scoped this pass to exactly these.
-        *
-        * The chip says the whole order ("Rank · Highest first") and not just the axis,
-        * because the direction is half the answer and a control that hides half of what
-        * it is doing is the subtitle again with a chevron on it.
-        */}
+       * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
+       *
+       * A subtitle stating the order is a subtitle nobody can act on. This is the same
+       * chip-and-menu the Collection tab has used since it had sorting — `FilterChip`
+       * naming the current order, a radio list under it — rather than a second grammar
+       * for the same idea on a second screen. Four options, no filters, no third axis:
+       * the founder scoped this pass to exactly these.
+       *
+       * The chip says the whole order ("Rank · Highest first") and not just the axis,
+       * because the direction is half the answer and a control that hides half of what
+       * it is doing is the subtitle again with a chevron on it.
+       */}
       <View style={styles.sortRow}>
         <SortChip axes={SORT_AXES} value={sort} onPress={() => setSortOpen((open) => !open)} />
       </View>
@@ -327,16 +361,22 @@ export function RankedTitlesSheet({
       ) : null}
 
       <ScrollView ref={scroll} style={styles.list} contentContainerStyle={styles.listContent}>
-        {list.isPending ? (
+        {list.isPending || (category === 'tv_seasons' && shows.isPending) ? (
           <SkeletonRow count={4} />
-        ) : list.isError ? (
+        ) : list.isError || (category === 'tv_seasons' && shows.isError) ? (
           <View style={styles.empty}>
             <EmptyState
               kind="couldNotLoad"
               compact
               title="Could not load the list"
               body="Check your connection and try again."
-              action={{ label: 'Try again', onPress: () => void list.refetch() }}
+              action={{
+                label: 'Try again',
+                onPress: () => {
+                  void list.refetch();
+                  if (category === 'tv_seasons') void shows.refetch();
+                },
+              }}
             />
           </View>
         ) : rows.length === 0 ? (
@@ -365,9 +405,17 @@ export function RankedTitlesSheet({
                 // Tertiary ink and caption weight: it labels the row rather than
                 // competing with the score, which is the number a reader is scanning for.
                 leading={
-                  <Text variant="caption" tone="tertiary" style={styles.ordinal}>
-                    {`#${row.position}`}
-                  </Text>
+                  <View style={styles.ordinal}>
+                    <Text variant="caption" tone="tertiary">
+                      {`#${row.position}`}
+                    </Text>
+                    {/* A show's place is among shows, never among the seasons around it. */}
+                    {row.isShow ? (
+                      <Text variant="caption" tone="tertiary">
+                        show
+                      </Text>
+                    ) : null}
+                  </View>
                 }
                 // The owner's score, in the badge every other list in the app uses. No
                 // `onPress` of its own: on the Collection tab that badge opens the log

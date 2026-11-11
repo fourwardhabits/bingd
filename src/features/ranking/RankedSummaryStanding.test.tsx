@@ -366,7 +366,7 @@ describe('the backlog summary', () => {
     expect(mockReadRanked).toHaveBeenCalledTimes(2);
   });
 
-  it('TV seasons read the season ranking and say "in TV"', async () => {
+  it('TV seasons read the season ranking and say "in TV seasons"', async () => {
     const season = (id: string, title: string) => ({ ...target(id, title), kind: 'season' });
     serve({
       ranking_backlog: [
@@ -389,7 +389,12 @@ describe('the backlog summary', () => {
     await likeIt(view, 'Severance, S2');
 
     await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(2));
-    expect(rowText(view)).toEqual(['Severance, S1 · #3 in TV · 9.0', 'Severance, S2 · #2 in TV · 9.5']);
+    // The pool is named since 2026-11-14 (TV is two rankings); nothing else in the
+    // summary changed.
+    expect(rowText(view)).toEqual([
+      'Severance, S1 · #3 in TV seasons · 9.0',
+      'Severance, S2 · #2 in TV seasons · 9.5',
+    ]);
     expect(mockReadRanked).toHaveBeenCalledWith('user-1', 'tv_seasons');
   });
 });

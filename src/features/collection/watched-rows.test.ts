@@ -54,7 +54,11 @@ describe('the window where the two queries disagree', () => {
   it('renders a just-ranked title once, not twice', () => {
     // The ranked query has caught up; the logged query has not, so it still lists
     // the title as unranked. This is the exact state that produced the warning.
-    const rows = mergeWatched([ranked()], [logged({ mediaItemId: 'film-1', title: 'Heat' })], 'movies');
+    const rows = mergeWatched(
+      [ranked()],
+      [logged({ mediaItemId: 'film-1', title: 'Heat' })],
+      'movies',
+    );
 
     expect(ids(rows)).toEqual(['film-1']);
   });
@@ -115,7 +119,10 @@ describe('ordinary shaping', () => {
   it('keeps the unranked side to the medium being shown', () => {
     const rows = mergeWatched(
       [],
-      [logged({ mediaItemId: 'film', kind: 'movie' }), logged({ mediaItemId: 'season', kind: 'season' })],
+      [
+        logged({ mediaItemId: 'film', kind: 'movie' }),
+        logged({ mediaItemId: 'season', kind: 'season' }),
+      ],
       'movies',
     );
 
@@ -124,7 +131,15 @@ describe('ordinary shaping', () => {
 
   it('carries a ranked season’s show name through', () => {
     const rows = mergeWatched(
-      [ranked({ mediaItemId: 's2', title: 'Season 2', kind: 'season', seriesTitle: 'Parks and Recreation', category: 'tv_seasons' })],
+      [
+        ranked({
+          mediaItemId: 's2',
+          title: 'Season 2',
+          kind: 'season',
+          seriesTitle: 'Parks and Recreation',
+          category: 'tv_seasons',
+        }),
+      ],
       [],
       'tv_seasons',
     );
@@ -165,7 +180,13 @@ describe('a ranked title carries its collection facts', () => {
   it('finds the watch date and the collection timestamp of a ranked title', () => {
     const items = watchedItems(
       [heat],
-      [logged({ mediaItemId: 'film-1', watchedOn: '2011-06-02', addedAt: '2026-08-30T09:00:00Z' })],
+      [
+        logged({
+          mediaItemId: 'film-1',
+          watchedOn: '2011-06-02',
+          addedAt: '2026-08-30T09:00:00Z',
+        }),
+      ],
       'movies',
     );
 
@@ -232,7 +253,130 @@ describe('a ranked title carries its collection facts', () => {
     // As merged: rating order, best first — the order the old code left standing.
     expect(ids(items)).toEqual(['best', 'worst']);
     // Sorted by when they were added: the later addition leads, whatever it scored.
-    expect(ids(sortItems(items, { axis: 'added', direction: 'desc' }))).toEqual(['worst', 'best']);
-    expect(ids(sortItems(items, { axis: 'added', direction: 'asc' }))).toEqual(['best', 'worst']);
+    expect(ids(sortItems(items, { axis: 'added', direction: 'desc' }))).toEqual([
+      'worst',
+      'best',
+    ]);
+    expect(ids(sortItems(items, { axis: 'added', direction: 'asc' }))).toEqual([
+      'best',
+      'worst',
+    ]);
+  });
+});
+
+/**
+ * **Candidate A** (founder brief §4, 2026-11-14): TV is two rankings, seasons and whole
+ * shows, drawn as one flat grid. A show stands for itself only while none of its seasons is
+ * ranked, and every row is scored against its own pool's bands.
+ */
+describe('TV seasons and whole shows in one collection', () => {
+  const show = (id: string, over: Partial<RankedEntry> = {}) =>
+    ranked({
+      mediaItemId: id,
+      title: id,
+      kind: 'series',
+      category: 'tv_shows',
+      runtimeMinutes: null,
+      ...over,
+    });
+  const season = (id: string, seriesId: string, n: number, over: Partial<RankedEntry> = {}) =>
+    ranked({
+      mediaItemId: id,
+      title: `Season ${n}`,
+      kind: 'season',
+      category: 'tv_seasons',
+      seriesId,
+      seriesTitle: seriesId,
+      seasonNumber: n,
+      runtimeMinutes: null,
+      ...over,
+    });
+  const tv = (seasons: RankedEntry[], shows: RankedEntry[], log: LoggedEntry[] = []) =>
+    watchedItems(seasons, log, 'tv_seasons', shows);
+
+  it('shows the show alone when only the show is ranked', () => {
+    const items = tv([], [show('shameless')]);
+    expect(ids(items)).toEqual(['shameless']);
+    expect(items[0]).toMatchObject({ kind: 'series', score: 10, category: 'tv_shows' });
+  });
+
+  it('shows S1 alone when only S1 is ranked', () => {
+    expect(ids(tv([season('s1', 'shameless', 1)], []))).toEqual(['s1']);
+  });
+
+  it('shows both seasons when S1 and S2 are ranked', () => {
+    const items = tv(
+      [season('s1', 'shameless', 1), season('s2', 'shameless', 2, { position: 2 })],
+      [],
+    );
+    expect(ids(items)).toEqual(['s1', 's2']);
+  });
+
+  it('shows S1 and hides the show when both are ranked', () => {
+    expect(ids(tv([season('s1', 'shameless', 1)], [show('shameless')]))).toEqual(['s1']);
+  });
+
+  it('shows every ranked season and no show poster when several seasons are ranked', () => {
+    const items = tv(
+      [
+        season('s4', 'shameless', 4),
+        season('s5', 'shameless', 5, { position: 2 }),
+        season('s10', 'shameless', 10, { position: 3 }),
+      ],
+      [show('shameless'), show('other', { position: 2 })],
+    );
+    expect(ids(items).sort()).toEqual(['other', 's10', 's4', 's5']);
+  });
+
+  it('never lets a hidden show come back through the logged half', () => {
+    const items = tv(
+      [season('s1', 'shameless', 1)],
+      [show('shameless')],
+      [
+        logged({
+          mediaItemId: 'shameless',
+          kind: 'series',
+          title: 'Shameless',
+          bucket: 'loved',
+        }),
+      ],
+    );
+    expect(ids(items)).toEqual(['s1']);
+  });
+
+  it('scores each pool against its own bands, never pooled', () => {
+    // Two loved seasons and one loved show. Pooled, the show would share a band of three
+    // and score below 10; on its own it is a band of one and scores the high.
+    const items = tv(
+      [season('s1', 'a', 1), season('s2', 'a', 2, { position: 2 })],
+      [show('b')],
+    );
+    const by = new Map(items.map((item) => [item.mediaItemId, item.score]));
+    expect(by.get('b')).toBe(10);
+    expect(by.get('s1')).toBe(10);
+    expect(by.get('s2')).toBe(7);
+  });
+
+  it('puts no artificial score on a show nobody ranked', () => {
+    const items = tv([season('s1', 'a', 1)], []);
+    expect(items.find((item) => item.mediaItemId === 'a')).toBeUndefined();
+  });
+
+  it('never compares a show’s ordinal with a season’s when their scores tie', () => {
+    // Both print 10.0 at position 1 of their own pool. The tie falls to a fixed pool order
+    // (seasons, then shows) and then the id, whatever the ordinals say.
+    const items = tv(
+      [season('s9', 'z', 9, { position: 1 })],
+      [show('a-show', { position: 1 })],
+    );
+    const sorted = sortItems(items, { axis: 'rating', direction: 'desc' });
+    expect(ids(sorted)).toEqual(['s9', 'a-show']);
+    const reversed = sortItems(items, { axis: 'rating', direction: 'asc' });
+    expect(ids(reversed)).toEqual(['s9', 'a-show']);
+  });
+
+  it('keeps Movies to films, and gives Movies no shows even if some are passed', () => {
+    const items = watchedItems([ranked()], [], 'movies');
+    expect(ids(items)).toEqual(['film-1']);
   });
 });

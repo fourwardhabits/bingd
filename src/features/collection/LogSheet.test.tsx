@@ -331,7 +331,52 @@ describe('choosing a bucket', () => {
 
     await fireEvent.press(sheet.bucket('I liked it'));
 
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
+  });
+
+  /**
+   * **What the completion screen learns about the act** (TV show & season ranking,
+   * 2026-11-14). `freshLog` is the server's own `created`: true only when this tap made
+   * the seen row and its first watch, which is what makes a season's placement "tied to a
+   * new watch" for Update Show. A re-rating of something already collected is not.
+   */
+  it('tells the ranking it began with a new watch log when log_title created the row', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve({
+        data:
+          name === 'log_title'
+            ? { status: 'ok', created: true, watch_event_id: 'w-1' }
+            : { status: 'ok' },
+        error: null,
+      }),
+    );
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: true }),
+    );
+  });
+
+  it('says no new watch when the title was already in the collection', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve({
+        data: name === 'log_title' ? { status: 'ok', created: false } : { status: 'ok' },
+        error: null,
+      }),
+    );
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: false }),
+    );
   });
 
   it('does not enter ranking when the save was refused', async () => {
@@ -1582,9 +1627,7 @@ describe('the watch date', () => {
     await sheet.openDate();
     await fireEvent.press(sheet.getByText('Earlier'));
 
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
 
     await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
@@ -1626,7 +1669,9 @@ describe('ranking a title that was already seen', () => {
     await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     // One bucket write, the hand-off to ranking — and nothing about a date.
@@ -1658,7 +1703,9 @@ describe('ranking a title that was already seen', () => {
     );
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     expect(callsTo('log_title')).toHaveLength(1);
@@ -1720,7 +1767,7 @@ describe('logging a title for the first time', () => {
       // `today_default` records and what `reader` would have claimed falsely.
       p_basis: 'today_default',
     });
-    expect(onRank).toHaveBeenCalledWith('loved', 'start');
+    expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) });
     /**
      * **One call, and it used to be two.** `set_bucket` then `log_watched` was the
      * shape, with a read-back between them and a race this file documented as accepted.
@@ -1738,7 +1785,9 @@ describe('logging a title for the first time', () => {
     await sheet.openDate();
     await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     expect(callsTo('log_title')).toHaveLength(1);
@@ -1761,7 +1810,9 @@ describe('logging a title for the first time', () => {
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     // Every date that reached the server is the one the reader picked.
@@ -1798,9 +1849,9 @@ describe('the When row carries an explicit choice through a logging sitting', ()
     // On screen without opening anything: the answer the sheet is carrying is visible,
     // and Today is one tap away rather than behind a collapsed row.
     expect(sheet.dateRow().props.accessibilityState.expanded).toBe(true);
-    expect(sheet.getByRole('button', { name: 'Earlier' }).props.accessibilityState.selected).toBe(
-      true,
-    );
+    expect(
+      sheet.getByRole('button', { name: 'Earlier' }).props.accessibilityState.selected,
+    ).toBe(true);
     expect(sheet.getByRole('button', { name: 'Today' }).props.accessibilityState.selected).toBe(
       false,
     );
@@ -2641,7 +2692,16 @@ describe('the state after a ranking', () => {
       postRank: { score: 6.2, position: 11, category: 'tv_seasons' },
     });
 
-    await waitFor(() => expect(sheet.getByText('#11 in TV')).toBeTruthy());
+    // "TV seasons" since 2026-11-14: TV is two rankings now, so the pool is named.
+    await waitFor(() => expect(sheet.getByText('#11 in TV seasons')).toBeTruthy());
+  });
+
+  it('names a whole show by its own pool', async () => {
+    const sheet = await open(filmA, {
+      postRank: { score: 8.4, position: 2, category: 'tv_shows' },
+    });
+
+    await waitFor(() => expect(sheet.getByText('#2 in TV shows')).toBeTruthy());
   });
 });
 
@@ -2907,7 +2967,9 @@ describe('the remembered share choice', () => {
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     expect(mockPrefs.has(KEY)).toBe(false);
@@ -2916,11 +2978,18 @@ describe('the remembered share choice', () => {
     // The post-rank sheet the comparisons return to: same note, still private, still no
     // preference written.
     stubReads(
-      { bucket: 'loved', note: 'my own thoughts', note_visibility: 'private', note_updated_at: 'v1' },
+      {
+        bucket: 'loved',
+        note: 'my own thoughts',
+        note_visibility: 'private',
+        note_updated_at: 'v1',
+      },
       { bucket: 'loved' },
     );
     await sheet.show(null);
-    const after = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    const after = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+    });
     await after.openNotes();
     await waitFor(() => expect(shareOn(after)).toBe(false));
     await settle();
@@ -2931,7 +3000,12 @@ describe('the remembered share choice', () => {
   it('opens existing writing on its stored visibility, whatever the preference says', async () => {
     mockPrefs.set(KEY, 'public');
     stubReads(
-      { bucket: 'loved', note: 'kept to myself', note_visibility: 'private', note_updated_at: 'v1' },
+      {
+        bucket: 'loved',
+        note: 'kept to myself',
+        note_visibility: 'private',
+        note_updated_at: 'v1',
+      },
       { bucket: 'loved' },
     );
     const kept = await open(filmA);
@@ -2942,7 +3016,12 @@ describe('the remembered share choice', () => {
 
     mockPrefs.set(KEY, 'private');
     stubReads(
-      { bucket: 'loved', note: 'said it out loud', note_visibility: 'public', note_updated_at: 'v1' },
+      {
+        bucket: 'loved',
+        note: 'said it out loud',
+        note_visibility: 'public',
+        note_updated_at: 'v1',
+      },
       { bucket: 'loved' },
     );
     const published = await open(filmB);
@@ -2953,7 +3032,12 @@ describe('the remembered share choice', () => {
   it('remembers an explicit tap on existing writing for new notes, and leaves stored notes alone', async () => {
     mockPrefs.set(KEY, 'public');
     stubReads(
-      { bucket: 'loved', note: 'said too much', note_visibility: 'public', note_updated_at: 'v1' },
+      {
+        bucket: 'loved',
+        note: 'said too much',
+        note_visibility: 'public',
+        note_updated_at: 'v1',
+      },
       { bucket: 'loved' },
     );
     const sheet = await open(filmA);
@@ -2971,7 +3055,12 @@ describe('the remembered share choice', () => {
 
     // A different stored review still opens on its own saved value: shared.
     stubReads(
-      { bucket: 'loved', note: 'still proud of this', note_visibility: 'public', note_updated_at: 'v2' },
+      {
+        bucket: 'loved',
+        note: 'still proud of this',
+        note_visibility: 'public',
+        note_updated_at: 'v2',
+      },
       { bucket: 'loved' },
     );
     const other = await open(filmB);
@@ -2983,10 +3072,17 @@ describe('the remembered share choice', () => {
     // A note written before the bucket, ranked, then shared once the score is in: the tap
     // is on what is by now a stored note, and it is still the reader's choice.
     stubReads(
-      { bucket: 'loved', note: 'my own thoughts', note_visibility: 'private', note_updated_at: 'v1' },
+      {
+        bucket: 'loved',
+        note: 'my own thoughts',
+        note_visibility: 'private',
+        note_updated_at: 'v1',
+      },
       { bucket: 'loved' },
     );
-    const after = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    const after = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+    });
     await after.openNotes();
     await waitFor(() => expect(shareOn(after)).toBe(false));
     await share(after);
@@ -3033,7 +3129,8 @@ describe('the ranking-start order', () => {
       return at;
     });
   };
-  const ascending = (xs: number[]) => xs.every((x, i) => i === 0 || (xs[i - 1] ?? Infinity) < x);
+  const ascending = (xs: number[]) =>
+    xs.every((x, i) => i === 0 || (xs[i - 1] ?? Infinity) < x);
 
   it('puts who, then the date, then the note first, and the buckets last', async () => {
     const sheet = await open(filmA);
@@ -3061,7 +3158,9 @@ describe('the ranking-start order', () => {
   });
 
   it('keeps its ordinary foot after a ranking, where Done is last', async () => {
-    const sheet = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    const sheet = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+    });
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
     const scroller = sheet.getByTestId('log-sheet-scroll');
     expect(StyleSheet.flatten(scroller.props.contentContainerStyle).paddingBottom).toBe(16);
@@ -3082,7 +3181,9 @@ describe('the ranking-start order', () => {
   });
 
   it('keeps the same row order after a ranking, with Done last and no buckets', async () => {
-    const sheet = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    const sheet = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+    });
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
 
     expect(sheet.queryByTestId('bucket-choices')).toBeNull();
@@ -3107,7 +3208,9 @@ describe('the ranking-start order', () => {
     await fireEvent.changeText(sheet.note(), 'the ending landed');
     await fireEvent.press(sheet.bucket('I liked it'));
 
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await waitFor(() => expect(callsTo('set_watch_date')).toHaveLength(1));
     expect(mockRpc.mock.calls.map(([name]) => name)).toEqual([
       'log_watched',
@@ -3136,7 +3239,10 @@ describe('the ranking-start order', () => {
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'first thoughts');
     // What the server holds now: a row this sheet just made, with no date yet.
-    stubReads({ bucket: null, watched_on: null, note: 'first thoughts', note_updated_at: 'v1' }, null);
+    stubReads(
+      { bucket: null, watched_on: null, note: 'first thoughts', note_updated_at: 'v1' },
+      null,
+    );
     const reads = readsOf('user_media');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -3160,7 +3266,9 @@ describe('the ranking-start order', () => {
       null,
     );
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     expect(callsTo('set_watch_date')).toHaveLength(0);
@@ -3179,7 +3287,9 @@ describe('the ranking-start order', () => {
     // what must not be taken as "still undated" — another device may have dated it.
     stubFailedLogState();
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     await settle();
 
     expect(callsTo('set_watch_date')).toHaveLength(0);
@@ -3193,7 +3303,10 @@ describe('the ranking-start order', () => {
     mockRpc.mockImplementation(async (name: string) => {
       if (name === 'log_watched') {
         await held;
-        return { data: null, error: { code: '22023', message: 'That note could not be saved.' } };
+        return {
+          data: null,
+          error: { code: '22023', message: 'That note could not be saved.' },
+        };
       }
       return { data: { status: 'ok' }, error: null };
     });
@@ -3219,7 +3332,9 @@ describe('the ranking-start order', () => {
     // The reader has seen it. Nothing above the buckets is required, so the next tap
     // ranks even though the note is refused again.
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     expect(callsTo('log_title')).toHaveLength(1);
   });
 
@@ -3268,7 +3383,9 @@ describe('the ranking-start order', () => {
       await held;
     });
 
-    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() =>
+      expect(onRank).toHaveBeenCalledWith('loved', 'start', { freshLog: expect.any(Boolean) }),
+    );
     expect(callsTo('log_title')).toHaveLength(1);
   });
 
@@ -3319,7 +3436,10 @@ describe('the ranking-start order', () => {
         // `log_title` found the row the note had created, so it answered created: false
         // (the stub sends no `created`). The title is still this reader's first log.
         expect(watches(spy)).toEqual([
-          { name: 'watch_logged', props: { kind: 'first', basis: 'today_default', surface: 'search' } },
+          {
+            name: 'watch_logged',
+            props: { kind: 'first', basis: 'today_default', surface: 'search' },
+          },
         ]);
       } finally {
         spy.mockRestore();
@@ -3332,7 +3452,9 @@ describe('the ranking-start order', () => {
       try {
         const sheet = await open(filmA);
         await waitFor(() =>
-          expect(sheet.getByLabelText('Watch date').props.accessibilityState.disabled).toBe(false),
+          expect(sheet.getByLabelText('Watch date').props.accessibilityState.disabled).toBe(
+            false,
+          ),
         );
         await fireEvent.press(sheet.bucket('I liked it'));
         await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
@@ -3366,7 +3488,12 @@ describe('the watch-history row', () => {
         gt: () => chain,
         maybeSingle: () =>
           Promise.resolve({
-            data: table === 'user_media' ? { bucket: 'loved' } : table === 'rankings' ? { bucket: 'loved' } : null,
+            data:
+              table === 'user_media'
+                ? { bucket: 'loved' }
+                : table === 'rankings'
+                  ? { bucket: 'loved' }
+                  : null,
             error: null,
           }),
         then: (resolve: (value: unknown) => unknown) =>
@@ -3382,7 +3509,9 @@ describe('the watch-history row', () => {
   it('offers Watch history from the second viewing', async () => {
     twoWatches();
     const view = await open(filmA);
-    await waitFor(() => expect(view.getByRole('button', { name: 'Watched 2 times' })).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Watched 2 times' })).toBeTruthy(),
+    );
   });
 
   it('draws neither that row nor a date row when opened from Watch History', async () => {

@@ -251,9 +251,9 @@ const FILM_ROW = 'Inception, 2010';
 /**
  * The Log tab (screens.md §2).
  *
- * The distinction this screen exists to make visible: a series cannot be logged. The season
- * is the rankable unit and `_assert_loggable` refuses a series outright (AD-1), so tapping
- * one has to lead somewhere rather than fail.
+ * A whole show is ranked in its own pool since 2026-11-14 (20261114000200), so a series row
+ * behaves as a film's does: the row opens the title, and `+` starts a show-level ranking.
+ * Its seasons are ranked from the show's page.
  */
 describe('a series in the results', () => {
   it('opens title detail from the row', async () => {
@@ -265,24 +265,23 @@ describe('a series in the results', () => {
     expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
-  it('starts season logging from the + action', async () => {
+  /**
+   * **+ on a series ranks the show** (TV show & season ranking, 2026-11-14). The season
+   * picker it used to open is gone from this path: a whole show is ranked in its own pool,
+   * and its seasons are ranked from the show's page.
+   */
+  it('starts a show-level ranking from the + action, with no season picker', async () => {
     const view = await search('breaking');
 
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Breaking Bad'));
-    await waitFor(() => expect(view.getByText('Season 2')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Season 2, 2009'));
-
-    // The series title travels with the season, or the header reads "Season 2" alone.
-    // "Parks and Recreation, S2" is the approved season identity (founder
-    // decision D5, 2026-08-15): an em dash, not a colon, and never a bare "Season 2".
-    await waitFor(() => expect(view.getByText('Breaking Bad, S2')).toBeTruthy());
-
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+    expect(view.queryByText('Season 2')).toBeNull();
     await fireEvent.press(view.getByLabelText('I liked it'));
     await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
 
-    expect(callsTo('log_title')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });
+    expect(callsTo('log_title')[0][1]).toMatchObject({ p_media_item_id: 'series-1' });
   });
 });
 
@@ -349,7 +348,15 @@ describe('arriving on Users', () => {
       Promise.resolve({
         data:
           fn === 'search_users'
-            ? [{ id: 'user-anna', username: 'anna', display_name: 'Anna Rivers', avatar_path: null, visibility: 'public' }]
+            ? [
+                {
+                  id: 'user-anna',
+                  username: 'anna',
+                  display_name: 'Anna Rivers',
+                  avatar_path: null,
+                  visibility: 'public',
+                },
+              ]
             : fn === 'follow_state_with'
               ? []
               : [],
@@ -368,7 +375,14 @@ describe('arriving on Users', () => {
     // A new array on every render, as the router hands a repeated query param over
     // (independent review 1): compared as-is, it set state on every render.
     let reads = 0;
-    Object.defineProperty(mockParams, 'show', { get: () => { reads += 1; return ['users', 'users']; }, enumerable: true, configurable: true });
+    Object.defineProperty(mockParams, 'show', {
+      get: () => {
+        reads += 1;
+        return ['users', 'users'];
+      },
+      enumerable: true,
+      configurable: true,
+    });
     const view = await renderWithProviders(<LogScreen />);
 
     expect(view.getByText('Find people')).toBeTruthy();
@@ -2078,18 +2092,35 @@ describe('the leading action is the reader’s own ranking state', () => {
     expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
   });
 
-  it('never puts a score or a Rank badge on a series', async () => {
+  it('puts the show’s own score on a ranked series, and no Rank badge', async () => {
     /**
-     * A series cannot be ranked (PRD §10), so either badge would be a control lying
-     * about what it does. It keeps `+`, which is not a ranking claim — it opens the
-     * season picker, and the season is the rankable unit. Removing it would take away
-     * the only fast path from "search Breaking Bad" to "rank the season".
+     * A whole show is ranked in its own pool since 2026-11-14, so a ranked show reads
+     * exactly as a ranked film does: its own explicit score, never one made up from its
+     * seasons. No Rank badge either way: the row's control is the score or the `+`.
      */
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'series-1', bucket: 'loved' }];
     tableRows.rankings = [
       {
         user_id: 'user-1',
         media_item_id: 'series-1',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_shows',
+      },
+    ];
+    const view = await search('breaking');
+
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/10\.0 out of 10/)).toBeTruthy());
+    expect(view.queryByLabelText('Log Breaking Bad')).toBeNull();
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+  });
+
+  it('never scores a series from its ranked seasons', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-2',
         bucket: 'loved',
         position: 1,
         category: 'tv_seasons',
@@ -2100,7 +2131,6 @@ describe('the leading action is the reader’s own ranking state', () => {
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
     expect(view.getByLabelText('Log Breaking Bad')).toBeTruthy();
     expect(view.queryByLabelText(/out of 10/)).toBeNull();
-    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
   });
 
   it('offers no watchlist or ranking control on a person', async () => {
@@ -2157,7 +2187,9 @@ describe('the two controls are independent', () => {
     await waitFor(() => expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()),
+    );
     expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });
 
@@ -2333,10 +2365,9 @@ describe('a series whose seasons the reader has already watched', () => {
     expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
   });
 
-  it('keeps the + as the way into season selection', async () => {
-    // The canonical action still works, which is what makes the new clause information
-    // rather than a dead end: one season ranked, two to go, and the way to the second
-    // is the same control it always was.
+  it('keeps the + as the way into ranking the show, whatever its seasons say', async () => {
+    // One season ranked, two to go: the series line says so, and the `+` ranks the show
+    // itself (2026-11-14). The seasons are ranked from the show's page.
     terraceHouse();
     tableRows.user_media = [loggedSeason('th-s1')];
 
@@ -2347,7 +2378,8 @@ describe('a series whose seasons the reader has already watched', () => {
     );
     await fireEvent.press(view.getByLabelText('Log Terrace House: Aloha State'));
 
-    await waitFor(() => expect(view.getByText('Season 2')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+    expect(view.queryByText('Season 2')).toBeNull();
   });
 
   it('says nothing extra about a series the reader has never touched', async () => {

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { batchMedium } from '@/features/ranking/RankedSummary';
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { ProfileAwards } from '@/features/awards/ProfileAwards';
@@ -692,7 +693,7 @@ export default function PublicProfileScreen() {
                           onPress: () =>
                             setRankingBatchFor({
                               id: event.id,
-                              medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                              medium: batchMedium(event.kind),
                             }),
                         }
                       : null

@@ -31,7 +31,7 @@ type Row = {
   media_item_id: string;
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;
-  category: 'movies' | 'tv_seasons';
+  category: 'movies' | 'tv_seasons' | 'tv_shows';
   created_at: string;
   media_items: {
     title: string;
@@ -40,7 +40,7 @@ type Row = {
     poster_path: string | null;
     genres: string[];
     runtime_minutes: number | null;
-    kind: 'movie' | 'season';
+    kind: 'movie' | 'season' | 'series';
     original_language: string | null;
     parent_id: string | null;
     parent: { title: string; genres: string[]; original_language: string | null } | null;
@@ -122,7 +122,8 @@ const ranked = (
     kind: category === 'tv_seasons' ? 'season' : 'movie',
     original_language: 'en',
     parent_id: category === 'tv_seasons' ? 'series-1' : null,
-    parent: category === 'tv_seasons' ? { title, genres: ['Drama'], original_language: 'en' } : null,
+    parent:
+      category === 'tv_seasons' ? { title, genres: ['Drama'], original_language: 'en' } : null,
   },
 });
 
@@ -144,7 +145,9 @@ const wall = (view: View) =>
   });
 
 const open = (userId = 'anna-id', otherName: string | null = 'Anna') =>
-  renderWithProviders(<TopRanked userId={userId} otherName={otherName} onPressTitle={() => {}} />);
+  renderWithProviders(
+    <TopRanked userId={userId} otherName={otherName} onPressTitle={() => {}} />,
+  );
 
 const settled = async (view: View) => {
   await waitFor(() => expect(view.getAllByLabelText(/scored \d/).length).toBeGreaterThan(0));
@@ -242,7 +245,12 @@ describe('All is one list ordered by score', () => {
      */
     mockRows = [
       ...Array.from({ length: 100 }, (_, index) =>
-        ranked(`m-${String(999 - index).padStart(4, '0')}`, `Movie ${index + 1}`, index + 1, 'movies'),
+        ranked(
+          `m-${String(999 - index).padStart(4, '0')}`,
+          `Movie ${index + 1}`,
+          index + 1,
+          'movies',
+        ),
       ),
       ranked('s-a', 'TV A', 1, 'tv_seasons'),
       ranked('s-b', 'TV B', 2, 'tv_seasons'),
@@ -278,9 +286,7 @@ describe('the category tabs still rank inside their own category', () => {
     const view = await settled(await open());
     fireEvent.press(view.getByRole('tab', { name: 'TV Shows' }));
 
-    await waitFor(() =>
-      expect(wall(view)).toEqual(['10.0 TV A', '7.0 TV B', '3.4 TV C']),
-    );
+    await waitFor(() => expect(wall(view)).toEqual(['10.0 TV A', '7.0 TV B', '3.4 TV C']));
   });
 });
 
@@ -295,10 +301,7 @@ describe('the walls with nothing to interleave', () => {
   });
 
   it('has no tabs, and one ranking’s order, when only seasons are ranked', async () => {
-    mockRows = [
-      ranked('s-a', 'TV A', 1, 'tv_seasons'),
-      ranked('s-b', 'TV B', 2, 'tv_seasons'),
-    ];
+    mockRows = [ranked('s-a', 'TV A', 1, 'tv_seasons'), ranked('s-b', 'TV B', 2, 'tv_seasons')];
 
     const view = await settled(await open());
 
@@ -313,5 +316,46 @@ describe('the walls with nothing to interleave', () => {
 
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
     expect(view.getByText('Anna has not ranked anything here yet.')).toBeTruthy();
+  });
+});
+
+/**
+ * **Whole shows on the profile wall** (Candidate A, 2026-11-14). A ranked show stands for
+ * itself only while none of its seasons is ranked, is scored among shows, and joins the TV
+ * wall by the score it prints.
+ */
+describe('a whole show on the wall', () => {
+  const show = (
+    id: string,
+    title: string,
+    position: number,
+    bucket: Row['bucket'] = 'loved',
+  ): Row => ({
+    ...ranked(id, title, position, 'movies', bucket),
+    category: 'tv_shows',
+    media_items: {
+      ...ranked(id, title, position, 'movies', bucket).media_items,
+      kind: 'series',
+      season_number: null,
+      parent_id: null,
+      parent: null,
+    },
+  });
+
+  it('shows a standalone show among the TV titles, scored among shows', async () => {
+    mockRows = [
+      ranked('m-a', 'Movie A', 1, 'movies'),
+      ranked('s-a', 'TV A', 1, 'tv_seasons', 'fine'),
+      show('show-x', 'Severance', 1),
+    ];
+    const view = await settled(await open());
+    // A band of one in its own pool scores the high; never the seasons' 6.9.
+    await waitFor(() => expect(wall(view)).toContain('10.0 Severance'));
+  });
+
+  it('hides a show once one of its seasons is ranked', async () => {
+    mockRows = [ranked('s-a', 'TV A', 1, 'tv_seasons'), show('series-1', 'The Show', 1)];
+    const view = await settled(await open());
+    expect(wall(view).some((tile) => tile.endsWith('The Show'))).toBe(false);
   });
 });

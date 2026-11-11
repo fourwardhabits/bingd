@@ -70,14 +70,13 @@ describe('the first title in a band', () => {
   });
 });
 
-describe('a series cannot be ranked', () => {
-  it('is refused, directing the user to its seasons', async () => {
+describe('a whole show is ranked in its own pool', () => {
+  it('ranks the show as a tv_shows title (20261114000200)', async () => {
     const series = await t.createSeries('Whole Show', 1010);
-    await assert.rejects(
-      () => t.sql(`select rank_start($1, 'loved')`, [series]),
-      /series cannot be ranked/i,
-      'PRD §10 makes the season the unit, not the series',
-    );
+    const r = await one(t.db, `select rank_start($1, 'loved') as r`, [series]);
+    assert.equal(r.done, true);
+    assert.equal(r.category, 'tv_shows', 'shows rank among shows, never among seasons');
+    await t.assertValid(user, 'tv_shows');
   });
 
   it('accepts a season of that series', async () => {

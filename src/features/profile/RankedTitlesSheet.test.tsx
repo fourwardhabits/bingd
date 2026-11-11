@@ -27,6 +27,7 @@ import { RankedTitlesSheet } from './RankedTitlesSheet';
 const mockAsked: { userId: string; category: string; enabled: boolean }[] = [];
 let mockMovies: unknown[] = [];
 let mockSeasons: unknown[] = [];
+let mockShows: unknown[] = [];
 let mockPending = false;
 let mockError = false;
 
@@ -38,7 +39,8 @@ jest.mock('@/features/collection/use-collection', () => ({
   ) => {
     mockAsked.push({ userId, category, enabled: options.enabled ?? true });
     return {
-      data: category === 'movies' ? mockMovies : mockSeasons,
+      data:
+        category === 'movies' ? mockMovies : category === 'tv_shows' ? mockShows : mockSeasons,
       isPending: mockPending,
       isError: mockError,
       refetch: jest.fn(),
@@ -70,6 +72,7 @@ beforeEach(() => {
   mockAsked.length = 0;
   mockMovies = [];
   mockSeasons = [];
+  mockShows = [];
   mockPending = false;
   mockError = false;
 });
@@ -308,8 +311,65 @@ it('reads only the category it is showing', async () => {
 it('reads the other category once it is switched to', async () => {
   await open({ category: 'tv_seasons' });
 
+  // TV is two rankings since 2026-11-14, seasons and whole shows; Movies is not read.
   const enabled = mockAsked.filter((call) => call.enabled).map((call) => call.category);
-  expect(enabled).toEqual(['tv_seasons']);
+  expect([...new Set(enabled)].sort()).toEqual(['tv_seasons', 'tv_shows']);
+});
+
+/**
+ * **TV under Candidate A's precedence** (founder brief §4, 2026-11-14): a ranked show is
+ * listed only while none of its seasons is ranked, and a mixed list is ordered by the score
+ * each row prints, never by ordinal. A show's ordinal is labelled as one.
+ */
+describe('a whole show on the TV list', () => {
+  const show = (over: Record<string, unknown> = {}) =>
+    entry({
+      mediaItemId: 'show-1',
+      title: 'Severance',
+      kind: 'series',
+      category: 'tv_shows',
+      ...over,
+    });
+  const season = (over: Record<string, unknown> = {}) =>
+    entry({
+      mediaItemId: 's-1',
+      title: 'Season 1',
+      seriesTitle: 'The Bear',
+      seasonNumber: 1,
+      kind: 'season',
+      category: 'tv_seasons',
+      seriesId: 'bear',
+      ...over,
+    });
+
+  it('lists a show that stands alone, its ordinal marked as a show’s', async () => {
+    mockShows = [show()];
+    const view = await open({ category: 'tv_seasons' });
+
+    await waitFor(() => expect(view.getByText(/Severance/)).toBeTruthy());
+    expect(view.getByText('show')).toBeTruthy();
+  });
+
+  it('hides a show once one of its seasons is ranked, without touching its score', async () => {
+    mockShows = [show({ mediaItemId: 'bear', title: 'The Bear' })];
+    mockSeasons = [season()];
+    const view = await open({ category: 'tv_seasons' });
+
+    await waitFor(() => expect(view.getByText(/The Bear, S1/)).toBeTruthy());
+    expect(view.queryByText('show')).toBeNull();
+    expect(view.getAllByText(/The Bear/)).toHaveLength(1);
+  });
+
+  it('orders a show and a season by the score each prints', async () => {
+    // A loved season (10.0, a band of one) above a fine show (6.9, a band of one).
+    mockShows = [show({ bucket: 'fine' })];
+    mockSeasons = [season({ bucket: 'loved' })];
+    const view = await open({ category: 'tv_seasons' });
+
+    await waitFor(() => expect(view.getByText(/Severance/)).toBeTruthy());
+    const texts = JSON.stringify(view.toJSON()).match(/"(The Bear, S1|Severance)"/g) ?? [];
+    expect(texts[0]).toContain('The Bear, S1');
+  });
 });
 
 it('names whose collection it is', async () => {
@@ -440,7 +500,12 @@ describe('the sort control', () => {
     // unknown at the top of a list claiming to be newest — and it is why the date test
     // comes before the direction rather than inside it.
     mockMovies = [
-      entry({ mediaItemId: 'a', title: 'Dated', position: 2, rankedAt: '2026-01-01T00:00:00Z' }),
+      entry({
+        mediaItemId: 'a',
+        title: 'Dated',
+        position: 2,
+        rankedAt: '2026-01-01T00:00:00Z',
+      }),
       entry({ mediaItemId: 'b', title: 'Undated', position: 1, rankedAt: null }),
     ];
     const view = await open();
@@ -457,8 +522,18 @@ describe('the sort control', () => {
     // id tiebreak is there anyway: a comparator that is total only by accident of a
     // constraint elsewhere is one schema change from reordering itself between renders.
     mockMovies = [
-      entry({ mediaItemId: 'zz', title: 'Later id', position: 1, rankedAt: '2026-01-01T00:00:00Z' }),
-      entry({ mediaItemId: 'aa', title: 'Earlier id', position: 2, rankedAt: '2026-01-01T00:00:00Z' }),
+      entry({
+        mediaItemId: 'zz',
+        title: 'Later id',
+        position: 1,
+        rankedAt: '2026-01-01T00:00:00Z',
+      }),
+      entry({
+        mediaItemId: 'aa',
+        title: 'Earlier id',
+        position: 2,
+        rankedAt: '2026-01-01T00:00:00Z',
+      }),
     ];
     const view = await open();
     await choose(view, /^Recently ranked$/);
@@ -467,7 +542,7 @@ describe('the sort control', () => {
     expect(drawn(view)[1]).toMatch(/Later id/);
   });
 
-  it('never offers a watch-date order over somebody else\'s collection', async () => {
+  it("never offers a watch-date order over somebody else's collection", async () => {
     // PRD §22: watch dates are private on any profile, at any visibility, to anybody.
     // The menu is the one place a reversal of that would be easy to make in passing.
     mockMovies = three;

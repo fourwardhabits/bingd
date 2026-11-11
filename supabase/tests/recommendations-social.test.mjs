@@ -204,9 +204,11 @@ describe('who may be recommended to', () => {
 });
 
 describe('what may be recommended', () => {
-  it('refuses a whole series, because a series is not a thing anybody watched', async () => {
+  it('accepts a whole show, which is rankable in its own pool (20261114000200)', async () => {
     const series = await t.createSeries('rec_series', seq++);
-    assert.equal(await refusal(bob, series), 'not_recommendable');
+    assert.equal((await recommend(bob, series)).status, 'ok');
+    const row = (await inbox(bob)).find((r) => r.media_item_id === series);
+    assert.equal(row.media_kind, 'series');
   });
 
   it('accepts an exact season, and names the show it belongs to', async () => {
@@ -225,7 +227,7 @@ describe('what may be recommended', () => {
     assert.equal(
       await refusal(bob, '00000000-0000-4000-8000-000000000001'),
       'not_recommendable',
-      'and reports the same way as a series, which discloses nothing: media_items is world-readable',
+      'which discloses nothing: media_items is world-readable',
     );
   });
 });

@@ -126,7 +126,11 @@ export default function suite() {
       const ranked = await rankingOf(db, user, film);
       const logged = await collectionOf(db, user, film);
       assert.equal(ranked?.bucket, 'loved');
-      assert.equal(logged?.bucket, 'loved', 'user_media.bucket must equal rankings.bucket (I3)');
+      assert.equal(
+        logged?.bucket,
+        'loved',
+        'user_media.bucket must equal rankings.bucket (I3)',
+      );
       await assertValid(db, user);
 
       await ranker.end();
@@ -459,7 +463,10 @@ export default function suite() {
       await solo.q(`select rank_answer($1, $2)`, [placing.session_id, subject]);
       // The re-ranking session: opened, and the old position deliberately still there.
       const again = (
-        await solo.one(`select rank_again($1, 'loved', $2, true) as r`, [subject, await newOp(db)])
+        await solo.one(`select rank_again($1, 'loved', $2, true) as r`, [
+          subject,
+          await newOp(db),
+        ])
       ).r;
       await solo.end();
       assert.equal(again.done, false, 'the fixture must leave a provisional session open');
@@ -677,6 +684,111 @@ export default function suite() {
 
       await first.end();
       await second.end();
+    });
+  });
+
+  /**
+   * **A whole show is a third pool with its own category lock** (20261114000200).
+   *
+   * `_rank_finalize` keys its advisory lock on (user, category), so two shows placed into
+   * one band at once serialise on the `tv_shows` key exactly as two films do on `movies`,
+   * and I1 holds for the show ranking. And because a show and its season are two pools, a
+   * show's placement never waits on a season's: nothing about one level can block, shift
+   * or reorder the other.
+   */
+  describe('TV shows, ranked in their own pool', () => {
+    before(() => rc.open());
+    after(() => rc.close());
+
+    it('serialises two shows placed into one band on the tv_shows category lock', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const one = await fx.createSeries('Show race one');
+      const two = await fx.createSeries('Show race two');
+
+      await db.armBarrier('rankings', 'show-lock');
+      const ctl = await db.controller();
+      await ctl.hold('show-lock');
+
+      const first = await db.session('show-one');
+      const second = await db.session('show-two');
+      await first.actAs(user);
+      await second.actAs(user);
+
+      await first.begin();
+      await first.pauseAt('show-lock');
+      const held = fire(first, `rank_start($1, 'loved')`, [one]);
+      await first.awaitBlocked();
+
+      await second.begin();
+      const overlapping = fire(second, `rank_start($1, 'loved')`, [two]);
+      await second.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.categoryKey(user, 'tv_shows'),
+      });
+
+      await ctl.release('show-lock');
+      await held;
+      await first.commit();
+      await overlapping;
+      await second.commit();
+      await ctl.end();
+
+      await assertValid(db, user, 'tv_shows');
+      const rows = await db.rows(
+        `select position from rankings where user_id = $1 and category = 'tv_shows' order by position`,
+        [user],
+      );
+      assert.deepEqual(
+        rows.map((r) => r.position),
+        [1, 2],
+        'positions are 1..n with no gap and no duplicate (I1)',
+      );
+
+      await first.end();
+      await second.end();
+    });
+
+    it('never makes a show wait on its own season, or the reverse', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const show = await fx.createSeries('Show and season race');
+      const season = await fx.createSeason(show, 1);
+
+      await db.armBarrier('rankings', 'show-vs-season');
+      const ctl = await db.controller();
+      await ctl.hold('show-vs-season');
+
+      const showSession = await db.session('show');
+      const seasonSession = await db.session('season');
+      await showSession.actAs(user);
+      await seasonSession.actAs(user);
+
+      // The show is held inside `_rank_finalize`, holding media(show) and the tv_shows
+      // category lock.
+      await showSession.begin();
+      await showSession.pauseAt('show-vs-season');
+      const held = fire(showSession, `rank_start($1, 'loved')`, [show]);
+      await showSession.awaitBlocked();
+
+      // The season is a different title in a different pool: it completes while the show
+      // is still held.
+      await seasonSession.begin();
+      await fire(seasonSession, `rank_start($1, 'loved')`, [season]);
+      await seasonSession.commit();
+
+      await ctl.release('show-vs-season');
+      await held;
+      await showSession.commit();
+      await ctl.end();
+
+      await assertValid(db, user, 'tv_shows');
+      await assertValid(db, user, 'tv_seasons');
+      assert.equal((await rankingOf(db, user, show))?.category, 'tv_shows');
+      assert.equal((await rankingOf(db, user, season))?.category, 'tv_seasons');
+
+      await showSession.end();
+      await seasonSession.end();
     });
   });
 

@@ -26,6 +26,35 @@ export function filterByMedium<T extends { kind: 'movie' | 'season' | 'series' }
 }
 
 /**
+ * **Candidate A's precedence** (founder brief §4, 2026-11-14), as one rule every
+ * collection and profile surface shares: a ranked show is drawn only while none of its
+ * seasons is ranked. Presentation only. The show's ranking is never deleted, suppressed in
+ * storage or recalculated; it is still on the show's page, in the feed, the scores and
+ * recommendations. Not applied to watchlists, custom lists, the feed or ranking data.
+ *
+ *   Show only                show poster + show score
+ *   Season 1 only            S1 poster + score
+ *   Seasons 1 and 2          both season posters + scores
+ *   Show + S1                S1 only
+ *   Show + several seasons   every ranked season; no show poster
+ */
+export function standsAloneBeside(seasons: readonly { kind: string; seriesId?: string | null }[]) {
+  const shown = new Set(
+    seasons
+      .filter((entry) => entry.kind === 'season' && entry.seriesId)
+      .map((entry) => entry.seriesId as string),
+  );
+  return (item: { kind: string; mediaItemId: string }) =>
+    !(item.kind === 'series' && shown.has(item.mediaItemId));
+}
+
+/** The ranked shows that stand alone beside these ranked seasons. */
+export const standaloneShows = <T extends { kind: string; mediaItemId: string }>(
+  seasons: readonly { kind: string; seriesId?: string | null }[],
+  shows: readonly T[],
+): T[] => shows.filter(standsAloneBeside(seasons));
+
+/**
  * Ranked titles by score, then everything watched but not yet ranked.
  *
  * **Why this deduplicates.** The two halves come from two independent queries —
@@ -119,36 +148,55 @@ export function watchedItems(
   ranked: readonly RankedEntry[],
   logged: readonly LoggedEntry[],
   medium: RankingCategory,
+  /**
+   * The TV side's second ranking, `tv_shows` (20261114000100): the whole shows the reader
+   * ranked explicitly. Empty for Movies, and for a backend or a cache that has none.
+   */
+  shows: readonly RankedEntry[] = [],
 ): CollectionItem[] {
-  const sizes = bandSizes(ranked);
   const byId = new Map(logged.map((entry) => [entry.mediaItemId, entry]));
 
-  const items: CollectionItem[] = ranked.map((entry) => ({
-    mediaItemId: entry.mediaItemId,
-    title: entry.title,
-    seriesTitle: entry.seriesTitle,
-    seasonNumber: entry.seasonNumber,
-    kind: entry.kind,
-    year: entry.year,
-    posterPath: entry.posterPath,
-    genres: entry.genres,
-    language: entry.language,
-    runtimeMinutes: entry.runtimeMinutes,
-    score: scoreFor(entry.bucket, entry.position, sizes),
-    // What the Rating order breaks an equal score on. See `CollectionItem.position`.
-    position: entry.position,
-    bucket: entry.bucket,
-    // A ranked title's watch date and collection timestamp live on `user_media`, which
-    // the logged query holds — so they are read across from there. See the note above
-    // for what happens when the caller hands over a list this cannot find them in.
-    watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
-    addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
-  }));
+  // **Scored per pool, each against its own band sizes.** A show is scored among shows
+  // and a season among seasons; one pooled set of sizes would let a show's bucket count
+  // move a season's score and the reverse.
+  const scored = (pool: readonly RankedEntry[]): CollectionItem[] => {
+    const sizes = bandSizes(pool);
+    return pool.map((entry) => ({
+      mediaItemId: entry.mediaItemId,
+      title: entry.title,
+      seriesTitle: entry.seriesTitle,
+      seasonNumber: entry.seasonNumber,
+      kind: entry.kind,
+      year: entry.year,
+      posterPath: entry.posterPath,
+      genres: entry.genres,
+      language: entry.language,
+      runtimeMinutes: entry.runtimeMinutes,
+      score: scoreFor(entry.bucket, entry.position, sizes),
+      // What the Rating order breaks an equal score on, inside this pool only. See
+      // `CollectionItem.position` and `.category`.
+      position: entry.position,
+      category: entry.category,
+      bucket: entry.bucket,
+      // A ranked title's watch date and collection timestamp live on `user_media`, which
+      // the logged query holds — so they are read across from there. See the note above
+      // for what happens when the caller hands over a list this cannot find them in.
+      watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
+      addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
+    }));
+  };
 
-  const seen = new Set(items.map((item) => item.mediaItemId));
+  // Candidate A's precedence: see `standsAloneBeside`.
+  const standsAlone = standsAloneBeside(ranked);
+
+  const all = [...scored(ranked), ...scored(shows)];
+  const items = all.filter(standsAlone);
+  // Hidden shows count as seen, so the logged half cannot bring one back as unranked.
+  const seen = new Set(all.map((item) => item.mediaItemId));
 
   for (const entry of filterByMedium(logged, medium)) {
     if (seen.has(entry.mediaItemId)) continue;
+    if (!standsAlone(entry)) continue;
     items.push({
       ...toItem(entry),
       score: null,
