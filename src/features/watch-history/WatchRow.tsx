@@ -5,12 +5,17 @@ import { formatWatchDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { fontFamily, theme } from '@/ui/tokens';
-import { Button, ScoreBadge, Text } from '@/ui/components';
+import { Button, ScoreBadge, SheetRow, Text } from '@/ui/components';
 
 import { useTitleNote } from '@/features/collection/use-title-note';
 
 import { WatchDetailsRows } from './WatchDetailsRows';
-import { isFromDiary, type WatchEvent, type WatchRowLabel, type WatchScore } from './watch-history';
+import {
+  isFromDiary,
+  type WatchEvent,
+  type WatchRowLabel,
+  type WatchScore,
+} from './watch-history';
 
 /** A note longer than this opens collapsed to three lines, with More. */
 const NOTE_PREVIEW = 140;
@@ -41,6 +46,13 @@ export type WatchRowProps = {
   onDismissEdit: () => void;
   onSave: (edit: WatchEdit) => void;
   onRemove: () => void;
+  /**
+   * **Edit ranking**, offered inside the editor when the title is ranked (UI consistency
+   * sprint, 2026-11-10). It opens the title's existing correction flow — *Update your
+   * rating*'s band chooser and comparisons — and records no watch. Absent for a title with
+   * no ranking to correct, and the row is not drawn.
+   */
+  onEditRanking?: () => void;
   busy?: boolean;
 };
 
@@ -54,10 +66,18 @@ export type WatchRowProps = {
  * poster (the reader is inside the title) and no `#X of Y` (the ledger keeps it; it is not
  * a historical opinion).
  *
- * **Edit** is a small text action, and editing reuses the log sheet's own rows
- * (`WatchDetailsRows`) inline — no modal, so the ranking flow's sheets can still stack.
- * Editing a watch never touches the current ranking; that changes through Update your
- * rating.
+ * **Edit** is a small text action directly under the date, and editing reuses the log
+ * sheet's own rows (`WatchDetailsRows`) inline — no modal, so the ranking flow's sheets can
+ * still stack. Editing a watch never touches the current ranking; that changes through
+ * **Edit ranking**, a separate action in the editor that opens *Update your rating*'s
+ * existing flow.
+ *
+ * The three acts stay three (UI consistency sprint, 2026-11-10):
+ *   Log another watch   a new viewing — the title page's, not this screen's.
+ *   Edit (this watch)   this viewing's date, who with, and the title's note.
+ *   Edit ranking        the *current* ranking, through comparisons. No watch is created,
+ *                       none is removed, and the scores frozen on earlier watches stay
+ *                       frozen (`scoresByWatch`).
  */
 export function WatchRow({
   event,
@@ -74,6 +94,7 @@ export function WatchRow({
   onDismissEdit,
   onSave,
   onRemove,
+  onEditRanking,
   busy = false,
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
@@ -88,11 +109,43 @@ export function WatchRow({
 
   return (
     <View style={styles.row} testID={`watch-row-${event.id}`}>
-      <View style={styles.main}>
-        <View style={styles.body}>
+      {/**
+       * **The date and Edit on the left, the score on the right** (founder, UI consistency
+       * sprint, 2026-11-10). Edit sits directly under the date it edits, so the score
+       * circle is the only thing in the right column and stays centred on the row's lead
+       * — it no longer moves down when Edit is drawn beside it. Edit keeps the full 44pt
+       * target the 2026-11-07 pass gave it, with the word centred in it.
+       */}
+      <View style={styles.main} testID={`watch-main-${event.id}`}>
+        <View style={styles.lead}>
           <Text variant="headline" testID={`watch-date-${event.id}`}>
             {primary}
           </Text>
+          {editing ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Edit this watch, ${dateLabel}`}
+              onPress={onEdit}
+              style={({ pressed }) => [styles.edit, pressed && styles.editPressed]}
+              testID={`watch-edit-${event.id}`}
+            >
+              <Text variant="footnote" tone="action" style={styles.editLabel}>
+                Edit
+              </Text>
+            </Pressable>
+          )}
+        </View>
+
+        {score ? (
+          <View testID={`watch-score-${event.id}`}>
+            <ScoreBadge score={score.score} bucket={score.bucket as Bucket | null} size="sm" />
+          </View>
+        ) : null}
+      </View>
+
+      {/* The watch's facts, the full width of the row so a long note reads as prose. */}
+      {label === 'earlier' || source || withLine || note ? (
+        <View style={styles.facts}>
           {label === 'earlier' ? (
             <Text variant="footnote" tone="tertiary">
               Date not recorded
@@ -123,43 +176,15 @@ export function WatchRow({
               accessibilityRole="button"
               onPress={() => setExpanded((was) => !was)}
               hitSlop={theme.space[2]}
+              style={styles.more}
             >
               <Text variant="footnote" tone="action">
                 {expanded ? 'Less' : 'More'}
               </Text>
             </Pressable>
           ) : null}
-
         </View>
-
-        {/**
-         * **The score and Edit, one column at the right** (founder, marquee cohesion
-         * sprint, 2026-11-07): the watch's facts read down the left, and the two things
-         * about it that are not prose — what it scored then, and the way to change it —
-         * line up on the right edge of every row. Edit is the word alone (founder, device
-         * QA, 2026-09-25), now a full 44pt target rather than a caption with slop.
-         */}
-        <View style={styles.aside}>
-          {score ? (
-            <View testID={`watch-score-${event.id}`}>
-              <ScoreBadge score={score.score} bucket={score.bucket as Bucket | null} size="sm" />
-            </View>
-          ) : null}
-          {editing ? null : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Edit this watch, ${dateLabel}`}
-              onPress={onEdit}
-              style={({ pressed }) => [styles.edit, pressed && styles.editPressed]}
-              testID={`watch-edit-${event.id}`}
-            >
-              <Text variant="footnote" tone="action" style={styles.editLabel}>
-                Edit
-              </Text>
-            </Pressable>
-          )}
-        </View>
-      </View>
+      ) : null}
 
       {editing ? (
         <WatchEditor
@@ -177,6 +202,7 @@ export function WatchRow({
             onDismissEdit();
           }}
           onRemove={onRemove}
+          onEditRanking={onEditRanking}
         />
       ) : null}
     </View>
@@ -195,6 +221,7 @@ function WatchEditor({
   onCancel,
   onSave,
   onRemove,
+  onEditRanking,
 }: {
   event: WatchEvent;
   mediaItemId: string;
@@ -207,6 +234,7 @@ function WatchEditor({
   onCancel: () => void;
   onSave: (edit: WatchEdit) => void;
   onRemove: () => void;
+  onEditRanking?: () => void;
 }) {
   const [date, setDate] = useState(event.watchedOn);
   // The note here is the title's one note now, not this watch's private line.
@@ -260,46 +288,95 @@ function WatchEditor({
        * The ellipsis is gone with the contradiction: this is the act, not a doorway to
        * somewhere else that performs it.
        */}
-      <Pressable
-        accessibilityRole="button"
-        disabled={busy}
-        onPress={onRemove}
-        style={styles.remove}
-        testID={`watch-remove-${event.id}`}
-      >
-        <Text variant="footnote" tone="action">
-          {onlyWatch ? 'Remove from collection' : 'Remove this watch'}
-        </Text>
-      </Pressable>
+      {/**
+       * **The two acts that are not this watch's details** (founder, UI consistency
+       * sprint, 2026-11-10), below the form and its Save so neither reads as a field.
+       *
+       * *Edit ranking* changes the title's current ranking through the existing flow and
+       * leaves this watch alone. A note typed above is flushed first, as Save does, so the
+       * rating sheet opens on it; the date and the companions are not saved, exactly as
+       * Cancel leaves them — the sheet is about the ranking, not this viewing.
+       *
+       * *Remove* is unchanged: the destructive act, behind Edit, exactly as before.
+       */}
+      <View style={styles.otherActions}>
+        {onEditRanking ? (
+          <View testID={`watch-edit-ranking-${event.id}`}>
+            <SheetRow
+              icon="swap-vertical-outline"
+              label="Edit ranking"
+              onPress={
+                busy
+                  ? undefined
+                  : () =>
+                      void (async () => {
+                        await titleNote.flush();
+                        onEditRanking();
+                      })()
+              }
+              disabledReason={busy ? 'Saving' : undefined}
+            />
+          </View>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          disabled={busy}
+          onPress={onRemove}
+          style={({ pressed }) => [styles.remove, pressed && styles.editPressed]}
+          testID={`watch-remove-${event.id}`}
+        >
+          <Text variant="footnote" tone="action">
+            {onlyWatch ? 'Remove from collection' : 'Remove this watch'}
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
+  /**
+   * The row's gutters live on its parts rather than on the row, so the inline editor can be
+   * the full width of the screen — the log sheet's rows draw their own gutters — without
+   * a negative margin pulling it back out over padding it should never have been inside.
+   */
+  row: { paddingVertical: theme.space[3] },
+  main: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
   },
-  main: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[3] },
-  body: { flex: 1, gap: theme.space[1] },
-  aside: { alignItems: 'flex-end' },
-  // The word on the date's line (or under the score), the rest of its 44pt target below it.
+  // The date, then Edit under it. Takes what the score leaves, so a long date wraps here.
+  lead: { flex: 1, alignItems: 'flex-start' },
+  // The word centred in a full 44pt target, flush with the date's left edge.
   edit: {
     minHeight: theme.layout.minTapTarget,
     minWidth: theme.layout.minTapTarget,
-    alignItems: 'flex-end',
-    justifyContent: 'flex-start',
-    paddingTop: 3,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   editLabel: { fontFamily: fontFamily.sansMedium },
   editPressed: { opacity: 0.6 },
-  // Pulled out to the screen's edges so the log sheet's rows sit at their own gutters.
-  editor: { marginTop: theme.space[3], marginHorizontal: -theme.layout.gutter, gap: theme.space[3] },
+  facts: { gap: theme.space[1], paddingHorizontal: theme.layout.gutter },
+  more: { alignSelf: 'flex-start' },
+  editor: { marginTop: theme.space[3], gap: theme.space[3] },
   actions: {
     flexDirection: 'row',
     gap: theme.space[3],
     justifyContent: 'flex-end',
     paddingHorizontal: theme.layout.gutter,
   },
-  remove: { paddingVertical: theme.space[1], paddingHorizontal: theme.layout.gutter },
+  // A hairline, as above the detail rows, so the two acts read as apart from the form.
+  otherActions: {
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
+  // A full 44pt target for the destructive act, the word on the gutter.
+  remove: {
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: theme.layout.gutter,
+  },
 });
