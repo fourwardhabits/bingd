@@ -1,3 +1,7 @@
+> **Superseded** by [`recommendations-v2-evaluation-results-2026-11-11.md`](./recommendations-v2-evaluation-results-2026-11-11.md),
+> the same world and config re-run on the engines as fixed after the 2026-11-11 independent
+> review. Kept as the record of what was measured on the code first submitted.
+
 > **SYNTHETIC DATA.** Every number below comes from a generated world whose people, tastes and
 > rankings are assumptions (`evaluation/world.ts`). It shows how the engines behave under that
 > model. It is **not** evidence that any engine is better for real bingd readers.

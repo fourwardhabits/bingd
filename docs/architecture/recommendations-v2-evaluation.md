@@ -7,7 +7,10 @@
 
 Founder spec 2026-11-10, §4 A3. Code: `src/features/recommendations/evaluation/` and
 `scripts/rec-eval/collaborative.mjs`. Results of the run recorded here:
-[`recommendations-v2-evaluation-results-2026-11-10.md`](./recommendations-v2-evaluation-results-2026-11-10.md).
+[`recommendations-v2-evaluation-results-2026-11-11.md`](./recommendations-v2-evaluation-results-2026-11-11.md)
+(the engines as fixed after the 2026-11-11 independent review; the 2026-11-10 run on the
+first submission is kept beside it). Server capacity on real PostgreSQL is a separate
+document: [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md).
 
 ## 1. Why synthetic
 
@@ -64,8 +67,11 @@ Paired differences against V1, all 400 readers (mean ± 95% interval):
 
 | | Held-out recall@20 | Pool recall | Oracle utility pct | Non-English share | Open languages served | Era share | Popularity pct |
 |---|---|---|---|---|---|---|---|
-| V2 metadata (A1) | −0.005 ± 0.005 | **−0.064 ± 0.017** | −0.004 ± 0.003 | **+0.034 ± 0.006** | **+0.155 ± 0.036** | +0.009 ± 0.006 | +0.002 ± 0.003 |
-| V2 hybrid (A2) | −0.003 ± 0.006 | **−0.040 ± 0.019** | −0.003 ± 0.003 | **+0.034 ± 0.006** | **+0.156 ± 0.037** | +0.008 ± 0.007 | +0.006 ± 0.003 |
+| V2 metadata (A1) | −0.005 ± 0.005 | **−0.064 ± 0.017** | −0.004 ± 0.003 | **+0.035 ± 0.006** | **+0.155 ± 0.036** | +0.009 ± 0.006 | +0.002 ± 0.003 |
+| V2 hybrid (A2) | −0.003 ± 0.006 | **−0.045 ± 0.018** | −0.003 ± 0.003 | **+0.035 ± 0.006** | **+0.158 ± 0.037** | +0.009 ± 0.006 | +0.005 ± 0.003 |
+
+(2026-11-11 re-run on the reviewed engines. Within noise of the 2026-11-10 run on the first
+submission; no weight was changed between them.)
 
 What the model says, in order of confidence:
 
@@ -74,8 +80,14 @@ What the model says, in order of confidence:
    and the share of a reader's open languages served rises by 0.14–0.20, without lowering the
    wall's oracle utility for those readers (non-English stratum −0.000 ± 0.009, polyglot
    +0.000 ± 0.006). Non-English titles enter the pool *and* reach the wall.
-2. **Following has no effect under V2.** A different random follow graph per reader changed
-   0/400 walls under V2 hybrid and 115/400 under V1.
+2. **Following has no effect under V2 — by construction here, by test elsewhere.** A
+   different random follow graph per reader changed 0/400 walls under V2 hybrid and 115/400
+   under V1. The 0 is structural, not a measurement: the pipeline gives V2 no social source
+   and `collaborative.mjs` loads no follows, so nothing could change. What shows it of the
+   shipped code is the DB test (a followed neighbour weighs exactly what an unfollowed one
+   does, `taste-neighbours.test.mjs`) and the hook test (`social_candidates` is never called
+   under V2, `for-you-engine-v2.test.tsx`). The 115/400 is the real finding: under V1,
+   following moves the wall.
 3. **It is not free.** Held-out recall is flat to slightly lower and pool recall is clearly
    lower. In this world V1's follow-graph candidates carry some signal (30% of follows are
    same-cluster), and V2 deliberately stops using following; catalogue and language anchors
@@ -84,16 +96,21 @@ What the model says, in order of confidence:
 4. **Cold start is worse under V2** (oracle utility −0.028 ± 0.012, popularity +0.029): with
    five rankings the behavioural profile is mostly prior, and the catalogue fill leans
    popular.
-5. **The collaborative source helps the pool modestly** (+0.024 ± 0.008 pool recall over V2
-   metadata) and reached 139/400 readers (mean 3.5 neighbours): overlap in this world is
+5. **The collaborative source helps the pool modestly** (+0.019 ± 0.007 pool recall over V2
+   metadata) and reached 139/400 readers (mean 3.4 neighbours): overlap in this world is
    sparse, as it will be in early real data. The scoring term alone moves little at the
    shipped weight; at 0.25–0.35 held-out recall and utility rise slightly while popularity
    rises and language coverage dips. Not acted on (no tuning to synthetic data).
 6. **Ablations:** era term and language anchors each carry their own target metric and little
-   else; negative evidence had no measurable effect on disliked-genre share in this world.
+   else. Negative evidence still has no measurable effect on disliked-genre share in this
+   world, even after the review fix that lets a disliked genre lower multi-genre titles: the
+   world's disliked genres are rare on the walls under every engine (≈5.5%), so there is
+   little for the term to remove. That is a limit of the world, not evidence the term works.
 7. **Cost:** client scoring 1.0 ms (V1), 3.8 ms (V2 metadata), 3.9 ms (V2 hybrid) per slate
-   on this machine; the collaborative read was 94 ms per refreshing call in single-connection
-   PGlite (not production Postgres; see the scale benchmark for real Postgres).
+   on an otherwise idle machine (2026-11-10; the 2026-11-11 re-run shared the machine with the
+   scale benchmark and reads 1.6 / 5.8 / 5.5 ms). Server cost on real PostgreSQL, up to 1M
+   synthetic accounts, is in
+   [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md).
 
 ## 4. Rollout readiness
 
