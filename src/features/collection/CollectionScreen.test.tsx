@@ -1,4 +1,4 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -776,16 +776,6 @@ describe('the unranked card', () => {
 });
 
 /**
- * **A Collection that failed to load could not be asked again.**
- *
- * The three panes each render `EmptyState kind="couldNotLoad"` on error, which is the
- * right half of the contract — the reader is told, rather than shown an empty collection
- * that isn't theirs. What was missing was anything to press: no retry action, and this
- * screen has no pull-to-refresh either, so a read that failed once stayed failed until the
- * app was killed. On the founder's build 4 that is indistinguishable from the app being
- * broken.
- */
-/**
  * **The marquee's menu stays open when the section under it finishes loading** (2026-11-11).
  *
  * Loading and failed sections used to draw a toolbar of their own, and the list drew
@@ -840,6 +830,16 @@ describe('a section that lands under an open menu', () => {
   });
 });
 
+/**
+ * **A Collection that failed to load could not be asked again.**
+ *
+ * The three panes each render `EmptyState kind="couldNotLoad"` on error, which is the
+ * right half of the contract — the reader is told, rather than shown an empty collection
+ * that isn't theirs. What was missing was anything to press: no retry action, and this
+ * screen has no pull-to-refresh either, so a read that failed once stayed failed until the
+ * app was killed. On the founder's build 4 that is indistinguishable from the app being
+ * broken.
+ */
 describe('when a collection read fails', () => {
   it('offers a retry rather than a dead end', async () => {
     mockFailing.add('rankings');
@@ -868,6 +868,22 @@ describe('when a collection read fails', () => {
    * The distinction the fix must not blur: an empty collection is a fact about the
    * account and is still drawn as one.
    */
+  /**
+   * **Centred in the room the list would have had** (independent review, 2026-11-11). The
+   * state is drawn in the list's header now, where `EmptyState`'s `flex: 1` has nothing to
+   * fill, so it is given a minimum height from the window instead of sitting pinned under
+   * the toolbar.
+   */
+  it('centres a failed or empty section in the page, not pinned under the toolbar', async () => {
+    mockFailing.add('rankings');
+    const view = await renderWithProviders(<CollectionScreen />);
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+    const fill = StyleSheet.flatten(view.getByTestId('collection-state-fill').props.style);
+    expect(fill.justifyContent).toBe('center');
+    expect(fill.minHeight).toBeGreaterThan(300);
+    expect(within(view.getByTestId('collection-state-fill')).getByText('Could not load')).toBeTruthy();
+  });
+
   it('still tells an empty collection apart from a broken one', async () => {
     const view = await renderWithProviders(<CollectionScreen />);
 

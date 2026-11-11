@@ -31,7 +31,7 @@
 >
 > - **Watch History** (#196): multiple watches and rewatches, the Watch History screen,
 >   per-watch date and watched-with (the note is the title's one note; see below). A **rewatch** (*Log another watch*) is a new watch.
->   A **rerank** (*Update your rating*) is a correction that writes no watch and no post. Each
+>   A **rerank** (*Edit ranking*, labelled *Update your rating* until 2026-11-11) is a correction that writes no watch and no post. Each
 >   watch's feed post keeps the score held at that watch; a correction moves only the latest
 >   watch's post. Design: [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md).
 > - **Native Lists v1** (#196): mixed media, privacy (Only you / Anyone with the link /
@@ -1047,7 +1047,7 @@ Three properties this is required to keep:
 > | | What the reader is saying | Feed activity |
 > |---|---|---|
 > | **Log another watch** (was *Rank again*, then *I watched it again*; renamed 2026-09-07) | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
-> | **Update your rating** (see the 2026-09-08 note below) | the opinion I recorded was wrong, or it is in the wrong place | **none** — the original activity stands |
+> | **Edit ranking** (*Update your rating* until 2026-11-11; see the 2026-09-08 note below) | the opinion I recorded was wrong, or it is in the wrong place | **none** — the original activity stands |
 >
 > A **band change** — loved to fine — is an Update your rating and writes no activity
 > either. Moving a title between bands is a correction to a rating, not a second viewing.

@@ -12,6 +12,7 @@ import {
 } from '@/features/collection/use-collection';
 import {
   CollectionView,
+  StateFill,
   initialViewState,
   isCollectionViewMode,
   type CollectionViewState,
@@ -835,12 +836,14 @@ function backlogCountLine(total: number, medium: Medium) {
  */
 function CouldNotLoad({ onRetry }: { onRetry: () => void }) {
   return (
-    <EmptyState
-      kind="couldNotLoad"
-      title="Could not load"
-      body="Check your connection and try again."
-      action={{ label: 'Try again', onPress: onRetry }}
-    />
+    <StateFill>
+      <EmptyState
+        kind="couldNotLoad"
+        title="Could not load"
+        body="Check your connection and try again."
+        action={{ label: 'Try again', onPress: onRetry }}
+      />
+    </StateFill>
   );
 }
 

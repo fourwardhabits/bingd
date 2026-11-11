@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import { useState, type ReactNode } from 'react';
-import { AccessibilityInfo, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -189,7 +189,7 @@ export function CollectionView({
     placeholder != null ? (
       placeholder
     ) : items.length === 0 ? (
-      empty
+      <StateFill>{empty}</StateFill>
     ) : visible.length === 0 ? (
       <View style={styles.padded}>
         <EmptyState
@@ -420,6 +420,32 @@ export function CollectionView({
 
 const LIST_POSITION = { disabled: true } as const;
 
+/**
+ * A state that stands in for the whole list (an empty collection, a failed read), centred
+ * in roughly the room the list would have had.
+ *
+ * It is drawn inside the list's header now (see `placeholder`), and a header has no height
+ * to fill, so `EmptyState`'s own `flex: 1` collapses and the state would sit pinned under
+ * the toolbar with the screen blank below it (independent review, 2026-11-11). A minimum
+ * height from the window gives it the room it had when it filled the screen. The skeleton
+ * does not use this: a loading list starts at the top, as the titles will.
+ */
+export function StateFill({ children }: { children: ReactNode }) {
+  const { height } = useWindowDimensions();
+  return (
+    <View
+      style={[styles.fill, { minHeight: Math.round(height * STATE_FILL) }]}
+      testID="collection-state-fill"
+    >
+      {children}
+    </View>
+  );
+}
+
+/** The share of the window a whole-list state is centred in: below the app header,
+ * toolbar and tab bar on a phone. */
+const STATE_FILL = 0.55;
+
 /** The sentence a screen reader is given instead of the arrow. */
 function filterSortSpoken<Axis extends string>(
   axes: readonly SortAxisSpec<Axis>[],
@@ -470,4 +496,5 @@ const styles = StyleSheet.create({
   wall: { paddingBottom: theme.space[10] },
   wallTop: { height: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  fill: { justifyContent: 'center' },
 });

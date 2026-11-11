@@ -50,7 +50,7 @@ The convention in every row:
 | Feed effect | one new `title_ranked` card |
 | Surfaces that must agree | title page · Collection (ranked and unranked) · Profile → Top Ranked · Profile → Recent activity · Feed · goals · streak · awards · Taste Match · community score |
 
-### 1.2 Correction — *Update your rating* (`rank_again` `p_new_watch` false, or `rank_rebucket`)
+### 1.2 Correction — *Edit ranking* (labelled *Update your rating* until 2026-11-11) (`rank_again` `p_new_watch` false, or `rank_rebucket`)
 
 | | |
 |---|---|

@@ -537,13 +537,13 @@ on); the friends section `shot-feed` + `shot-comments`; the last section `shot-r
 A social experience and Find your next binge.
 
 **Refreshed 2026-11-09** from the founder's prepared screen layers, the same screens as the
-approved App Store set (`store-assets/listings/2026-11-09/`; the approved set lives on the
-Forward Habits Drive; it is not in this repository) before they went into a phone
+approved App Store set (`store-assets/listings/2026-11-09/`) before they went into a phone
 frame: `shot-movies`, `shot-tv`, `shot-compare`, `shot-score`, `shot-feed`,
 `shot-recommended`, and the router's `shot-collection.jpg` and `shot-ranking.jpg`. The
 layers arrive redacted and cropped, so `node web/shots.mjs --layers <dir>` only scales them
 (`LAYER_SHOTS`). `shot-comments` and `shot-grouppicks` have no newer capture and are
-unchanged.
+unchanged. (The approved set lives on the Forward Habits Drive; it is not in this
+repository.)
 
 ### Adding or replacing a landing-page screenshot
 

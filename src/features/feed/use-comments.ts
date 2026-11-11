@@ -224,6 +224,10 @@ export function useComments(eventId: string | null, viewerId: string) {
          * `my_reaction` on a comment it wrote. That one is taken out of the count, out of
          * the glyphs when it was the only reaction, and out of the reader's own state.
          * Older rows are not deleted, and taking one back still works on the server.
+         * When others reacted too, the glyphs are left as the server sent them: the
+         * aggregate has no per-kind counts, so the author's kind cannot be told apart
+         * from somebody else's of the same kind (a known limit, independent review
+         * 2026-11-11).
          *
          * Somebody else's reaction to their own comment is inside the server's aggregate
          * and cannot be separated here; the reactor list leaves it out

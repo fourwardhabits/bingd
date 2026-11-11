@@ -20,6 +20,8 @@ let mockWatchlist: unknown[] = [];
  * screen down with it would prove nothing about what the bookmark does.
  */
 let mockRpcErrors: Record<string, unknown> = {};
+/** How long an RPC takes to answer, in ms: a slow server, for the open-menu race. */
+const mockRpcDelayMs: Record<string, number> = {};
 /**
  * How many times each table has actually been read.
  *
@@ -34,7 +36,11 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
+      const answer = { data: error ? null : (mockRpcResults[name] ?? null), error };
+      const delay = mockRpcDelayMs[name] ?? 0;
+      return delay > 0
+        ? new Promise((done) => setTimeout(() => done(answer), delay))
+        : Promise.resolve(answer);
     },
     from: (table: string) => {
       mockReads[table] = (mockReads[table] ?? 0) + 1;
@@ -198,6 +204,7 @@ beforeEach(() => {
   mockRpc.mockReset();
   mockRpcResults = { my_notifications: [], recommendations_to_me: [] };
   mockRpcErrors = {};
+  for (const key of Object.keys(mockRpcDelayMs)) delete mockRpcDelayMs[key];
   mockWatchlist = [];
   mockRanked = [];
   mockFailing.clear();
@@ -205,6 +212,31 @@ beforeEach(() => {
 });
 
 describe('the wall and the list', () => {
+  /**
+   * **The Recommended ▾ menu stays open when Sent to You lands under it** (2026-11-11).
+   * The list's loading state drew the toolbar in a fragment and the loaded list drew it in
+   * a scroller, so a menu opened before the list arrived closed by itself when it did.
+   */
+  it('leaves the menu open when the list lands under it', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRpcDelayMs.recommendations_to_me = 400;
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await fireEvent.press(await view.findByLabelText(/^Sent to You/));
+    expect(view.queryByText('Inception (2010)')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await view.findByRole('menuitem', { name: /^Top Rated/ });
+
+    // The list arrives while the menu is open.
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy(), {
+      timeout: 3000,
+    });
+    expect(view.getByRole('menuitem', { name: /^Top Rated/ })).toBeTruthy();
+    expect(view.getByLabelText(/^Showing /).props.accessibilityState).toMatchObject({
+      expanded: true,
+    });
+  });
+
   it('keeps human recommendations out of the algorithmic wall', async () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);

@@ -870,7 +870,10 @@ export default function RecommendationsScreen() {
                   // query that never runs would leave it spinning for ever.
                   refreshing={false}
                   onRefresh={() => {
+                    // The wall's gesture on a wall; on a failed read, the same retry as
+                    // its Try again. Loading and empty have nothing to pull.
                     if (wallScrolls) refreshSlate();
+                    else if (wall.isError) void wall.refetch();
                   }}
                   tintColor={theme.semantic.action}
                   colors={[theme.semantic.action]}
@@ -1162,7 +1165,7 @@ function SentList({
   onToggleSave,
   header,
 }: {
-  /** The page's toolbar: first in the list's scroller, or above a state with none. */
+  /** The page's toolbar: first in the list's scroller, in every state. */
   header: React.ReactNode;
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
@@ -1172,61 +1175,17 @@ function SentList({
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
 }) {
-  if (query.isPending)
-    return (
-      <>
-        {header}
-        <SkeletonRow count={5} />
-      </>
-    );
-
-  if (query.isError) {
-    return (
-      <>
-        {header}
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load these"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void query.refetch() }}
-        />
-      </>
-    );
-  }
-
-  if (total === 0) {
-    return (
-      <>
-        {header}
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing sent your way yet"
-          body="When someone you follow back recommends a film or a season, it lands here."
-        />
-      </>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      // No button. Clear all is already on screen, in the chip row a few points above
-      // this, and a second one with the same label is the duplicated state the founder
-      // rejected on the Feed: the reader would have to work out whether the two do the
-      // same thing.
-      <>
-        {header}
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing matches your filters"
-          body="Clear your filters to see everything people have sent you."
-        />
-      </>
-    );
-  }
-
+  /**
+   * **One scroller in every state, so the toolbar is never remounted** (2026-11-11), the
+   * rule the wall follows: a list that landed, failed or emptied under an open
+   * Recommended ▾ menu used to move the toolbar from a fragment into a `ScrollView` and
+   * close the menu. Every state is drawn under the header inside the same scroller, which
+   * grows to fill the page so a state sits where it did.
+   */
+  const loaded = !query.isPending && !query.isError && total > 0 && rows.length > 0;
   return (
     <ScrollView
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, !loaded && styles.stateContent]}
       refreshControl={
         <RefreshControl
           refreshing={query.isRefetching}
@@ -1237,15 +1196,42 @@ function SentList({
       }
     >
       {header}
-      <View style={styles.wallBody}>
-      <SentToYouList
-        rows={rows}
-        saved={saved}
-        busyId={busyId}
-        onOpen={onOpen}
-        onToggleSave={onToggleSave}
-      />
-      </View>
+      {query.isPending ? (
+        <SkeletonRow count={5} />
+      ) : query.isError ? (
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load these"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void query.refetch() }}
+        />
+      ) : total === 0 ? (
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing sent your way yet"
+          body="When someone you follow back recommends a film or a season, it lands here."
+        />
+      ) : rows.length === 0 ? (
+        // No button. Clear all is already on screen, in the chip row a few points above
+        // this, and a second one with the same label is the duplicated state the founder
+        // rejected on the Feed: the reader would have to work out whether the two do the
+        // same thing.
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing matches your filters"
+          body="Clear your filters to see everything people have sent you."
+        />
+      ) : (
+        <View style={styles.wallBody}>
+          <SentToYouList
+            rows={rows}
+            saved={saved}
+            busyId={busyId}
+            onOpen={onOpen}
+            onToggleSave={onToggleSave}
+          />
+        </View>
+      )}
     </ScrollView>
   );
 }

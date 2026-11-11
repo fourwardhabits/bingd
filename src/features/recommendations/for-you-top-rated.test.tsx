@@ -621,7 +621,8 @@ describe('the dropdown and the switch together', () => {
   /**
    * Run twice: with the server answering at once, and with it answering 60ms after each
    * request — after the press and before the menu item is pressed, the CI flake's window
-   * (see `pickWall`). Without `pickWall`'s wait the slow run fails every time. The 60ms
+   * (see `pickWall`). Without `pickWall`'s wait the slow run failed every time, until the
+   * screen stopped remounting the dropdown (2026-11-11); the wait stays. The 60ms
    * sits inside that window only because the menu opens from the 120ms fallback timer; if
    * `MEASURE_TIMEOUT_MS` changes a lot, revisit it.
    */
