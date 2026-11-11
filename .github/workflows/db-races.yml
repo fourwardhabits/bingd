@@ -113,10 +113,15 @@ jobs:
       # connection and therefore one transaction, so none of these races can be
       # constructed under it at all — see supabase/tests/concurrency/harness.mjs.
       #
-      # Invoked through the existing npm script rather than a new one. `packageJson:scripts`
-      # is an @expo/fingerprint input: adding a script moves every lane's runtime version,
-      # including the published friend-beta binary's. See config/push.cjs.
-      - run: npm run test:race
+      # `test:race`, spelled out with a five-minute timeout instead of its 60 s. Under
+      # `node --test` the timeout bounds the whole of `races.test.mjs`, which imports every
+      # race suite into one process (one cluster boot), and the proactive-notification races
+      # brought that file to ~49 s on CI. Raising it in `package.json` would move the Expo
+      # runtime fingerprint (`packageJson:scripts` is an @expo/fingerprint input; see
+      # config/push.cjs), so it is raised here, the way ci.yml spells out push-sender's checks.
+      # `npm run test:race -- --test-timeout=…` does not work: after the glob, node reads it
+      # as another file pattern.
+      - run: node --test --test-timeout=300000 "supabase/tests/concurrency/*.test.mjs"
 
       # And the check on that check. Each invariant above is deliberately broken in a
       # disposable database and the suite is required to notice — which is what stops a

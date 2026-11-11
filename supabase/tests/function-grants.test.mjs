@@ -835,7 +835,11 @@ const ALLOWED = {
   // `_push_eligible` and `_enqueue_push` join the internal side for the reason
   // `_apply_notification_preference` does: the second writes the delivery queue, and a
   // client holding it could enqueue a push for anybody.
-  'register_device_token(uuid,text,text)': ['authenticated'],
+  //
+  // 20261028000100 added a fourth, defaulted argument: the proactive-notification version
+  // of the build registering, bounded 1-100 and stored on that token only (latest-wins).
+  // An old client's three-argument call reaches it through the default and records null.
+  'register_device_token(uuid,text,text,integer)': ['authenticated'],
   'revoke_device_token(uuid,text)': ['authenticated'],
 
   // 20260930000100, release awareness. The device's IANA timezone and locale region, for
@@ -845,6 +849,13 @@ const ALLOWED = {
   // nothing a client can call reads it back, including this. Every other release
   // function is service_role only and is not on this list.
   'report_device_context(text,text)': ['authenticated'],
+
+  // 20261028000100. A tap on one of the caller's OWN notifications, for proactive
+  // attribution. It reads the notification by `id = $1 and recipient_id = auth.uid()` and
+  // writes only then, answering the same `ok` either way, so it is neither an oracle nor
+  // a way to write about anybody else. Everything else proactive (the ledger, the arbiter,
+  // the collectors, the tick, the status) is service_role or internal and is not here.
+  'record_notification_open(uuid,text,text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

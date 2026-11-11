@@ -93,8 +93,8 @@ const OFFERED_PREF = 'push.offered';
  * shape of the thing and Settings is where the categories live.
  *
  * **This is the OS permission and not Bingd's own preferences**, which are a separate
- * set of switches under Settings → Notifications and are all on by default
- * (`20260820000100`). Somebody can have every Bingd category enabled and still receive
+ * set of switches under Settings → Notifications and are on by default except Reactions
+ * (`20261031000100`). Somebody can have every Bingd category enabled and still receive
  * nothing, because iOS has never been asked. That is exactly the state this dialog
  * exists to resolve, and it is why the copy talks about being notified rather than
  * about what Bingd will send.

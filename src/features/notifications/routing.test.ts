@@ -1,6 +1,8 @@
 import {
   hintFor,
   hrefFor,
+  hrefForPush,
+  pushDestination,
   ROUTED_KINDS,
   targetChainFor,
   targetFor,
@@ -48,6 +50,10 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   subjectActivityType: null,
   commentIsReply: false,
   commentIsFollowUp: false,
+  cluster: null,
+  opensOn: null,
+  availableOn: null,
+  seasonNumber: null,
   ...over,
 });
 
@@ -110,6 +116,13 @@ describe('the routing matrix', () => {
     import_started: { kind: 'import', jobId: null },
     import_completed: { kind: 'import', jobId: null },
     import_failed: { kind: 'import', jobId: null },
+    // The proactive kinds (20261028000100) open the title the reader saved, never one
+    // friend's post: a cluster names several people.
+    watchlist_social: { kind: 'title', mediaItemId: 'media-1' },
+    theatrical_release: { kind: 'title', mediaItemId: 'media-1' },
+    watchlist_resurface: { kind: 'title', mediaItemId: 'media-1' },
+    // 20261031000100: the new season's own page. Asserted with a season below.
+    season_premiere: { kind: 'title', mediaItemId: 'media-1' },
   };
 
   for (const kind of ROUTED_KINDS) {
@@ -166,6 +179,42 @@ describe('a Letterboxd import', () => {
   it('falls back to the importer rather than nowhere when the row has lost its job', () => {
     const target = targetFor(importRow('import_completed', null));
     expect(hrefFor(target)).toEqual({ pathname: '/settings/import' });
+  });
+});
+
+/**
+ * A season premiere (20261031000100) is about the season, not the show: `mediaItemId` is
+ * the season's own media item, from the inbox row and from the push alike, and the
+ * destination recorded for the open is still `title`.
+ */
+describe('a season premiere', () => {
+  const premiere = row({
+    kind: 'season_premiere',
+    actorId: null,
+    actorUsername: null,
+    actorName: null,
+    mediaItemId: 'season-3',
+    mediaTitle: 'Season 3',
+    mediaKind: 'season',
+    seriesTitle: 'Severance',
+    subjectType: 'media_item',
+    subjectId: 'season-3',
+    availableOn: '2031-05-16',
+    seasonNumber: 3,
+  });
+
+  it('opens that exact season, from the inbox and from a push', () => {
+    expect(targetFor(premiere)).toEqual({ kind: 'title', mediaItemId: 'season-3' });
+    expect(hrefFor(targetFor(premiere))).toBe('/title/season-3');
+    expect(pushDestination({ kind: 'season_premiere', mediaItemId: 'season-3' })).toEqual({
+      href: '/title/season-3',
+      destination: 'title',
+    });
+  });
+
+  it('stops safely when the season has left the catalogue', () => {
+    expect(targetFor({ ...premiere, mediaItemId: null }).kind).toBe('unavailable');
+    expect(pushDestination({ kind: 'season_premiere' }).destination).toBe('inbox');
   });
 });
 
@@ -409,5 +458,47 @@ describe('what the row promises before it is tapped', () => {
       hintFor(row({ kind: 'comment', mediaItemId: null, subjectType: null, subjectId: null })),
     ).toBe('No longer available');
     expect(hintFor(row({ kind: 'follow', actorUsername: null }))).toBe('No longer available');
+  });
+});
+
+/**
+ * What a tapped push records as its destination (2026-10-28): the kind of screen, from
+ * the same resolution that produced the href, and never a path. The server refuses
+ * anything outside this vocabulary.
+ */
+describe('push destinations', () => {
+  const VOCABULARY = ['profile', 'title', 'activity', 'awards', 'award-celebration', 'goals', 'import', 'inbox'];
+
+  it('names the screen kind, and agrees with the href it travels with', () => {
+    const title = pushDestination({ kind: 'watchlist_social', mediaItemId: 'm1' });
+    expect(title).toEqual({ href: '/title/m1', destination: 'title' });
+    expect(hrefForPush({ kind: 'watchlist_social', mediaItemId: 'm1' })).toBe('/title/m1');
+
+    expect(pushDestination({ kind: 'follow', actorUsername: 'ada' }).destination).toBe('profile');
+    expect(pushDestination({ kind: 'comment', feedEventId: 'e1' }).destination).toBe('activity');
+  });
+
+  it('falls back to the inbox, never to text, for anything it cannot resolve', () => {
+    for (const payload of [null, {}, { kind: 'nonsense' }, { kind: 'watchlist_social' }]) {
+      expect(pushDestination(payload)).toEqual({
+        href: '/settings/notifications',
+        destination: 'inbox',
+      });
+    }
+  });
+
+  it('only ever produces a word from the closed vocabulary', () => {
+    for (const kind of ROUTED_KINDS) {
+      const { destination } = pushDestination({
+        kind,
+        actorUsername: 'ada',
+        mediaItemId: 'm1',
+        feedEventId: 'e1',
+        importJobId: 'j1',
+        awardKey: 'queue-dragon',
+        awardTier: 'seedling',
+      });
+      expect(VOCABULARY).toContain(destination);
+    }
   });
 });
