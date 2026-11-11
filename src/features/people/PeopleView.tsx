@@ -58,7 +58,8 @@ import {
  * dividers. The heading sits exactly where `THIS MONTH ▼` sits, in the Feed's content
  * header row opposite the toggle — see `app/(tabs)/feed.tsx`, which owns that row.
  *
- * **The heading has no chevron.** `PEOPLE YOU MAY KNOW` is drawn with `SectionHeader` and
+ * **The heading has no chevron.** `DISCOVER PEOPLE` (`PEOPLE YOU MAY KNOW` until the UI
+ * consistency sprint, founder 2026-11-10) is drawn with `SectionHeader` and
  * not with a `MediumSelector`, because there is no header-level choice to make yet and a
  * chevron that opens nothing is a control that lies. If a second header-level list ever
  * exists (Everyone, Nearby, From contacts) this becomes a selector and the row does not
@@ -229,7 +230,7 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
 
   return (
     <View style={styles.body}>
-      {/* The heading is `PEOPLE YOU MAY KNOW` and it lives in the screen's content header
+      {/* The heading is `DISCOVER PEOPLE` and it lives in the screen's content header
           row rather than here — see `app/(tabs)/feed.tsx`, exactly as the Leaderboard's
           timeframe does. This component draws the list beneath it. */}
 
@@ -355,14 +356,30 @@ function PersonRow({
       >
         <Avatar size="sm" uri={person.avatarUri} name={person.name} />
         <View style={styles.copy}>
-          {/* Name and handle on one baseline, the Leaderboard's arrangement: the name keeps
-              its intrinsic width and the handle shrinks first, so a long display name costs
-              the handle rather than pushing the control off the row. */}
+          {/* Name and handle on one baseline, the Leaderboard's arrangement. **Both are always
+              drawn**, even when the display name and the handle are the same word
+              (`ctkrooze  @ctkrooze` — founder, UI consistency sprint, 2026-11-10: hiding the
+              duplicate was rejected). The name used to keep its intrinsic width, so a long
+              one squeezed the handle to nothing; now the handle keeps its own width up to
+              half the line and the name truncates in the rest. Neither can reach the
+              Follow control: the line lives inside `copy`, which takes only what the
+              control leaves. */}
           <View style={styles.line}>
-            <Text variant="callout" numberOfLines={1} style={styles.name}>
+            <Text
+              variant="callout"
+              numberOfLines={1}
+              style={styles.name}
+              testID={`person-name-${person.id}`}
+            >
               {person.name}
             </Text>
-            <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.handle}>
+            <Text
+              variant="caption"
+              tone="tertiary"
+              numberOfLines={1}
+              style={styles.handle}
+              testID={`person-handle-${person.id}`}
+            >
               @{person.username}
             </Text>
             {/* The same lock the follower lists and the Leaderboard draw. A private account
@@ -520,8 +537,10 @@ const styles = StyleSheet.create({
   identity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   copy: { flex: 1, gap: 1 },
   line: { flexDirection: 'row', alignItems: 'baseline', gap: theme.space[2] },
-  name: { flexShrink: 0, fontFamily: fontFamily.sansSemibold },
-  handle: { flexShrink: 1 },
+  // The name takes what the handle leaves and truncates; the handle keeps its own width,
+  // capped at half the line so a long handle truncates too rather than hiding the name.
+  name: { flexShrink: 1, fontFamily: fontFamily.sansSemibold },
+  handle: { flexShrink: 0, maxWidth: '50%' },
   pressed: { opacity: 0.7 },
   sheetTitle: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   sheetList: { maxHeight: 360 },
