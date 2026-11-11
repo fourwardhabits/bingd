@@ -39,6 +39,7 @@ import {
   wantsExactRecovery,
   personCredits,
   personRecord,
+  tmdbScore,
   ratingOf,
   seasonTarget,
   seasonsOf,
@@ -660,6 +661,147 @@ Deno.test('the shipped genre table holds every name the catalogue has ever been 
   const names = new Set(knownGenres.values());
   for (const name of seen) assert(names.has(name), `missing ${name}`);
   assertEquals(knownGenres.size, 27);
+});
+
+// ---------------------------------------------------------------------------
+// personCredits: sortable coverage (2026-11-11)
+// ---------------------------------------------------------------------------
+
+/** A dated, rated acting credit; popularity falls with `id` so id 1 is the best known. */
+const dated = (
+  id: number,
+  date: string | undefined,
+  extra: Partial<{ media_type: 'movie' | 'tv'; vote_average: number; vote_count: number; popularity: number }> = {},
+) => {
+  const tv = extra.media_type === 'tv';
+  return {
+    ...credit(id, { media_type: extra.media_type, popularity: extra.popularity ?? 10_000 - id, character: `Part ${id}` }),
+    title: tv ? undefined : `Film ${id}`,
+    name: tv ? `Show ${id}` : undefined,
+    release_date: tv ? undefined : date,
+    first_air_date: tv ? date : undefined,
+    vote_average: extra.vote_average,
+    vote_count: extra.vote_count,
+  };
+};
+
+/** Ninety films, one a year from 1930, least popular the newest: a long career. */
+const career = () =>
+  Array.from({ length: 90 }, (_, index) =>
+    dated(index + 1, `${1930 + index}-06-01`, { popularity: 1_000 - Math.abs(index - 45) * 10 }),
+  );
+
+Deno.test('a long career keeps its newest and its oldest credits beyond the popularity cap', () => {
+  const { credits } = personCredits(person({ cast: career() }), GENRES);
+  const years = credits.map((entry) => Number(entry.row.release_date!.slice(0, 4)));
+
+  // The ten newest and the five oldest, which popularity alone would have cut.
+  for (const year of [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019]) {
+    assert(years.includes(year), `newest ${year} kept`);
+  }
+  for (const year of [1930, 1931, 1932, 1933, 1934]) assert(years.includes(year), `oldest ${year} kept`);
+  // Bounded: sixty by popularity plus at most fifteen date slots, no more.
+  assert(credits.length <= 60 + 15, `kept ${credits.length}`);
+});
+
+Deno.test('edge slots do not disturb the stored popularity order', () => {
+  const { credits } = personCredits(person({ cast: career() }), GENRES);
+  const popularity = credits.map((entry) => entry.popularity);
+  assertEquals(popularity, [...popularity].sort((a, b) => b - a));
+});
+
+Deno.test('coverage names the newest and oldest credit that was dropped', () => {
+  const { credits, coverage } = personCredits(person({ cast: career() }), GENRES);
+  const keptDates = new Set(credits.map((entry) => entry.row.release_date));
+  const { newest, oldest } = coverage.cast.movie;
+
+  assert(newest !== null && oldest !== null);
+  assert(!keptDates.has(newest), 'the gap is a dropped credit');
+  // Everything newer than the newest gap is kept, and everything older than the oldest.
+  for (let index = 0; index < 90; index += 1) {
+    const date = `${1930 + index}-06-01`;
+    if (date > newest || date < oldest) assert(keptDates.has(date), `${date} kept`);
+  }
+  // Nothing undated was dropped, and every credit is unrated.
+  assertEquals(coverage.cast.movie.undated, false);
+  assertEquals(coverage.cast.movie.unrated, true);
+  // No television, so nothing of that kind is missing.
+  assertEquals(coverage.cast.series, { newest: null, oldest: null, undated: false, rated: null, unrated: false });
+});
+
+Deno.test('a short filmography is complete under every sort', () => {
+  const { coverage } = personCredits(
+    person({ cast: [dated(1, '2001-01-01'), dated(2, undefined)], crew: [{ ...dated(3, '1999-01-01'), job: 'Director' }] }),
+    GENRES,
+  );
+  const empty = { newest: null, oldest: null, undated: false, rated: null, unrated: false };
+  assertEquals(coverage, {
+    cast: { movie: empty, series: empty },
+    self: { movie: empty, series: empty },
+    crew: { movie: empty, series: empty },
+  });
+});
+
+Deno.test('a TMDB rating on too few votes does not rank', () => {
+  // Two votes of ten must not outrank an established film.
+  assertEquals(tmdbScore('movie', 10, 2), null);
+  assertEquals(tmdbScore('movie', 10, 99), null);
+  assertEquals(tmdbScore('series', 9, 49), null);
+  assertEquals(tmdbScore('movie', undefined, 5_000), null);
+  assertEquals(tmdbScore('movie', Number.NaN, 5_000), null);
+
+  const thin = tmdbScore('movie', 9.5, 120)!;
+  const established = tmdbScore('movie', 8.4, 30_000)!;
+  assert(established > thin, `${established} > ${thin}`);
+  // Well-voted titles are, near enough, their own rating.
+  assert(Math.abs(established - 8.4) < 0.01);
+});
+
+Deno.test('a series and a film are weighted against their own thresholds', () => {
+  // Sixty votes ranks a series and not a film.
+  assert(tmdbScore('series', 8, 60) !== null);
+  assertEquals(tmdbScore('movie', 8, 60), null);
+});
+
+Deno.test('the best-rated credits are kept, and coverage says what the rating sort lost', () => {
+  const cast = career().map((entry, index) =>
+    // The least popular film is the best rated, with plenty of votes.
+    index === 70 ? { ...entry, vote_average: 9.1, vote_count: 8_000 } : { ...entry, vote_average: 6, vote_count: 500 },
+  );
+  const { credits, coverage } = personCredits(person({ cast }), GENRES);
+
+  const best = credits.find((entry) => entry.row.tmdb_id === 71);
+  assert(best, 'the best-rated credit survives the popularity cap');
+  assertEquals(best.score, tmdbScore('movie', 9.1, 8_000));
+  // Every dropped credit is rated 6 on 500 votes, so that is the rating sort's gap.
+  assertEquals(coverage.cast.movie.rated, tmdbScore('movie', 6, 500));
+  assertEquals(coverage.cast.movie.unrated, false);
+});
+
+Deno.test('a crew half keeps its own newest and oldest work', () => {
+  const crew = Array.from({ length: 50 }, (_, index) => ({
+    ...dated(200 + index, `${1970 + index}-01-01`, { popularity: 500 - Math.abs(index - 25) }),
+    job: 'Producer',
+  }));
+  const { credits, coverage } = personCredits(person({ crew }), GENRES);
+  const years = credits.map((entry) => Number(entry.row.release_date!.slice(0, 4)));
+
+  for (const year of [2015, 2016, 2017, 2018, 2019, 1970, 1971, 1972]) assert(years.includes(year), `${year}`);
+  assert(credits.length <= 30 + 11);
+  assert(coverage.crew.movie.newest !== null);
+});
+
+Deno.test('a series carries its first air date and is covered separately from films', () => {
+  const cast = [
+    ...career(),
+    ...Array.from({ length: 30 }, (_, index) =>
+      dated(500 + index, `${1990 + index}-01-01`, { media_type: 'tv', popularity: 1 }),
+    ),
+  ];
+  const { coverage } = personCredits(person({ cast }), GENRES);
+  // The television tail is the least popular of all, so it lost credits of its own.
+  assert(coverage.cast.series.newest !== null);
+  assert(coverage.cast.series.newest! >= '1990-01-01');
 });
 
 Deno.test('a person with no credits at all is a person, not a failure', () => {
