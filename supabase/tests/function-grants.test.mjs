@@ -95,7 +95,9 @@ const ALLOWED = {
   // 20260917000300. The four things a client does during an import. Each one resolves the
   // job from auth.uid() and refuses a job belonging to anybody else, so the job id is a
   // handle rather than an authorisation. Not anon: there is no collection to import into.
-  'import_create()': ['authenticated'],
+  // 20261111000100: gained `p_provider text default 'letterboxd'`, so a call with no
+  // argument is still a Letterboxd import. The signature, and so this key, changed.
+  'import_create(text)': ['authenticated'],
   'import_stage(uuid,jsonb)': ['authenticated'],
   'import_ready(uuid)': ['authenticated'],
   'import_status(uuid)': ['authenticated'],
