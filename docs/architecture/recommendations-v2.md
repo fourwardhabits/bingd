@@ -49,7 +49,8 @@ popularity, excluding what the caller logged (and, on TV, shows with a logged se
 answers empty while the caller is on V1. Each window is the first rows of one ordered index
 range: `media_items_catalogue_language (kind, original_language, popularity)` and
 `media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
-not grow with the size of a language or a decade (measured in the scale benchmark).
+not grow with the size of a language or a decade (measured in A3's scale benchmark, PR #253,
+`recommendations-v2-scale-benchmark.md` once that PR lands).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -99,7 +100,7 @@ create index concurrently if not exists media_items_catalogue_decade
   where kind in ('movie', 'series') and poster_path is not null;
 ```
 
-A2 adds a third, on `rankings` (§2.6). An operator step, run only with founder approval.
+A2 (PR #251) adds a third, on `rankings`. An operator step, run only with founder approval.
 
 **Rollback:** write `"v1"` to `recommendations.v2_engine`. `recommendation_engine()` then
 answers V1 for everybody and `catalogue_candidates` answers empty. Clients pick it up on the
@@ -179,8 +180,8 @@ compares a reader with every account. The refresh happens inside the first stale
 concurrent stale reads by one reader refresh once (a per-reader advisory lock plus a
 re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs`), and
 different readers do not contend. Capacity is **measured**, not asserted, on real
-PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark
-([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md), PR #253).
+PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark (PR #253, which adds
+`recommendations-v2-scale-benchmark.md`; land it with this PR).
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
 neighbour on a given day if a probe title has thousands of raters. Rotation finds different
