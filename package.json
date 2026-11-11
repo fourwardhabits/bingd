@@ -27,7 +27,6 @@
     "catalogue:enrich": "node supabase/seed/backfill-tmdb.mjs",
     "telemetry:smoke": "node scripts/telemetry-smoke.mjs",
     "report:recommendations": "node scripts/recommendation-report.mjs",
-    "eval:recommendations": "RUN_REC_EVAL=1 jest src/features/recommendations/evaluation/evaluation.test.ts --testTimeout=3600000",
     "trending:refresh": "node supabase/seed/refresh-trending.mjs",
     "functions:check": "deno check --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter/index.ts",
     "functions:lint": "deno lint --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter",

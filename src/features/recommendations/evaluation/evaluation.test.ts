@@ -26,10 +26,14 @@ import {
  * deterministic, the harness scores named engines exactly as `scoreSlate` does, metrics stay
  * in range, and V2 walls do not move when the follow graph does.
  *
- * `npm run eval:recommendations` runs the full evaluation (`RUN_REC_EVAL=1`): a 4,000-title,
+ * `RUN_REC_EVAL=1 npx jest src/features/recommendations/evaluation/evaluation.test.ts
+ * --testTimeout=3600000` runs the full evaluation: a 4,000-title,
  * 4,000-person world, 400 stratified test readers, every engine, ablation and sweep, with the
  * collaborative source computed by the real SQL in an ephemeral PGlite database. The report
  * is written to `$REC_EVAL_OUT` (default: the OS temp directory) as JSON and Markdown.
+ *
+ * Deliberately not an `npm run` alias: `package.json` `scripts` is an input to the Expo
+ * runtime fingerprint (`config/push.cjs`), and a new key strands the live binaries' updates.
  */
 
 const FULL = process.env.RUN_REC_EVAL === '1';

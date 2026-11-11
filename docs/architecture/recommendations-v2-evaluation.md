@@ -21,8 +21,14 @@ cost?*
 
 ## 2. What runs
 
-`npm run eval:recommendations` (about 9 minutes on 4 cores; writes `report.json` and
-`report.md` to `$REC_EVAL_OUT`, default the OS temp directory). The smoke version (a small
+```bash
+RUN_REC_EVAL=1 npx jest src/features/recommendations/evaluation/evaluation.test.ts --testTimeout=3600000
+```
+
+About 9 minutes on 4 cores; writes `report.json` and `report.md` to `$REC_EVAL_OUT`
+(default the OS temp directory). It is deliberately not an `npm run` alias: `package.json`
+`scripts` is an input to the Expo runtime fingerprint, so a new key would strand the live
+binaries' over-the-air updates (`config/push.cjs`). The smoke version (a small
 world, four assertions) runs in the normal `jest` suite.
 
 - **The world** (`world.ts`, version `rec-eval-world-2026-11-10.1`, seed 20261110): 4,000
