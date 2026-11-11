@@ -203,21 +203,23 @@ describe('destinationFor', () => {
 
 describe('installLabel', () => {
   /**
-   * The wordmark is lowercase with its full stop, on every button a person reads.
+   * The name is lowercase and, on a button, written as text: `bingd`, no full stop.
    *
-   * These read "Bingd" until 2026-09-03. The founder's instruction is that the brand is
-   * `bingd.` in product copy, and an install button is the most product-facing copy on
-   * the site. Pinned as exact strings for the same reason they always were: a button
-   * label is the last thing anybody re-reads before tapping.
+   * These read "Bingd" until 2026-09-03, then `bingd.` until Visual 2.0 (2026-11-02),
+   * when the founder settled that the full stop belongs to the logo only. Every install
+   * label follows the same rule, the beta fallbacks included, so the day a fallback is
+   * chosen it does not reintroduce the old spelling. Pinned as exact strings for the same
+   * reason they always were: a button label is the last thing anybody re-reads before
+   * tapping.
    */
   it('names the beta destinations in the brand’s own casing', () => {
     assert.equal(
       installLabel({ platform: 'ios', kind: 'testflight', url: 'x' }),
-      'Get the bingd. beta for iPhone',
+      'Get the bingd beta for iPhone',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play-opt-in', url: 'x' }),
-      'Join the bingd. Android beta',
+      'Join the bingd Android beta',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play', url: 'x' }),
@@ -1115,7 +1117,7 @@ describe('the built site', () => {
     const html = read('title.html');
     assert.match(html, /shot-collection\.jpg" width="720" height="\d+"/);
     assert.match(html, /shot-ranking\.jpg" width="720" height="\d+"/);
-    assert.match(html, /alt="A bingd\. collection of ranked series[^"]*"/);
+    assert.match(html, /alt="A bingd collection of ranked series[^"]*"/);
     assert.ok(html.includes('loading="lazy"'));
   });
 

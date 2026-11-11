@@ -31,7 +31,7 @@
       "reaches": "an address with no account yet -- everybody signing in to Bingd for the first time",
       "verifiedAs": "email",
       "subjectKey": "mailer_subjects_confirmation",
-      "subject": "Your bingd. sign-in code",
+      "subject": "Your bingd sign-in code",
       "bodyKey": "mailer_templates_confirmation_content",
       "bodyFile": "confirm-signup.html"
     },
@@ -40,7 +40,7 @@
       "reaches": "an address that already has an account -- everybody coming back",
       "verifiedAs": "email",
       "subjectKey": "mailer_subjects_magic_link",
-      "subject": "Your bingd. sign-in code",
+      "subject": "Your bingd sign-in code",
       "bodyKey": "mailer_templates_magic_link_content",
       "bodyFile": "magic-link.html"
     }

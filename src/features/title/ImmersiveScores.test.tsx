@@ -34,7 +34,7 @@ describe('the immersive score strip', () => {
 
     const strip = within(view.getByTestId('immersive-scores'));
     expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
-    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd. (4)');
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd (4)');
     expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
       'Following (3)',
     );
@@ -71,7 +71,7 @@ describe('the immersive score strip', () => {
     expect(
       view.getByLabelText('People you follow. No ratings yet from people you follow. 0 ratings'),
     ).toBeTruthy();
-    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd. (0)');
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd (0)');
     expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
       'Following (0)',
     );
@@ -85,7 +85,7 @@ describe('the immersive score strip', () => {
         following={{ score: null, ratingCount: null, loading: true }}
       />,
     );
-    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd.');
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd');
     expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
       'Following',
     );

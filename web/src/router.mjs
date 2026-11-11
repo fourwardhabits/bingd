@@ -121,9 +121,10 @@ export function allDestinations(distribution) {
  * arrived**, `store` is the kind every Android visitor gets, and the label is right
  * because it reads the platform.
  *
- * **The wordmark is lowercase with the full stop, everywhere a person reads it.** It was
- * "Bingd" here until 2026-09-03, which is the brand written the way a sentence wants it
- * rather than the way the product is named. The legal documents still say Bingd, and
+ * **The name is lowercase, and a button writes it as text: `bingd`, without the full
+ * stop.** The full stop belongs to the logo (`bingd.`), not to the name in a sentence
+ * (founder, Visual 2.0, 2026-11-02). It was "Bingd" here until 2026-09-03, and `bingd.`
+ * on every button from then until this change. The legal documents still say Bingd, and
  * deliberately: naming the entity formally in Terms is a different job from addressing
  * somebody on a landing page.
  */
@@ -132,9 +133,9 @@ export function installLabel(destination) {
 
   switch (destination.kind) {
     case 'testflight':
-      return 'Get the bingd. beta for iPhone';
+      return 'Get the bingd beta for iPhone';
     case 'play-opt-in':
-      return 'Join the bingd. Android beta';
+      return 'Join the bingd Android beta';
     case 'play':
       return 'Get bingd. on Google Play';
     case 'store':

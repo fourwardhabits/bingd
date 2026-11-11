@@ -10,7 +10,7 @@ import { theme } from '@/ui/tokens';
  * Post-QA sprint 2 (2026-11-05) reworked the row, not the scores behind it:
  *
  *        (8.4)            8.7             —
- *     Your score       bingd. (4)    Following (0)
+ *     Your score       bingd (4)     Following (0)
  *
  * - three columns of exactly equal width, each value centred with its label centred
  *   directly beneath it, and the same padding above and below the row;
@@ -71,7 +71,7 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
       {bingd ? (
         <Cell
           testID="immersive-score-bingd"
-          label="bingd."
+          label="bingd"
           spokenLabel="bingd score"
           count={bingd.ratingCount}
           score={bingd.score}

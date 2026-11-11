@@ -125,45 +125,45 @@ const LAYER_SHOTS = [
     source: '01-movies-tv__main-screen.png',
     name: 'shot-movies',
     width: 640,
-    alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
+    alt: 'A ranked bingd movie collection as a grid of posters, each one carrying its own score out of ten',
   },
   {
     source: '01-movies-tv__secondary-screen.png',
     name: 'shot-tv',
     width: 640,
-    alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
+    alt: 'A ranked bingd TV collection as a grid of posters, each season carrying its own score out of ten',
   },
   {
     source: '02-head-to-head__secondary-screen.png',
     name: 'shot-compare',
     width: 640,
-    alt: 'The bingd. ranking sheet asking which did you like more, You Can See Everything or Inception',
+    alt: 'The bingd ranking sheet asking which did you like more, You Can See Everything or Inception',
   },
   {
     // The same ranking as shot-compare, finished: the result sheet over the title page.
     source: '02-head-to-head__main-screen.png',
     name: 'shot-score',
     width: 640,
-    alt: 'The score a bingd. ranking lands on, 9.8 for You Can See Everything, in the sheet shown after ranking',
+    alt: 'The score a bingd ranking lands on, 9.8 for You Can See Everything, sixth in Movies and just below Inglourious Basterds',
   },
   {
     source: '03-friends__main-screen.png',
     name: 'shot-feed',
     width: 640,
-    alt: 'The bingd. feed, showing trending titles above friends’ recent activity, with names and faces blurred',
+    alt: 'The bingd feed, showing trending titles above friends’ recent activity, with names and faces blurred',
   },
   {
     source: '06-for-you__main-screen.png',
     name: 'shot-recommended',
     width: 640,
-    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
+    alt: 'The bingd For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
   },
   {
     source: '01-movies-tv__secondary-screen.png',
     name: 'shot-collection',
     format: 'jpeg',
     width: 720,
-    alt: 'A bingd. collection of ranked series, each with a score out of ten.',
+    alt: 'A bingd collection of ranked series, each with a score out of ten.',
   },
   {
     // The comparison sheet alone, from just above its rounded top edge to under Undo and
@@ -173,7 +173,7 @@ const LAYER_SHOTS = [
     format: 'jpeg',
     width: 720,
     crop: [0, 388, 709, 974],
-    alt: 'Two films side by side in bingd., under the question which did you like more.',
+    alt: 'Two films side by side in bingd, under the question which did you like more.',
   },
 ];
 
@@ -183,7 +183,7 @@ const SHOTS = [
     name: 'shot-grouppicks',
     width: 640,
     masks: GROUP_PICKS_MASKS,
-    alt: 'The bingd. Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
+    alt: 'The bingd Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
   },
   {
     // Your First Five on an iPhone (2026-09-12), the whole screen (founder, 2026-09-14:
@@ -208,7 +208,7 @@ const SHOTS = [
     name: 'shot-comments',
     width: 640,
     masks: COMMENT_MASKS,
-    alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
+    alt: 'A bingd comment thread under a ranking of The Witcher, season one, with names and faces blurred',
   },
   {
     source: 'Screenshot_20260831_094137_bingd.jpg',

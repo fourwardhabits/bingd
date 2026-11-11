@@ -670,10 +670,14 @@ Where the name is not prose at all, it keeps whatever form the identifier or the
   note it here rather than letting it spread back into the app.
 - **The graphic.** `Wordmark.tsx` and the brand lockup draw `bingd.`, and so does any
   image asset of the mark.
-- **Owned elsewhere, and not yet changed (2026-09-13).** The auth templates, the support
-  mailto subject and greeting (`bingd. support` / `Hi bingd. team,`), the web pages, and the
-  push copy `push-sender` sends (`bingd. Awards`, `joined bingd. from your invite`) still
-  carry the period. Web belongs to the marketing thread; push needs its own function deploy.
+- **Owned elsewhere, and not yet changed (2026-09-13; updated by #241).** #241 writes the
+  name as `bingd` in the sign-in email subject (`Your bingd sign-in code`), the support
+  greeting (`Hi bingd team,`) and the invite push (`joined bingd from your invite`); the
+  auth email body keeps `bingd.` as its masthead wordmark. Still carrying the period: the
+  support mailto subjects (`bingd. support` / `bingd. feedback`), which the web support
+  page and the mail filter extend and so change with them, and the web pages. Web belongs
+  to the marketing thread. The push copy needs its own `push-sender` deploy, and the email
+  subject a re-apply of the auth config, before either reaches anyone.
 
   **The lifecycle email follows the rule above** (2026-09-17). `emails/welcome/` writes the
   name as `bingd` in every sentence and keeps `bingd.` only as the masthead, which is the
