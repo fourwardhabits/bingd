@@ -2,9 +2,18 @@ import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { DEFAULT_REACTION, REACTIONS, useReactions, useSetReaction } from './use-reactions';
+import {
+  DEFAULT_REACTION,
+  REACTIONS,
+  SELF_REACTION_MESSAGE,
+  isSelfReactionRefusal,
+  reactionFailureAlert,
+  useReactions,
+  useSetReaction,
+} from './use-reactions';
 
 let mockRows: unknown[] = [];
+let mockReads = 0;
 const mockRpc = jest.fn();
 
 // A fresh id every call, so a held one is visibly held rather than two undefineds
@@ -24,7 +33,10 @@ jest.mock('@/lib/supabase', () => ({
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
         select: () => chain,
-        in: () => Promise.resolve({ data: mockRows, error: null }),
+        in: () => {
+          mockReads += 1;
+          return Promise.resolve({ data: mockRows, error: null });
+        },
       });
       return chain;
     },
@@ -130,6 +142,91 @@ describe('one operation id per reaction', () => {
 
     const [first, second] = idsSent();
     expect(second).not.toBe(first);
+  });
+});
+
+/**
+ * **A reaction to your own post is refused calmly** (20261110000100, founder 2026-11-10).
+ *
+ * The server raises 42501 "cannot react to your own activity". 42501 is also the
+ * suspension refusal, so the message decides which sentence the reader gets; the codes
+ * and the RPC are the migration's and are not changed by the client.
+ */
+describe('a refused self-reaction', () => {
+  const SELF = { code: '42501', message: 'cannot react to your own activity' };
+
+  const mount = async () => {
+    const view = await renderHookWithProviders(() => useSetReaction('me'));
+    return (kind: 'love' | null) =>
+      act(() => view.result.current.setReaction('event-1', kind));
+  };
+
+  it('is recognised by its code and its words, for a post and a comment', () => {
+    expect(isSelfReactionRefusal(SELF)).toBe(true);
+    expect(
+      isSelfReactionRefusal({ code: '42501', message: 'cannot react to your own comment' }),
+    ).toBe(true);
+    // A suspended account is 42501 too, and keeps its own wording.
+    expect(isSelfReactionRefusal({ code: '42501', message: 'account is suspended' })).toBe(false);
+    expect(isSelfReactionRefusal({ code: 'P0002', message: 'no such activity' })).toBe(false);
+    expect(isSelfReactionRefusal(null)).toBe(false);
+  });
+
+  it('answers in its own words and reads the reactions again', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: SELF });
+    const before = mockRpc.mock.calls.length;
+    // The read and the writer together, as a surface mounts them, so the rollback (a
+    // fresh read of what is stored) is visible.
+    const view = await renderHookWithProviders(() => ({
+      read: useReactions(['event-1'], 'me'),
+      write: useSetReaction('me'),
+    }));
+    await waitFor(() => expect(view.result.current.read.isPending).toBe(false));
+    const readsBefore = mockReads;
+
+    const result = await act(() => view.result.current.write.setReaction('event-1', 'love'));
+
+    await waitFor(() => expect(mockReads).toBeGreaterThan(readsBefore));
+
+    expect(result).toEqual({
+      ok: false,
+      message: SELF_REACTION_MESSAGE.post,
+      selfReaction: true,
+    });
+    expect(SELF_REACTION_MESSAGE.post).toBe('You can’t react to your own post.');
+    expect(mockRpc.mock.calls.length - before).toBe(1);
+    // The calm sentence alone, not under "Could not save your reaction".
+    expect(reactionFailureAlert(result, 'Could not save your reaction')).toEqual([
+      'You can’t react to your own post.',
+    ]);
+  });
+
+  it('leaves every other failure its existing alert', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'account is suspended' },
+    });
+    const react = await mount();
+
+    const result = await react('love');
+
+    expect(result.ok).toBe(false);
+    expect(result.selfReaction).toBeFalsy();
+    expect(reactionFailureAlert(result, 'Could not save your reaction')).toEqual([
+      'Could not save your reaction',
+      'account is suspended',
+    ]);
+  });
+
+  it('still sends a removal, which the server allows on your own post', async () => {
+    // Taking an old self-reaction back is a null kind, and nothing here refuses it first.
+    const react = await mount();
+    const result = await react(null);
+    expect(result).toEqual({ ok: true, message: null });
+    expect(mockRpc).toHaveBeenCalledWith(
+      'set_reaction',
+      expect.objectContaining({ p_feed_event_id: 'event-1', p_kind: null }),
+    );
   });
 });
 

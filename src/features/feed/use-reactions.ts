@@ -191,6 +191,57 @@ async function readReactions(
 
 export const emptyReactionSummary = () => EMPTY;
 
+/** What a reaction is attached to, for the words a refusal uses. */
+export type ReactionTarget = 'post' | 'comment';
+
+/**
+ * The calm sentence for a reaction to your own post or comment (founder, 2026-11-10).
+ *
+ * Said as the alert's title on its own, rather than under "Could not save your reaction",
+ * because nothing failed: the server declined something it never allows.
+ */
+export const SELF_REACTION_MESSAGE: Record<ReactionTarget, string> = {
+  post: 'You can’t react to your own post.',
+  comment: 'You can’t react to your own comment.',
+};
+
+/**
+ * Whether a reaction write was refused for being the author's own (20261110000100).
+ *
+ * `set_reaction` and `_set_comment_reaction` raise **42501** "cannot react to your own
+ * activity" / "…comment" for a non-null kind on the caller's own post or comment. 42501
+ * is also `assert_can_write`'s suspension refusal, so the message is part of the test:
+ * a suspended account keeps the generic alert and its own wording. The codes and the
+ * messages are the migration's and are not changed here, so an older client, which does
+ * not know this function, still shows them in its existing alert.
+ */
+export function isSelfReactionRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    code === '42501' && typeof message === 'string' && /cannot react to your own/i.test(message)
+  );
+}
+
+/** A reaction write's answer, shared by the post and the comment writers. */
+export type ReactionWriteResult =
+  | { ok: true; message: null; selfReaction?: false }
+  | { ok: false; message: string | null; selfReaction?: boolean };
+
+/**
+ * The alert a failed reaction write shows, the same on every surface: the calm sentence
+ * alone for a self-reaction, else `fallbackTitle` over the write's message. Null when
+ * there is nothing to say (a write refused locally because another was in flight).
+ */
+export function reactionFailureAlert(
+  result: { ok: boolean; message?: string | null; selfReaction?: boolean },
+  fallbackTitle: string,
+): [title: string, message?: string] | null {
+  if (result.ok) return null;
+  if (result.selfReaction && result.message) return [result.message];
+  return result.message ? [fallbackTitle, result.message] : null;
+}
+
 /**
  * Sets, changes or clears the viewer's reaction.
  *
@@ -204,7 +255,10 @@ export function useSetReaction(viewerId: string) {
   const [pending, setPending] = useState<string | null>(null);
   const withIntent = useOperationIntent();
 
-  const setReaction = async (feedEventId: string, kind: ReactionKind | null) => {
+  const setReaction = async (
+    feedEventId: string,
+    kind: ReactionKind | null,
+  ): Promise<ReactionWriteResult> => {
     if (pending) return { ok: false as const, message: null };
     setPending(feedEventId);
 
@@ -235,10 +289,20 @@ export function useSetReaction(viewerId: string) {
     // loses its reply leaves the pill showing the previous state, and the reader's next
     // tap sends the *opposite* intent against a row that already moved
     // (`lib/write-outcome.ts`). Independent review 21e's invariant, in a fifth place.
-    if (mustReconcile(classifyWrite(error))) {
+    /**
+     * **A refused self-reaction is reconciled too** (2026-11-11). Nothing was written, but
+     * whatever drew a heart on the reader's own post was holding a state the server does
+     * not have, so the cache is read again and the surface returns to what is stored.
+     * There is no optimistic state to undo in this hook; this is its rollback.
+     */
+    const selfReaction = isSelfReactionRefusal(error);
+    if (selfReaction || mustReconcile(classifyWrite(error))) {
       await queryClient.invalidateQueries({ queryKey: ['reactions', viewerId] });
     }
 
+    if (selfReaction) {
+      return { ok: false as const, message: SELF_REACTION_MESSAGE.post, selfReaction: true };
+    }
     if (error) return { ok: false as const, message: diagnose(error) ?? error.message };
     // The event's actor has a `reaction` notification as of the statement above, and this
     // reader is the only person holding a phone on its behalf. Debounced, and awaited by

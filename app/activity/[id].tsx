@@ -15,6 +15,7 @@ import { useActivityEvent } from '@/features/feed/use-feed';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
+  reactionFailureAlert,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -165,9 +166,10 @@ export default function ActivityScreen() {
     if (!event) return;
     setPickerOpen(false);
     const result = await setReaction(event.id, kind);
-    if (!result.ok && result.message) {
-      Alert.alert('Could not save your reaction', result.message);
-    }
+    // One rule for every surface: a self-reaction is answered calmly on its own, anything
+    // else under the alert it always had (`reactionFailureAlert`).
+    const alert = reactionFailureAlert(result, 'Could not save your reaction');
+    if (alert) Alert.alert(...alert);
   };
 
   /**

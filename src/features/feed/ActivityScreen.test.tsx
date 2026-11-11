@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Keyboard, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
+import { Alert, Keyboard, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -126,6 +126,8 @@ const mockReactions = {
   /** Whether the read has landed. A `Map` with no entry cannot say this by itself. */
   settled: true,
   failed: false,
+  /** What `setReaction` answers. */
+  result: { ok: true } as Record<string, unknown>,
 };
 
 jest.mock('@/features/feed/use-reactions', () => {
@@ -147,7 +149,7 @@ jest.mock('@/features/feed/use-reactions', () => {
     useSetReaction: () => ({
       setReaction: async (eventId: string, kind: string | null) => {
         mockReactions.set.push([eventId, kind]);
-        return { ok: true };
+        return mockReactions.result;
       },
     }),
   };
@@ -212,6 +214,7 @@ beforeEach(() => {
   mockReactions.set = [];
   mockReactions.settled = true;
   mockReactions.failed = false;
+  mockReactions.result = { ok: true };
 });
 
 /**
@@ -295,6 +298,42 @@ describe('the reactions on the post above the conversation', () => {
 
     fireEvent.press(summaryLine as never);
     await waitFor(() => expect(view.getByText('Priya Raman')).toBeTruthy());
+  });
+
+  /**
+   * **An older server answer, said calmly** (20261110000100). A heart drawn against a
+   * stale idea of whose post this is reaches the server's refusal; the reader is told
+   * plainly, not "Could not save your reaction".
+   */
+  it('says a refused self-reaction in its own words, not as a failure', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockReactions.result = {
+      ok: false,
+      message: 'You can’t react to your own post.',
+      selfReaction: true,
+    };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    fireEvent.press(control(view, false) as never);
+
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'));
+    expect(alert).not.toHaveBeenCalledWith('Could not save your reaction', expect.anything());
+    alert.mockRestore();
+  });
+
+  it('keeps the existing alert for any other refusal', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockReactions.result = { ok: false, message: 'account is suspended' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    fireEvent.press(control(view, false) as never);
+
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith('Could not save your reaction', 'account is suspended'),
+    );
+    alert.mockRestore();
   });
 
   it('sets the default reaction on a tap, and clears it on the next one', async () => {

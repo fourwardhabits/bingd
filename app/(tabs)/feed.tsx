@@ -45,6 +45,7 @@ import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
+  reactionFailureAlert,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -469,9 +470,10 @@ export default function FeedScreen() {
   const choose = async (eventId: string, kind: ReactionKind | null) => {
     setPickerFor(null);
     const result = await setReaction(eventId, kind);
-    if (!result.ok && result.message) {
-      Alert.alert('Could not save your reaction', result.message);
-    }
+    // One rule for every surface: a self-reaction is answered calmly on its own, anything
+    // else under the alert it always had (`reactionFailureAlert`).
+    const alert = reactionFailureAlert(result, 'Could not save your reaction');
+    if (alert) Alert.alert(...alert);
   };
 
   /**

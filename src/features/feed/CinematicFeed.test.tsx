@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { BackHandler, StyleSheet, type TextStyle } from 'react-native';
+import { Alert, BackHandler, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -33,6 +33,8 @@ let mockWatched: { media_item_id: string }[] = [];
 let mockReactions: unknown[] = [];
 type MockFn = (input: unknown) => unknown;
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
+const mockFromLog: string[] = [];
+const mockFromCalls = (table: string) => mockFromLog.filter((name) => name === table).length;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -45,6 +47,7 @@ jest.mock('@/lib/supabase', () => ({
       return Promise.resolve({ data, error: null });
     },
     from: (table: string) => {
+      mockFromLog.push(table);
       const chain: Record<string, unknown> = {};
       const result = () => {
         if (table === 'follows') {
@@ -362,6 +365,33 @@ describe('comments on the card', () => {
 });
 
 describe('the actions', () => {
+  /**
+   * **The server's refusal of a self-reaction, through the real writer** (20261110000100).
+   * This client draws no Like on the reader's own post, so the refusal is reached only
+   * when what the card was told about the post is out of date. The reader is told
+   * plainly, nothing crashes, and the reactions are read again.
+   */
+  it('says a refused self-reaction calmly, and reads the reactions again', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockRpc.set_reaction = Object.assign(new Error('cannot react to your own activity'), {
+      code: '42501',
+    });
+    const view = await renderWithProviders(<FeedScreen />);
+    const like = await waitFor(() => view.getByTestId('feed-card-like'));
+    const reads = mockFromCalls('reactions');
+
+    fireEvent.press(like);
+
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'));
+    expect(alert).not.toHaveBeenCalledWith('Could not save your reaction', expect.anything());
+    await waitFor(() => expect(mockFromCalls('reactions')).toBeGreaterThan(reads));
+    // Still a Like to press, and nothing claims a reaction that was never stored.
+    expect(view.getByTestId('feed-card-like')).toBeTruthy();
+    expect(within(view.getByTestId('feed-card-like')).getByText('Like')).toBeTruthy();
+    alert.mockRestore();
+  });
+
   it('likes on a tap, and opens the six on a long press', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     const view = await renderWithProviders(<FeedScreen />);

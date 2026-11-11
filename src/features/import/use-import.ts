@@ -470,7 +470,9 @@ export function useImport(
   const provider: ImportProvider = options?.provider ?? providerOfJob(state) ?? 'letterboxd';
   /** The same, for the poll loop, which must not restart when it changes. */
   const providerRef = useRef(provider);
-  providerRef.current = provider;
+  useEffect(() => {
+    providerRef.current = provider;
+  }, [provider]);
   /** Bumped by `recheck`, so the restore effect asks about the named job again. */
   const [checks, setChecks] = useState(0);
   const jobRef = useRef<string | null>(null);

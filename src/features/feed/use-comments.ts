@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { nudgePushDelivery } from '@/features/notifications/push';
-import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
+import {
+  REACTIONS,
+  SELF_REACTION_MESSAGE,
+  isSelfReactionRefusal,
+  type ReactionKind,
+  type ReactionTarget,
+} from '@/features/feed/use-reactions';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { useChunkedById } from '@/lib/chunked-query';
@@ -210,37 +216,59 @@ export function useComments(eventId: string | null, viewerId: string) {
       });
       if (error) throw error;
 
-      return ((data ?? []) as CommentRow[]).map((row) => ({
-        id: row.id,
-        eventId: eventId as string,
-        parentId: row.parent_id,
-        authorId: row.author_id,
-        authorUsername: row.username,
-        authorName: row.display_name || row.username,
-        authorAvatarUri: avatarUri(row.avatar_path),
-        body: row.body,
-        hasSpoilers: row.has_spoilers,
-        createdAt: row.created_at,
-        editedAt: row.edited_at,
-        deleted: row.deleted_at !== null,
-        reactionCount: row.reaction_count,
-        reactedByMe: row.reacted_by_me,
-        // Narrowed against the shared list rather than cast: the column is `text`, and a
-        // value this client does not know is a glyph it cannot draw — so an unrecognised
-        // one is dropped here rather than rendering as `undefined` three layers down.
-        reactionKinds: (row.reaction_kinds ?? []).filter(isReactionKind),
-        myReaction: isReactionKind(row.my_reaction) ? row.my_reaction : null,
-        // Defensive against a server that predates 20260830000100 — a bundle can be
-        // newer than the database it is pointed at during a rollout, and an edit that
-        // read `undefined.map` would be a crash rather than a comment with no mentions.
-        mentions: (row.mentions ?? []).map((mention) => ({
-          id: mention.id,
-          username: mention.username,
-          // Absent from a server that predates the column, and from any row written
-          // before it existed. Null reads as "no second spelling", which is right.
-          handle: mention.handle ?? null,
-        })),
-      }));
+      return ((data ?? []) as CommentRow[]).map((row) => {
+        /**
+         * **Your reaction to your own comment is not counted** (founder, 2026-11-10), the
+         * rule `use-reactions.ts` applies to a post. `activity_comments` returns a summary
+         * rather than the rows, so the one self-reaction this client can see is its own:
+         * `my_reaction` on a comment it wrote. That one is taken out of the count, out of
+         * the glyphs when it was the only reaction, and out of the reader's own state.
+         * Older rows are not deleted, and taking one back still works on the server.
+         *
+         * Somebody else's reaction to their own comment is inside the server's aggregate
+         * and cannot be separated here; the reactor list leaves it out
+         * (`use-comment-reactors.ts`). Excluding it from the count needs the aggregate
+         * changed, which is a migration and a separate decision.
+         */
+        const selfReacted = row.author_id === viewerId && isReactionKind(row.my_reaction);
+        const reactionCount = selfReacted
+          ? Math.max(row.reaction_count - 1, 0)
+          : row.reaction_count;
+        return {
+          id: row.id,
+          eventId: eventId as string,
+          parentId: row.parent_id,
+          authorId: row.author_id,
+          authorUsername: row.username,
+          authorName: row.display_name || row.username,
+          authorAvatarUri: avatarUri(row.avatar_path),
+          body: row.body,
+          hasSpoilers: row.has_spoilers,
+          createdAt: row.created_at,
+          editedAt: row.edited_at,
+          deleted: row.deleted_at !== null,
+          reactionCount,
+          reactedByMe: selfReacted ? false : row.reacted_by_me,
+          // Narrowed against the shared list rather than cast: the column is `text`, and a
+          // value this client does not know is a glyph it cannot draw — so an unrecognised
+          // one is dropped here rather than rendering as `undefined` three layers down.
+          reactionKinds:
+            selfReacted && reactionCount === 0
+              ? []
+              : (row.reaction_kinds ?? []).filter(isReactionKind),
+          myReaction: !selfReacted && isReactionKind(row.my_reaction) ? row.my_reaction : null,
+          // Defensive against a server that predates 20260830000100 — a bundle can be
+          // newer than the database it is pointed at during a rollout, and an edit that
+          // read `undefined.map` would be a crash rather than a comment with no mentions.
+          mentions: (row.mentions ?? []).map((mention) => ({
+            id: mention.id,
+            username: mention.username,
+            // Absent from a server that predates the column, and from any row written
+            // before it existed. Null reads as "no second spelling", which is right.
+            handle: mention.handle ?? null,
+          })),
+        };
+      });
     },
   });
 }
@@ -284,7 +312,9 @@ export function threadsOf(comments: Comment[] | undefined): CommentThread[] {
 export const readableCount = (comments: Comment[] | undefined) =>
   (comments ?? []).filter((comment) => !comment.deleted).length;
 
-export type CommentWriteResult = { ok: true } | { ok: false; message: string };
+export type CommentWriteResult =
+  | { ok: true }
+  | { ok: false; message: string; selfReaction?: boolean };
 
 /**
  * Posting, editing, deleting and liking.
@@ -316,8 +346,22 @@ export function useCommentWrites(viewerId: string) {
     invalidateAwards(queryClient, viewerId);
   };
 
-  const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<CommentWriteResult> => {
+  const run = async (
+    fn: () => PromiseLike<{ error: unknown }>,
+    target?: ReactionTarget,
+  ): Promise<CommentWriteResult> => {
     const { error } = await fn();
+
+    /**
+     * **A reaction to your own comment is answered in its own words** (2026-11-11), and
+     * the thread is read again so whatever drew the heart returns to what is stored
+     * (`isSelfReactionRefusal`). Nothing was written, so this is the only rollback there
+     * is: the writers here hold no optimistic state.
+     */
+    if (target && isSelfReactionRefusal(error)) {
+      await refresh();
+      return { ok: false, message: SELF_REACTION_MESSAGE[target], selfReaction: true };
+    }
 
     /**
      * **Reconciled on an unknown outcome as well as on a commit.**
@@ -500,6 +544,7 @@ export function useCommentWrites(viewerId: string) {
             }),
           answerWasLost,
         ),
+        'comment',
       ),
   });
 

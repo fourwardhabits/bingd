@@ -603,6 +603,34 @@ describe('recent activity', () => {
     await waitFor(() => expect(view.getByText(/That’s the end of the list/)).toBeTruthy());
   });
 
+  /**
+   * **No reaction to yourself, here too** (founder, 2026-11-10). Every row on your own
+   * profile is yours, so none offers a heart or a picker; other people's reactions are
+   * still summarised, and a self-reaction written before the rule is left out of the
+   * count and the names (`use-reactions.ts`, the one rule the Feed uses).
+   */
+  it('offers no reaction on your own rows, and counts only other people’s', async () => {
+    mockTables.feed_events = [activity('e1', 'user-1', 'Sai')];
+    const reactor = (id: string, name: string) => ({
+      feed_event_id: 'e1',
+      user_id: id,
+      kind: 'love',
+      created_at: '2026-08-16T00:00:00Z',
+      event: { actor_id: 'user-1' },
+      profiles: { id, display_name: name, username: name.toLowerCase(), avatar_path: null },
+    });
+    mockTables.reactions = [reactor('user-1', 'Sai'), reactor('priya', 'Priya')];
+
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Priya likes this. See who reacted.')).toBeTruthy(),
+    );
+    expect(view.queryByLabelText(/^React to|You reacted to/)).toBeNull();
+    expect(view.queryByTestId('reaction-action')).toBeNull();
+    expect(view.queryByLabelText(/Sai and 1 other|2 reactions/)).toBeNull();
+  });
+
   it('says so when there is none, rather than leaving a bare heading', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Nothing here yet')).toBeTruthy());

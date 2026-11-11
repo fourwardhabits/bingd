@@ -25,6 +25,7 @@ import {
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
+  reactionFailureAlert,
   type ReactionKind,
 } from './use-reactions';
 
@@ -127,7 +128,11 @@ export function CommentThread({
    * deliberately carries only aggregates.
    */
   const [reactorsFor, setReactorsFor] = useState<string | null>(null);
-  const reactors = useCommentReactors(reactorsFor, viewerId);
+  // The comment's author, so a reaction they left on it themselves is not listed: the one
+  // rule `use-reactions.ts` applies to a post, applied to the people behind a comment.
+  const reactorsAuthor =
+    comments.data?.find((comment) => comment.id === reactorsFor)?.authorId ?? null;
+  const reactors = useCommentReactors(reactorsFor, viewerId, reactorsAuthor);
 
   /**
    * ---------------------------------------------------------------------------
@@ -423,7 +428,8 @@ export function CommentThread({
       // The state wanted, not "the opposite of what I am showing" — see `react` in
       // `use-comments.ts`. A retry after a lost reply converges instead of undoing.
       const result = await react({ commentId: comment.id, kind });
-      if (!result.ok) Alert.alert('Could not do that', result.message);
+      const alert = reactionFailureAlert(result, 'Could not do that');
+      if (alert) Alert.alert(...alert);
     })();
   };
 
