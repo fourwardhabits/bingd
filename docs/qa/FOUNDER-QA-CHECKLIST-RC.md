@@ -63,13 +63,13 @@ Use `bingdtest2`. The IMDb steps use the founder's own IMDb export; it is never 
    - **Expected:** the summary says "Nothing was added", then its unmatched / TV / unsupported lines.
 4. **A Letterboxd import** still says Letterboxd, end to end.
 5. **PostHog:** `provider` is on every import event, and `films` / `tv_shows` are on `import_started`.
-6. TV shows in an IMDb file: see **8.13** for the TV-specific checks.
+6. TV shows in an IMDb file: see **8.14** for the TV-specific checks.
 
 ## 7. Web `[web, after merge]`
 - After merge only: the store buttons read "Get bingd on Google Play / the App Store / for iPhone / for Android". **Not in this sitting.**
 
 ## 8. TV Rankings (#265) `[ops 3]` `[build]`
-Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8.12 (and 8.14) in order on one phone, then repeat 8.4 and 8.9 on the other.
+Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8.13 in order on one phone, then repeat 8.4 and 8.9 on the other.
 
 ### 8.1 Rank a show
 1. Search "Shameless" and tap **`+`** on the show row.
@@ -172,7 +172,7 @@ Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8
 1. Start a first ranking on a new show, kill the app mid-comparison, reopen, and tap **Rank Show**.
    - **Expected:** it resumes the same comparison.
 
-### 8.14 Actor pages list shows (#262 × #265) `[ops 4b]`
+### 8.13 Actor pages list shows (#262 × #265) `[ops 4b]`
 1. Open an actor from Shameless's cast (title page → Cast).
 2. The **Shameless** row reads **Ranked**, because the reader ranked the show.
 3. A show the reader logged as a show but did not rank reads **Watched**.
@@ -180,7 +180,7 @@ Use a long show the reader has not ranked; Shameless is the example. Do 8.1 to 8
 5. A show where the reader logged or ranked only seasons claims nothing.
 6. Sorting (#262) works on a filmography that mixes films and shows.
 
-### 8.13 IMDb import of a TV show (§5 of the RC brief) `[ops 1]` `[ops 3]` `[ops 4b if the key was missing]`
+### 8.14 IMDb import of a TV show (§5 of the RC brief) `[ops 1]` `[ops 3]` `[ops 4b if the key was missing]`
 Use `bingdtest2`, with an IMDb export holding at least one TV Series, one TV Mini Series and one TV Episode.
 1. **Preview:**
    - **Expected:** "TV shows, not added" counts the series and mini-series; the episode is under Not supported.
