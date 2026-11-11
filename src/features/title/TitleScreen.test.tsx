@@ -4369,6 +4369,53 @@ describe('the immersive title page (experiment)', () => {
         expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
         expect(rewatchCalls()).toHaveLength(0);
       });
+
+      /**
+       * **No second, prominent Edit ranking** (founder decision, 2026-11-11). Log rewatch is
+       * the page's one ranking control; correcting the ranking stays where it was — ⋯ →
+       * *Update your rating* on this page, and *Edit ranking* in an expanded watch on Watch
+       * History (#258), which this page's Watch history row opens.
+       */
+      it('draws no Edit ranking control on the page: the correction is in ⋯ and Watch History', async () => {
+        ranked();
+        tableRows.watch_events = [
+          { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
+          { id: 'w2', media_item_id: 'film-1', user_id: 'user-1' },
+        ];
+        const view = await open();
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+
+        // Nothing on the page itself offers to edit the ranking: no button, no label, no
+        // second ranking control beside Log rewatch.
+        expect(view.queryAllByText(/Edit ranking/i)).toHaveLength(0);
+        expect(view.queryAllByLabelText(/Edit (your )?ranking/i)).toHaveLength(0);
+        expect(view.queryByLabelText('Update your rating')).toBeNull();
+        expect(view.queryByTestId('title-action-rank')).toBeNull();
+        expect(view.getAllByTestId('title-action-ranked')).toHaveLength(1);
+
+        // The way to it: ⋯ holds the correction, beside Log another watch.
+        await fireEvent.press(view.getByTestId('title-more'));
+        await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
+
+      it('opens Watch History, where an expanded watch carries Edit ranking', async () => {
+        ranked();
+        tableRows.watch_events = [
+          { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
+          { id: 'w2', media_item_id: 'film-1', user_id: 'user-1' },
+        ];
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+        const row = await waitFor(() => view.getByRole('button', { name: 'Watch history' }));
+        await fireEvent.press(row);
+        expect(mockPush).toHaveBeenCalledWith('/title/film-1/history');
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
     });
 
     it('still resumes an unfinished ranking from Rank', async () => {

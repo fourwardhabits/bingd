@@ -1915,6 +1915,11 @@ export default function TitleScreen() {
    * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
    * the score row. *Update your rating*, the same-watch correction this button used to
    * open, is still the ⋯ menu's first Ranking row.
+   *
+   * **No second, prominent Edit ranking beside it** (founder decision, 2026-11-11). Log
+   * rewatch stays the primary action; the ranking correction is reached from ⋯ here and
+   * from *Edit ranking* in an expanded watch on Watch History (the Watch history row
+   * below opens it). Both open the same correction flow, which records no viewing.
    */
   const immersiveActions = cloneElement(actions, {
     rank: rankable
