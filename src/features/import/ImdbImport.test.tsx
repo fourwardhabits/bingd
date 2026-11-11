@@ -194,7 +194,7 @@ describe('the IMDb preview', () => {
     expect(view.getByText('Not supported')).toBeTruthy();
     expect(
       view.getByText(
-        /Whole TV shows can’t be added yet\. We’ll match the 3 shows you rated and count them in your summary, but they won’t join your collection/,
+        /Whole TV shows can’t be added yet\. We’ll look for the 3 shows you rated and count the ones we find in your summary, but they won’t join your collection/,
       ),
     ).toBeTruthy();
     expect(view.getByText(/1 TV episode won’t come in/)).toBeTruthy();

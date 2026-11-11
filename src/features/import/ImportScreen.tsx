@@ -1140,7 +1140,7 @@ function ImdbPreviewView({
 
       {counts.tvShows > 0 ? (
         <Note>
-          {`Whole TV shows can’t be added yet. We’ll match the ${plural(counts.tvShows, 'show', 'shows')} you rated and count ${counts.tvShows === 1 ? 'it' : 'them'} in your summary, but ${counts.tvShows === 1 ? 'it won’t' : 'they won’t'} join your collection: bingd tracks TV by season.`}
+          {`Whole TV shows can’t be added yet. We’ll look for the ${plural(counts.tvShows, 'show', 'shows')} you rated and count the ones we find in your summary, but they won’t join your collection: bingd tracks TV by season.`}
         </Note>
       ) : null}
       {counts.episodes > 0 ? (

@@ -48,10 +48,11 @@ outbox.
     the import migration changed in the rebuild.
 - **Grants are restated:** revoked from `public`, `anon` and `authenticated`, and granted to
   `service_role`. The comment is appended, not replaced.
-- **No one-argument form, and no wrapper.** Every caller passes one argument (push-sender's
-  `rpc(…, { p_limit })`, and the tests' `claim_push_batch(20)`), and resolves to the
-  two-argument function through its `p_now` default. Nothing in SQL or cron calls it. A
-  separate `claim_push_batch(integer)` would make exactly those calls ambiguous.
+- **No one-argument form, and no wrapper.** The only production caller, push-sender's
+  `rpc(…, { p_limit })`, passes one argument, as most tests do (`claim_push_batch(20)`). Those
+  calls resolve to the two-argument function through its `p_now` default; the proactive tests
+  and races pass both arguments. Nothing in SQL or cron calls it. A separate
+  `claim_push_batch(integer)` would make every one-argument call ambiguous.
 - **Exactly one definition at every file boundary,** not just at the end.
   `security-before-proactive.test.mjs` applies the migrations up to each file that rebuilds
   the function and asserts one signature.
@@ -77,15 +78,26 @@ an environment that is current with `main`, a plain `db push` applies all six in
   Engine V2 `20261111000100` / `20261111000200`.
 - In that case, run `db push --include-all --dry-run` and confirm it lists exactly these six
   files, as in `letterboxd-production-promotion.md`.
+- **`--include-all` helps only when the newer migrations are also in the local directory.**
+  #249's and Engine V2's files are on neither `main` nor this branch. If one of them was
+  applied to an environment from its own branch, `db push` from this branch stops with
+  "Remote migration versions not found in local migrations directory", and `--include-all`
+  does not fix that. Push from a commit that contains them (for example, after they merge).
+  Or, only after review, record the gap with `supabase migration repair`.
 - The import file itself never needs it relative to #254.
+- **`20261113000100` is dated ahead of today.** A migration that lands later with a version
+  below it (a `20261112…` file) would need `--include-all` on every environment that already
+  has the import. Date later migrations after `20261113000100`.
 
 ## 4. Merge and staging sequence
 
 **Merge** (founder approval at each step; nothing here is approved yet):
 
-1. Merge #254.
-2. Retarget the import PR (`claude/imdb-import-on-254`) to `main`; it is based on #254's
-   branch, and after #254 merges its diff is the import alone. Merge it.
+1. Merge #254 **with a merge commit**, not a squash. Then retarget the import PR
+   (`claude/imdb-import-on-254`) to `main`. It is based on #254's branch, so after a merge
+   commit its diff is the import alone. After a squash merge the retargeted PR would show all
+   of #254 again; in that case merge `main` into this branch first (no force push).
+2. Merge it.
 3. Close #256 as superseded.
 4. Before each merge, CI must be green. That includes `security-before-proactive`,
    `function-grants`, `import-*` and the push-sender Deno tests.
@@ -127,9 +139,13 @@ merge commit. Each step is a founder decision.
    - It must be live before `proactive.push_enabled` is ever turned on (#254 §S), and every
      proactive switch stays off.
    - The `goal_completed` push copy goes live at this step; it is not behind a switch.
-5. **The app update.** A Preview OTA from the same commit, staging backend. Neither change
-   moves `package.json` `scripts` or `app.config.ts`, so `scripts/ota-gate.mjs` should pass
-   against the live runtimes.
+5. **The app update.** A Preview OTA from the same commit, staging backend.
+   - Neither change moves a native-fingerprint input: `package.json` `scripts`,
+     `app.config.ts` and `.gitignore` are unchanged against `main`.
+   - #256 had added a `private-samples/` line to `.gitignore`, which moved the fingerprint
+     (independent review, verified with `@expo/fingerprint`). The rebuild drops it.
+   - Run `scripts/ota-gate.mjs` before publishing. It refuses any runtime mismatch with
+     `config/live-runtimes.json`.
 6. **Functional checks** on staging accounts (`staging-qa-inventory.md`):
    - An IMDb import whose file holds shows. The preview shows "TV shows, not added" with its
      note. The pushes read "IMDb import started" and then "Your IMDb history is ready". The

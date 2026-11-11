@@ -136,8 +136,9 @@ decision), is in [`docs/release/claim-push-batch-reconciliation.md`](../release/
    through the default, and `import_status` gains a trailing column.
 3. Deploy **one** `push-sender` built from this branch, carrying #254's goal and proactive
    copy and this branch's provider naming. A payload without `provider` reads as Letterboxd.
-4. Ship the app update (OTA-eligible: no native change, and `package.json` scripts and
-   `app.config.ts` are unchanged). The new client needs step 2, because it selects
+4. Ship the app update (OTA-eligible: no native change. `package.json` scripts,
+   `app.config.ts` and `.gitignore`, all fingerprint inputs, are unchanged; #256's
+   `private-samples/` ignore line was dropped in the rebuild for exactly that reason). The new client needs step 2, because it selects
    `import_jobs.provider`.
 
 **Rollback:** the switch above (or `unschedule_import_drain()`) stops imports without a
@@ -214,7 +215,8 @@ generator byte-for-byte, and reproduced its findings against PGlite and Jest.
    official brand-kit rasters if brand guidelines require exact files.
 4. **Real-file validation is outstanding.** The friend's 811-row export was not available to
    this session and must never be committed. To validate privately, keep the file outside the
-   checkout (or in the git-ignored `private-samples/`) and run
+   checkout (or, inside it, list the folder in your own `.git/info/exclude`: a line added to
+   `.gitignore` moves every lane's native fingerprint, `founder-todo.md`) and run
    `IMDB_PRIVATE_SAMPLE=/path/to/ratings.csv npx jest imdb-private-sample`, which prints counts
    only. Expected from the spec's description: 811 parsed; 660 Movie + 2 TV Movie + 1 Video +
    1 Short + 1 TV Special = 665 movie-eligible; 118 + 21 = 139 TV shows (recognised, not
