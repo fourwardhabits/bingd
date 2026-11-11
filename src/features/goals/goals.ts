@@ -1,4 +1,4 @@
-import type { RankingCategory } from '@/features/collection/use-collection';
+import type { CollectionMedium } from '@/features/collection/use-collection';
 
 /**
  * What a yearly goal counts, and what it refuses to count.
@@ -37,7 +37,11 @@ import type { RankingCategory } from '@/features/collection/use-collection';
  * surface that would must not ship until this is resolved. See data-model.md.
  */
 
-export type GoalCategory = RankingCategory;
+/**
+ * Goals count movies and seasons (20261114000200): a whole show is ranked in its own pool,
+ * but the unit a TV goal counts stays the season, so one series is never counted twice.
+ */
+export type GoalCategory = CollectionMedium;
 
 export const GOAL_CATEGORIES: readonly GoalCategory[] = ['movies', 'tv_seasons'];
 

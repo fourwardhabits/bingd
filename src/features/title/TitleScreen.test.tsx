@@ -678,9 +678,7 @@ describe('a title this user has ranked', () => {
     // Top of a two-title Loved band, so the band's high. **Once**, and in the Scores
     // section: it sat on the poster's corner until the founder's 2026-09-07 lock, and
     // before that it was in both places at once.
-    await waitFor(() =>
-      expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1),
-    );
+    await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
   });
 
   it('puts its one copy in the Scores row and never on the poster', async () => {
@@ -1545,8 +1543,13 @@ describe('reviews', () => {
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'Top, most helpful first' }).props.accessibilityState.selected).toBe(true);
+    await waitFor(() =>
+      expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy(),
+    );
+    expect(
+      view.getByRole('tab', { name: 'Top, most helpful first' }).props.accessibilityState
+        .selected,
+    ).toBe(true);
   });
 
   it('invites the first one rather than showing an empty box', async () => {
@@ -1712,15 +1715,53 @@ describe('a series', () => {
     // "Where am I up to" is the question a series page is opened to answer. Saying
     // "Season" beside a row already titled "Season 1" answered nothing.
     await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
-    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    // Twice since 2026-11-14: Season 2's row, and the show's own Your score, which is the
+    // show's explicit ranking and is not made up from the ranked Season 1.
+    expect(view.getAllByText('Not ranked yet')).toHaveLength(2);
   });
 
-  it('offers no way to rank the series itself', async () => {
+  it('offers Rank Show for the series itself, as its own ranking (2026-11-14)', async () => {
     const view = await openSeries();
 
     await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
-    expect(view.queryByTestId('title-action-rank')).toBeNull();
-    expect(view.queryByLabelText('Ranked. Change your rating.')).toBeNull();
+    const rank = view.getByTestId('title-action-rank');
+    expect(within(rank).getByText('Rank Show')).toBeTruthy();
+    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
+  });
+
+  it('gives each season row the search row’s +, and ranks that season from it', async () => {
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+
+    // The season's own log sheet, with its bands: a first season ranking begins here.
+    await waitFor(() => expect(view.getByText(/liked it/i)).toBeTruthy());
+    expect(mockPush).not.toHaveBeenCalledWith('/title/season-2');
+  });
+
+  it('draws a ranked season row as its score circle, against seasons only', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+      },
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    const view = await openSeries();
+
+    // A band of one scores its high: 10.0 for the loved season, never the show's 6.9.
+    await waitFor(() => expect(view.getAllByTestId('title-row-actions-ranked').length).toBe(1));
+    expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy();
   });
 
   it('keeps a route onward even before the seasons have arrived', async () => {
@@ -1868,7 +1909,9 @@ describe('the following score', () => {
     expect(view.queryByText(/friend/i)).toBeNull();
   });
 
-  it('asks for nothing on a series, which cannot be ranked', async () => {
+  it('shows a series its own Following and bingd scores (2026-11-14)', async () => {
+    // A whole show is ranked in its own pool, so its aggregates are other readers' show
+    // rankings — the RPCs are asked about the show itself, never about its seasons.
     mockOpenId = 'series-1';
     tableRows.media_items = [
       { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
@@ -1877,8 +1920,10 @@ describe('the following score', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByText('Following')).toBeNull();
-    expect(view.queryByText('bingd')).toBeNull();
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('following_score', { p_media_item_id: 'series-1' }),
+    );
+    expect(mockRpc).toHaveBeenCalledWith('community_score', { p_media_item_id: 'series-1' });
   });
 });
 
@@ -1972,7 +2017,9 @@ describe('a title opened from a recommendation', () => {
   });
 
   it('says who sent it, and quotes the note they wrote', async () => {
-    mockRpcResults.title_recommendations_for_me = [sent({ message: 'The second half is insane.' })];
+    mockRpcResults.title_recommendations_for_me = [
+      sent({ message: 'The second half is insane.' }),
+    ];
     const view = await open();
 
     await waitFor(() => expect(view.getByText(/^Ada · /)).toBeTruthy());
@@ -2019,7 +2066,9 @@ describe('a title opened from a recommendation', () => {
   });
 
   it('does not mark one that was already opened', async () => {
-    mockRpcResults.title_recommendations_for_me = [sent({ opened_at: new Date().toISOString() })];
+    mockRpcResults.title_recommendations_for_me = [
+      sent({ opened_at: new Date().toISOString() }),
+    ];
     const view = await open();
 
     await waitFor(() => expect(view.getByText(/^Recommended by Ada · /)).toBeTruthy());
@@ -2202,9 +2251,9 @@ describe('the action row', () => {
     expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
-  it('does not offer Recommend on a series, which is not a thing anybody watched', async () => {
-    // PRD §10 makes the season the rankable TV unit, and `recommend_title` refuses a
-    // series outright. A control that always fails is worse than its absence.
+  it('offers Recommend on a series, which is rankable in its own pool (2026-11-14)', async () => {
+    // `recommend_title` resolves a series through `rankable_category`, which maps it to
+    // tv_shows, so the show page has the same capabilities as a film's.
     const film = (tableRows.media_items ?? [])[0] as Record<string, unknown>;
     mockOpenId = 'series-1';
     tableRows.media_items = [
@@ -2213,7 +2262,7 @@ describe('the action row', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+    expect(view.getByLabelText(/^Recommend /)).toBeTruthy();
   });
 });
 
@@ -2635,10 +2684,9 @@ describe('where to watch', () => {
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
   });
 
-  it('is on a series page too, which has no score block of its own', async () => {
-    // A series cannot be ranked, so it gets no Scores section — and availability is
-    // still the thing somebody on that page wants. "Under the scores" is a placement
-    // rule, not a dependency.
+  it('is on a series page too, under the show’s own scores', async () => {
+    // A whole show is ranked in its own pool since 2026-11-14, so it has a Scores section
+    // of its own, and availability still follows it.
     mockOpenId = 'series-1';
     tableRows.media_items = [
       {
@@ -2652,7 +2700,7 @@ describe('where to watch', () => {
 
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
-    expect(view.queryByTestId('scores-section')).toBeNull();
+    expect(view.getByTestId('scores-section')).toBeTruthy();
   });
 });
 
@@ -2859,7 +2907,7 @@ describe('the score row and what surrounds it', () => {
     expect(order.indexOf('scores-divider')).toBeLessThan(order.indexOf('scores-layout'));
   });
 
-  it('draws no score row on a series, which cannot be ranked', async () => {
+  it('draws the score row on a series, about the show alone (2026-11-14)', async () => {
     mockOpenId = 'series-1';
     tableRows.media_items = [
       { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
@@ -2868,8 +2916,8 @@ describe('the score row and what surrounds it', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByTestId('scores-section')).toBeNull();
-    expect(view.queryByTestId('scores-divider')).toBeNull();
+    expect(view.getByTestId('scores-section')).toBeTruthy();
+    expect(view.getByTestId('scores-unit-you')).toBeTruthy();
   });
 
   it('keeps the insufficient-ratings state, in each row’s own words', async () => {
@@ -3427,7 +3475,12 @@ describe('a title in the collection that is not ranked', () => {
   it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of ['Edit ranking', 'Log another watch', 'Who I watched with', 'Add a note']) {
+    for (const label of [
+      'Edit ranking',
+      'Log another watch',
+      'Who I watched with',
+      'Add a note',
+    ]) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
     expect(view.queryByText('Ranking')).toBeNull();
@@ -3465,13 +3518,21 @@ describe('a title in the collection that is not ranked', () => {
       ),
     );
     // One write, and it is the removal: no ranking is started, finished or cleared on the way.
-    expect(mockRpc.mock.calls.map(([name]) => name).filter((name) => /^rank_/.test(name))).toEqual([]);
+    expect(
+      mockRpc.mock.calls.map(([name]) => name).filter((name) => /^rank_/.test(name)),
+    ).toEqual([]);
     expect(mockRpc.mock.calls.filter(([name]) => name === 'unlog')).toHaveLength(1);
   });
 
   it('still clears a ranked title’s ranking first, which is the path that already worked', async () => {
     tableRows.rankings = [
-      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
     ];
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
@@ -3533,7 +3594,9 @@ describe('Add to list', () => {
       .getAllByTestId(/^title-action-(save|list|recommend)$/)
       .map((node) => node.props.testID as string);
     expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
-    expect(ids.indexOf('title-action-list')).toBeLessThan(ids.indexOf('title-action-recommend'));
+    expect(ids.indexOf('title-action-list')).toBeLessThan(
+      ids.indexOf('title-action-recommend'),
+    );
   });
 
   it('opens the Add-to-list sheet directly, with nothing refused', async () => {
@@ -3543,8 +3606,7 @@ describe('Add to list', () => {
     await fireEvent.press(view.getByTestId('title-action-list'));
 
     await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
-    const shows = (globalThis as unknown as { __modalShows: { refused: number } })
-      .__modalShows;
+    const shows = (globalThis as unknown as { __modalShows: { refused: number } }).__modalShows;
     expect(shows.refused).toBe(0);
   });
 
@@ -3630,8 +3692,20 @@ describe('the ranking state on the title page', () => {
 describe('the immersive title page (experiment)', () => {
   const ranked = () => {
     tableRows.rankings = [
-      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
-      { user_id: 'user-1', media_item_id: 'other', position: 2, category: 'movies', bucket: 'loved' },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
+      {
+        user_id: 'user-1',
+        media_item_id: 'other',
+        position: 2,
+        category: 'movies',
+        bucket: 'loved',
+      },
     ];
     tableRows.user_media = [
       {
@@ -3747,7 +3821,9 @@ describe('the immersive title page (experiment)', () => {
         walk(children);
       };
       walk(view.toJSON());
-      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-section-about'));
+      expect(ids.indexOf('immersive-module')).toBeLessThan(
+        ids.indexOf('immersive-section-about'),
+      );
     });
 
     it('opens on the cinematic first screen, with none of the original identity block', async () => {
@@ -3831,14 +3907,18 @@ describe('the immersive title page (experiment)', () => {
         // The heading sits above the rail's scroller, outside it, with the section's own
         // gap between them, so a fling on the rail cannot land on the heading.
         expect(within(rail).queryByText('Episodes')).toBeNull();
-        expect(StyleSheet.flatten(view.getByTestId('immersive-body-episodes').props.style).paddingTop)
-          .toBeGreaterThan(0);
+        expect(
+          StyleSheet.flatten(view.getByTestId('immersive-body-episodes').props.style)
+            .paddingTop,
+        ).toBeGreaterThan(0);
         expect(view.queryByText('Five years after the events of the first season.')).toBeNull();
 
         await fireEvent.press(within(section).getByTestId('episode-card-1'));
         const sheet = within(view.getByTestId('episode-sheet'));
         expect(sheet.getByText('Season 2 · Episode 1')).toBeTruthy();
-        expect(sheet.getByText('Five years after the events of the first season.')).toBeTruthy();
+        expect(
+          sheet.getByText('Five years after the events of the first season.'),
+        ).toBeTruthy();
       });
     });
 
@@ -3851,7 +3931,9 @@ describe('the immersive title page (experiment)', () => {
       // Not repeated in About: the module is where the genres live now.
       expect(view.queryByTestId('genre-row')).toBeNull();
       const order = readingOrder(view.toJSON());
-      expect(order.indexOf('Inception')).toBeLessThan(order.findIndex((t) => t.includes('Science Fiction')));
+      expect(order.indexOf('Inception')).toBeLessThan(
+        order.findIndex((t) => t.includes('Science Fiction')),
+      );
     });
 
     it('states the title, the scores, Rank and the synopsis once each', async () => {
@@ -3867,7 +3949,9 @@ describe('the immersive title page (experiment)', () => {
       // The three labels the brief names, inside the one module.
       // Compact since post-QA sprint 2: the rating count rides in the label.
       expect(view.getByTestId('immersive-score-you-label')).toHaveTextContent('Your score');
-      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd( \(\d+\))?$/);
+      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(
+        /^bingd( \(\d+\))?$/,
+      );
       expect(view.getByTestId('immersive-score-following-label')).toHaveTextContent(
         /^Following( \(\d+\))?$/,
       );
@@ -3932,7 +4016,9 @@ describe('the immersive title page (experiment)', () => {
       await fireEvent.press(view.getByRole('button', { name: 'More details' }));
 
       expect(director).toHaveTextContent('Directed by Christopher Nolan');
-      expect(within(view.getByTestId('immersive-module')).getByTestId('title-director')).toBeTruthy();
+      expect(
+        within(view.getByTestId('immersive-module')).getByTestId('title-director'),
+      ).toBeTruthy();
       // Under the metadata, and the genres above both.
       const order = readingOrder(view.toJSON());
       const at = (text: string) => order.findIndex((t) => t.includes(text));
@@ -3955,7 +4041,14 @@ describe('the immersive title page (experiment)', () => {
           ...credits,
           payload: {
             ...credits.payload,
-            crew: [{ id: 1, name: 'An Assistant', job: 'First Assistant Director', department: 'Directing' }],
+            crew: [
+              {
+                id: 1,
+                name: 'An Assistant',
+                job: 'First Assistant Director',
+                department: 'Directing',
+              },
+            ],
           },
         },
       ];
@@ -3979,7 +4072,10 @@ describe('the immersive title page (experiment)', () => {
         const walk = (node: unknown): void => {
           if (Array.isArray(node)) return node.forEach(walk);
           if (!node || typeof node !== 'object') return;
-          const { props, children } = node as { props?: { source?: unknown }; children?: unknown };
+          const { props, children } = node as {
+            props?: { source?: unknown };
+            children?: unknown;
+          };
           const source = props?.source as { uri?: string } | { uri?: string }[] | undefined;
           for (const item of Array.isArray(source) ? source : [source]) {
             if (item?.uri?.includes('ytimg')) found.push(item.uri);
@@ -4023,7 +4119,9 @@ describe('the immersive title page (experiment)', () => {
       const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
 
       await fireEvent.press(within(section).getAllByRole('link')[0]!);
-      expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//));
+      expect(openURL).toHaveBeenCalledWith(
+        expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//),
+      );
       openURL.mockRestore();
     });
 
@@ -4038,17 +4136,27 @@ describe('the immersive title page (experiment)', () => {
         payload: {
           results: [
             ...videos.payload.results,
-            { id: 'v2', key: 'abcdefghijk', name: 'Teaser', type: 'Teaser', site: 'YouTube', official: true },
+            {
+              id: 'v2',
+              key: 'abcdefghijk',
+              name: 'Teaser',
+              type: 'Teaser',
+              site: 'YouTube',
+              official: true,
+            },
           ],
         },
       };
-      const tiles = (section: ReturnType<typeof within>) => section.getAllByTestId('trailer-thumb');
+      const tiles = (section: ReturnType<typeof within>) =>
+        section.getAllByTestId('trailer-thumb');
 
       it('draws the stills with the page outside production, with no Show previews', async () => {
         mockPreviewsByDefault = true;
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         expect(section.getAllByTestId('trailer-still')).toHaveLength(2);
         expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
         // The frame, kind and link are unchanged under the still.
@@ -4059,7 +4167,9 @@ describe('the immersive title page (experiment)', () => {
       it('draws each trailer as a video frame with its kind, before any preview', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
 
         expect(tiles(section)).toHaveLength(2);
         for (const tile of tiles(section)) {
@@ -4075,9 +4185,13 @@ describe('the immersive title page (experiment)', () => {
       it('keeps the frame for a trailer whose still YouTube cannot serve', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         await fireEvent.press(
-          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+          view.getByRole('button', {
+            name: 'Show trailer previews. Loads images from YouTube.',
+          }),
         );
         const stills = await waitFor(() => {
           const found = section.getAllByTestId('trailer-still');
@@ -4089,7 +4203,9 @@ describe('the immersive title page (experiment)', () => {
           uri: 'https://i.ytimg.com/vi/YoHD9XEInc0/hqdefault.jpg',
         });
 
-        await act(async () => stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }));
+        await act(async () =>
+          stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }),
+        );
 
         expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
         // The failed card is still the frame, its kind and its link.
@@ -4105,9 +4221,13 @@ describe('the immersive title page (experiment)', () => {
       it('keeps the frame when YouTube answers with its small placeholder image', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         await fireEvent.press(
-          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+          view.getByRole('button', {
+            name: 'Show trailer previews. Loads images from YouTube.',
+          }),
         );
         const stills = await waitFor(() => {
           const found = section.getAllByTestId('trailer-still');
@@ -4118,10 +4238,14 @@ describe('the immersive title page (experiment)', () => {
         // Decoded at YouTube's size, so the width is the image's and not the card's.
         expect(stills[0]!.props.allowDownscaling).toBe(false);
         await act(async () =>
-          stills[0]!.props.onLoad?.({ nativeEvent: { source: { width: 480, height: 360, url: 'real' } } }),
+          stills[0]!.props.onLoad?.({
+            nativeEvent: { source: { width: 480, height: 360, url: 'real' } },
+          }),
         );
         await act(async () =>
-          stills[1]!.props.onLoad?.({ nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } } }),
+          stills[1]!.props.onLoad?.({
+            nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } },
+          }),
         );
 
         expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
@@ -4144,7 +4268,9 @@ describe('the immersive title page (experiment)', () => {
 
       await fireEvent.press(toggle);
 
-      expect(view.getByRole('button', { name: 'More details' }).props.accessibilityState).toMatchObject({
+      expect(
+        view.getByRole('button', { name: 'More details' }).props.accessibilityState,
+      ).toMatchObject({
         expanded: true,
       });
       const facts = within(view.getByTestId('more-details'));
@@ -4169,7 +4295,9 @@ describe('the immersive title page (experiment)', () => {
       const body = (key: string) =>
         StyleSheet.flatten(view.getByTestId(`immersive-body-${key}`).props.style);
 
-      expect(StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight).toBe(0);
+      expect(
+        StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight,
+      ).toBe(0);
       expect(body('about')).toMatchObject({ paddingTop: 4 });
       expect(body('similar')).toMatchObject({ paddingTop: 8 });
       // A rail's space is outside its scroll view, where See all's slop can use it without
@@ -4192,7 +4320,9 @@ describe('the immersive title page (experiment)', () => {
       mockFetchWatchProviders.mockResolvedValue({
         region: 'US',
         link: null,
-        providers: [{ provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] }],
+        providers: [
+          { provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] },
+        ],
       });
       tableRows.media_cache = [credits];
       const view = await open();
@@ -4227,7 +4357,7 @@ describe('the immersive title page (experiment)', () => {
      * control may take the row's full width and the icons wrap, at any text size; the
      * original page's narrow column keeps its ceiling.
      */
-    it('lets Log rewatch take the card’s width rather than truncating', async () => {
+    it('keeps Log rewatch and the icons on one row, fitting the word rather than cutting it', async () => {
       ranked();
       const view = await open();
       const control = await waitFor(() => view.getByTestId('title-action-ranked'));
@@ -4237,9 +4367,16 @@ describe('the immersive title page (experiment)', () => {
           : control.props.style,
       );
       expect(style.maxWidth).toBe('100%');
-      expect(style.flexShrink).toBe(0);
-      // One line, and the bookmark, list and recommend controls stay in the same cluster.
-      expect(within(control).getByText('Log rewatch').props.numberOfLines).toBe(1);
+      // It gives width back to the icons beside it (2026-11-14): one row, never two.
+      expect(style.flexShrink).toBe(1);
+      expect(StyleSheet.flatten(view.getByTestId('title-actions').props.style).flexWrap).toBe(
+        'nowrap',
+      );
+      // One line, never cut: past 1.5x text the word fits itself to the row.
+      const label = within(control).getByText('Log rewatch');
+      expect(label.props.numberOfLines).toBe(1);
+      expect(label.props.adjustsFontSizeToFit).toBe(true);
+      expect(label.props.maxFontSizeMultiplier).toBe(1.5);
       const cluster = within(view.getByTestId('title-actions'));
       for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
         expect(cluster.getByTestId(id)).toBeTruthy();
@@ -4254,7 +4391,8 @@ describe('the immersive title page (experiment)', () => {
     describe('Log rewatch on a ranked title', () => {
       const rewatchCalls = () =>
         mockRpc.mock.calls.filter(([name]: [string]) => name === 'log_rewatch_with_details');
-      const againCalls = () => mockRpc.mock.calls.filter(([name]: [string]) => name === 'rank_again');
+      const againCalls = () =>
+        mockRpc.mock.calls.filter(([name]: [string]) => name === 'rank_again');
 
       it('reads Log rewatch with the repeat icon, and no second Rank', async () => {
         ranked();
@@ -4299,14 +4437,31 @@ describe('the immersive title page (experiment)', () => {
             title: 'Season 1',
             release_date: '2023-04-01',
             runtime_minutes: null,
-            parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+            parent: {
+              id: 'series-1',
+              title: 'Breaking Bad',
+              poster_path: null,
+              backdrop_path: null,
+            },
           },
         ];
         tableRows.rankings = [
-          { user_id: 'user-1', media_item_id: 'season-1', position: 1, category: 'tv_seasons', bucket: 'loved' },
+          {
+            user_id: 'user-1',
+            media_item_id: 'season-1',
+            position: 1,
+            category: 'tv_seasons',
+            bucket: 'loved',
+          },
         ];
         tableRows.user_media = [
-          { user_id: 'user-1', media_item_id: 'season-1', bucket: 'loved', watched_on: null, note: null },
+          {
+            user_id: 'user-1',
+            media_item_id: 'season-1',
+            bucket: 'loved',
+            watched_on: null,
+            note: null,
+          },
         ];
         const view = await renderWithProviders(<TitleScreen />);
         const control = await waitFor(() => view.getByTestId('title-action-ranked'));
@@ -4328,7 +4483,9 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull());
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);
-        expect(within(view.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
+        expect(
+          within(view.getByTestId('title-action-ranked')).getByText('Log rewatch'),
+        ).toBeTruthy();
       });
 
       it('saves exactly one viewing, then re-checks on that viewing rather than a new one', async () => {
@@ -4348,7 +4505,13 @@ describe('the immersive title page (experiment)', () => {
           expect.objectContaining({ p_bucket: 'loved', p_watch_event_id: 'event-2' }),
         );
         // Nothing else that records a viewing, or moves the ranking outside the session.
-        for (const name of ['log_rewatch', 'log_title', 'set_watch_date', 'rank_rebucket', 'rank_unrank']) {
+        for (const name of [
+          'log_rewatch',
+          'log_title',
+          'set_watch_date',
+          'rank_rebucket',
+          'rank_unrank',
+        ]) {
           expect(mockRpc).not.toHaveBeenCalledWith(name, expect.anything());
         }
       });
@@ -4362,10 +4525,11 @@ describe('the immersive title page (experiment)', () => {
        */
       it('ignores Log rewatch while the sheet is still leaving, and the re-check still opens', async () => {
         type Held = { hold: boolean; pending: (() => void)[] };
-        const { __modalDismissals: dismissals, __modalShows: shows } = globalThis as unknown as {
-          __modalDismissals: Held;
-          __modalShows: Held;
-        };
+        const { __modalDismissals: dismissals, __modalShows: shows } =
+          globalThis as unknown as {
+            __modalDismissals: Held;
+            __modalShows: Held;
+          };
         mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
         ranked();
         const view = await open();
@@ -4383,7 +4547,9 @@ describe('the immersive title page (experiment)', () => {
         // normally ignores touches during the transition — so the press is made on the
         // hidden control on purpose: this guards the state, not the platform.
         shows.hold = true;
-        await fireEvent.press(view.getByTestId('title-action-ranked', { includeHiddenElements: true }));
+        await fireEvent.press(
+          view.getByTestId('title-action-ranked', { includeHiddenElements: true }),
+        );
         // No presentation was issued over the dismissing sheet.
         expect(shows.pending).toHaveLength(0);
         shows.hold = false;
@@ -4394,7 +4560,9 @@ describe('the immersive title page (experiment)', () => {
         });
         // The re-check still opens, on the viewing just saved, and only one viewing exists.
         await waitFor(() => expect(againCalls()).toHaveLength(1));
-        expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_watch_event_id: 'event-2' }));
+        expect(againCalls()[0]![1]).toEqual(
+          expect.objectContaining({ p_watch_event_id: 'event-2' }),
+        );
         expect(rewatchCalls()).toHaveLength(1);
       });
 
@@ -4471,7 +4639,12 @@ describe('the immersive title page (experiment)', () => {
             .filter(Boolean)
             .sort(),
         ).toEqual(
-          ['title-action-list', 'title-action-ranked', 'title-action-recommend', 'title-action-save'].sort(),
+          [
+            'title-action-list',
+            'title-action-ranked',
+            'title-action-recommend',
+            'title-action-save',
+          ].sort(),
         );
         const count = first.getAllByRole('button').length;
         expect(count).toBeGreaterThan(3);
@@ -4547,7 +4720,7 @@ describe('the immersive title page (experiment)', () => {
       ];
       const view = await open();
       const control = await waitFor(() => view.getByTestId('title-action-rank'));
-      expect(within(control).getByText('Rank')).toBeTruthy();
+      expect(within(control).getByText('Rank Movie')).toBeTruthy();
       expect(view.queryByText('Log rewatch')).toBeNull();
 
       await fireEvent.press(control);
@@ -4567,7 +4740,10 @@ describe('the immersive title page (experiment)', () => {
       await fireEvent.press(view.getByTestId('title-action-save'));
 
       await waitFor(() =>
-        expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.objectContaining({ p_present: true })),
+        expect(mockRpc).toHaveBeenCalledWith(
+          'set_watchlist',
+          expect.objectContaining({ p_present: true }),
+        ),
       );
     });
 
@@ -4581,7 +4757,9 @@ describe('the immersive title page (experiment)', () => {
 
     it('opens the recommendation sheet from Share', async () => {
       const view = await open();
-      await waitFor(() => expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy());
+      await waitFor(() =>
+        expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy(),
+      );
 
       await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
       await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
@@ -4612,7 +4790,9 @@ describe('the immersive title page (experiment)', () => {
       };
       const sheetOf = async (view: Awaited<ReturnType<typeof open>>) => {
         await fireEvent.press(
-          await waitFor(() => view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ })),
+          await waitFor(() =>
+            view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ }),
+          ),
         );
         return within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
       };
@@ -4652,7 +4832,12 @@ describe('the immersive title page (experiment)', () => {
         withNote('public');
         mockRpcResults.title_reviews_v2 = [
           reviewBy(1),
-          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          {
+            ...reviewBy(9),
+            user_id: 'user-1',
+            note: 'My own words on it.',
+            display_name: 'Sai',
+          },
           reviewBy(2),
         ];
         mockRpcResults.title_review_count = 3;
@@ -4666,7 +4851,9 @@ describe('the immersive title page (experiment)', () => {
         expect(preview.getByText('Review number 1.')).toBeTruthy();
         expect(preview.queryByText('Review number 2.')).toBeNull();
         const order = readingOrder(view.toJSON());
-        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(
+          order.indexOf('Review number 1.'),
+        );
         // No score circle on your own review.
         expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
 
@@ -4775,9 +4962,13 @@ describe('the immersive title page (experiment)', () => {
         const sheet = await sheetOf(view);
 
         await fireEvent.press(sortTab(sheet, 'Newest'));
-        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), { timeout: 4000 });
+        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), {
+          timeout: 4000,
+        });
         await fireEvent.press(sortTab(sheet, 'Newest first'));
-        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), { timeout: 4000 });
+        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), {
+          timeout: 4000,
+        });
         expect(sortTab(sheet, 'Oldest first')).toBeSelected();
       });
 
@@ -4831,7 +5022,9 @@ describe('the immersive title page (experiment)', () => {
       });
 
       it('never offers Rating over a list the server may have cut short', async () => {
-        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) => reviewBy(n + 1));
+        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) =>
+          reviewBy(n + 1),
+        );
         mockRpcResults.title_review_count = 140;
         const view = await open();
         const sheet = await sheetOf(view);
@@ -4863,9 +5056,12 @@ describe('the immersive title page (experiment)', () => {
 
         full = true;
         await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
-        await waitFor(() => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(), {
-          timeout: 4000,
-        });
+        await waitFor(
+          () => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(),
+          {
+            timeout: 4000,
+          },
+        );
         expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
         expect(sheet.getByTestId('reviews-truncated')).toBeTruthy();
       });
@@ -4886,7 +5082,12 @@ describe('the immersive title page (experiment)', () => {
         withNote('public');
         mockRpcResults.title_reviews_v2 = [
           reviewBy(1),
-          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          {
+            ...reviewBy(9),
+            user_id: 'user-1',
+            note: 'My own words on it.',
+            display_name: 'Sai',
+          },
         ];
         mockRpcResults.title_review_count = 2;
         const view = await open();
@@ -4894,7 +5095,9 @@ describe('the immersive title page (experiment)', () => {
         const mine = sheet.getByTestId('your-review');
         expect(sheet.getAllByText('My own words on it.')).toHaveLength(1);
         const order = readingOrder(view.getByTestId('reviews-sheet-list'));
-        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(
+          order.indexOf('Review number 1.'),
+        );
 
         // Edit from inside the sheet: the sheet goes, then the one composer opens.
         await fireEvent.press(within(mine).getByTestId('edit-review'));

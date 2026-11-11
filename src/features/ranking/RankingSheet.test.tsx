@@ -7,7 +7,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import { queryKeys } from '@/lib/query';
 import { theme, typography } from '@/ui/tokens';
 
-import { RankingSheet, type RankingSheetProps } from './RankingSheet';
+import { offersUpdateShow, RankingSheet, type RankingSheetProps } from './RankingSheet';
 
 const mockRpc = jest.fn();
 const mockPivotRead = jest.fn();
@@ -476,7 +476,10 @@ describe('the comparison', () => {
       // another's key, and the reader would judge a pair they were not shown.
       answering(
         comparison(),
-        comparison({ pivot: 'film-q', pivot_card: { ...filmQ, id: 'film-z', title: 'Film Z' } }),
+        comparison({
+          pivot: 'film-q',
+          pivot_card: { ...filmQ, id: 'film-z', title: 'Film Z' },
+        }),
       );
       mockPivotRead
         .mockResolvedValueOnce(read('film-p', 'Film P'))
@@ -962,7 +965,7 @@ describe('the reveal names what it landed between', () => {
     expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
 
-  it('names a TV neighbour by its series, and calls the category TV', async () => {
+  it('names a TV neighbour by its series, and calls the category TV seasons', async () => {
     ranked([
       {
         mediaItemId: 's1',
@@ -978,10 +981,12 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in TV. Below Severance, S1.');
-    // The category is TV and the neighbour is a season. Nothing claims a rank among
-    // series, which is not a thing this product orders.
-    expect(sheet.getByText('#3 in TV', { includeHiddenElements: true })).toBeTruthy();
+    await sheet.findByLabelText(
+      'Film A scored 8.7 out of 10. #3 in TV seasons. Below Severance, S1.',
+    );
+    // The category is TV seasons and the neighbour is a season. Shows are their own pool
+    // (2026-11-14), so the label names which TV list the number counts in.
+    expect(sheet.getByText('#3 in TV seasons', { includeHiddenElements: true })).toBeTruthy();
     // The show's name, never the bare "Season 1" the row carries.
     expect(sheet.getByText('Severance, S1', { includeHiddenElements: true })).toBeTruthy();
     expect(sheet.queryByText('Season 1', { includeHiddenElements: true })).toBeNull();
@@ -2430,7 +2435,9 @@ describe('a Too tough whose reply was lost', () => {
 
     // The same intent: the retry reuses the operation id, which is what makes the
     // server answer it from the stored result rather than skipping twice.
-    const [first, second] = callsTo('rank_skip').map(([, args]) => args as { p_operation_id: string });
+    const [first, second] = callsTo('rank_skip').map(
+      ([, args]) => args as { p_operation_id: string },
+    );
     expect(second!.p_operation_id).toBe(first!.p_operation_id);
 
     await fireEvent.press(await sheet.ready('Film A'));
@@ -2455,7 +2462,9 @@ describe('a Too tough whose reply was lost', () => {
     await retry(sheet);
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(3));
     const ids = new Set(
-      callsTo('rank_skip').map(([, args]) => (args as { p_operation_id: string }).p_operation_id),
+      callsTo('rank_skip').map(
+        ([, args]) => (args as { p_operation_id: string }).p_operation_id,
+      ),
     );
     expect(ids.size).toBe(1);
 
@@ -2709,5 +2718,160 @@ describe('the reveal after a re-ranking', () => {
     await fireEvent.press(await sheet.ready('Film P'));
     await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
     expect(sheet.queryByTestId('reveal-movement', { includeHiddenElements: true })).toBeNull();
+  });
+});
+
+/**
+ * **Update Show** (founder brief §5, 2026-11-14), on a season's reveal.
+ *
+ * Offered only when ALL hold: a season placement tied to a new watch log or a rewatch;
+ * a show the server says is ranked; and a session that is not itself a linked update.
+ * Everywhere else the reveal is the ordinary Done | Add details pair.
+ */
+describe('Update Show on a season reveal', () => {
+  const season = {
+    id: 's4',
+    title: 'Season 4',
+    bucket: 'loved' as const,
+    posterUri: null,
+    kind: 'season' as const,
+    freshLog: true,
+  };
+  const seasonPlaced = (parent: unknown) => ({
+    data: {
+      ...placement.data,
+      category: 'tv_seasons',
+      placement_id: 'placement-s4',
+      parent,
+    },
+    error: null,
+  });
+  const ranked = { media_item_id: 'shameless', ranked: true, bucket: 'fine' };
+
+  it('decides from the act and the server, never from a timestamp', () => {
+    const placed = {
+      placementId: 'p',
+      parent: { mediaItemId: 'x', ranked: true, bucket: null },
+    };
+    expect(offersUpdateShow({ kind: 'season', freshLog: true }, placed)).toBe(true);
+    expect(offersUpdateShow({ kind: 'season', mode: 'again' }, placed)).toBe(true);
+    // A season ranked without a new log (imported, or re-rated) is not a new watch.
+    expect(offersUpdateShow({ kind: 'season' }, placed)).toBe(false);
+    expect(offersUpdateShow({ kind: 'season', mode: 'start', freshLog: false }, placed)).toBe(
+      false,
+    );
+    // A pure correction of the season.
+    expect(offersUpdateShow({ kind: 'season', mode: 'rerank', freshLog: true }, placed)).toBe(
+      false,
+    );
+    expect(offersUpdateShow({ kind: 'season', mode: 'rebucket' }, placed)).toBe(false);
+    // A movie, or a whole show.
+    expect(offersUpdateShow({ kind: 'movie', freshLog: true }, placed)).toBe(false);
+    expect(offersUpdateShow({ kind: 'series', freshLog: true }, placed)).toBe(false);
+    // Already inside a linked show update.
+    expect(
+      offersUpdateShow({ kind: 'season', freshLog: true, linkedPlacementId: 'q' }, placed),
+    ).toBe(false);
+    // No ranked show, or a backend that sent no link.
+    expect(
+      offersUpdateShow(
+        { kind: 'season', freshLog: true },
+        { placementId: 'p', parent: { mediaItemId: 'x', ranked: false, bucket: null } },
+      ),
+    ).toBe(false);
+    expect(
+      offersUpdateShow({ kind: 'season', freshLog: true }, { placementId: 'p', parent: null }),
+    ).toBe(false);
+    expect(
+      offersUpdateShow({ kind: 'season', freshLog: true }, { ...placed, placementId: null }),
+    ).toBe(false);
+  });
+
+  it('lays out Add details | Update Show, with Done centred under them, and hands over the link', async () => {
+    answering(seasonPlaced(ranked));
+    const onUpdateShow = jest.fn();
+    const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow });
+
+    const update = await sheet.findByText('Update Show');
+    expect(sheet.getByText('Add details')).toBeTruthy();
+    expect(sheet.getByTestId('reveal-done')).toBeTruthy();
+    // Add details leads row one; Update Show follows it.
+    const labels = visibleText(sheet.toJSON());
+    expect(labels.indexOf('Add details')).toBeLessThan(labels.indexOf('Update Show'));
+    expect(labels.indexOf('Update Show')).toBeLessThan(labels.lastIndexOf('Done'));
+
+    await fireEvent.press(update);
+    expect(onUpdateShow).toHaveBeenCalledWith({
+      showId: 'shameless',
+      bucket: 'fine',
+      linkedPlacementId: 'placement-s4',
+    });
+    expect(sheet.onClose).toHaveBeenCalled();
+  });
+
+  it('keeps Done one tap away', async () => {
+    answering(seasonPlaced(ranked));
+    const sheet = await openSheet({
+      subject: season,
+      onFinishLog: jest.fn(),
+      onUpdateShow: jest.fn(),
+    });
+    await sheet.findByText('Update Show');
+    await fireEvent.press(sheet.getByTestId('reveal-done'));
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+  });
+
+  it('is the ordinary Done | Add details when the show is not ranked', async () => {
+    answering(seasonPlaced({ media_item_id: 'shameless', ranked: false, bucket: null }));
+    const sheet = await openSheet({
+      subject: season,
+      onFinishLog: jest.fn(),
+      onUpdateShow: jest.fn(),
+    });
+    await sheet.findByText('Add details');
+    expect(sheet.queryByText('Update Show')).toBeNull();
+    expect(sheet.getByText('Done')).toBeTruthy();
+  });
+
+  it('is not offered for a correction of the season', async () => {
+    answering(seasonPlaced(ranked));
+    const sheet = await openSheet({
+      subject: { ...season, mode: 'rerank' },
+      onFinishLog: jest.fn(),
+      onUpdateShow: jest.fn(),
+    });
+    await sheet.findByText('Add details');
+    expect(sheet.queryByText('Update Show')).toBeNull();
+  });
+
+  it('is not offered by a screen that does not ask for it', async () => {
+    answering(seasonPlaced(ranked));
+    const sheet = await openSheet({ subject: season, onFinishLog: jest.fn() });
+    await sheet.findByText('Add details');
+    expect(sheet.queryByText('Update Show')).toBeNull();
+  });
+
+  it('opens a linked correction with the link, and offers nothing further from it', async () => {
+    answering(comparison(), seasonPlaced(null));
+    const sheet = await openSheet({
+      subject: {
+        id: 'shameless',
+        title: 'Shameless',
+        bucket: 'fine',
+        posterUri: null,
+        kind: 'series',
+        mode: 'rerank',
+        linkedPlacementId: 'placement-s4',
+      },
+      onFinishLog: jest.fn(),
+      onUpdateShow: jest.fn(),
+    });
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
+    expect(callsTo('rank_again')[0][1]).toMatchObject({
+      p_media_item_id: 'shameless',
+      p_new_watch: false,
+      p_linked_placement_id: 'placement-s4',
+    });
+    expect(sheet.queryByText('Update Show')).toBeNull();
   });
 });

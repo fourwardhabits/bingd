@@ -149,11 +149,11 @@ export function useMyScores(userId: string, enabled = true) {
       if (error) throw error;
 
       const rows = data ?? [];
-      // Per category, because a band is a band *within* Movies or within TV seasons —
+      // Per category, because a band is a band *within* Movies, TV seasons or TV shows —
       // one pooled set of sizes would score a film against the television it shares a
-      // bucket name with.
+      // bucket name with, or a show against its own seasons (20261114000100).
       const sizes = new Map<RankingCategory, BandSizes>();
-      for (const category of ['movies', 'tv_seasons'] as const) {
+      for (const category of ['movies', 'tv_seasons', 'tv_shows'] as const) {
         sizes.set(category, bandSizes(rows.filter((row) => row.category === category)));
       }
 
