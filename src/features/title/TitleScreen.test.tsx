@@ -4402,7 +4402,61 @@ describe('the immersive title page (experiment)', () => {
         expect(againCalls()).toHaveLength(0);
       });
 
-      it('opens Watch History, where an expanded watch carries Edit ranking', async () => {
+      /**
+       * The same decision checked by behaviour rather than by wording (independent review):
+       * whatever a control is called, none on the page opens the rating sheet — the
+       * correction's band chooser — or writes a ranking. Each button is pressed on a fresh
+       * page. Only ⋯'s own rows do that, and they are not on the page until ⋯ is opened.
+       */
+      it('has no control outside ⋯ that opens the ranking correction, whatever it is called', async () => {
+        const correctionWrites = () =>
+          mockRpc.mock.calls.filter(([name]: [string]) =>
+            ['rank_again', 'rank_rebucket', 'set_bucket'].includes(name),
+          );
+        ranked();
+        const first = await open();
+        await waitFor(() => expect(first.getByTestId('title-action-ranked')).toBeTruthy());
+        // The cluster is exactly Log rewatch and the three icon controls.
+        const cluster = within(first.getByTestId('title-actions'));
+        expect(
+          cluster
+            .getAllByRole('button')
+            .map((node) => node.props.testID as string | undefined)
+            .filter(Boolean)
+            .sort(),
+        ).toEqual(
+          ['title-action-list', 'title-action-ranked', 'title-action-recommend', 'title-action-save'].sort(),
+        );
+        const labels = first
+          .getAllByRole('button')
+          .map((node) => node.props.accessibilityLabel as string | undefined)
+          .filter((label): label is string => Boolean(label));
+        expect(labels.length).toBeGreaterThan(3);
+        await first.unmount();
+
+        // Back only leaves the page (and this file's router stand-in has no `back`).
+        // *Write a review* (Reviews) is the one existing door into the same log sheet: it
+        // opens on the review composer, for the reader's note, and is on main unchanged —
+        // a writing control, not a ranking one. Anything else that opens the sheet fails.
+        const allowed = new Set(['Back', 'Write a review']);
+        for (const label of [...new Set(labels)].filter((l) => !allowed.has(l))) {
+          mockRpc.mockClear();
+          ranked();
+          const view = await open();
+          await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+          const [button] = view.getAllByLabelText(label);
+          await fireEvent.press(button!);
+          // The correction's band chooser never opens, and nothing is re-ranked.
+          expect({ label, chooser: view.queryAllByLabelText('How was it?').length }).toEqual({
+            label,
+            chooser: 0,
+          });
+          expect({ label, writes: correctionWrites().length }).toEqual({ label, writes: 0 });
+          await view.unmount();
+        }
+      });
+
+      it('opens Watch History from its row (where #258 puts Edit ranking in an expanded watch)', async () => {
         ranked();
         tableRows.watch_events = [
           { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
