@@ -78,3 +78,6 @@ expo-env.d.ts
 # committed file imports whether or not git has heard of it (review 28b), so local-only
 # scratch has to be ignored rather than merely uncommitted.
 .claude/
+
+# Real import exports are other people's history: keep them out of the repo.
+private-samples/
