@@ -17,18 +17,8 @@ import { tvRanking } from './tv-ranking-support.mjs';
  * and then deleted, and no timestamp decides anything.
  */
 const ctx = { t: null, user: null, seq: 0 };
-const {
-  op,
-  movie,
-  series,
-  taste,
-  rank,
-  correct,
-  positions,
-  posts,
-  scoreOf,
-  fixture,
-} = tvRanking(ctx);
+const { op, movie, series, taste, rank, correct, positions, posts, scoreOf, fixture } =
+  tvRanking(ctx);
 
 before(async () => {
   ctx.t = await createTestDb();
@@ -66,6 +56,9 @@ describe('the Feed contract for TV', () => {
     assert.equal(all[1].payload.update, true);
     assert.equal(all[1].payload.category, 'tv_shows');
     assert.equal(Number(all[1].payload.score), Number(await scoreOf(main)));
+    // The first ranking's post keeps the score it was written with: the update carries
+    // the new one, so the two posts say what changed rather than repeating one number.
+    assert.notEqual(Number(all[0].payload.score), Number(all[1].payload.score));
   });
 
   it('posts a standalone season update the same way', async () => {
@@ -226,11 +219,41 @@ describe('Update Show, linked to the season that offered it', () => {
     );
     assert.equal(notFresh?.code, 'P0002');
 
+    // A fresh link, so the only thing wrong with this call is asking to log a watch.
+    const s3 = await rank(seasons[2], 'loved', 40);
     const asWatch = await ctx.t.errorFrom(
       `select rank_again($1, 'loved', $2, true, null, $3)`,
-      [main, await op(), s1.placement_id],
+      [main, await op(), s3.placement_id],
     );
     assert.equal(asWatch?.code, '22023', 'Update Show records no watch');
+  });
+
+  it('refuses a stale link, or one a later placement of the season superseded', async () => {
+    const { main, seasons } = await fixture();
+    await rank(main, 'loved', 80);
+
+    // From more than a day ago: not the act that offered Update Show.
+    const old = await rank(seasons[0], 'loved', 50);
+    await ctx.t.sql(
+      `update ranking_placements set created_at = now() - interval '2 days' where id = $1`,
+      [old.placement_id],
+    );
+    const stale = await ctx.t.errorFrom(`select rank_again($1, 'loved', $2, false, null, $3)`, [
+      main,
+      await op(),
+      old.placement_id,
+    ]);
+    assert.equal(stale?.code, 'P0002');
+
+    // Replaced by a later re-check of the same season: the earlier link is spent.
+    const first = await rank(seasons[1], 'loved', 60);
+    await correct(seasons[1], 'fine');
+    const superseded = await ctx.t.errorFrom(
+      `select rank_again($1, 'loved', $2, false, null, $3)`,
+      [main, await op(), first.placement_id],
+    );
+    assert.equal(superseded?.code, 'P0002');
+    assert.equal((await posts(main)).length, 1, 'and nothing was posted for the show');
   });
 
   it('refuses to link to a show that is not ranked', async () => {

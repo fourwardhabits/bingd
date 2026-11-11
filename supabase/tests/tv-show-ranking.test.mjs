@@ -308,3 +308,17 @@ describe('the profile count follows the collection precedence', () => {
     assert.equal(await count(), 2, 'show + S1 + S2: both seasons');
   });
 });
+
+describe('goals stay on movies and seasons', () => {
+  it('refuses a whole-show goal, so one series is never counted twice', async () => {
+    const err = await ctx.t.errorFrom(
+      `select set_watch_goal(2026, 'tv_shows'::ranking_category, 5)`,
+    );
+    assert.equal(err?.code, '22023');
+    const ok = await one(
+      ctx.t.db,
+      `select set_watch_goal(2026, 'tv_seasons'::ranking_category, 5) as r`,
+    );
+    assert.equal(ok.status, 'ok');
+  });
+});

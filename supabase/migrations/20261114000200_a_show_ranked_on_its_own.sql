@@ -32,6 +32,7 @@
 --   6. The rankings award (`rating-rascal`) counts a ranked show. The season and genre
 --      awards, watch goals and the monthly board stay on movies and seasons: a show-level
 --      log next to its seasons' logs would otherwise count one series twice.
+--      `set_watch_goal` refuses a `tv_shows` goal outright.
 --
 -- Old clients: no signature changes here. An installed build never asks to rank a series,
 -- so it sees nothing new; a series it already shows still shows. Every function below is
@@ -328,5 +329,55 @@ begin
   end case;
 
   return coalesce(v, 0);
+end;
+$function$;
+
+-- ===========================================================================
+-- 6. Goals stay on movies and seasons, refused by the server
+-- ===========================================================================
+
+create or replace function set_watch_goal(p_year integer, p_category ranking_category, p_target integer DEFAULT NULL::integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_user uuid := auth.uid();
+begin
+  perform assert_can_write();
+
+  -- 20261114000200: a goal counts films or seasons. A whole show is ranked in its own
+  -- pool, but counting show-level logs beside their seasons' would count one series
+  -- twice, so there is no show goal, and the server says so rather than the client.
+  if p_category = 'tv_shows' then
+    raise exception 'a goal counts movies or seasons' using errcode = '22023';
+  end if;
+
+  if p_target is null then
+    delete from watch_goals
+     where user_id = v_user and year = p_year and category = p_category;
+
+    -- 'cleared' whether or not a row was there. The caller asked for "no goal for
+    -- this medium this year" and that is now true; reporting the difference would
+    -- only tell them about a race they cannot act on.
+    return jsonb_build_object('status', 'cleared', 'year', p_year, 'category', p_category);
+  end if;
+
+  -- The check constraint would catch this, as a 23514 the client has to parse. A
+  -- named error is what the constraint is for, said where the caller can act on it.
+  if p_target < 1 or p_target > 10000 then
+    raise exception 'a goal must be between 1 and 10000 titles'
+      using errcode = '22023';
+  end if;
+
+  insert into watch_goals (user_id, year, category, target)
+  values (v_user, p_year, p_category, p_target)
+  on conflict (user_id, year, category)
+  do update set target = excluded.target;
+
+  return jsonb_build_object(
+    'status', 'ok', 'year', p_year, 'category', p_category, 'target', p_target
+  );
 end;
 $function$;

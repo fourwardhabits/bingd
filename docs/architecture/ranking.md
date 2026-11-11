@@ -692,12 +692,15 @@ offered it. The link rides on `ranking_sessions.linked_placement_id` to `_rank_f
 which records it on the show's ledger row and posts nothing: suppression at write time,
 never publish-then-delete. `_assert_linked_show_update` checks, under the media lock, that
 the placement is the caller's own `first`/`rewatch` placement of a season of this show,
-that the show is ranked, and that no placement already used the link. A season's finalise
+still that season's latest placement and from the last day, that the show is ranked, and
+that no placement already used the link (a unique index makes "once" structural). A season's finalise
 reply carries `parent` (is the show ranked, and in which band), read inside the locks, so
 the client never decides from a stale cache. No timestamp decides anything.
 
 `_latest_watch_post` skips update posts, so `_correction_follows_latest_watch` cannot
-rewrite an update post's own score.
+rewrite an update post's own score; and when a TV correction posts its own update, that
+trigger leaves the earlier post its original score, so the two posts show what changed.
+`set_watch_goal` refuses a `tv_shows` goal: goals count movies and seasons.
 
 ### 14.3 Presentation (client)
 

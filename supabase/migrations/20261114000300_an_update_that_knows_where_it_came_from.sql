@@ -23,8 +23,9 @@
 -- The link is checked, under the media lock, by `_assert_linked_show_update`: the
 -- placement is the caller's own, it is a `first` or `rewatch` placement of a season of
 -- this show (so never a backlog sitting's silent `import`, a Refine pass or a pure
--- correction), the show is already ranked, and no earlier placement already took that
--- link. An abandoned Update Show finalises nothing, so it spends nothing and leaves the
+-- correction), it is still that season's latest placement and from the last day, the show
+-- is already ranked, and no earlier placement already took that link (also a unique
+-- index). An abandoned Update Show finalises nothing, so it spends nothing and leaves the
 -- show's ranking exactly where it was (I6).
 --
 -- **Old clients.** `rank_again` and `rank_rebucket` gain one trailing parameter with a
@@ -48,7 +49,9 @@ alter table ranking_placements
     references ranking_placements(id) on delete set null;
 comment on column ranking_placements.linked_placement_id is
   'Set on a show correction made from a season''s completion screen (Update Show): the season placement that offered it. Provenance only: it decides that the show''s correction posts nothing, and that the same season placement cannot link a second one.';
-create index if not exists ranking_placements_linked
+-- Unique: a season placement links at most one show update, structurally, and not only
+-- because the media lock and the one-session-per-title rule happen to make it so.
+create unique index if not exists ranking_placements_linked
   on ranking_placements (linked_placement_id) where linked_placement_id is not null;
 
 alter table ranking_sessions
@@ -81,6 +84,18 @@ begin
        and s.kind = 'season'
        and s.parent_id = p_show
        and p.kind in ('first', 'rewatch')
+       -- The season placement that offered Update Show, not an older one: it is still
+       -- that season's latest placement (no later correction or re-check replaced it),
+       -- and it is from the last day. The client decides "tied to a new watch" from the
+       -- act itself (LogSheet's `created`, or a rewatch); this only refuses a stale or
+       -- superseded link, so a modified client cannot silence an unrelated update.
+       and p.created_at > now() - interval '1 day'
+       and not exists (
+         select 1 from ranking_placements later
+          where later.user_id = p.user_id
+            and later.media_item_id = p.media_item_id
+            and later.created_at > p.created_at
+       )
   ) then
     raise exception 'that is not a season of this show you just ranked'
       using errcode = 'P0002';
@@ -870,4 +885,54 @@ AS $function$
      and coalesce(fe.payload ->> 'update', 'false') <> 'true'
    order by fe.created_at desc, fe.id desc
    limit 1;
+$function$;
+
+-- ===========================================================================
+-- 6. A TV update post leaves the earlier post its own score
+--
+-- `_correction_follows_latest_watch` (20261016000100) keeps the most recent viewing's post
+-- in step with a correction, because a correction used to post nothing and that post was
+-- the only place the new opinion could show. A standalone TV correction that moved the
+-- title now posts its own update carrying the new score (section 3), so rewriting the
+-- earlier post as well would make both read the same number and the update look like no
+-- change. Skipped exactly when `_rank_finalize` writes an update post: a TV category,
+-- outcome 'moved', no link. A movie correction and a linked Update Show (which posts
+-- nothing) still bring the latest viewing's post up to date, as before.
+-- ===========================================================================
+
+create or replace function _correction_follows_latest_watch()
+ returns trigger
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_post uuid;
+begin
+  -- 20261114000300: the update post carries this correction's score; see above.
+  if new.category in ('tv_shows', 'tv_seasons')
+     and new.outcome = 'moved'
+     and new.linked_placement_id is null then
+    return new;
+  end if;
+
+  v_post := _latest_watch_post(new.user_id, new.media_item_id);
+  if v_post is null then
+    return new;
+  end if;
+
+  -- Score, band, position and category together, as the rewatch enrichment writes them
+  -- (20261005000100 §K): a post whose score and band disagree is internally inconsistent.
+  -- No `from_*` and no outcome: the payload carries no movement.
+  update feed_events
+     set payload = payload || jsonb_build_object(
+           'score',    new.score,
+           'bucket',   new.bucket,
+           'position', new.position,
+           'category', new.category
+         )
+   where id = v_post;
+
+  return new;
+end;
 $function$;
