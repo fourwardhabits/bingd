@@ -62,7 +62,12 @@ export default function suite() {
   const rc = raceContext();
   const { ctx } = rc;
 
-  describe('proactive notification races', () => {
+  // Five minutes per test, set here rather than on `test:race`'s command line: the claim,
+  // arbiter and tick races hold real locks across several sessions and can outlast the
+  // suite-wide 60 s default on a slow runner. `package.json` `scripts` is an input to the
+  // Expo runtime fingerprint (`config/push.cjs`), so raising the timeout there would strand
+  // the live binaries' over-the-air updates for a test setting.
+  describe('proactive notification races', { timeout: 300_000 }, () => {
     before(async () => {
       await rc.open();
       // Both switches ship off; these races are about what happens once they are on.

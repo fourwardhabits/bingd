@@ -78,7 +78,15 @@ describe('what is left when every migration has run', () => {
 
   it('leaves one claim_push_batch, which keeps the rule', async () => {
     const rows = await definitions('claim_push_batch');
-    assert.deepEqual(rows.map((r) => r.signature), ['claim_push_batch(integer,timestamp with time zone)']);
+    assert.deepEqual(
+      rows.map((r) => r.signature),
+      ['claim_push_batch(integer,timestamp with time zone)'],
+      // A later migration that recreates `claim_push_batch(integer)` (one written against
+      // main before 20261028000100 dropped it) leaves two overloads, and push-sender's
+      // `rpc('claim_push_batch', { p_limit })` then matches both: every push stops. Rebuild
+      // the two-argument function instead, carrying this branch's body.
+      'claim_push_batch must have exactly one signature, (integer, timestamptz)',
+    );
     assert.ok(rows[0].body.includes(RULE), 'the claim sends text without asking who can read it');
   });
 

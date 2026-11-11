@@ -33,6 +33,12 @@
 alter function _proactive_affinity(uuid, uuid, timestamptz) rename to _proactive_affinity_unguarded;
 revoke execute on function _proactive_affinity_unguarded(uuid, uuid, timestamptz) from public, anon, authenticated;
 
+-- Its old comment still described it as the affinity. It is not any more: call the guard.
+comment on function _proactive_affinity_unguarded(uuid, uuid, timestamptz) is
+  'DO NOT CALL DIRECTLY: use _proactive_affinity, which answers 0 for a blocked or inactive pair '
+  '(20261112000100). This is the 20261031000100 body, renamed unchanged. Anyone rebuilding '
+  '_proactive_affinity must rebuild the guard, not this. Internal.';
+
 create or replace function _proactive_affinity(p_reader uuid, p_actor uuid, p_now timestamptz)
 returns numeric
 language sql
@@ -81,10 +87,18 @@ begin
     with sampled as (
       select f.follower_id as reader, f.followee_id as actor
         from follows f tablesample bernoulli (%s)
+        -- Active pairs only: a suspended account's pairs score 0 by the guard, and counting
+        -- them would pull every quantile down and inflate the baseline share.
+        join profiles rp on rp.id = f.follower_id and rp.status = 'active'
+        join profiles ap on ap.id = f.followee_id and ap.status = 'active'
        where f.state = 'approved'
          and exists (select 1 from follows back
                       where back.follower_id = f.followee_id and back.followee_id = f.follower_id
                         and back.state = 'approved')
+       -- Shuffled before the limit: the sample is oversampled about fourfold, and a bare
+       -- LIMIT would keep the rows the scan reaches first, which on a heap is the oldest
+       -- follows, so the distribution would describe long-standing pairs only.
+       order by random()
        limit %s
     -- Materialized: referenced once, the CTE would be inlined and the score recomputed
     -- in every aggregate below (fourteen times a pair).

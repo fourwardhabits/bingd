@@ -544,6 +544,16 @@ Reactive notifications never read it. So **applying the migrations makes no proa
 row appear**, in staging or in production, until this is turned on. Pending candidates
 made while it was on are still arbitrated, under the push switch.
 
+> **Keep this off in production until B2 lands (founder spec 2026-11-10, §5).** This one
+> switch turns on `watchlist_social` together with theatrical releases, and
+> `watchlist_social` qualifies a friend on **mutual follow alone**: affinity only orders
+> clusters and picks names. The spec makes mutual follow plus meaningful interaction
+> mandatory for friend-activity notifications, so turning generation on as it stands would
+> ship exactly what the spec forbids. Its trigger also walks every watchlister of the title
+> inside the ranking or logging write (§R, scale), which the spec rules out at ~1M users.
+> B2 adds the affinity qualification and moves that fan-out off the write path; until then,
+> staging QA only. (Independent review of B1, 2026-11-11.)
+
 ```sql
 -- enable (staging QA first; production only after founder approval)
 update app_config set value = 'true'::jsonb  where key = 'proactive.generation_enabled';
@@ -831,8 +841,9 @@ recommendations, co-watches and reactions. No caller acted on that, because
 `_proactive_social_actors` re-checks visibility; the guard is for the next caller
 (friend-activity eligibility, a reaction summary) that should not need to know. The original
 is renamed `_proactive_affinity_unguarded`, not copied, so its body is exactly what was
-reviewed. Pinned in `proactive-affinity-guard.test.mjs`, including a mutant run with the
-guard removed.
+reviewed. Pinned in `proactive-affinity-guard.test.mjs`. The repo's mutation harness does
+not cover it: removing the block clause by hand fails three of those tests (checked when B1
+was written, not automated).
 
 **Lifting a block restores the history.** `blocks` keeps nothing once a block is lifted, and
 `block()` deletes both follows, so a pair that unblocks and follows each other again gets
@@ -845,9 +856,15 @@ reactions do not count towards reciprocity, so mutual follow plus any amount of 
 at most 1.5. A threshold strictly above 1.5 therefore always requires a comment,
 recommendation or co-watch, which is what the spec means by meaningful interaction.
 
+**Rollback of this migration.** Forward only, as everywhere (§T): a new migration that drops
+the guard and renames `_proactive_affinity_unguarded` back to `_proactive_affinity`
+(callers resolve it by name, so nothing else changes), and drops
+`proactive_affinity_distribution`. Nothing reads either new function unless an operator does,
+so there is no urgency attached to it.
+
 **Choosing the threshold.** `proactive_affinity_distribution(sample)` (service role only)
-scores a bounded random sample of mutual pairs (50 to 20,000; `tablesample bernoulli` on
-`follows`, oversampled four times) and returns the mean, p50/p75/p90/p95/p99, the share at or
+scores a bounded random sample of mutual pairs between active accounts (50 to 20,000;
+`tablesample bernoulli` on `follows`, oversampled four times, shuffled before the limit) and returns the mean, p50/p75/p90/p95/p99, the share at or
 above 0.75, 1, 1.5, 2, 3, 4 and 6, and the share at the 0.5 baseline. It returns no pair, no
 id and no individual value. Run it on staging and on production before setting the friend
 threshold (B2), and record the result with the date:
@@ -856,23 +873,45 @@ threshold (B2), and record the result with the date:
 select proactive_affinity_distribution(5000);
 ```
 
-Its cost is one `_proactive_affinity` per sampled pair (see the scale notes in B2's
-benchmark); 5,000 pairs is an operator query, not something to run from a cron.
+Its cost is one `_proactive_affinity` per sampled pair, and that has **not** been measured
+at production scale yet: start with `proactive_affinity_distribution(500)` on staging, check
+its duration against the statement timeout, then raise the sample. It is an operator query,
+not something to run from a cron. The sample is shuffled before its limit, so it is not
+biased towards the oldest follows (independent review of B1, 2026-11-11).
+
+**Migration order with the other open work (2026-11-11).** This branch's migrations are
+`20261028000100`, `20261028000200`, `20261031000100`, `20261101000100` (from #220, dated when
+they were written) and `20261112000100`. The open Engine V2 PRs add `20261111000100` (#250)
+and `20261111000200` (#251), and the IMDb import draft #256 adds `20261111000300`. No object
+is defined by both stacks, so a fresh database applies them correctly in file order; but if
+either 20261111 migration reaches an environment before this branch does, `db push` refuses
+the four older files until it is run with `--include-all`, after a `--dry-run` that lists
+exactly this branch's files (the same procedure as `letterboxd-production-promotion.md`).
+**#256 and this branch both rebuild `claim_push_batch`.** This branch drops the one-argument
+form and owns `claim_push_batch(integer, timestamptz)`; #256 (written against `main`)
+recreates `claim_push_batch(integer)`. Whichever merges second must rebuild the two-argument
+function with both changes and must not recreate the one-argument form: two overloads make
+push-sender's `rpc('claim_push_batch', { p_limit })` ambiguous and stop every push.
+`security-before-proactive.test.mjs` fails on a second overload, so the combined branch
+cannot go green without that reconciliation.
 
 ## S. Staging application and Preview QA (do not run without approval)
 
-Rewritten for the second tranche (Codex re-review): three migrations, client version 2,
-four switches.
+Rewritten for the second tranche (Codex re-review): client version 2, four switches.
+Updated 2026-11-11 for B1: five migrations, and the order notes in §R.1.
 
 **Preconditions:** independent reviews with no open BLOCKER or MAJOR; the separate staging
 migration-parity audit reconciled; staging credentials for the operator
 (`npx supabase login`, or `BINGD_STAGING_DB_URL` for `scripts/ops`).
 
 1. `npx supabase link --project-ref fjxhcbowoxuzulwirzyr` then
-   `npx supabase migration list --linked`. Confirm staging is at `20261023000100` with no
-   drift.
-2. `npx supabase db push --linked`. Applies `20261028000100`, `20261028000200` and
-   `20261031000100`, nothing else. Re-run `migration list`.
+   `npx supabase migration list --linked`. Confirm staging has every migration on `main`
+   applied (when B1 was written, the latest was `20261024000500`), with no drift.
+2. `npx supabase db push --linked --dry-run`, then without `--dry-run`. Applies
+   `20261028000100`, `20261028000200`, `20261031000100`, `20261101000100` and
+   `20261112000100`, nothing else. If a `20261111…` migration is already applied there, the
+   CLI asks for `--include-all` (§R.1); the dry run must still list exactly these five.
+   Re-run `migration list`.
 3. `supabase functions deploy push-sender` (goal, proactive and season copy), **after** the
    migrations. It must be live before `proactive.push_enabled` is ever turned on: it sets the
    Expo `expiration` from `deliver_by` (§E).
@@ -936,7 +975,8 @@ migration-parity audit reconciled; staging credentials for the operator
 **Rollout** (each production step is founder-only under `AGENTS.md`):
 
 1. Founder approval of the reviewed PR, then merge.
-2. Production `db push`: the three migrations. **All four switches are false, so nothing
+2. Production `db push` (`--dry-run` first): the five migrations listed in §S, with
+   `--include-all` only if a newer migration is already applied (§R.1). **All four switches are false, so nothing
    proactive is created and nothing is sent.** Verify with `select proactive_status();`
    (all four `false`, no candidates) and a count of zero `watchlist_social` /
    `theatrical_release` / `season_premiere` notifications. The Reactions default changes at
@@ -947,9 +987,11 @@ migration-parity audit reconciled; staging credentials for the operator
 5. Production OTA from the merged commit, for the 1.1.0 runtimes (and a second publish from
    a 1.0.1 tree if 1.0.1 installs are to receive it, per `production-state.md`). Watch
    adoption as `count(*) filter (where proactive_version >= 2)` over live `device_tokens`.
-6. After a staging pass: `generation_enabled = true` → validate production candidates and
-   inbox rows → `push_enabled = true` when push QA is ready (social and theatrical pushes
-   begin, to version-2 devices only, tonight-or-not-at-all).
+6. **Not before B2** (see §K, Generation): `generation_enabled` also starts
+   `watchlist_social`, which qualifies on mutual follow alone today. After B2 and a staging
+   pass: `generation_enabled = true` → validate production candidates and inbox rows →
+   `push_enabled = true` when push QA is ready (social and theatrical pushes begin, to
+   version-2 devices only, tonight-or-not-at-all).
 7. **`season_enabled` and `resurface_enabled` stay `false`.** Each is a separate later
    decision: seasons after §Q's gate (independent review, the shadow reliability review,
    market evidence); resurfacing after push has been observed.

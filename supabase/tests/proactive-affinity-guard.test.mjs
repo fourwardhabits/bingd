@@ -166,7 +166,11 @@ describe('_proactive_affinity: a block ends it', () => {
     );
   });
 
-  it('the guard applies where the social path ranks friends', async () => {
+  // What this proves is that the social path still ranks through the guarded function and
+  // still drops a blocked friend; the drop itself comes from _proactive_social_actors, so it
+  // would pass without the guard too (independent review of B1, 2026-11-11). The guard's own
+  // effect is pinned by the tests above.
+  it('the social path still ranks friends through it, and still drops a blocked friend', async () => {
     const { r, a } = await closePair();
     const candidate = await clusterWith(r, a);
     const ranked = async () =>
@@ -253,10 +257,52 @@ describe('proactive_affinity_distribution', () => {
     for (const id of [close.r, close.a, r, a, lonely]) assert.equal(text.includes(id), false);
   });
 
-  it('bounds the sample it is asked for', async () => {
+  // The fixture is far smaller than 20,000 pairs, so the upper clamp is not observable here;
+  // what is pinned is that out-of-range sizes are clamped rather than failing.
+  it('accepts a sample size outside 50–20,000 without failing', async () => {
     const { rows } = await t.sql(`select proactive_affinity_distribution(1000000) as big, proactive_affinity_distribution(-5) as small`);
     assert.ok(Number(rows[0].big.pairs) <= 20000);
     assert.ok(Number(rows[0].small.pairs) <= 50);
+  });
+
+  it('leaves pairs with a suspended account out of the sample', async () => {
+    await t.sql(`delete from follows`);
+    const r = await user();
+    const a = await user();
+    await friends(r, a);
+    const s1 = await user();
+    const s2 = await user();
+    await friends(s1, s2);
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [s1]);
+    const { rows } = await t.sql(`select proactive_affinity_distribution(50) as d`);
+    assert.equal(Number(rows[0].d.pairs), 2, 'only the active pair, both directions');
+  });
+
+  it('draws its sample from the whole table, not the oldest follows', async () => {
+    // Sixty baseline pairs first, then sixty close ones, so physical order is creation order.
+    // A bare LIMIT after the oversampled scan kept the first rows it met: all baseline.
+    await t.sql(`delete from follows`);
+    const pinned = NOW;
+    NOW = new Date().toISOString();
+    try {
+      for (let i = 0; i < 60; i += 1) await friends(await user(), await user());
+      for (let i = 0; i < 60; i += 1) {
+        const r = await user();
+        const a = await user();
+        await friends(r, a);
+        await comment(r, await post(a), daysAgo(2));
+        await comment(a, await post(r), daysAgo(2));
+      }
+    } finally {
+      NOW = pinned;
+    }
+    await t.sql(`analyze follows`);
+    const { rows } = await t.sql(`select proactive_affinity_distribution(50) as d`);
+    const d = rows[0].d;
+    assert.equal(Number(d.pairs), 50);
+    // About half the table is at baseline. A prefix would be all of it.
+    assert.ok(Number(d.baseline_only) < 0.85, `baseline share ${d.baseline_only} looks like a prefix`);
+    assert.ok(Number(d.baseline_only) > 0.15, `baseline share ${d.baseline_only}`);
   });
 
   // Found by the B2 synthetic distribution run (24 ms a pair against 2.5 ms scored directly):
