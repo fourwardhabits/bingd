@@ -4353,6 +4353,51 @@ describe('the immersive title page (experiment)', () => {
         }
       });
 
+      /**
+       * **A second press while the sheet is still leaving does nothing** (cross-PR review,
+       * 2026-11-11). On iOS the sheet slides away after a band is chosen and only then
+       * hands over to the comparisons (`onDismissed`). Log rewatch is on the page rather
+       * than in the menu; if a press ever reached it in that gap, it would present the
+       * sheet again mid-dismissal and drop the re-check. Defence in depth.
+       */
+      it('ignores Log rewatch while the sheet is still leaving, and the re-check still opens', async () => {
+        type Held = { hold: boolean; pending: (() => void)[] };
+        const { __modalDismissals: dismissals, __modalShows: shows } = globalThis as unknown as {
+          __modalDismissals: Held;
+          __modalShows: Held;
+        };
+        mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        dismissals.hold = true;
+        await fireEvent.press(view.getByText('I liked it'));
+        await waitFor(() => expect(rewatchCalls()).toHaveLength(1));
+        await waitFor(() => expect(dismissals.pending.length).toBeGreaterThan(0));
+        // Inside the slide-out: the comparisons have not opened yet.
+        expect(againCalls()).toHaveLength(0);
+
+        // The page counts as covered while the sheet is still presented — as UIKit, which
+        // normally ignores touches during the transition — so the press is made on the
+        // hidden control on purpose: this guards the state, not the platform.
+        shows.hold = true;
+        await fireEvent.press(view.getByTestId('title-action-ranked', { includeHiddenElements: true }));
+        // No presentation was issued over the dismissing sheet.
+        expect(shows.pending).toHaveLength(0);
+        shows.hold = false;
+
+        dismissals.hold = false;
+        await act(async () => {
+          for (const finish of dismissals.pending.splice(0)) finish();
+        });
+        // The re-check still opens, on the viewing just saved, and only one viewing exists.
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_watch_event_id: 'event-2' }));
+        expect(rewatchCalls()).toHaveLength(1);
+      });
+
       it('keeps Update your rating in the menu, as a correction that records no watch', async () => {
         ranked();
         const view = await open();
