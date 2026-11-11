@@ -9,7 +9,14 @@ This file covers what the IMDb import adds and what it changed in shared code.
 
 ---
 
-## 0. Escalation: whole TV shows (founder decision needed)
+## 0. Whole TV shows: matched and reported, not added (founder decision, 2026-11-11, provisional)
+
+> **Decided (provisional), 2026-11-11:** whole TV shows are matched and accurately reported
+> but **not added to the collection this release**. No season rankings, no show-level
+> collection model. The import preview labels the count "TV shows, not added" and says why;
+> the summary reports them on their own line, "TV shows matched, not added", separate from
+> "Not supported" (the title is supported; the destination is not). The section below is the
+> escalation as it was written, kept for the reasoning and for the switch if this changes.
 
 **What the spec asks:** TV Series and TV Mini Series rows go to "the bingd TV show", join
 the collection unranked, and TV is in the first release "wherever a canonical destination
@@ -97,7 +104,10 @@ Replaced (same behaviour for Letterboxd): `import_create` (new signature), `impo
 `_import_provider_claim` (adds four trailing columns), `_import_provider_resolve` (adds
 `p_imdb_id`, `p_unsupported`), `_import_settle`, `_import_redact_on_complete`,
 `_import_notify` (payload gains `provider`), `claim_push_batch` (import payload for all
-three import pushes). New: `_import_imdb_title_type`, `_import_imdb_kind`,
+three import pushes). **`claim_push_batch` is #254's two-argument function** (this branch is
+built on #254): the generator copies it from `20261101000100` and applies the one import
+edit, and no one-argument form is created
+(`docs/release/claim-push-batch-reconciliation.md`). New: `_import_imdb_title_type`, `_import_imdb_kind`,
 `_import_imdb_destination_supported`, `_import_imdb_identity_agrees`,
 `_import_match_batch_imdb`, `_import_apply_batch_imdb`.
 
@@ -112,16 +122,23 @@ Regenerate/verify: `node scripts/migration-generators/imdb-import.mjs` rewrites 
 
 ## 4. Release order and rollback
 
-1. Deploy `letterboxd-import` and `push-sender` **first** (staging first). Against the old
-   schema they behave exactly as today: a claim without `provider` takes the Letterboxd
-   path, resolve is called with the same three arguments, and a payload without `provider`
-   reads as Letterboxd. (The reverse order is safe but lossy: the old function would
-   title-search IMDb TV rows as movies, the database would refuse the kind, and those rows
-   would settle unmatched for that import. Found by the independent review.)
-2. Apply `20261113000100`. Old app builds keep working: `import_create()` resolves through
-   the default; `import_status` gains a trailing column.
-3. Ship the app update (OTA-eligible: no native change). The new client needs step 2
-   (it selects `import_jobs.provider`).
+Built on #254 (`claude/imdb-import-on-254`), so this ships with #254's migrations and its
+push-sender. The combined order, per environment (staging first; each step a founder
+decision), is in [`docs/release/claim-push-batch-reconciliation.md`](../release/claim-push-batch-reconciliation.md):
+
+1. Deploy `letterboxd-import` **first**. Against the old schema it behaves exactly as today:
+   a claim without `provider` takes the Letterboxd path, and resolve is called with the same
+   three arguments. (The reverse order is lossy: the old function would title-search IMDb TV
+   rows as movies, the database would refuse the kind, and those rows would settle unmatched
+   for that import. Found by the independent review.)
+2. Apply the migrations in **one** `db push`, in date order, after a `--dry-run`: #254's five
+   files and then `20261113000100`. Old app builds keep working: `import_create()` resolves
+   through the default, and `import_status` gains a trailing column.
+3. Deploy **one** `push-sender` built from this branch, carrying #254's goal and proactive
+   copy and this branch's provider naming. A payload without `provider` reads as Letterboxd.
+4. Ship the app update (OTA-eligible: no native change, and `package.json` scripts and
+   `app.config.ts` are unchanged). The new client needs step 2, because it selects
+   `import_jobs.provider`.
 
 **Rollback:** the switch above (or `unschedule_import_drain()`) stops imports without a
 deploy. Reverting the app is OTA. The migration is additive; its function replacements
@@ -188,7 +205,8 @@ generator byte-for-byte, and reproduced its findings against PGlite and Jest.
 
 ## 7. Open for the founder
 
-1. **§0, whole TV shows.** Report-only today; one switch to change.
+1. **§0, whole TV shows.** Decided provisionally on 2026-11-11: matched and reported, not
+   added this release. One switch to change if that decision changes.
 2. **IMDb's export steps are unverified.** imdb.com and help.imdb.com are unreachable from
    the build environment, so the copy is written to hold under both of IMDb's recent flows
    (immediate download, or prepared and listed under *Your exports*). Check on a device.

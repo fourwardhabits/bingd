@@ -1103,9 +1103,11 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * What the IMDb file holds, before anything is sent.
  *
  * Movies and TV shows are counted separately because they will not be treated alike: a movie
- * joins the collection, and a whole show is recognised and reported, because bingd collects
- * TV by season and an IMDb rating of a show says nothing about which seasons were watched.
- * The preview says that now, so the summary is not the first place somebody learns it.
+ * joins the collection, and a whole show is matched and reported but **not added in this
+ * release** (founder decision, 2026-11-11, provisional): bingd collects TV by season, an IMDb
+ * rating of a show says nothing about which seasons were watched, and there is no show-level
+ * collection model. The preview labels that limitation on the count itself, so neither the
+ * summary nor the collection is the first place somebody learns it.
  */
 function ImdbPreviewView({
   preview,
@@ -1131,14 +1133,14 @@ function ImdbPreviewView({
 
       <View style={styles.card}>
         <Stat label="Movies" value={counts.movies} />
-        {counts.tvShows > 0 ? <Stat label="TV shows" value={counts.tvShows} /> : null}
+        {counts.tvShows > 0 ? <Stat label="TV shows, not added" value={counts.tvShows} /> : null}
         <Stat label="Ratings" value={counts.rated} />
         {unsupported > 0 ? <Stat label="Not supported" value={unsupported} /> : null}
       </View>
 
       {counts.tvShows > 0 ? (
         <Note>
-          {`bingd tracks TV by season, so the ${plural(counts.tvShows, 'show', 'shows')} you rated won’t be added to your collection.`}
+          {`Whole TV shows can’t be added yet. We’ll match the ${plural(counts.tvShows, 'show', 'shows')} you rated and count ${counts.tvShows === 1 ? 'it' : 'them'} in your summary, but ${counts.tvShows === 1 ? 'it won’t' : 'they won’t'} join your collection: bingd tracks TV by season.`}
         </Note>
       ) : null}
       {counts.episodes > 0 ? (
@@ -1217,8 +1219,12 @@ function ImdbSummary({
     (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
   const unsupported = counts.unsupported ?? 0;
   const failed = counts.failed ?? 0;
+  // Whole shows the import MATCHED to bingd's show and did not add (provisional founder
+  // decision, 2026-11-11: no show-level collection model this release). They are reported on
+  // their own line, not as "Not supported": the title is supported, the destination is not.
   const shows = counts.unsupported_tv ?? 0;
   const episodes = counts.unsupported_episode ?? 0;
+  const notSupported = Math.max(unsupported - shows, 0);
   // Whatever else bingd has no destination for: games, music videos, podcasts, or an id
   // TMDB files as an episode. Every "Not supported" gets a sentence.
   const otherUnsupported = Math.max(unsupported - shows - episodes, 0);
@@ -1236,13 +1242,14 @@ function ImdbSummary({
         ) : null}
         {previously > 0 ? <Count value={previously} label="Imported before" /> : null}
         {unmatched > 0 ? <Count value={unmatched} label="Couldn’t match" /> : null}
-        {unsupported > 0 ? <Count value={unsupported} label="Not supported" /> : null}
+        {shows > 0 ? <Count value={shows} label="TV shows matched, not added" /> : null}
+        {notSupported > 0 ? <Count value={notSupported} label="Not supported" /> : null}
         {failed > 0 ? <Count value={failed} label="Couldn’t import" /> : null}
       </View>
 
       {shows > 0 ? (
         <Text variant="footnote" tone="tertiary">
-          {`${plural(shows, 'TV show wasn’t', 'TV shows weren’t')} added. bingd tracks TV by season, so find ${shows === 1 ? 'the show' : 'a show'} in Search and log the seasons you’ve watched.`}
+          {`${plural(shows, 'TV show was', 'TV shows were')} matched but not added: whole shows can’t be imported yet, because bingd tracks TV by season. Find ${shows === 1 ? 'the show' : 'a show'} in Search to log the seasons you’ve watched.`}
         </Text>
       ) : null}
       {episodes > 0 ? (

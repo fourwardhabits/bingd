@@ -188,10 +188,14 @@ describe('the IMDb preview', () => {
     const view = await preview();
     expect(view.getByText('Here’s what we found in your IMDb file.')).toBeTruthy();
     expect(view.getByText('Movies')).toBeTruthy();
-    expect(view.getByText('TV shows')).toBeTruthy();
+    // Provisional founder decision (2026-11-11): whole shows are matched and reported, not
+    // added, and the preview labels that on the count itself.
+    expect(view.getByText('TV shows, not added')).toBeTruthy();
     expect(view.getByText('Not supported')).toBeTruthy();
     expect(
-      view.getByText(/bingd tracks TV by season, so the 3 shows you rated won’t be added/),
+      view.getByText(
+        /Whole TV shows can’t be added yet\. We’ll match the 3 shows you rated and count them in your summary, but they won’t join your collection/,
+      ),
     ).toBeTruthy();
     expect(view.getByText(/1 TV episode won’t come in/)).toBeTruthy();
     expect(view.getByText(/3 rows couldn’t be read/)).toBeTruthy();
@@ -301,13 +305,19 @@ describe('the IMDb summary', () => {
     expect(view.getByLabelText('12 Already in your collection')).toBeTruthy();
     expect(view.getByLabelText('3 Imported before')).toBeTruthy();
     expect(view.getByLabelText('8 Couldn’t match')).toBeTruthy();
-    expect(view.getByLabelText('148 Not supported')).toBeTruthy();
+    // Matched shows are their own line, not "Not supported": 148 - 139 = 9 (7 episodes, 2
+    // other kinds). Provisional founder decision, 2026-11-11.
+    expect(view.getByLabelText('139 TV shows matched, not added')).toBeTruthy();
+    expect(view.getByLabelText('9 Not supported')).toBeTruthy();
+    expect(view.queryByLabelText('148 Not supported')).toBeNull();
     expect(view.getByLabelText('1 Couldn’t import')).toBeTruthy();
     expect(
-      view.getByText(/139 TV shows weren’t added\. bingd tracks TV by season/),
+      view.getByText(
+        /139 TV shows were matched but not added: whole shows can’t be imported yet, because bingd tracks TV by season/,
+      ),
     ).toBeTruthy();
     expect(view.getByText(/7 TV episodes weren’t added/)).toBeTruthy();
-    // 148 - 139 - 7: every "Not supported" has a sentence.
+    // 9 - 7: every "Not supported" has a sentence.
     expect(
       view.getByText(/2 titles weren’t added because they’re a kind of title/),
     ).toBeTruthy();
