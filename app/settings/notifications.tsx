@@ -581,7 +581,13 @@ export default function NotificationsScreen() {
                               ? // The second actorless sentence. `verbFor` returns the
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
-                                verbFor(row.kind, row.mediaKind, row.goal)
+                                verbFor(
+                                  row.kind,
+                                  row.mediaKind,
+                                  row.goal,
+                                  undefined,
+                                  row.importProvider,
+                                )
                               : row.kind === 'watchlist_social'
                                 ? // The people are the cluster, not an actor.
                                   `${clusterPhrase(row.cluster) ?? 'Friends'} ${spokenSentence(sentence)}. On your Watchlist`
@@ -735,7 +741,13 @@ export default function NotificationsScreen() {
                           ) : IMPORT_KINDS.has(row.kind) ? (
                             /* The same headline the push and the import screen use. */
                             <Text variant="callout" numberOfLines={2}>
-                              {verbFor(row.kind)}
+                              {verbFor(
+                                row.kind,
+                                undefined,
+                                undefined,
+                                undefined,
+                                row.importProvider,
+                              )}
                             </Text>
                           ) : row.kind === 'goal_completed' ? (
                             /* "You hit your 2026 Movies goal 🎉" — the founder's copy.

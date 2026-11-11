@@ -242,7 +242,7 @@ without one). **No new secret is added by this release**: `SUPABASE_URL` and
   `10 seconds` (or a documented one-minute fallback when pg_cron < 1.5), `provider_ready: true`.
   Any other shape: `select unschedule_import_drain();` and stop.
 - `select _push_eligible('import_completed');` → true.
-- The importer switch will work: for `import_create()`, `import_stage(uuid, jsonb)` and
+- The importer switch will work: for `import_create(text)` (`import_create()` before 20261111000300), `import_stage(uuid, jsonb)` and
   `import_ready(uuid)`, `has_function_privilege('public', f, 'EXECUTE')` and `('anon', …)` are
   false and `('authenticated', …)` is true. If PUBLIC or anon is true, revoke from them now.
 - `select * from profile_title_counts('<founder user id>');` as the founder → sane Movies/TV.
@@ -300,11 +300,11 @@ PUBLIC-executable functions in `public` are the same 47 citext operators, read 2
 the switch must not depend on that. §5 checks it on production after the migrations apply.
 
 ```sql
-revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated;
+revoke execute on function import_create(text), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated;
 select unschedule_import_drain();
 -- back on, in reverse:
 select schedule_import_drain();
-grant execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) to authenticated;
+grant execute on function import_create(text), import_stage(uuid, jsonb), import_ready(uuid) to authenticated;
 ```
 
 Run as `npx supabase db query --linked --project-ref abheeqyjzekiowkztfxv "<sql>"` from a

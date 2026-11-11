@@ -397,7 +397,9 @@ export function hintFor(row: Notification): string {
     case 'goals':
       return 'Opens your goals';
     case 'import':
-      return 'Opens your Letterboxd import';
+      return row.importProvider === 'imdb'
+        ? 'Opens your IMDb import'
+        : 'Opens your Letterboxd import';
     case 'unavailable':
       return 'No longer available';
   }

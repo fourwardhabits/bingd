@@ -1187,6 +1187,21 @@ describe('a Letterboxd import', () => {
     expect(view.queryByText(/null|match/i)).toBeNull();
   });
 
+  it.each([
+    ['import_started', 'IMDb import started'],
+    ['import_completed', 'Your IMDb history is ready'],
+    ['import_failed', 'We couldn’t finish your IMDb import'],
+  ])('names IMDb on %s when the payload says so (20261111000300)', async (kind, headline) => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      importRow(kind, { id: `${kind}-imdb`, payload: { job_id: 'job-9', provider: 'imdb' } }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(headline)).toBeTruthy());
+    expect(view.queryByText(/Letterboxd/)).toBeNull();
+  });
+
   it('opens the exact job it is about when tapped with the app open', async () => {
     mockPush.mockClear();
     mockNotifications.length = 0;

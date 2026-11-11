@@ -38,7 +38,17 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  * the only part of this function that makes a decision, and therefore the only part worth
  * a suite of its own.
  */
-import { catalogueItem, needsWindow, pick } from './match.mjs';
+import {
+  catalogueItem,
+  catalogueSeries,
+  decideFind,
+  imdbKind,
+  imdbTitleType,
+  needsWindow,
+  needsWindowTv,
+  pick,
+  pickTv,
+} from './match.mjs';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -62,7 +72,20 @@ const CONCURRENCY = 8;
 /** One invocation's ceiling. The tick calls again while rows remain. */
 const BATCH = 50;
 
-export type Claim = { row_id: string; name: string; year: number | null };
+export type Claim = {
+  row_id: string;
+  name: string;
+  year: number | null;
+  /**
+   * 20261111000300. The job's provider: `imdb` routes the claim to `resolveImdb`, and
+   * `letterboxd` (or the field's absence, against a database older than that migration)
+   * keeps the Letterboxd path. The three fields below are null on a Letterboxd row.
+   */
+  provider?: string | null;
+  imdb_id?: string | null;
+  title_type?: string | null;
+  original_title?: string | null;
+};
 export type ProviderResult = {
   id: number;
   title: string;
@@ -115,7 +138,11 @@ async function search(
  * one row per (kind, tmdb_id), with the provenance the catalogue expects, and with the
  * poster the search returned. That last part was not true until `catalogueItem`; see it.
  */
-async function upsert(db: SupabaseClient, result: ProviderResult): Promise<string | null> {
+async function upsert(
+  db: SupabaseClient,
+  result: ProviderResult,
+  item: Record<string, unknown> = catalogueItem(result),
+): Promise<string | null> {
   /**
    * **`p_items`, and `media_item_id`.** Both were wrong, and between them they meant the
    * provider tier could never resolve a single film.
@@ -133,10 +160,157 @@ async function upsert(db: SupabaseClient, result: ProviderResult): Promise<strin
    * symptom, which is why the first fix alone would have looked like no fix at all.
    */
   const { data, error } = await db.rpc('tmdb_upsert_titles', {
-    p_items: [catalogueItem(result)],
+    p_items: [item],
   });
   if (error) return null;
   return Array.isArray(data) && data.length > 0 ? (data[0].media_item_id ?? null) : null;
+}
+
+/** The same transport as `search`, so a 429 and a refusal throw identically. */
+async function tmdbGet(
+  path: string,
+  params: Record<string, string>,
+  key: string,
+  bearer: string | null,
+) {
+  const url = new URL(`https://api.themoviedb.org/3${path}`);
+  for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
+  if (!bearer) url.searchParams.set('api_key', key);
+  const response = await fetch(url, {
+    headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
+  });
+  if (response.status === 429) throw new Error('provider rate limited');
+  if (!response.ok) throw new Error(`provider ${response.status}`);
+  return await response.json();
+}
+
+/** One TMDB TV search, the TV twin of `search`. */
+async function searchTv(
+  claim: Claim,
+  key: string,
+  bearer: string | null,
+  year: number | null = claim.year,
+) {
+  const params: Record<string, string> = {
+    query: claim.name,
+    language: 'en-US',
+    include_adult: 'false',
+  };
+  if (year !== null) params.first_air_date_year = String(year);
+  const body = await tmdbGet('/search/tv', params, key, bearer);
+  return Array.isArray(body?.results) ? body.results : [];
+}
+
+type Outcome = { matched: boolean; empty: boolean; unconfident: boolean; unwritable: boolean };
+
+/**
+ * **An IMDb claim** (20261111000300): the identifier first, a title second.
+ *
+ *   Tier 2  TMDB `/find/{tt}?external_source=imdb_id`. An answer of the expected kind that
+ *           agrees with the row places it, and is the ONLY path that hands the database
+ *           the id to remember (`p_imdb_id`). An episode is unsupported; a title of the
+ *           other kind, a disagreeing one or two of them are final non-matches.
+ *   Tier 3  When /find knows nothing: the same conservative title-and-year search a
+ *           Letterboxd row gets (`pick`), on `/search/movie` or `/search/tv` by the kind
+ *           the IMDb type implies. Never by popularity; ambiguity stays unresolved. A title
+ *           search proves nothing about the id, so it never writes it.
+ *
+ * Tier 1 (a catalogue title already carrying the id) ran in SQL before this was called.
+ */
+async function resolveImdb(
+  db: SupabaseClient,
+  claim: Claim,
+  key: string,
+  bearer: string | null,
+): Promise<Outcome> {
+  const outcome: Outcome = {
+    matched: false,
+    empty: false,
+    unconfident: false,
+    unwritable: false,
+  };
+  const kind = imdbKind(imdbTitleType(claim.title_type));
+
+  if (kind === null || !claim.imdb_id) {
+    await db.rpc('_import_provider_resolve', {
+      p_row_id: claim.row_id,
+      p_media_item_id: null,
+      p_final: true,
+      p_unsupported: kind === null,
+    });
+    return outcome;
+  }
+
+  const found = await tmdbGet(
+    `/find/${encodeURIComponent(claim.imdb_id)}`,
+    { external_source: 'imdb_id', language: 'en-US' },
+    key,
+    bearer,
+  );
+  const decision = decideFind(claim, found);
+
+  if (decision.outcome === 'unsupported') {
+    await db.rpc('_import_provider_resolve', {
+      p_row_id: claim.row_id,
+      p_media_item_id: null,
+      p_final: true,
+      p_unsupported: true,
+    });
+    return outcome;
+  }
+  if (decision.outcome === 'conflict' || decision.outcome === 'ambiguous') {
+    outcome.unconfident = true;
+    await db.rpc('_import_provider_resolve', {
+      p_row_id: claim.row_id,
+      p_media_item_id: null,
+      p_final: true,
+    });
+    return outcome;
+  }
+
+  let chosen: ProviderResult | null = null;
+  let verified = false;
+  let final = false;
+
+  if (decision.outcome === 'match') {
+    chosen = decision.result as ProviderResult;
+    verified = true;
+  } else {
+    const titleClaim: Claim = { row_id: claim.row_id, name: claim.name, year: claim.year };
+    const searchFor = kind === 'series' ? searchTv : search;
+    const choose = kind === 'series' ? pickTv : pick;
+    const widen = kind === 'series' ? needsWindowTv : needsWindow;
+    let results = await searchFor(titleClaim, key, bearer);
+    if (titleClaim.year !== null && widen(titleClaim, results)) {
+      const before = await searchFor(titleClaim, key, bearer, titleClaim.year - 1);
+      const after = await searchFor(titleClaim, key, bearer, titleClaim.year + 1);
+      results = [...results, ...before, ...after];
+    }
+    chosen = choose(titleClaim, results);
+    if (!chosen) {
+      if (results.length === 0) outcome.empty = true;
+      else outcome.unconfident = true;
+      final = results.length === 0;
+    }
+  }
+
+  const mediaItemId = chosen
+    ? await upsert(
+        db,
+        chosen,
+        kind === 'series' ? catalogueSeries(chosen) : catalogueItem(chosen),
+      )
+    : null;
+  if (chosen && !mediaItemId) outcome.unwritable = true;
+
+  await db.rpc('_import_provider_resolve', {
+    p_row_id: claim.row_id,
+    p_media_item_id: mediaItemId,
+    p_final: final,
+    p_imdb_id: verified && mediaItemId ? claim.imdb_id : null,
+  });
+  outcome.matched = mediaItemId !== null;
+  return outcome;
 }
 
 async function resolveBatch(db: SupabaseClient, key: string, bearer: string | null) {
@@ -183,6 +357,14 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     await Promise.all(
       slice.map(async (claim) => {
         try {
+          if (claim.provider === 'imdb') {
+            const result = await resolveImdb(db, claim, key, bearer);
+            if (result.empty) empty.push(0);
+            if (result.unconfident) unconfident.push(1);
+            if (result.unwritable) unwritable += 1;
+            if (result.matched) matched += 1;
+            return;
+          }
           let results = await search(claim, key, bearer);
           /**
            * **The neighbouring years, when the exact one cannot decide** (the Hamlet
