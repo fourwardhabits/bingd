@@ -28,7 +28,35 @@ export type PersonCredit = {
    * ceremony. Left out of the Cast half unless it is all the person has.
    */
   self: boolean;
+  /**
+   * The catalogue row's release date, `YYYY-MM-DD` — a series' first air date — or null.
+   * What the Release date sort orders by; `year` is what a row displays.
+   */
+  releaseDate: string | null;
+  /**
+   * TMDB's audience rating, weighted by its vote count in the adapter (`tmdbScore`), or
+   * null below the vote threshold or on a row cached before scores were stored. Ordered
+   * by, never displayed: bingd's scores are its readers', and this is TMDB's.
+   */
+  score: number | null;
+  /** Position in the cache's popularity order, from 0: Popular, and every tie-break. */
+  order: number;
 };
+
+/** Where each sort stops being complete for one kind of credit. See the adapter's `KindCoverage`. */
+export type KindCoverage = {
+  newest: string | null;
+  oldest: string | null;
+  undated: boolean;
+  rated: number | null;
+  unrated: boolean;
+};
+
+/** Per half of the page — performances, appearances as themselves, crew work — and per kind. */
+export type PersonCoverage = Record<
+  'cast' | 'self' | 'crew',
+  Record<'movie' | 'series', KindCoverage>
+>;
 
 /**
  * A row cached before the adapter flagged self-appearances says nothing either way, so
@@ -59,6 +87,12 @@ export type PersonDetail = {
   castTotal: number | null;
   /** How many titles they held a crew job on, with the same null. */
   crewTotal: number | null;
+  /**
+   * What the adapter's caps left out, per sort — or null for a row cached before it was
+   * recorded (or one whose record does not parse), which the page must treat as "cannot
+   * say" rather than as complete.
+   */
+  coverage: PersonCoverage | null;
 };
 
 /**
@@ -109,11 +143,58 @@ type CachedPayload = {
     as: 'cast' | 'crew';
     crew_role?: string | null;
     self?: boolean;
+    tmdb_score?: number | null;
   }[];
   credit_total?: number;
   cast_total?: number;
   crew_total?: number;
+  coverage?: unknown;
 };
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The cache's coverage record, checked field by field.
+ *
+ * All or nothing: a record with one malformed kind is not partly trusted, because a
+ * wrong "nothing was dropped" is exactly the silent overclaim it exists to prevent.
+ */
+function coverageOf(value: unknown): PersonCoverage | null {
+  if (!value || typeof value !== 'object') return null;
+  const kind = (entry: unknown): KindCoverage | null => {
+    if (!entry || typeof entry !== 'object') return null;
+    const { newest, oldest, undated, rated, unrated } = entry as Record<string, unknown>;
+    const date = (field: unknown) =>
+      field === null || (typeof field === 'string' && DATE.test(field));
+    if (!date(newest) || !date(oldest)) return null;
+    // Both ends or neither: a dropped dated credit is both the newest and the oldest of
+    // something. One end alone, or the ends crossed, does not describe a real cut, and
+    // trusting half of it could make one direction read as complete.
+    if ((newest === null) !== (oldest === null)) return null;
+    if (typeof newest === 'string' && typeof oldest === 'string' && oldest > newest)
+      return null;
+    if (typeof undated !== 'boolean' || typeof unrated !== 'boolean') return null;
+    if (rated !== null && (typeof rated !== 'number' || !Number.isFinite(rated))) return null;
+    return {
+      newest: newest as string | null,
+      oldest: oldest as string | null,
+      undated,
+      rated: rated as number | null,
+      unrated,
+    };
+  };
+  const half = (entry: unknown) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const movie = kind((entry as Record<string, unknown>).movie);
+    const series = kind((entry as Record<string, unknown>).series);
+    return movie && series ? { movie, series } : null;
+  };
+  const record = value as Record<string, unknown>;
+  const cast = half(record.cast);
+  const self = half(record.self);
+  const crew = half(record.crew);
+  return cast && self && crew ? { cast, self, crew } : null;
+}
 
 const NOTHING: PersonState = { detail: null, claimed: false, stale: false };
 
@@ -141,7 +222,6 @@ const CLAIM_POLL_MS = 1_500;
  * a spinner while an isolate that died two seconds in fails to come back.
  */
 const CLAIM_WAIT_MS = 30_000;
-
 
 /**
  * A person, and everything TMDB credits them on.
@@ -174,8 +254,9 @@ const CLAIM_WAIT_MS = 30_000;
  * rendered; the refresh happens behind the reader rather than instead of them.
  *
  * The credits are returned in the cache's own order, which is the provider's
- * popularity ranking. Re-sorting here would derive a worse copy of an ordering that
- * was already applied where the popularity numbers were.
+ * popularity ranking, each carrying its position in it (`order`). Re-sorting here would
+ * derive a worse copy of an ordering that was already applied where the popularity
+ * numbers were; the page's other orders are `filmography.ts`, applied on top.
  */
 export function usePerson(personId: string | null) {
   const numeric = personIdOf(personId);
@@ -241,17 +322,19 @@ export function usePerson(personId: string | null) {
       if (rows.error) throw rows.error;
 
       const byId = new Map(
-        ((rows.data ?? []) as {
-          id: string;
-          kind: PersonCredit['kind'];
-          title: string;
-          release_date: string | null;
-          poster_path: string | null;
-        }[]).map((item) => [item.id, item]),
+        (
+          (rows.data ?? []) as {
+            id: string;
+            kind: PersonCredit['kind'];
+            title: string;
+            release_date: string | null;
+            poster_path: string | null;
+          }[]
+        ).map((item) => [item.id, item]),
       );
 
       const credits: PersonCredit[] = entries
-        .map((credit) => {
+        .map((credit, order) => {
           const item = byId.get(credit.id);
           // A credit whose catalogue row has gone is dropped rather than rendered as
           // a title-less tile. It should not happen — the adapter writes the rows
@@ -262,6 +345,16 @@ export function usePerson(personId: string | null) {
             title: item.title,
             kind: credit.kind,
             year: item.release_date ? Number(item.release_date.slice(0, 4)) : null,
+            // The date part only, and only a well-formed one: it is compared as a string.
+            releaseDate:
+              item.release_date && DATE.test(item.release_date.slice(0, 10))
+                ? item.release_date.slice(0, 10)
+                : null,
+            score:
+              typeof credit.tmdb_score === 'number' && Number.isFinite(credit.tmdb_score)
+                ? credit.tmdb_score
+                : null,
+            order,
             posterPath: item.poster_path,
             role: credit.role,
             as: credit.as,
@@ -292,6 +385,10 @@ export function usePerson(personId: string | null) {
           creditTotal: payload.credit_total ?? credits.length,
           castTotal: typeof payload.cast_total === 'number' ? payload.cast_total : null,
           crewTotal: typeof payload.crew_total === 'number' ? payload.crew_total : null,
+          // The record describes the payload's credits. If any was dropped above, for a
+          // catalogue row that has gone, it no longer describes this list and is not
+          // trusted, rather than trusted wrongly.
+          coverage: credits.length === entries.length ? coverageOf(payload.coverage) : null,
         },
         claimed: false,
         stale: expired,
