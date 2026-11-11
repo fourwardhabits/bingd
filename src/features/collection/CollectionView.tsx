@@ -123,6 +123,17 @@ export type CollectionViewProps = {
   title?: ReactNode;
   /** Cards between the toolbar and the count (the unranked and refine prompts). */
   lead?: ReactNode;
+  /**
+   * Drawn in place of the titles while the section has none to give yet: its skeleton
+   * while the read is on its way, its error when it failed. `items` is ignored meanwhile.
+   *
+   * **Here rather than in a screen of its own, so the toolbar is never remounted**
+   * (2026-11-11). Collection drew loading and failed sections with a toolbar of their own
+   * and swapped in this component's when the titles landed: two places in the tree, so a
+   * Watched ▾ menu opened before the list arrived closed by itself when it did. Every
+   * state is now drawn in the same list, under the same header.
+   */
+  placeholder?: ReactNode;
 };
 
 /**
@@ -149,6 +160,7 @@ export function CollectionView({
   countAccessory,
   title,
   lead,
+  placeholder,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -166,16 +178,32 @@ export function CollectionView({
   // stable, which it reports rather than silently ignoring.
   const visible = visibleItems(items, state.filters, sort, state.seed);
 
-  if (items.length === 0) {
-    return (
-      <>
-        {title ? <ContentToolbar title={title} testID="collection-toolbar" /> : null}
-        {lead}
-        {countAccessory ? <View style={styles.accessoryOnly}>{countAccessory}</View> : null}
-        {empty}
-      </>
-    );
-  }
+  /**
+   * What stands in for the titles, when something does: the section's own placeholder
+   * (loading, failed), the empty collection, or a filter that hides everything. It is
+   * drawn under the header inside the same list the titles use, so the toolbar keeps its
+   * place in the tree whatever the read is doing (see `placeholder`).
+   */
+  const hasTitles = placeholder == null && items.length > 0;
+  const standIn =
+    placeholder != null ? (
+      placeholder
+    ) : items.length === 0 ? (
+      empty
+    ) : visible.length === 0 ? (
+      <View style={styles.padded}>
+        <EmptyState
+          kind="nothingMatches"
+          compact
+          title="Nothing matches"
+          body="Try removing a filter."
+          action={{
+            label: 'Clear all',
+            onPress: () => onChange({ ...state, filters: emptyFilters() }),
+          }}
+        />
+      </View>
+    ) : null;
 
   const activeCount = activeFilterCount(state.filters);
 
@@ -221,64 +249,63 @@ export function CollectionView({
    */
   const header = (
     <View>
+      {/* First, in every state: the one position the marquee has (see `placeholder`). The
+          tools act on titles, so they are drawn only when there are some. */}
       <ContentToolbar
         title={title}
         // The last glyph's 44pt cell around its 20pt glyph, so the glyph lands on the gutter.
-        edgeInset={(theme.layout.minTapTarget - theme.layout.icon.sm) / 2}
+        edgeInset={hasTitles ? (theme.layout.minTapTarget - theme.layout.icon.sm) / 2 : undefined}
         testID="collection-toolbar"
       >
-        <FiltersAction
-          label="Filters & Sort"
-          activeCount={activeCount}
-          accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
-          accessibilityHint="Opens filters and the sort order"
-          onPress={() => setFilterOpen(true)}
-          testID="collection-filter-sort"
-        />
-        {/* The view control, not a third collection state. **Poster first, list second**
-            (founder §11): the leftmost cell is the one a device with no stored preference
-            opens on, so the row and the state agree. */}
-        <IconToggle
-          label="View"
-          appearance="quiet"
-          value={state.mode}
-          onChange={(mode) => onChange({ ...state, mode })}
-          options={VIEW_MODES}
-        />
+        {hasTitles ? (
+          <>
+            <FiltersAction
+              label="Filters & Sort"
+              activeCount={activeCount}
+              accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+              accessibilityHint="Opens filters and the sort order"
+              onPress={() => setFilterOpen(true)}
+              testID="collection-filter-sort"
+            />
+            {/* The view control, not a third collection state. **Poster first, list second**
+                (founder §11): the leftmost cell is the one a device with no stored preference
+                opens on, so the row and the state agree. */}
+            <IconToggle
+              label="View"
+              appearance="quiet"
+              value={state.mode}
+              onChange={(mode) => onChange({ ...state, mode })}
+              options={VIEW_MODES}
+            />
+          </>
+        ) : null}
       </ContentToolbar>
 
       {lead}
 
-      <View style={styles.countRow}>
-        <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
-          {visible.length === items.length
-            ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
-            : `${visible.length} of ${items.length}`}
-        </Text>
-        {countAccessory}
-      </View>
+      {hasTitles ? (
+        <View style={styles.countRow}>
+          <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
+            {visible.length === items.length
+              ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
+              : `${visible.length} of ${items.length}`}
+          </Text>
+          {countAccessory}
+        </View>
+      ) : countAccessory ? (
+        // The way to the lists never depends on there being titles.
+        <View style={styles.accessoryOnly}>{countAccessory}</View>
+      ) : null}
+
+      {standIn}
     </View>
   );
+  /** The titles the list draws: none while something stands in for them. */
+  const shown = standIn == null ? visible : [];
 
   return (
     <View style={styles.body}>
-      {visible.length === 0 ? (
-        <>
-          {header}
-          <View style={styles.padded}>
-            <EmptyState
-              kind="nothingMatches"
-              compact
-              title="Nothing matches"
-              body="Try removing a filter."
-              action={{
-                label: 'Clear all',
-                onPress: () => onChange({ ...state, filters: emptyFilters() }),
-              }}
-            />
-          </View>
-        </>
-      ) : state.mode === 'poster' ? (
+      {state.mode === 'poster' ? (
         /**
          * **Both modes are virtualised, and that is the 2026-09-16 fix.**
          *
@@ -293,7 +320,7 @@ export function CollectionView({
          * was, and only the drawing of it changed.
          */
         <PosterGridList
-          tiles={visible.map((item) => ({
+          tiles={shown.map((item) => ({
             id: item.mediaItemId,
             title: nameOf(item),
             year: item.year,
@@ -319,7 +346,7 @@ export function CollectionView({
         />
       ) : (
         <FlashList
-          data={visible}
+          data={shown}
           keyExtractor={(item) => item.mediaItemId}
           // See the note on the grid in `PosterGridList`: a re-sort keeps the offset
           // rather than chasing the row that happened to be on top.

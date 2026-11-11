@@ -172,6 +172,10 @@ const open = async () => {
  * race up every run — the wall answers after the press — so this helper is what keeps it
  * passing. It guards the helper, not the screen: the remount itself is screen behaviour
  * (see the PR).
+ *
+ * The screen no longer remounts the dropdown (2026-11-11): the toolbar is in the same
+ * scroller in every state, and `a wall that lands under an open menu` below pins that. The
+ * wait stays, because it is still how a person uses the control.
  */
 const pickWall = async (view: Awaited<ReturnType<typeof open>>, wall: 'Recommended' | 'Top Rated') => {
   await waitFor(() => expect(view.queryByTestId('skeleton-grid')).toBeNull());
@@ -577,6 +581,42 @@ describe('keep looking on a deeply scrolled wall', () => {
  * chooses the wall and the switch the medium; together they are the four walls, so changing
  * one must never reset the other.
  */
+/**
+ * **The dropdown stays open when the wall under it finishes loading** (2026-11-11).
+ *
+ * The screen bug behind #260's flake, which #260 fixed only in the test: the toolbar that
+ * holds Recommended ▾ was drawn above a loading wall and inside the wall's scroller once
+ * it landed, so a wall arriving under an open menu remounted the dropdown and closed it.
+ * A person meets it by changing wall or medium and opening the menu straight away. The
+ * server answers 400ms after the request here, well after the menu has opened.
+ */
+describe('a wall that lands under an open menu', () => {
+  it('leaves the menu open, on the same dropdown', async () => {
+    mockTopRatedDelayMs = 400;
+    const view = await open();
+    await pickWall(view, 'Top Rated');
+    await waitFor(() => expect(view.getByTestId('skeleton-grid')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await view.findByRole('menuitem', { name: /^Recommended/ });
+    expect(view.getByTestId('skeleton-grid')).toBeTruthy();
+
+    // The wall arrives while the menu is open.
+    await waitFor(() => expect(view.queryByTestId('skeleton-grid')).toBeNull(), {
+      timeout: 3000,
+    });
+    expect(view.getByTestId('for-you-wall')).toBeTruthy();
+    expect(view.getByRole('menuitem', { name: /^Recommended/ })).toBeTruthy();
+    expect(view.getByLabelText(/^Showing /).props.accessibilityState).toMatchObject({
+      expanded: true,
+    });
+
+    // And it still works: the choice lands.
+    await fireEvent.press(view.getByRole('menuitem', { name: /^Recommended/ }));
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
+  });
+});
+
 describe('the dropdown and the switch together', () => {
   /**
    * Run twice: with the server answering at once, and with it answering 60ms after each

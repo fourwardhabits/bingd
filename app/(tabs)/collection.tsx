@@ -30,7 +30,6 @@ import { fontFamily, theme } from '@/ui/tokens';
 import {
   AppHeader,
   Button,
-  ContentToolbar,
   HeaderBoundary,
   EmptyState,
   MediumSelector,
@@ -617,27 +616,20 @@ function Watched({
   // no pull-to-refresh either — so a collection that failed to load stayed failed until the
   // app was killed. Both reads are retried, because either one can be the one that broke
   // and the view needs both.
-  if (ranked.isError || logged.isError) {
-    return (
-      <>
-        <SectionTop title={title} lead={lead} />
-        <ListsOnly lists={lists} />
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load"
-          body="Check your connection and try again."
-          action={{
-            label: 'Try again',
-            onPress: () => {
-              void ranked.refetch();
-              void logged.refetch();
-            },
-          }}
-        />
-      </>
-    );
-  }
-  if (ranked.isPending || logged.isPending) return <Loading lists={lists} title={title} lead={lead} />;
+  // Loading and failed are drawn by the same view as the titles, under the same toolbar,
+  // so the marquee is never remounted when the read lands (`CollectionView`'s
+  // `placeholder`, 2026-11-11).
+  const placeholder =
+    ranked.isError || logged.isError ? (
+      <CouldNotLoad
+        onRetry={() => {
+          void ranked.refetch();
+          void logged.refetch();
+        }}
+      />
+    ) : ranked.isPending || logged.isPending ? (
+      <SkeletonRow count={7} />
+    ) : undefined;
 
   return (
     <CollectionView
@@ -648,9 +640,10 @@ function Watched({
       countAccessory={lists}
       title={title}
       lead={lead}
+      placeholder={placeholder}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
-        logged.data.loggedCount === 0 ? (
+        logged.data?.loggedCount === 0 ? (
           <EmptyState
             kind="nothingYet"
             title="Your watched list starts here"
@@ -682,21 +675,12 @@ function Watchlist({
   const { data, isPending, isError, refetch } = useWatchlist(userId);
   const items = useMemo(() => watchlistItems(data ?? [], medium), [data, medium]);
 
-  if (isError) {
-    return (
-      <>
-        <SectionTop title={title} lead={lead} />
-        <ListsOnly lists={lists} />
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void refetch() }}
-        />
-      </>
-    );
-  }
-  if (isPending) return <Loading lists={lists} title={title} lead={lead} />;
+  // See Watched: every state in the one view, so the marquee keeps its place.
+  const placeholder = isError ? (
+    <CouldNotLoad onRetry={() => void refetch()} />
+  ) : isPending ? (
+    <SkeletonRow count={7} />
+  ) : undefined;
 
   return (
     <CollectionView
@@ -707,6 +691,7 @@ function Watchlist({
       countAccessory={lists}
       title={title}
       lead={lead}
+      placeholder={placeholder}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -734,21 +719,12 @@ function Unranked({
   const { data, isPending, isError, refetch } = useLoggedCollection(userId);
   const items = useMemo(() => watchlistItems(data?.unranked ?? [], medium), [data, medium]);
 
-  if (isError) {
-    return (
-      <>
-        <SectionTop title={title} lead={lead} />
-        <ListsOnly lists={lists} />
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void refetch() }}
-        />
-      </>
-    );
-  }
-  if (isPending) return <Loading lists={lists} title={title} lead={lead} />;
+  // See Watched: every state in the one view, so the marquee keeps its place.
+  const placeholder = isError ? (
+    <CouldNotLoad onRetry={() => void refetch()} />
+  ) : isPending ? (
+    <SkeletonRow count={7} />
+  ) : undefined;
 
   return (
     <CollectionView
@@ -759,6 +735,7 @@ function Unranked({
       countAccessory={lists}
       title={title}
       lead={lead}
+      placeholder={placeholder}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -851,46 +828,20 @@ function backlogCountLine(total: number, medium: Medium) {
   return `${total} ${noun} to rank`;
 }
 
-function Loading({
-  lists,
-  title,
-  lead,
-}: {
-  lists?: React.ReactNode;
-  title: React.ReactNode;
-  lead?: React.ReactNode;
-}) {
-  return (
-    <View style={styles.body}>
-      <SectionTop title={title} lead={lead} />
-      <ListsOnly lists={lists} />
-      <SkeletonRow count={7} />
-    </View>
-  );
-}
-
 /**
- * The toolbar and the cards, where there is no list to carry them: while a section loads
- * and when its read fails. The marquee must stay reachable in both, or a failed Watched
- * would strand the reader with no way to Watchlist.
+ * A section whose read failed, under the toolbar like every other state. It said what had
+ * happened and offered nothing to do about it once, on a screen with no pull-to-refresh, so
+ * a collection that failed to load stayed failed until the app was killed; it retries now.
  */
-function SectionTop({ title, lead }: { title: React.ReactNode; lead?: React.ReactNode }) {
+function CouldNotLoad({ onRetry }: { onRetry: () => void }) {
   return (
-    <>
-      <ContentToolbar title={title} testID="collection-toolbar" />
-      {lead}
-    </>
+    <EmptyState
+      kind="couldNotLoad"
+      title="Could not load"
+      body="Check your connection and try again."
+      action={{ label: 'Try again', onPress: onRetry }}
+    />
   );
-}
-
-/**
- * `My lists ›` on its own line, where there is no count row to sit in: while a segment
- * loads and when its read fails (independent review, UI cohesion pass). The lists are their
- * own read, so a collection that cannot load must not take the way to them with it.
- */
-function ListsOnly({ lists }: { lists?: React.ReactNode }) {
-  if (!lists) return null;
-  return <View style={styles.listsOnly}>{lists}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -902,12 +853,6 @@ const styles = StyleSheet.create({
     paddingLeft: theme.space[3],
   },
   listsLinkLabel: { fontFamily: fontFamily.sansMedium },
-  listsOnly: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-  },
   pressed: { opacity: 0.6 },
 
   // A column now. As a row it put the copy and the dismissal at opposite edges,
@@ -926,7 +871,6 @@ const styles = StyleSheet.create({
   },
   nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
 
-  body: { flex: 1 },
   count: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],

@@ -84,6 +84,48 @@ describe('the menu', () => {
     expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
   });
 
+  /**
+   * **The Android hypothesis for the self-closing marquee, pinned rather than fixed**
+   * (2026-11-11). If a `statusBarTranslucent` Modal on edge-to-edge Android reports a window
+   * a status bar taller once it opens, the rule above sees "a size change" and closes the
+   * menu it just opened. This shows the rule does close on a height-only change of that
+   * size. Whether Android really reports one is a device question no test here can answer,
+   * so the rule is unchanged: if the founder's device check reproduces it, the fix is to
+   * close on a width change (or a height change larger than the system bars) only, and
+   * this expectation flips.
+   */
+  it('closes today on a height-only change the size of a status bar (hypothesis)', async () => {
+    const view = await render(
+      <MediumSelector size="marquee" value="month" onChange={() => {}} options={TIMEFRAMES} />,
+    );
+    await fireEvent.press(screen.getByLabelText('Showing This month'));
+    expect(await screen.findAllByRole('menuitem')).toHaveLength(2);
+
+    mockWindow = { ...mockWindow, height: mockWindow.height + 24 };
+    await act(async () => {
+      view.rerender(
+        <MediumSelector size="marquee" value="month" onChange={() => {}} options={TIMEFRAMES} />,
+      );
+    });
+    expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
+  });
+
+  it('stays open across a re-render that changes nothing about the window', async () => {
+    const view = await render(
+      <MediumSelector size="marquee" value="month" onChange={() => {}} options={TIMEFRAMES} />,
+    );
+    await fireEvent.press(screen.getByLabelText('Showing This month'));
+    expect(await screen.findAllByRole('menuitem')).toHaveLength(2);
+
+    mockWindow = { ...mockWindow };
+    await act(async () => {
+      view.rerender(
+        <MediumSelector size="marquee" value="month" onChange={() => {}} options={TIMEFRAMES} />,
+      );
+    });
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+  });
+
   it('chooses, and reports only a change', async () => {
     const onChange = jest.fn();
     await render(
