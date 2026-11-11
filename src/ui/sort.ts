@@ -75,6 +75,12 @@ export type SortAxisSpec<Axis extends string> = {
   directions?: { desc: string; asc: string };
   /** Where rule 2 lands. Required when `directions` is present. */
   defaultDirection?: SortDirection;
+  /**
+   * For an axis with no `directions`: what a screen reader is told about pressing it
+   * while it is already on — Shuffle's `Tap again to reshuffle`. The row stays enabled,
+   * because pressing it again *does* something, and without a hint nothing says what.
+   */
+  repeatHint?: string;
 };
 
 /** Whether this axis has two states to move between. */

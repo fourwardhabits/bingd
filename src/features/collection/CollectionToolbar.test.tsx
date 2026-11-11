@@ -203,7 +203,7 @@ describe('the Filter and sort sheet', () => {
     const offered = within(watchedView.getByTestId('collection-sort-section'))
       .getAllByRole('radio')
       .map((radio) => radio.props.accessibilityLabel.split(',')[0]);
-    expect(offered).toEqual(sortAxesFor('watched').map((spec) => spec.label));
+    expect(offered).toEqual(sortAxesFor('watched', { runtime: true }).map((spec) => spec.label));
   });
 
   it('offers no Rating on the Watchlist, which has no scores', async () => {
@@ -266,18 +266,19 @@ describe('the Filter and sort sheet', () => {
     expect(view.getByTestId('collection-filter-sort', BEHIND).props.accessibilityLabel).toMatch(/Sorted by Title.*No filters$/);
   });
 
-  it('reshuffles from the toolbar and from Shuffle pressed again', async () => {
+  it('reshuffles from Shuffle pressed again, closes the sheet, and has no toolbar button', async () => {
     const seen: CollectionViewState[] = [];
     const view = await openSheet({
       initial: { sort: { axis: 'shuffle', direction: 'desc' } },
       onState: (state) => seen.push(state),
     });
+    expect(view.queryByTestId('collection-reshuffle', BEHIND)).toBeNull();
     await fireEvent.press(
       within(view.getByTestId('collection-sort-section')).getByRole('radio', { name: 'Shuffle' }),
     );
-    expect(seen.at(-1)?.seed).toBe(2);
-    await fireEvent.press(view.getByTestId('collection-reshuffle', BEHIND));
-    expect(seen.at(-1)?.seed).toBe(3);
+    expect(seen.at(-1)?.seed).toBeGreaterThan(1);
+    await waitFor(() => expect(view.queryByTestId('collection-sort-section')).toBeNull());
+    expect(view.queryByTestId('collection-reshuffle')).toBeNull();
   });
 });
 

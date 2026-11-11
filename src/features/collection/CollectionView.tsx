@@ -1,7 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -23,11 +22,12 @@ import { CollectionFilterSheet } from './CollectionFilterSheet';
 import { TitleRowActions } from './TitleRowActions';
 import {
   activeFilterCount,
-  applyFilters,
   COLLECTION_SORT_AXES,
   emptyFilters,
+  nextShuffleSeed,
+  offersRuntime,
   sortAxesFor,
-  sortItems,
+  visibleItems,
   type CollectionFilters,
   type CollectionItem,
   type CollectionSegment,
@@ -56,7 +56,10 @@ export type CollectionViewState = {
    */
   sort: CollectionSortState;
   mode: CollectionViewMode;
-  /** Bumped by Shuffle. Nothing else changes the order. */
+  /**
+   * Moved by every press of Shuffle ({@link nextShuffleSeed}), and by nothing else — not a
+   * scroll, a re-render, a refetch, a filter or a switch between Poster and List.
+   */
   seed: number;
 };
 
@@ -149,7 +152,8 @@ export function CollectionView({
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const axes = sortAxesFor(segment);
+  // Runtime only where a row could carry one: not on a TV list made only of seasons.
+  const axes = sortAxesFor(segment, { runtime: offersRuntime(items) });
   // A sort the current segment does not offer — Rating on a watchlist — falls back
   // rather than silently ordering by a field that is null on every row. The fallback
   // lands in the replacement axis's own default direction, so the chip, the arrow and
@@ -160,7 +164,7 @@ export function CollectionView({
   // (app.config.ts `experiments.reactCompiler`), and it memoizes this itself —
   // a hand-written one here only gave it a dependency list it could not prove
   // stable, which it reports rather than silently ignoring.
-  const visible = sortItems(applyFilters(items, state.filters), sort, state.seed);
+  const visible = visibleItems(items, state.filters, sort, state.seed);
 
   if (items.length === 0) {
     return (
@@ -174,7 +178,32 @@ export function CollectionView({
   }
 
   const activeCount = activeFilterCount(state.filters);
-  const reshuffle = () => onChange({ ...state, seed: state.seed + 1 });
+
+  /**
+   * **Every press of Shuffle, from any axis or from Shuffle itself** (approved spec,
+   * 2026-11-10): a new seed whose order differs from the one on screen, applied at once,
+   * and the sheet closed so the new order is what the reader sees next.
+   *
+   * It does not wait for Apply and does not apply the filter drafts: those are the
+   * filters' own, and closing the sheet abandons them exactly as closing it any other way
+   * does. There is no reshuffle glyph in the toolbar any more — Shuffle lives in the sheet.
+   */
+  const shuffleNow = () => {
+    setFilterOpen(false);
+    // The sheet closes on the press, so nothing on screen says the order changed; a screen
+    // reader is told in words.
+    AccessibilityInfo.announceForAccessibility('Shuffled');
+    onChange({
+      ...state,
+      sort: { axis: COLLECTION_SORT_AXES.shuffle.axis, direction: 'desc' },
+      seed: nextShuffleSeed(
+        items,
+        state.filters,
+        state.seed,
+        visible.map((item) => item.mediaItemId),
+      ),
+    });
+  };
 
   /**
    * **The page's toolbar, then its cards, then the count — all at the head of the list**
@@ -206,18 +235,6 @@ export function CollectionView({
           onPress={() => setFilterOpen(true)}
           testID="collection-filter-sort"
         />
-        {/* Shuffle's reshuffle, one press from the toolbar rather than three. */}
-        {sort.axis === 'shuffle' ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Shuffle again"
-            onPress={reshuffle}
-            style={({ pressed }) => [styles.reshuffle, pressed && styles.pressed]}
-            testID="collection-reshuffle"
-          >
-            <Ionicons name="shuffle" size={theme.layout.icon.sm} color={theme.semantic.action} />
-          </Pressable>
-        ) : null}
         {/* The view control, not a third collection state. **Poster first, list second**
             (founder §11): the leftmost cell is the one a device with no stored preference
             opens on, so the row and the state agree. */}
@@ -356,13 +373,17 @@ export function CollectionView({
             onChange({ ...state, filters });
           }}
           onClose={() => setFilterOpen(false)}
-          // The sort choices this segment offers, applied on the press as they always were.
-          // Shuffle is the one axis with no direction, so choosing it again reseeds.
+          // The sort choices this segment offers, applied on the press as they always were;
+          // the sheet stays open so a second press reverses. Shuffle is the exception: any
+          // press of it deals a new order and closes the sheet (`shuffleNow`).
           sort={{
             axes,
             value: sort,
-            onChange: (next) => onChange({ ...state, sort: next }),
-            onRepeatUndirected: reshuffle,
+            onChange: (next) =>
+              next.axis === COLLECTION_SORT_AXES.shuffle.axis
+                ? shuffleNow()
+                : onChange({ ...state, sort: next }),
+            onRepeatUndirected: shuffleNow,
           }}
         />
       ) : null}
@@ -401,13 +422,6 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
-  reshuffle: {
-    width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.6 },
 
   /** `37 titles` on the left and the lists link on the right, one line under the toolbar. */
   countRow: {
