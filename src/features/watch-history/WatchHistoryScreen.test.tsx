@@ -425,6 +425,20 @@ describe('removing a watch', () => {
     expect(mockBack).not.toHaveBeenCalled();
   });
 
+  it('removing the only watch from a page opened cold opens the title page', async () => {
+    mockCanGoBack = false;
+    mockReplace.mockClear();
+    mockHistory.mockReturnValue(oneWatch);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByTestId('watch-remove-w1'));
+
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/title/film-1'));
+    expect(mockBack).not.toHaveBeenCalled();
+    mockCanGoBack = true;
+  });
+
   it('stays put and says why when the removal fails', async () => {
     mockRemove.mockResolvedValueOnce({ outcome: 'failed', message: 'No connection.' });
     mockHistory.mockReturnValue(oneWatch);
@@ -582,6 +596,18 @@ describe('a collapsed row', () => {
     // The score is the right column, and Edit is not in it.
     expect(right?.props.testID).toBe('watch-score-w1');
     expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024 (First watch)');
+  });
+
+  it('keeps the score level with the date, whether Edit or the editor is showing', async () => {
+    two();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    const main = () => StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style);
+    // Top-aligned, so neither Edit's 44pt target below the date nor its removal while
+    // editing can move the circle (independent review).
+    expect(main().alignItems).toBe('flex-start');
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    expect(main().alignItems).toBe('flex-start');
+    expect(view.getByTestId('watch-score-w1')).toBeTruthy();
   });
 
   it('keeps the companions and the note under the row, never between the date and Edit', async () => {

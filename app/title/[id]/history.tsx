@@ -176,6 +176,10 @@ export default function WatchHistoryScreen() {
   const reconcile = () =>
     invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
 
+  /** Back to the title page behind this one, or to it when this page was opened cold. */
+  const leave = () =>
+    router.canGoBack() ? router.back() : router.replace(`/title/${mediaItemId}` as never);
+
   const editRanking = () => {
     if (!loggable.data) return;
     // The inline editor closes first: its unsaved date and companions are dropped as
@@ -268,7 +272,9 @@ export default function WatchHistoryScreen() {
         setError(result.message);
         return;
       }
-      router.back();
+      // The same way out as the header's Back, so a page opened cold does not stay on a
+      // history for a title that has just left the collection (independent review).
+      leave();
       return;
     }
     setBusy(true);
@@ -299,12 +305,7 @@ export default function WatchHistoryScreen() {
     <>
       <Stack.Screen options={{ headerShown: false, title: 'Watch history' }} />
       <AppHeader
-        back={{
-          onPress: () =>
-            router.canGoBack()
-              ? router.back()
-              : router.replace(`/title/${mediaItemId}` as never),
-        }}
+        back={{ onPress: leave }}
       />
       <HeaderBoundary />
     </>
@@ -443,6 +444,7 @@ export default function WatchHistoryScreen() {
             mode,
           });
           setRankedTitle(rating);
+          setPlacement(null);
           setRating(null);
         }}
       />

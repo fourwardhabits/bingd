@@ -112,8 +112,8 @@ export function WatchRow({
       {/**
        * **The date and Edit on the left, the score on the right** (founder, UI consistency
        * sprint, 2026-11-10). Edit sits directly under the date it edits, so the score
-       * circle is the only thing in the right column and stays centred on the row's lead
-       * — it no longer moves down when Edit is drawn beside it. Edit keeps the full 44pt
+       * circle is the only thing in the right column, level with the date — it no longer
+       * moves down when Edit is drawn beside it, or up when the editor replaces Edit. Edit keeps the full 44pt
        * target the 2026-11-07 pass gave it, with the word centred in it.
        */}
       <View style={styles.main} testID={`watch-main-${event.id}`}>
@@ -341,9 +341,11 @@ const styles = StyleSheet.create({
    * a negative margin pulling it back out over padding it should never have been inside.
    */
   row: { paddingVertical: theme.space[3] },
+  // Top-aligned: the score sits level with the date's line and never moves when Edit is
+  // drawn under the date or gives way to the editor (independent review).
   main: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
   },

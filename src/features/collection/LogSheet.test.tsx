@@ -3388,8 +3388,11 @@ describe('the watch-history row', () => {
   it('draws neither that row nor a date row when opened from Watch History', async () => {
     twoWatches();
     const view = await open(filmA, { inWatchHistory: true });
-    // The sheet itself is open and ready for a band.
+    // The sheet itself is open and ready for a band, and the count has been read — so the
+    // absences below are the prop's doing, not a query that has not answered yet.
     await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await waitFor(() => expect(readsOf('watch_events')).toBeGreaterThan(0));
+    await settle();
     await settle();
     expect(view.queryByRole('button', { name: 'Watched 2 times' })).toBeNull();
     expect(view.queryByRole('button', { name: 'Watch date' })).toBeNull();
