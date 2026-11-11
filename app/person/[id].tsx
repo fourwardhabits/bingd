@@ -161,21 +161,29 @@ export default function PersonScreen() {
   /**
    * The reader's own state, from queries the rest of the app has already warmed.
    *
-   * Only the movie ranking is fetched. A credit is a film or a *series*, never a
-   * season — TMDB credits people on shows — and a series cannot be ranked (AD-1), so
-   * a "Ranked" flag against one would be a state it can never reach.
+   * A credit is a film or a *series*, never a season — TMDB credits people on shows —
+   * so the two rankings read are the films and the whole shows. Since 20261114000200 a
+   * show ranks in its own pool (`tv_shows`) and is logged like a film, so a ranked or
+   * logged show says so here exactly as its title page does (RC review, 2026-11-11).
+   * The season pool is not read: a season is never a credit row.
    */
   const watchlist = useWatchlist(viewer.id);
   const watched = useWatched(viewer.id);
   const rankedMovies = useRankedCollection(viewer.id, 'movies');
+  const rankedShows = useRankedCollection(viewer.id, 'tv_shows');
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
     [watchlist.data],
   );
   const ranked = useMemo(
-    () => new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId)),
-    [rankedMovies.data],
+    () =>
+      new Set(
+        [...(rankedMovies.data ?? []), ...(rankedShows.data ?? [])].map(
+          (entry) => entry.mediaItemId,
+        ),
+      ),
+    [rankedMovies.data, rankedShows.data],
   );
 
   /**
@@ -756,15 +764,15 @@ function Biography({ text, truncated }: { text: string; truncated: boolean }) {
  *
  * One word, not three: a row carrying "Saved · Ranked · Watched" is a row about the
  * reader rather than about the film. Ranked wins over watched because it is the
- * stronger statement and implies it, and neither is shown for a series, which cannot
- * be ranked and whose seasons are logged individually — "Watched" against a whole
- * show would be a claim the data does not make.
+ * stronger statement and implies it. A series says either only about the *show itself*
+ * (ranked in `tv_shows`, or logged as a show, 20261114000200): its `user_media` row is
+ * the show's own, so a reader who logged only seasons is not told they watched it.
  */
 function stateLabel(
   credit: PersonCredit,
   state: { saved: Set<string>; ranked: Set<string>; watched: Set<string> | undefined },
 ) {
-  if (credit.kind === 'movie') {
+  if (credit.kind === 'movie' || credit.kind === 'series') {
     if (state.ranked.has(credit.mediaItemId)) return 'Ranked';
     if (state.watched?.has(credit.mediaItemId)) return 'Watched';
   }
