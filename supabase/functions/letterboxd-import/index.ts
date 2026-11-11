@@ -77,9 +77,9 @@ export type Claim = {
   name: string;
   year: number | null;
   /**
-   * 20261111000100. Null on a Letterboxd row; `imdb` routes the claim to `resolveImdb`.
-   * Absent altogether against a database older than that migration, which reads as
-   * Letterboxd too.
+   * 20261111000100. The job's provider: `imdb` routes the claim to `resolveImdb`, and
+   * `letterboxd` (or the field's absence, against a database older than that migration)
+   * keeps the Letterboxd path. The three fields below are null on a Letterboxd row.
    */
   provider?: string | null;
   imdb_id?: string | null;

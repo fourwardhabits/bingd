@@ -64,7 +64,7 @@ export type ImdbStagingRow = {
   readonly year: number | null;
   readonly imdbId: string;
   readonly titleType: string;
-  /** Only for a title bingd can place. Provenance; never a score. */
+  /** Only for a movie, the one kind that is placed. Provenance; never a score. */
   readonly imdbRating?: number;
 };
 
@@ -81,7 +81,7 @@ export function imdbStagingRows(normalised: ImdbNormalised): ImdbStagingRow[] {
     year: title.year,
     imdbId: title.imdbId,
     titleType: title.titleType,
-    ...(title.rating !== null && title.kind !== null ? { imdbRating: title.rating } : {}),
+    ...(title.rating !== null && title.kind === 'movie' ? { imdbRating: title.rating } : {}),
   }));
 }
 

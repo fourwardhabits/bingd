@@ -87,9 +87,9 @@ describe('the synthetic export', () => {
       tvShows: 3,
       episodes: 1,
       otherUnsupported: 1,
-      // Every movie and show but Too Loud (11 is not a rating). The episode's and the
-      // game's ratings are dropped, because nothing can use them.
-      rated: 9,
+      // The movies' ratings, less Too Loud (11 is not a rating). Shows', the episode's and
+      // the game's are dropped: nothing they could attach to is kept.
+      rated: 6,
       malformed: 2,
       invalidIds: 1,
       invalidRatings: 1,
@@ -188,6 +188,8 @@ describe('what crosses the wire', () => {
   it('sends no rating for a title bingd cannot place', () => {
     expect(rows.find((r) => r.imdbId === 'tt9000004')).not.toHaveProperty('imdbRating');
     expect(rows.find((r) => r.imdbId === 'tt9000009')).not.toHaveProperty('imdbRating');
+    // A show is recognised and not added, so its rating has nowhere to live.
+    expect(rows.find((r) => r.imdbId === 'tt9000002')).not.toHaveProperty('imdbRating');
   });
 
   it('omits an original title equal to the title', () => {

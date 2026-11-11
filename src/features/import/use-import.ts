@@ -141,7 +141,12 @@ export type ImportFailure =
   /** The server refused or the connection went. Recoverable: the job survives. */
   | { readonly kind: 'upload' }
   /** The worker gave up on the job. Not recoverable by retrying the same archive. */
-  | { readonly kind: 'server' }
+  /**
+   * The worker gave up. `status` is the job as it ended, kept so the screen can say whose
+   * import it was (independent review, 2026-11-11: a failed IMDb job reopened from its
+   * notification used to read as Letterboxd and offer the Letterboxd picker).
+   */
+  | { readonly kind: 'server'; readonly status?: ImportJobStatus }
   /**
    * An import for this account is already running, so this one cannot start.
    *
@@ -419,9 +424,18 @@ const completedRecently = (completedAt: string | null): boolean => {
  * somebody was away reopened under "Your Letterboxd history is in" with its empty counts.
  * That was invisible until a notification started sending people to exactly that job.
  */
+/** The provider of the job a phase is showing, when it shows one and the server said. */
+export const providerOfJob = (state: ImportPhase): ImportProvider | undefined =>
+  state.phase === 'working' || state.phase === 'done'
+    ? state.status.provider
+    : state.phase === 'failed' &&
+        (state.failure.kind === 'already_running' || state.failure.kind === 'server')
+      ? state.failure.status?.provider
+      : undefined;
+
 const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
   status.status === 'failed'
-    ? { phase: 'failed', failure: { kind: 'server' } }
+    ? { phase: 'failed', failure: { kind: 'server', status } }
     : { phase: 'done', status };
 
 /**
@@ -445,9 +459,15 @@ export function useImport(
     readonly provider?: ImportProvider;
   },
 ) {
-  const provider: ImportProvider = options?.provider ?? 'letterboxd';
   const queryClient = useQueryClient();
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
+
+  /**
+   * Whose file `pick` reads and `start` sends: the caller's choice, else the provider of the
+   * job on screen (so a failed IMDb job reopened from its notification offers the IMDb file,
+   * independent review 2026-11-11), else Letterboxd.
+   */
+  const provider: ImportProvider = options?.provider ?? providerOfJob(state) ?? 'letterboxd';
   /** Bumped by `recheck`, so the restore effect asks about the named job again. */
   const [checks, setChecks] = useState(0);
   const jobRef = useRef<string | null>(null);
@@ -597,13 +617,16 @@ export function useImport(
    * the picker's own metadata, before anything is allocated.
    */
   const pickOnce = useCallback(async () => {
+    // The provider is named on IMDb's events only, so a Letterboxd event is exactly the
+    // event it always was (see `ImportProviderName`).
+    const tagged = provider === 'imdb' ? ({ provider: 'imdb' } as const) : {};
     settle({ phase: 'reading' });
 
     let bytes: Uint8Array;
     try {
       const picked = await File.pickFileAsync();
       if (picked.canceled) {
-        track({ name: 'import_archive_selected', props: { outcome: 'cancelled' } });
+        track({ name: 'import_archive_selected', props: { outcome: 'cancelled', ...tagged } });
         settle({ phase: 'idle' });
         return;
       }
@@ -614,7 +637,7 @@ export function useImport(
       // nothing, the likely mis-tap is a video out of Photos rather than an exotic attack.
       // `size` costs nothing: the picker has already stat'd the file.
       if (picked.result.size > DEFAULT_LIMITS.maxTotalBytes) {
-        track({ name: 'import_archive_selected', props: { outcome: 'too_large' } });
+        track({ name: 'import_archive_selected', props: { outcome: 'too_large', ...tagged } });
         settle({ phase: 'failed', failure: { kind: 'archive', reason: 'too_large' } });
         return;
       }
@@ -622,7 +645,7 @@ export function useImport(
       await yieldFrame();
       bytes = await picked.result.bytes();
     } catch {
-      track({ name: 'import_archive_selected', props: { outcome: 'unreadable' } });
+      track({ name: 'import_archive_selected', props: { outcome: 'unreadable', ...tagged } });
       settle({ phase: 'failed', failure: { kind: 'unreadable' } });
       return;
     }
@@ -636,10 +659,6 @@ export function useImport(
     } catch {
       result = { ok: false, reason: 'unexpected' } as const;
     }
-
-    // The provider is named on IMDb's events only, so a Letterboxd event is exactly the
-    // event it always was (see `ImportProviderName`).
-    const tagged = provider === 'imdb' ? ({ provider: 'imdb' } as const) : {};
 
     if (!result.ok) {
       track({
@@ -948,7 +967,7 @@ export function useImport(
         nothingRunning.current = true;
         // Part of it may have landed before the job failed. See the failure copy.
         invalidateAfterImport(queryClient);
-        settle({ phase: 'failed', failure: { kind: 'server' } });
+        settle({ phase: 'failed', failure: { kind: 'server', status } });
         return;
       }
 
@@ -1021,5 +1040,15 @@ export function useImport(
   /** Whether an import may be running for this account. See `nothingRunning`. */
   const mayBeRunning = useCallback(() => !nothingRunning.current, []);
 
-  return { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } as const;
+  return {
+    state,
+    provider,
+    pick,
+    start,
+    reset,
+    watchRunning,
+    recheck,
+    opened,
+    mayBeRunning,
+  } as const;
 }

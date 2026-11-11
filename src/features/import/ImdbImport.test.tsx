@@ -297,7 +297,8 @@ describe('the IMDb summary', () => {
     const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
     await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
     expect(view.getByLabelText('640 Added to your collection')).toBeTruthy();
-    expect(view.getByLabelText('13 Already in your collection')).toBeTruthy();
+    // The duplicate is the title just added, counted once (independent review, 2026-11-11).
+    expect(view.getByLabelText('12 Already in your collection')).toBeTruthy();
     expect(view.getByLabelText('3 Imported before')).toBeTruthy();
     expect(view.getByLabelText('8 Couldn’t match')).toBeTruthy();
     expect(view.getByLabelText('148 Not supported')).toBeTruthy();
@@ -306,6 +307,10 @@ describe('the IMDb summary', () => {
       view.getByText(/139 TV shows weren’t added\. bingd tracks TV by season/),
     ).toBeTruthy();
     expect(view.getByText(/7 TV episodes weren’t added/)).toBeTruthy();
+    // 148 - 139 - 7: every "Not supported" has a sentence.
+    expect(
+      view.getByText(/2 titles weren’t added because they’re a kind of title/),
+    ).toBeTruthy();
     expect(view.getByText(/your IMDb ratings stay a note rather than a score/)).toBeTruthy();
     expect(view.getByRole('button', { name: 'Rank imported movies' })).toBeTruthy();
   });
@@ -319,6 +324,31 @@ describe('the IMDb summary', () => {
     expect(view.getByLabelText('640 Imported before')).toBeTruthy();
     expect(view.queryByLabelText(/Couldn’t match/)).toBeNull();
     expect(view.queryByRole('button', { name: 'Rank imported movies' })).toBeNull();
+  });
+});
+
+describe('a failed IMDb import, reopened from its notification', () => {
+  it('names IMDb and offers the IMDb file, not the Letterboxd one', async () => {
+    mockRpcResults = {
+      import_status: {
+        status: 'failed',
+        counts: {},
+        completed_at: new Date().toISOString(),
+        provider: 'imdb',
+      },
+    };
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
+    await waitFor(() =>
+      expect(view.getByText('We couldn’t finish your IMDb import')).toBeTruthy(),
+    );
+    expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy();
+    expect(view.queryByText(/Letterboxd/)).toBeNull();
+    // Choosing the file again opens the IMDb reader: a ZIP is refused as a ZIP.
+    mockPicked = zipSync({ 'watched.csv': strToU8('Date,Name,Year\n') });
+    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
   });
 });
 

@@ -185,11 +185,27 @@ begin
    order by created_at desc
    limit 1;
 
-  -- The one addition: a half-staged job from the OTHER provider is never handed back. Its
-  -- rows would be read through the wrong projection. A pending job is, by the existing
-  -- rule, one nobody finished sending, so it is cleared exactly as a stale one is below.
   if v_id is not null and (v_status <> 'pending' or v_provider = p_provider) then
     return v_id;
+  end if;
+
+  -- ---------------------------------------------------------------------------
+  -- The one addition: a half-staged job from the OTHER provider is never handed back, because
+  -- its rows would be read through the wrong projection. Two cases:
+  --
+  --   rows already staged   somebody may be sending that file right now, from another
+  --                         device. Clearing it would break their upload, and their retry
+  --                         would clear this one (independent review, 2026-11-11). Refused
+  --                         with 22023, which the client already reads as "an import is
+  --                         already running; this file wasn't sent".
+  --   nothing staged        a job opened and never used: cleared, exactly as a stale one is.
+  --
+  -- Both are inside the existing one-hour window; an older pending job is stale either way.
+  -- ---------------------------------------------------------------------------
+  if v_id is not null
+     and exists (select 1 from import_jobs where id = v_id and staged_rows > 0)
+  then
+    raise exception 'another import is being sent' using errcode = '22023';
   end if;
 
   delete from import_jobs
@@ -310,9 +326,10 @@ begin
                'titleType',     _import_imdb_title_type(r->>'titleType'),
                -- The person's own 1-10. Never a bucket, a position or a score: it is kept on
                -- imported_titles.imdb_rating as provenance and nothing reads it as an opinion.
-               -- Dropped outright for a title bingd cannot place, which has no use for it.
+               -- Kept for a movie only: a show is recognised and not added, and an episode
+               -- is not matched, so neither has anywhere for a rating to live.
                'imdbRating',    case when r->>'imdbRating' ~ '^([1-9]|10)$'
-                                     and _import_imdb_kind(_import_imdb_title_type(r->>'titleType')) is not null
+                                     and _import_imdb_kind(_import_imdb_title_type(r->>'titleType')) = 'movie'
                                 then (r->>'imdbRating')::integer end
              )) as raw
         from jsonb_array_elements(p_rows) r
@@ -695,8 +712,9 @@ drop function if exists _import_provider_claim(integer);
 create function _import_provider_claim(p_limit integer default 50)
 returns table (
   row_id uuid, name text, year integer,
-  -- 20261111000100. Null on a Letterboxd row, so an Edge Function that predates them
-  -- reads exactly the three columns it always did.
+  -- 20261111000100. Trailing, so an Edge Function that predates them reads exactly the
+  -- three columns it always did. provider is the job's ('letterboxd' or 'imdb'); the
+  -- other three are null on a Letterboxd row.
   provider text, imdb_id text, title_type text, original_title text
 )
 language plpgsql
@@ -1395,6 +1413,15 @@ begin
      and (raw ?| array['filmUri', 'rating', 'bucket', 'watchedOn', 'watches',
                          'imdbId', 'imdbRating', 'titleType', 'originalTitle']);
 
+  -- 20261111000100. An IMDb row's correlation is its tt id. The rows still here are the
+  -- unresolved ones, reduced to name and year above; the id goes with the rest, so what
+  -- is kept is what a Letterboxd row keeps (independent review, 2026-11-11).
+  if v_provider = 'imdb' then
+    update import_rows
+       set correlation = 'redacted:' || id::text
+     where job_id = p_job_id and correlation not like 'redacted:%';
+  end if;
+
   update import_jobs
      set status = 'done',
          completed_at = now(),
@@ -1431,6 +1458,13 @@ begin
    where job_id = new.id
      and raw ?| array['filmUri', 'rating', 'bucket', 'watchedOn', 'watches',
                          'imdbId', 'imdbRating', 'titleType', 'originalTitle'];
+
+  -- 20261111000100: an IMDb row's correlation is its tt id, and goes with the rest.
+  if new.provider = 'imdb' then
+    update import_rows
+       set correlation = 'redacted:' || id::text
+     where job_id = new.id and correlation not like 'redacted:%';
+  end if;
 
   return null;
 end;

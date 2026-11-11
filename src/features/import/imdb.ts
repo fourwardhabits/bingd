@@ -124,7 +124,7 @@ export type ImdbTitle = {
   readonly year: number | null;
   readonly titleType: ImdbTitleType;
   readonly kind: 'movie' | 'series' | null;
-  /** `Your Rating`, 1-10, or null. Provenance only. Dropped for a title with no destination. */
+  /** `Your Rating`, 1-10, or null. Provenance only. Kept for movies only. */
   readonly rating: number | null;
 };
 
@@ -139,7 +139,7 @@ export type ImdbCounts = {
   readonly episodes: number;
   /** Any other type bingd has no destination for (games, music videos, podcasts, unknown). */
   readonly otherUnsupported: number;
-  /** Titles carrying a valid `Your Rating`. */
+  /** Movies carrying a valid `Your Rating`: the ratings that will be kept. */
   readonly rated: number;
   /** Rows with no usable title, or a field count that does not match the header. */
   readonly malformed: number;
@@ -233,8 +233,10 @@ export function normaliseImdb(
     const rawRating = cell(row, 'Your Rating');
     const validRating = rawRating !== null && RATING_RE.test(rawRating);
     if (rawRating !== null && !validRating) invalidRatings += 1;
-    // No destination, no use for the rating: it is not sent at all.
-    const rating = validRating && kind !== null ? Number(rawRating) : null;
+    // Only a movie's rating has somewhere to live (`imported_titles`, on the collection row).
+    // A show is recognised and not added, and an episode is not matched, so their ratings
+    // are not kept or sent at all (independent review, 2026-11-11).
+    const rating = validRating && kind === 'movie' ? Number(rawRating) : null;
 
     const existing = byId.get(imdbId);
     if (existing) {

@@ -16,6 +16,7 @@ import type { ArchivePreview } from './read-archive';
 import type { ImdbPreview } from './read-imdb';
 import {
   isImdbPreview,
+  providerOfJob,
   useImport,
   type ImportCounts,
   type ImportFailure,
@@ -152,12 +153,11 @@ export function ImportScreen({
 }) {
   const router = useRouter();
   const [chosen, setChosen] = useState<ImportProvider | null>(null);
-  const provider: ImportProvider = fixedProvider ?? chosen ?? 'letterboxd';
-  const { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } = useImport(
-    surface,
-    jobId,
-    { countOpenOnRequest: onboarding !== undefined, provider },
-  );
+  const { state, provider, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } =
+    useImport(surface, jobId, {
+      countOpenOnRequest: onboarding !== undefined,
+      provider: fixedProvider ?? chosen ?? undefined,
+    });
   const [howTo, setHowTo] = useState(false);
 
   /** Whether the idle page is the choice of service rather than one service's page. */
@@ -166,14 +166,9 @@ export function ImportScreen({
 
   /**
    * The provider a phase's words are about: the job's own once there is a job, else the one
-   * chosen here.
+   * chosen here (`useImport` resolves both).
    */
-  const jobProvider: ImportProvider =
-    (state.phase === 'working' || state.phase === 'done' ? state.status.provider : undefined) ??
-    (state.phase === 'failed' && state.failure.kind === 'already_running'
-      ? state.failure.status?.provider
-      : undefined) ??
-    provider;
+  const jobProvider: ImportProvider = providerOfJob(state) ?? provider;
 
   /** Back to the choice, from a service's page. Only where there is a choice to go back to. */
   const chooseAgain =
@@ -1143,7 +1138,7 @@ function ImdbPreviewView({
 
       {counts.tvShows > 0 ? (
         <Note>
-          {`bingd tracks TV by season, so the ${plural(counts.tvShows, 'show', 'shows')} you rated won’t be added to your collection. We’ll list ${counts.tvShows === 1 ? 'it' : 'them'} in your summary.`}
+          {`bingd tracks TV by season, so the ${plural(counts.tvShows, 'show', 'shows')} you rated won’t be added to your collection.`}
         </Note>
       ) : null}
       {counts.episodes > 0 ? (
@@ -1213,8 +1208,10 @@ function ImdbSummary({
   onContinue?: () => void;
 }) {
   const added = counts.watched ?? 0;
-  // Built here and left alone, plus a second IMDb id that named a title already placed.
-  const inCollection = (counts.kept ?? 0) + (counts.duplicate ?? 0);
+  // Built here and left alone. A second IMDb id naming a title this import just placed
+  // (`duplicate`) is not "already in your collection": it is counted once, as added, and
+  // not again (independent review, 2026-11-11).
+  const inCollection = counts.kept ?? 0;
   const previously = counts.already ?? 0;
   const unmatched =
     (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
@@ -1222,6 +1219,9 @@ function ImdbSummary({
   const failed = counts.failed ?? 0;
   const shows = counts.unsupported_tv ?? 0;
   const episodes = counts.unsupported_episode ?? 0;
+  // Whatever else bingd has no destination for: games, music videos, podcasts, or an id
+  // TMDB files as an episode. Every "Not supported" gets a sentence.
+  const otherUnsupported = Math.max(unsupported - shows - episodes, 0);
 
   return (
     <View style={styles.block}>
@@ -1248,6 +1248,11 @@ function ImdbSummary({
       {episodes > 0 ? (
         <Text variant="footnote" tone="tertiary">
           {`${plural(episodes, 'TV episode wasn’t', 'TV episodes weren’t')} added. bingd doesn’t track single episodes.`}
+        </Text>
+      ) : null}
+      {otherUnsupported > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {`${plural(otherUnsupported, 'title wasn’t', 'titles weren’t')} added because ${otherUnsupported === 1 ? 'it’s' : 'they’re'} a kind of title bingd doesn’t track, like a game or a single episode.`}
         </Text>
       ) : null}
       {unmatched > 0 ? (

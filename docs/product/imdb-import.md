@@ -112,13 +112,15 @@ Regenerate/verify: `node scripts/migration-generators/imdb-import.mjs` rewrites 
 
 ## 4. Release order and rollback
 
-1. Apply `20261111000100` (staging first). Old app builds keep working: `import_create()`
-   resolves through the default; `import_status` gains a trailing column; the old Edge
-   Function reads the claim's first three columns and calls resolve with three named args.
-2. Deploy `letterboxd-import` (IMDb routing) and `push-sender` (provider-aware copy).
-   Until then IMDb rows the local tier can't place settle unmatched, and pushes say
-   "Letterboxd".
-3. Ship the app update (OTA-eligible: no native change). The new client needs step 1
+1. Deploy `letterboxd-import` and `push-sender` **first** (staging first). Against the old
+   schema they behave exactly as today: a claim without `provider` takes the Letterboxd
+   path, resolve is called with the same three arguments, and a payload without `provider`
+   reads as Letterboxd. (The reverse order is safe but lossy: the old function would
+   title-search IMDb TV rows as movies, the database would refuse the kind, and those rows
+   would settle unmatched for that import. Found by the independent review.)
+2. Apply `20261111000100`. Old app builds keep working: `import_create()` resolves through
+   the default; `import_status` gains a trailing column.
+3. Ship the app update (OTA-eligible: no native change). The new client needs step 2
    (it selects `import_jobs.provider`).
 
 **Rollback:** the switch above (or `unschedule_import_drain()`) stops imports without a
@@ -136,16 +138,37 @@ votes, runtime, URL and release date are never read. The file is not uploaded or
 Wire: `{kind, correlation, name, originalTitle?, year, imdbId, titleType, imdbRating?}`;
 no rating for unsupported types. Server: re-projects field by field, drops a rating on an
 unsupported type, deletes applied/duplicate/unsupported/failed rows on settle and reduces
-unmatched rows to name and year (the `correlation` column keeps the tt id for a future
-repair screen); a failed job keeps nothing. RLS unchanged; provider functions service-role
+unmatched rows to name and year, replacing the `correlation` (the tt id) with an opaque
+value, so an IMDb row keeps exactly what a Letterboxd row keeps; a failed job keeps nothing.
+A rating is sent and kept only for a movie (a show is recognised and not added, so its
+rating has nowhere to live). Episode and other unsupported rows are still sent, without a
+rating, so the server's summary can count them; they are deleted on settle. RLS unchanged; provider functions service-role
 only; `imported_titles` and `import_jobs` cascade on account deletion; `media_items.imdb_id`
 is catalogue data and stays. Nothing logs titles or ratings.
 
 ---
 
+## 5a. Independent review (2026-11-11)
+
+A separate review pass diffed every copied function against its source, re-ran the
+generator byte-for-byte, and reproduced its findings against PGlite and Jest.
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | A failed IMDb job reopened from its notification read as Letterboxd and offered the Letterboxd picker | **Fixed.** The server failure keeps the job's status; a job's provider chooses the service. Test in `ImdbImport.test.tsx`. |
+| 2 | `import_create('imdb')` cleared a Letterboxd job another device was still sending (and vice versa) | **Fixed.** A pending other-provider job with staged rows is refused with 22023 ("already running; this file wasn't sent"); an unused one is still cleared. DB test. |
+| 3 | A Const duplicate was shown as "Already in your collection" beside the title it duplicated | **Fixed.** Counted once, as added. |
+| 4 | The tt id survived redaction in `import_rows.correlation` | **Fixed.** Replaced on settle and on the completion trigger. DB test. |
+| 5 | Ratings sent for TV series that are never kept; unsupported rows sent | **Fixed** for ratings (movies only, client and server). Unsupported rows still sent, deliberately, for server-side counts (§5). |
+| 6 | Old Edge Function + new schema loses IMDb TV rows for that import | **Release order** changed (§4). |
+| 7 | Some "Not supported" rows had no sentence; preview promised shows "listed in your summary" | **Fixed.** A sentence for every remainder; the preview promise removed. |
+| 8 | Preview "Ratings" counted show ratings | **Fixed** with 5. |
+| 9 | IMDb picker cancel / too large / unreadable events untagged | **Fixed.** |
+| 10 | Claim comments said provider is null on Letterboxd rows; the Letterboxd "single CSV isn't enough" refusal doesn't mention IMDb | Comments **fixed**. The Letterboxd copy is left as shipped (no Letterboxd regression); worth a line pointing to IMDb in a later copy pass. |
+
 ## 6. Tests
 
-- `supabase/tests/import-imdb.test.mjs` (46): staging projection, provider on jobs, every
+- `supabase/tests/import-imdb.test.mjs` (47): staging projection, provider on jobs, every
   matching tier and refusal, TV recognised-not-added, episodes, integrity (ranking, native
   log, no score/bucket, no watch date, no feed, lifecycle-only notifications), idempotency,
   duplicates, Letterboxd⇄IMDb in both orders, Letterboxd summary unchanged, RLS, anon,
@@ -155,7 +178,7 @@ is catalogue data and stays. Nothing logs titles or ratings.
 - `src/features/import/imdb.test.ts`, `read-imdb.test.ts` (29): exact columns, BOM, CRLF,
   quotes and commas, missing fields, malformed rows, invalid ids and ratings, duplicates,
   10,000-row file, every Title Type, ZIP/list/non-IMDb refusals.
-- `src/features/import/ImdbImport.test.tsx` (15): the choice, IMDb page, preview, upload
+- `src/features/import/ImdbImport.test.tsx` (16): the choice, IMDb page, preview, upload
   payload, refusals, six-outcome summary, onboarding Not now.
 - Updated: `LetterboxdStep.test.tsx` (new question, Letterboxd flow one tap later),
   `SettingsScreens.test.tsx`, `NotificationsInbox.test.tsx`, `push.test.ts`,

@@ -154,6 +154,27 @@ describe('an IMDb job', () => {
     );
   });
 
+  it('refuses, rather than clears, the other provider’s job while its rows are being sent', async () => {
+    // Device A is mid-upload of a Letterboxd file; device B starts an IMDb import
+    // (independent review, 2026-11-11). Clearing A's job would break its upload, and A's
+    // retry would then clear B's.
+    await t.actAs(ada);
+    const lb = (await one(`select import_create() as id`)).id;
+    await t.sql(`select import_stage($1, $2::jsonb)`, [
+      lb,
+      JSON.stringify([{ kind: 'watched', correlation: 'a|2001', name: 'A', year: 2001 }]),
+    ]);
+    const error = await t.errorFrom(`select import_create('imdb')`);
+    await t.actAs(null);
+    assert.equal(error?.code, '22023');
+    assert.equal(
+      await count('import_jobs', 'id = $1', [lb]),
+      1,
+      'the upload in progress is intact',
+    );
+    assert.equal(await count('import_rows', 'job_id = $1', [lb]), 1);
+  });
+
   it('hands back a RUNNING job of either provider, so the client can say one is running', async () => {
     const running = await stage(ada, [row('Running Film', 2001, tt())]);
     await t.actAs(ada);
@@ -243,12 +264,15 @@ describe('what an IMDb page may carry', () => {
       row('Eleven', 2001, a, { imdbRating: 11 }),
       row('Episode', 2001, b, { titleType: 'TV Episode', imdbRating: 9 }),
       row('Nine', 2001, c, { imdbRating: 9 }),
+      row('Show', 2001, tt(), { titleType: 'TV Series', imdbRating: 9 }),
     ]);
     const by = Object.fromEntries(staged.map((s) => [s.raw.name, s.raw]));
     assert.equal(by.Eleven.imdbRating, undefined);
     assert.equal(by.Episode.imdbRating, undefined);
     assert.equal(by.Episode.titleType, 'tvepisode');
     assert.equal(by.Nine.imdbRating, 9);
+    // A show is recognised and not added: its rating has nowhere to live, so it is not kept.
+    assert.equal(by.Show.imdbRating, undefined);
   });
 
   it('stages a duplicated Const once', async () => {
@@ -809,10 +833,11 @@ describe('whose import it is, and what is kept', () => {
 
   it('keeps no ratings or ids once settled: placed rows deleted, unmatched ones reduced to name and year', async () => {
     const placed = tt();
+    const lost = tt();
     await movie('Placed', 2001, { imdbId: placed });
     const job = await stage(gus, [
       row('Placed', 2001, placed),
-      row('Not Found Anywhere', 2001, tt(), { originalTitle: 'Nulle Part' }),
+      row('Not Found Anywhere', 2001, lost, { originalTitle: 'Nulle Part' }),
       row('An Episode', 2001, tt(), { titleType: 'TV Episode' }),
     ]);
     await runToEnd(job);
@@ -823,6 +848,15 @@ describe('whose import it is, and what is kept', () => {
     assert.equal(rows.length, 1);
     assert.ok(['unmatched', 'needs_provider'].includes(rows[0].status));
     assert.deepEqual(rows[0].raw, { name: 'Not Found Anywhere', year: 2001 });
+    // The tt id was the row's correlation; it goes too (independent review, 2026-11-11).
+    assert.equal(
+      await count('import_rows', 'job_id = $1 and correlation = $2', [job, lost]),
+      0,
+    );
+    assert.equal(
+      await count('import_rows', `job_id = $1 and correlation not like 'redacted:%'`, [job]),
+      0,
+    );
   });
 
   it('a job that fails keeps nothing', async () => {
