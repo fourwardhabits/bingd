@@ -718,7 +718,7 @@ export default function FeedScreen() {
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
          *     LEADERBOARD                     [Feed] [Trophy] [People]
-         *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
+         *     DISCOVER PEOPLE                 [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
          * across from it changes. That is what makes it read as a control over *this
@@ -727,8 +727,9 @@ export default function FeedScreen() {
          * The left side is the heading of whatever is immediately below — the shelf's
          * name in Feed mode, LEADERBOARD in Leaderboard mode (whose time range has been a
          * filter under its categories since 2026-11-06), and since
-         * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
-         * same treatment. In Feed mode it is drawn only when the shelf will actually
+         * 2026-09-08 (§A3) the People heading in People mode, in the same slot with the
+         * same treatment — `DISCOVER PEOPLE` since the UI consistency sprint (founder,
+         * 2026-11-10), `PEOPLE YOU MAY KNOW` before it. In Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
          * absent shelf would be a label for nothing. `useTrending` is called here purely
          * to know that, and costs no request — it is the same query key the shelf itself
@@ -749,8 +750,10 @@ export default function FeedScreen() {
               <SectionHeader title="Leaderboard" size="large" fit />
             ) : showingPeople ? (
               // The Feed's label size, as LEADERBOARD and TRENDING NOW (marquee cohesion
-              // sprint); it shrinks to fit beside the toggle on a narrow phone.
-              <SectionHeader title="People you may know" size="large" fit />
+              // sprint); it shrinks to fit beside the toggle on a narrow phone. DISCOVER
+              // PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint, 2026-11-10):
+              // the list is discovery, and most suggestions are not people the reader knows.
+              <SectionHeader title="Discover people" size="large" fit />
             ) : trendingHasItems ? (
               // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
               // heading keeps the standard 12pt, which is what fits beside the toggle.

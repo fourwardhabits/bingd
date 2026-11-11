@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet, type StyleProp, type TextStyle } from 'react-native';
 
 import { memberSearch } from '@/lib/routes';
 import { renderWithProviders } from '@/test-utils/render';
@@ -223,6 +224,58 @@ describe('a row', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Requested')).toBeTruthy());
+  });
+});
+
+/**
+ * **Name and @username, always both** (founder, UI consistency sprint, 2026-11-10). Hiding
+ * the handle when it repeats the display name was considered and rejected, and a long
+ * display name must never squeeze the handle off the line or reach the Follow control.
+ */
+describe('name and handle', () => {
+  const flat = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as StyleProp<TextStyle>);
+
+  it('draws both even when the display name is the handle', async () => {
+    mockRpcResults.people_mutuals = [
+      person({ user_id: 'ck-id', username: 'ctkrooze', display_name: 'ctkrooze', mutual_count: 1, mutual_names: ['Ben'] }),
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('person-name-ck-id')).toBeTruthy());
+    expect(view.getByTestId('person-name-ck-id').props.children).toBe('ctkrooze');
+    expect(view.getByText('@ctkrooze')).toBeTruthy();
+  });
+
+  it('draws the handle when there is no display name at all', async () => {
+    mockRpcResults.people_mutuals = [
+      person({ display_name: null, mutual_count: 1, mutual_names: ['Ben'] }),
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    // The name falls back to the handle, and both are still drawn.
+    expect(view.getByTestId('person-name-anna-id').props.children).toBe('anna');
+  });
+
+  it('truncates a long name in the space the handle leaves, and keeps the handle', async () => {
+    const long = 'Bartholomew Montgomery-Fitzwilliam the Third of Somewhere Rather Far';
+    mockRpcResults.people_mutuals = [
+      person({ display_name: long, mutual_count: 1, mutual_names: ['Ben'] }),
+    ];
+    const view = await open();
+
+    const name = await waitFor(() => view.getByTestId('person-name-anna-id'));
+    const handle = view.getByTestId('person-handle-anna-id');
+    expect(name.props.numberOfLines).toBe(1);
+    expect(handle.props.numberOfLines).toBe(1);
+    // The name gives way; the handle keeps its width, capped at half the line, so a long
+    // handle truncates rather than hiding the name.
+    expect(flat(name).flexShrink).toBe(1);
+    expect(flat(handle).flexShrink).toBe(0);
+    expect(flat(handle).maxWidth).toBe('50%');
+    // And the Follow control is still on the row, outside the identity's press target.
+    expect(view.getByText('Follow')).toBeTruthy();
   });
 });
 

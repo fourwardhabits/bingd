@@ -76,7 +76,7 @@ export type IconToggleProps<T extends string> = {
  * than dropped: a glyph is a guess when nothing else on the screen names it, and each of
  * these three cells has a name where the reader is already looking — the left half of the
  * same row is the heading of whatever the selected cell shows (`TRENDING NOW`,
- * `THIS MONTH`, `PEOPLE YOU MAY KNOW`). The `label` on every option is still what a screen
+ * `THIS MONTH`, `DISCOVER PEOPLE`). The `label` on every option is still what a screen
  * reader is given, and it is still required.
  *
  * It stays a closed tuple. Three is a decision, not the start of a series: a fourth cell
