@@ -1115,7 +1115,7 @@ describe('the built site', () => {
     const html = read('title.html');
     assert.match(html, /shot-collection\.jpg" width="720" height="\d+"/);
     assert.match(html, /shot-ranking\.jpg" width="720" height="\d+"/);
-    assert.match(html, /alt="A bingd\. collection of ranked series[^"]*"/);
+    assert.match(html, /alt="A bingd collection of ranked series[^"]*"/);
     assert.ok(html.includes('loading="lazy"'));
   });
 
