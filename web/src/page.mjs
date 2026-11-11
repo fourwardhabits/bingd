@@ -125,12 +125,12 @@ const link = (id, href, label) => {
  *
  * It used to be what the desktop pair actually rendered, and that made the two halves of
  * the site disagree: a phone was told "Join the bingd. Android beta" while a laptop
- * showing both options was told "Get bingd. for Android" — the same closed test, one
+ * showing both options was told "Get bingd for Android" — the same closed test, one
  * description honest about it and one not. Since 2026-09-10 the pair asks `installLabel`
  * first, so both surfaces describe the same destination the same way, and iOS reads "Get
  * bingd on the App Store" now that the listing is public.
  */
-const PLATFORM_LABEL = { ios: 'Get bingd. for iPhone', android: 'Get bingd. for Android' };
+const PLATFORM_LABEL = { ios: 'Get bingd for iPhone', android: 'Get bingd for Android' };
 
 /**
  * Reports that the invitation page was opened.

@@ -2844,7 +2844,7 @@ const LANDING_STYLES = `
         /* The reservation has to carry the safe-area inset, because the bar does.
            5.5rem flat left the bar overlapping the last 22px of the footer on any
            phone with a home indicator, and more than that when a two-line label
-           ("Get bingd. on Google Play" at 320pt) makes the button taller. */
+           ("Get bingd on Google Play" at 320pt) makes the button taller. */
         body:has(.sticky a.button:not([hidden])) {
           padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
         }
@@ -3092,8 +3092,8 @@ const AVAILABILITY = [
  * which is how the front page came to advertise one store on the day there were two.
  */
 const PUBLIC_STORES = [
-  ['iOS', distribution.ios?.storeUrl, 'Get bingd. on the App Store'],
-  ['Android', distribution.android?.storeUrl, 'Get bingd. on Google Play'],
+  ['iOS', distribution.ios?.storeUrl, 'Get bingd on the App Store'],
+  ['Android', distribution.android?.storeUrl, 'Get bingd on Google Play'],
 ].filter(([, url]) => url);
 
 /**
