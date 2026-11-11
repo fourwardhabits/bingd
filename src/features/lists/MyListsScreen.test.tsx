@@ -253,6 +253,31 @@ describe('the header', () => {
     expect(view.getByText('MY LISTS')).toBeTruthy();
     expect(view.getByTestId('my-lists-new')).toBeTruthy();
   });
+
+  /**
+   * **No blank band above MY LISTS** (founder, UI consistency sprint, 2026-11-10). The row's
+   * own 44pt — SectionHeader's minimum and New list's target — is its only vertical space:
+   * no padding stacked on top of it, and nothing hidden with a negative margin.
+   */
+  it('puts the MY LISTS row straight under the header, with no padding of its own above it', async () => {
+    mockRows = [];
+    const view = await open();
+    // The empty state renders under the same header and row as a populated page.
+    await waitFor(() => view.getByText('No lists yet'));
+    const row = StyleSheet.flatten(view.getByTestId('my-lists-title-row').props.style);
+    expect(row.paddingTop ?? 0).toBe(0);
+    expect(row.paddingVertical ?? 0).toBe(0);
+    expect(row.padding ?? 0).toBe(0);
+    expect(row.marginTop ?? 0).toBe(0);
+    // The header itself is intact, and New list keeps its full target.
+    expect(view.getByTestId('app-header')).toBeTruthy();
+    expect(view.getByText('MY LISTS')).toBeTruthy();
+    const create = view.getByTestId('my-lists-new');
+    const style = StyleSheet.flatten(
+      typeof create.props.style === 'function' ? create.props.style({ pressed: false }) : create.props.style,
+    );
+    expect(style.minHeight).toBe(44);
+  });
 });
 
 describe('Back', () => {

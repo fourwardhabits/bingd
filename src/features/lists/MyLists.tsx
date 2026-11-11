@@ -90,7 +90,7 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
         }}
       />
       <HeaderBoundary />
-      <View style={styles.titleRow}>
+      <View style={styles.titleRow} testID="my-lists-title-row">
         <View style={styles.titleLabel}>
           <SectionHeader title="My lists" size="large" />
         </View>
@@ -170,11 +170,20 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   loading: { paddingTop: theme.space[3] },
   list: { paddingBottom: theme.space[8] },
-  // MY LISTS on the gutter (the header's own padding), New list's glyph edge on the other.
+  /**
+   * MY LISTS on the gutter (the header's own padding), New list's glyph edge on the other.
+   *
+   * **No top padding of its own** (founder, UI consistency sprint, 2026-11-10: "no blank
+   * band above MY LISTS"). The row is already 44pt — `SectionHeader`'s own minimum and New
+   * list's touch target — and the label is centred in it, which puts about 13pt of Paper
+   * between the header's boundary and the words: the same air a stack-header page leaves
+   * above its first line. The `space[3]` that used to sit on top of that was the same job
+   * done twice, and it read as an empty band under the header. Nothing is pulled up with a
+   * negative margin; the duplicate is simply gone, and every touch target is unchanged.
+   */
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: theme.space[3],
     paddingRight: theme.layout.gutter - theme.space[2],
   },
   titleLabel: { flex: 1 },
