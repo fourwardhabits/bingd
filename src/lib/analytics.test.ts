@@ -263,6 +263,26 @@ describe('the privacy boundary', () => {
     expect(propertiesOf()).toMatchObject({ medium: 'tv' });
   });
 
+  it('lets every import event name its provider, and an IMDb import its shows', () => {
+    // 2026-11-11: `provider` was declared on the IMDb events and missing from the
+    // allowlist, so `sanitize` dropped it and no import funnel could be split by service.
+    // A mocked `track` in the import suites cannot see that, so the wire is asserted here.
+    track({
+      name: 'import_started',
+      props: { films: 7, tv_shows: 3, viewings: 0, provider: 'imdb' },
+    });
+    expect(propertiesOf()).toMatchObject({ films: 7, tv_shows: 3, viewings: 0, provider: 'imdb' });
+
+    track({
+      name: 'import_completed',
+      props: { applied: 2, unresolved: 1, provider: 'letterboxd' },
+    });
+    expect(propertiesOf(1)).toMatchObject({ applied: 2, unresolved: 1, provider: 'letterboxd' });
+
+    track({ name: 'import_opened', props: { surface: 'settings', provider: 'imdb' } });
+    expect(propertiesOf(2)).toMatchObject({ surface: 'settings', provider: 'imdb' });
+  });
+
   it('lets For You’s repetition counts reach the wire, which they never had', () => {
     // The independent review of the 2026-09-13 repetition fix: its three new counts were
     // declared on the type and dropped by `sanitize`, exactly like `size` and

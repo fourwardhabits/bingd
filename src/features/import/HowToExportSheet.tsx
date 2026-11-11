@@ -125,7 +125,7 @@ export function HowToExportSheet({
 }) {
   const sheet = SHEET[provider];
   const open = () => {
-    track({ name: 'import_instructions_opened', props: { surface } });
+    track({ name: 'import_instructions_opened', props: { surface, provider } });
     void Linking.openURL(sheet.url).catch(() => {});
   };
 

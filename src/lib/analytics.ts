@@ -920,6 +920,11 @@ export type AnalyticsEvent =
    * step's impressions and the two surfaces incomparable. It fires when somebody presses
    * *Import from Letterboxd* or asks how to get the file; the step's own exposure is
    * `onboarding_step_completed` with `step: 'letterboxd'`.
+   *
+   * **On the choice of service, too** (2026-11-11). Settings ▸ Import from opens on the
+   * choice between Letterboxd and IMDb, and an open counted before the choice could only
+   * guess the provider. It is counted when a service is chosen, or when the screen shows
+   * an import that is already running (whose provider is the job's).
    */
   | { name: 'import_opened'; props: { surface: ImportSurface; provider?: ImportProviderName } }
   /**
@@ -930,7 +935,10 @@ export type AnalyticsEvent =
    * with a file is invisible to us, so the ratio of this to `import_archive_selected` is
    * the only read available on whether the hand-off works.
    */
-  | { name: 'import_instructions_opened'; props: { surface: ImportSurface } }
+  | {
+      name: 'import_instructions_opened';
+      props: { surface: ImportSurface; provider?: ImportProviderName };
+    }
   /**
    * A file came back from the picker and was read — or could not be.
    *
@@ -955,10 +963,19 @@ export type AnalyticsEvent =
    * the diary entries attached to them — two numbers that say how big a real import is,
    * which is the thing nobody currently knows and which every bound in the pipeline was
    * guessed against.
+   *
+   * **`films` is movies only** (2026-11-11). An IMDb file also stages its TV shows, which
+   * are matched to the show and not added, so they are counted apart as `tv_shows`
+   * (always 0 for Letterboxd, whose archive holds films only).
    */
   | {
       name: 'import_started';
-      props: { films: number; viewings: number; provider?: ImportProviderName };
+      props: {
+        films: number;
+        tv_shows: number;
+        viewings: number;
+        provider?: ImportProviderName;
+      };
     }
   /**
    * The job reached `done` while somebody was still watching.
@@ -973,7 +990,10 @@ export type AnalyticsEvent =
    * place — because a completion rate that ignores it would call an import that matched
    * nothing a success.
    */
-  | { name: 'import_completed'; props: { applied: number; unresolved: number } }
+  | {
+      name: 'import_completed';
+      props: { applied: number; unresolved: number; provider?: ImportProviderName };
+    }
 
   // --- Lists ---------------------------------------------------------------
   /**
@@ -1198,8 +1218,9 @@ export type ImportSelectOutcome =
   | 'nothing_supported';
 
 /**
- * Whose export an import event is about. Optional on the events so a Letterboxd event from
- * a build that predates it reads as what it was.
+ * Whose export an import event is about. Sent on every import event since 2026-11-11;
+ * optional on the events so an event from a build that predates it (Letterboxd's sent
+ * none, IMDb's sent it on some) still reads as what it was.
  */
 export type ImportProviderName = 'letterboxd' | 'imdb';
 
@@ -1447,6 +1468,16 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'viewings',
   'applied',
   'unresolved',
+  /**
+   * The IMDb import (2026-11-11). `provider` is one of two words, `letterboxd` or `imdb`
+   * (`ImportProviderName`): whose export, never whose account. `tv_shows` is a count of
+   * the shows an IMDb file held, beside `films`, never a title.
+   *
+   * **`provider` was declared on the IMDb events and never allowed**, so `sanitize` had
+   * been dropping it: until this line no import event could be split by service.
+   */
+  'provider',
+  'tv_shows',
   /**
    * Which profile link was opened (2026-09-15, `profile_social_link_opened`).
    *

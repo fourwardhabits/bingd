@@ -468,6 +468,9 @@ export function useImport(
    * independent review 2026-11-11), else Letterboxd.
    */
   const provider: ImportProvider = options?.provider ?? providerOfJob(state) ?? 'letterboxd';
+  /** The same, for the poll loop, which must not restart when it changes. */
+  const providerRef = useRef(provider);
+  providerRef.current = provider;
   /** Bumped by `recheck`, so the restore effect asks about the named job again. */
   const [checks, setChecks] = useState(0);
   const jobRef = useRef<string | null>(null);
@@ -617,9 +620,10 @@ export function useImport(
    * the picker's own metadata, before anything is allocated.
    */
   const pickOnce = useCallback(async () => {
-    // The provider is named on IMDb's events only, so a Letterboxd event is exactly the
-    // event it always was (see `ImportProviderName`).
-    const tagged = provider === 'imdb' ? ({ provider: 'imdb' } as const) : {};
+    // Every import event names its provider (2026-11-11), so the funnel splits by service.
+    // Older builds sent it on IMDb's events only, which is why the type keeps it optional
+    // (see `ImportProviderName`).
+    const tagged = { provider } as const;
     settle({ phase: 'reading' });
 
     let bytes: Uint8Array;
@@ -831,9 +835,15 @@ export function useImport(
         track({
           name: 'import_started',
           props: {
-            films: preview.rows.length,
+            // Movies only. An IMDb file's staged rows include its TV shows, which are
+            // matched to the show and not added to the collection, so `rows.length` would
+            // overcount what this import adds. The shows are counted on their own.
+            films: imdb
+              ? (preview as ImdbPreview).normalised.counts.movies
+              : preview.rows.length,
+            tv_shows: imdb ? (preview as ImdbPreview).normalised.counts.tvShows : 0,
             viewings: imdb ? 0 : (preview as ArchivePreview).normalised.counts.watches,
-            ...(imdb ? { provider: 'imdb' as const } : {}),
+            provider: imdb ? 'imdb' : 'letterboxd',
           },
         });
 
@@ -946,6 +956,8 @@ export function useImport(
         track({
           name: 'import_completed',
           props: {
+            // The job's own provider when the server said, else the screen's.
+            provider: status.provider ?? providerRef.current,
             applied: status.counts.applied ?? 0,
             // `stragglers` counts as unresolved here for the same reason it does on the
             // summary screen: a row nobody placed is unresolved to the person, whatever the
@@ -995,11 +1007,19 @@ export function useImport(
    * denominator into the step's impressions. See `import_opened` in `lib/analytics.ts`.
    */
   const openedRef = useRef(false);
-  const opened = useCallback(() => {
-    if (openedRef.current) return;
-    openedRef.current = true;
-    track({ name: 'import_opened', props: { surface } });
-  }, [surface]);
+  /**
+   * @param which The service just chosen, when the open is counted on the choice itself:
+   *   the chooser calls this in the same tap that sets the choice, before `provider` has
+   *   caught up with it.
+   */
+  const opened = useCallback(
+    (which?: ImportProvider) => {
+      if (openedRef.current) return;
+      openedRef.current = true;
+      track({ name: 'import_opened', props: { surface, provider: which ?? provider } });
+    },
+    [surface, provider],
+  );
   const countOpenOnRequest = options?.countOpenOnRequest === true;
   useEffect(() => {
     if (!countOpenOnRequest) opened();

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 
 import type { ImportSurface } from '@/lib/analytics';
@@ -153,9 +153,15 @@ export function ImportScreen({
 }) {
   const router = useRouter();
   const [chosen, setChosen] = useState<ImportProvider | null>(null);
+  /**
+   * Whether this screen opens on the choice of service. Its open is counted on the choice
+   * (or on a running import it shows), because before the choice there is no provider to
+   * put on `import_opened` (2026-11-11, see the event in `lib/analytics.ts`).
+   */
+  const offersChoice = chooser === true && fixedProvider === undefined;
   const { state, provider, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } =
     useImport(surface, jobId, {
-      countOpenOnRequest: onboarding !== undefined,
+      countOpenOnRequest: onboarding !== undefined || offersChoice,
       provider: fixedProvider ?? chosen ?? undefined,
     });
   const [howTo, setHowTo] = useState(false);
@@ -169,6 +175,16 @@ export function ImportScreen({
    * chosen here (`useImport` resolves both).
    */
   const jobProvider: ImportProvider = providerOfJob(state) ?? provider;
+
+  /**
+   * Off onboarding, a chooser that shows an import already running counts the open the way
+   * a mount used to, with that job's provider. On onboarding the count waits for a tap, as
+   * it always has.
+   */
+  const shownJobProvider = providerOfJob(state);
+  useEffect(() => {
+    if (onboarding === undefined && offersChoice && shownJobProvider !== undefined) opened();
+  }, [onboarding, offersChoice, shownJobProvider, opened]);
 
   /** Back to the choice, from a service's page. Only where there is a choice to go back to. */
   const chooseAgain =
@@ -226,7 +242,7 @@ export function ImportScreen({
         <ChooseProvider
           onboarding={step !== undefined}
           onChoose={(next) => {
-            opened();
+            opened(next);
             setChosen(next);
           }}
           onSkip={step ? () => step.onLeave('skipped') : undefined}

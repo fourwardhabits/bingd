@@ -206,7 +206,7 @@ describe('before a file is chosen', () => {
 
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
-      props: { surface: 'onboarding' },
+      props: { surface: 'onboarding', provider: 'letterboxd' },
     });
   });
 });
@@ -253,7 +253,7 @@ describe('choosing an export', () => {
     expect(mockRpc).not.toHaveBeenCalled();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
-      props: { outcome: 'ok' },
+      props: { outcome: 'ok', provider: 'letterboxd' },
     });
   });
 
@@ -278,7 +278,7 @@ describe('choosing an export', () => {
     expect(screen.getByText(/unzipped it/)).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
-      props: { outcome: 'not_a_zip' },
+      props: { outcome: 'not_a_zip', provider: 'letterboxd' },
     });
   });
 
@@ -309,7 +309,7 @@ describe('choosing an export', () => {
     await waitFor(() =>
       expect(mockTrack).toHaveBeenCalledWith({
         name: 'import_archive_selected',
-        props: { outcome: 'cancelled' },
+        props: { outcome: 'cancelled', provider: 'letterboxd' },
       }),
     );
     // No apology for a decision somebody made on purpose.
@@ -348,7 +348,7 @@ describe('uploading', () => {
     expect((stageArgs as { p_rows: unknown[] }).p_rows).toHaveLength(2);
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_started',
-      props: { films: 2, viewings: 0 },
+      props: { films: 2, tv_shows: 0, viewings: 0, provider: 'letterboxd' },
     });
   });
 
@@ -441,7 +441,7 @@ describe('when it is over', () => {
     expect(screen.getByText(/couldn.+t find 1 film/)).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
-      props: { applied: 1, unresolved: 1 },
+      props: { applied: 1, unresolved: 1, provider: 'letterboxd' },
     });
   });
 

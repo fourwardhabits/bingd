@@ -1,5 +1,6 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
+import { Linking } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -137,6 +138,31 @@ describe('the choice of service', () => {
     expect(view.getByRole('button', { name: 'Choose a different service' })).toBeTruthy();
   });
 
+  /**
+   * **The open is counted on the choice, with the service chosen** (2026-11-11). Before the
+   * choice there is no provider to name, and an open counted on mount could only guess
+   * Letterboxd. Going back and choosing again is the same visit, counted once.
+   */
+  it('counts the open once, on the choice, naming the service', async () => {
+    const view = await openChooser();
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'import_opened' }),
+    );
+    await fireEvent.press(view.getByTestId('choose-imdb'));
+    await waitFor(() => expect(view.getByText('Bring your IMDb history')).toBeTruthy());
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_opened',
+      props: { surface: 'settings', provider: 'imdb' },
+    });
+    await fireEvent.press(view.getByRole('button', { name: 'Choose a different service' }));
+    await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('choose-letterboxd'));
+    await waitFor(() => expect(view.getByText('Bring your Letterboxd history')).toBeTruthy());
+    expect(
+      mockTrack.mock.calls.filter(([event]) => event.name === 'import_opened'),
+    ).toHaveLength(1);
+  });
+
   it('goes back to the choice from a service', async () => {
     const view = await openImdb();
     await fireEvent.press(view.getByRole('button', { name: 'Choose a different service' }));
@@ -153,6 +179,11 @@ describe('the choice of service', () => {
     expect(view.queryByText('Bring your watch history')).toBeNull();
     // The lookup asks for the job's provider, so its words can be the right ones.
     expect(mockSelected.some((columns) => columns.includes('provider'))).toBe(true);
+    // Nobody chose, so the open is counted on the running job, with its provider.
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_opened',
+      props: { surface: 'settings', provider: 'imdb' },
+    });
   });
 });
 
@@ -172,6 +203,14 @@ describe('IMDb’s page', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
     await waitFor(() => expect(view.getByText('Getting your IMDb file')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Open your IMDb ratings' })).toBeTruthy();
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await fireEvent.press(view.getByRole('button', { name: 'Open your IMDb ratings' }));
+    expect(openURL).toHaveBeenCalledTimes(1);
+    openURL.mockRestore();
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_instructions_opened',
+      props: { surface: 'settings', provider: 'imdb' },
+    });
   });
 });
 
@@ -236,9 +275,42 @@ describe('the IMDb preview', () => {
         ),
       ).toBe(true);
     }
+    // **`films` is the movies, not every staged row** (2026-11-11). This mixed file stages
+    // 12 rows, 3 of them TV shows that are matched and not added, so counting the rows
+    // overstated the import. The shows are their own count.
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_started',
-      props: { films: 12, viewings: 0, provider: 'imdb' },
+      props: { films: 7, tv_shows: 3, viewings: 0, provider: 'imdb' },
+    });
+    expect(rows.length).toBeGreaterThan(7);
+  });
+
+  it('names IMDb on the file it read and on the completion', async () => {
+    let reads = 0;
+    mockRpcResults = {
+      import_create: JOB,
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null, provider: 'imdb' }
+          : {
+              status: 'done',
+              counts: { applied: 7, watched: 7, unmatched: 0 },
+              completed_at: '2026-11-11T00:00:00.000Z',
+              provider: 'imdb',
+            };
+      },
+    };
+    const view = await preview();
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_archive_selected',
+      props: { outcome: 'ok', provider: 'imdb' },
+    });
+    await fireEvent.press(view.getByRole('button', { name: 'Import 7 movies' }));
+    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_completed',
+      props: { applied: 7, unresolved: 0, provider: 'imdb' },
     });
   });
 
@@ -247,6 +319,10 @@ describe('the IMDb preview', () => {
     const view = await openImdb();
     await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_archive_selected',
+      props: { outcome: 'is_zip', provider: 'imdb' },
+    });
     expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy();
   });
 

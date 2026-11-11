@@ -421,7 +421,7 @@ describe('Not now', () => {
     await waitFor(() =>
       expect(mockTrack).toHaveBeenCalledWith({
         name: 'import_archive_selected',
-        props: { outcome: 'cancelled' },
+        props: { outcome: 'cancelled', provider: 'letterboxd' },
       }),
     );
     // Back on Letterboxd's page, both answers live, and no apology for a choice.
@@ -432,7 +432,7 @@ describe('Not now', () => {
     // The press that reached the importer is the one that counts it.
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
-      props: { surface: 'onboarding' },
+      props: { surface: 'onboarding', provider: 'letterboxd' },
     });
   });
 
@@ -686,7 +686,7 @@ describe('importing from the step', () => {
     expect(shows().refused).toBe(0);
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
-      props: { surface: 'onboarding' },
+      props: { surface: 'onboarding', provider: 'letterboxd' },
     });
   });
 });

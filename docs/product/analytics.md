@@ -302,11 +302,18 @@ push exists. §10b carries the measurement plan it belongs to. Deliberately no
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `import_opened` | `settings`: the importer screen mounted, once per mount. `onboarding` (2026-09-13): *Import from Letterboxd* or *Need help getting the file?* was first pressed on the optional step, once per visit | the importer | `surface` |
-| `import_instructions_opened` | the "how to export" sheet's link to Letterboxd was tapped | the importer | `surface` |
-| `import_archive_selected` | a picked file was read, or refused, or the picker was dismissed | the importer | `outcome` |
-| `import_started` | the preview was accepted and the first page was sent | the importer | `films`, `viewings` |
-| `import_completed` | the job reached `done` **while somebody was watching** | the importer | `applied`, `unresolved` |
+| `import_opened` | `settings`: the importer screen mounted, once per mount; on the Settings choice of service (2026-11-11), when a service is chosen or a running import is shown instead. `onboarding` (2026-09-13): *Import from Letterboxd* or *Need help getting the file?* was first pressed on the optional step, once per visit | the importer | `surface`, `provider` |
+| `import_instructions_opened` | the "how to export" sheet's link to the service was tapped | the importer | `surface`, `provider` |
+| `import_archive_selected` | a picked file was read, or refused, or the picker was dismissed | the importer | `outcome`, `provider` |
+| `import_started` | the preview was accepted and the first page was sent | the importer | `films`, `tv_shows`, `viewings`, `provider` |
+| `import_completed` | the job reached `done` **while somebody was watching** | the importer | `applied`, `unresolved`, `provider` |
+
+**`provider` on every import event (2026-11-11, with the IMDb import).** One of two words,
+`letterboxd` or `imdb`. It was declared on some IMDb events and missing from the
+allowlist, so no import event carried it until then; events from older builds have none
+and are Letterboxd. **`films` is movies only**: an IMDb file also stages its TV shows,
+which are matched and not added, and they are counted apart as `tv_shows` (0 for
+Letterboxd).
 
 A funnel with somebody else's app in the middle of it. The step between
 `import_instructions_opened` and `import_archive_selected` happens entirely on
