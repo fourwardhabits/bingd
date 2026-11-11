@@ -1919,7 +1919,7 @@ export default function TitleScreen() {
    * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
    * Rank exactly as it was; a ranked one shows the smaller *Log rewatch* (founder,
    * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
-   * the score row. *Update your rating*, the same-watch correction this button used to
+   * the score row. *Edit ranking*, the same-watch correction this button used to
    * open, is still the ⋯ menu's first Ranking row.
    *
    * **No second, prominent Edit ranking beside it** (founder decision, 2026-11-11). Log
@@ -3193,7 +3193,7 @@ export default function TitleScreen() {
                  * ---------------------------------------------------------------------------
                  * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
                  *
-                 * **`Update your rating` is the single same-watch correction path, and it can
+                 * **`Edit ranking` is the single same-watch correction path, and it can
                  * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
                  * has had three branches since 2026-08-15 and keeps all of them:
                  *
@@ -3216,7 +3216,7 @@ export default function TitleScreen() {
                  * ---------------------------------------------------------------------------
                  * THE SEMANTICS ARE UNTOUCHED
                  *
-                 *   Update your rating   corrects the current watch. `p_new_watch` false, no
+                 *   Edit ranking         corrects the current watch. `p_new_watch` false, no
                  *                        new watch record, no feed activity, no timestamp
                  *                        heuristic anywhere.
                  *   Log another watch    an explicit second viewing. `p_new_watch` true, and
@@ -3236,7 +3236,7 @@ export default function TitleScreen() {
                     viewing is the rare one. */}
                 <SheetRow
                   icon="star-outline"
-                  label="Update your rating"
+                  label="Edit ranking"
                   onPress={() => {
                     setManaging(false);
                     openLog();

@@ -707,7 +707,7 @@ function Body({
    *   - ranked, different bucket: move the band, and re-run the comparisons in it.
    *
    * **Both ranked branches are reached from one row.** Since 2026-09-08 the Ranked menu
-   * offers *Update your rating*, which lands here, and *Log another watch*, which does
+   * offers *Edit ranking*, which lands here, and *Log another watch*, which does
    * not — the second and third cases above are the two halves of that one correction, and
    * the chooser is where the reader says which they meant.
    *
@@ -716,7 +716,7 @@ function Body({
    *
    * Both ranked branches used to stop on a card — "Rank <title> again? You will compare it
    * again. Nothing changes until you finish. [Re-rank] [Cancel]" — before handing off.
-   * The approved contract is that *Update your rating* goes **straight into the
+   * The approved contract is that *Edit ranking* goes **straight into the
    * comparisons**: the band tap is the decision, and a second question about the same
    * decision is a step the reader has already answered.
    *

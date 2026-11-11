@@ -376,7 +376,7 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId:
  * placing it a second time. `newWatch` is true, and completing it writes exactly one new
  * `title_ranked` activity.
  *
- * *Update your rating* re-choosing the band it already has is a **correction**. The
+ * *Edit ranking* re-choosing the band it already has is a **correction**. The
  * founder reproduced the original bug on the device — a Loved title, Change your
  * rating (as the row was then called), Loved, and nothing happened, because `LogSheet`
  * read "same bucket" as "no change" and returned before anything ran. It is not no

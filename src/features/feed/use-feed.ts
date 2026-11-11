@@ -77,7 +77,7 @@ export type FeedItem = {
    * answer, because it is stale in two ways at once:
    *
    *   · a correction posts no new activity (20260826000500, 20261001000100), so
-   *     *Update your rating* left the old number on the card — the founder's report of
+   *     *Edit ranking* left the old number on the card — the founder's report of
    *     2026-09-19; and
    *   · a score is a title's place *within its band*, so ranking anything at all
    *     re-scores every other title in that band and quietly invalidates every earlier
@@ -1032,7 +1032,7 @@ async function attachScores(items: FeedItem[]) {
     /**
      * **Ranked: the post shows its own watch's score** (founder delta QA, 2026-09-21).
      * `payload.score` is the score of the watch this post is about. The server keeps the
-     * MOST RECENT watch's post in step with a pure Update your rating
+     * MOST RECENT watch's post in step with a pure Edit ranking
      * (20261016000100) and leaves every earlier watch's post frozen, so this reads the
      * payload and never the live score — a band that grew cannot move any card.
      *

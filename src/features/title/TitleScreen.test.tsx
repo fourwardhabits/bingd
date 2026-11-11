@@ -758,7 +758,7 @@ describe('a title this user has ranked', () => {
     expect(view.getByText('Ranked')).toBeTruthy();
 
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Update your rating')).toBeTruthy();
+    expect(view.getByText('Edit ranking')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
@@ -768,7 +768,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    expect(view.getByText('Update your rating')).toBeTruthy();
+    expect(view.getByText('Edit ranking')).toBeTruthy();
   });
 
   /**
@@ -790,7 +790,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     // Five rows in one column with no structure is a list you read rather than a menu
     // you use, and the destructive one has to be last and on its own.
     expect(view.getByText('YOUR LOG')).toBeTruthy();
@@ -855,7 +855,7 @@ describe('a title this user has ranked', () => {
   /**
    * **The Ranking group is two rows, and it is the founder's list** (2026-09-08).
    *
-   *   ★ Update your rating   the current watch, corrected
+   *   ★ Edit ranking         the current watch, corrected
    *   ↻ Log another watch    an explicit second viewing
    *
    * It was three. *Rank it again* and *Change your rating* were two doors into the same
@@ -875,7 +875,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
 
     // The two labels the founder retired, in both the forms they were ever drawn in.
@@ -907,7 +907,7 @@ describe('a title this user has ranked', () => {
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Update your rating',
+      'Edit ranking',
       'Log another watch',
       'Remove from collection',
     ]) {
@@ -939,7 +939,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     return view;
   };
 
@@ -1134,7 +1134,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
 
     expect(view.queryByLabelText('Remove ranking')).toBeNull();
     expect(view.queryByText('Keeps it in your collection')).toBeNull();
@@ -2944,7 +2944,7 @@ describe('the score row and what surrounds it', () => {
  * one skipped the band chooser — a mechanism, which is precisely what the 2026-09-07
  * pass had decided this menu must stop exposing. So the menu is:
  *
- *   Update your rating  the same-watch correction, whole. Opens the log sheet's band
+ *   Edit ranking  the same-watch correction, whole. Opens the log sheet's band
  *                       chooser, from which a *different* band is `rank_rebucket` and
  *                       the *same* band is `rankAgain(newWatch: false)` — which is
  *                       exactly the call *Rank it again* used to make directly.
@@ -2987,14 +2987,14 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     return view;
   };
 
   /**
    * **The same-watch correction, taken the way a reader now takes it.**
    *
-   * *Update your rating* opens the log sheet's band chooser; re-choosing the band the
+   * *Edit ranking* opens the log sheet's band chooser; re-choosing the band the
    * title already has is the correction, and it goes **straight into the comparisons** —
    * `rankAgain(newWatch: false)` on the tap, with no confirmation card between (founder QA,
    * 2026-09-21). That is the exact call the retired *Rank it again* row made in one tap,
@@ -3003,7 +3003,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
   const correctTheRating = async (view: Awaited<ReturnType<typeof openMenu>>) => {
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
   };
@@ -3023,7 +3023,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Update your rating')).toBeTruthy();
+    expect(view.getByLabelText('Edit ranking')).toBeTruthy();
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
     // Every label this row has ever worn that meant "another viewing" while reading like
     // "redo my ranking", plus the second correction door the founder consolidated away.
@@ -3181,7 +3181,7 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
 
     await correctTheRating(view);
 
@@ -3191,14 +3191,14 @@ describe('adjusting a ranking versus watching it again', () => {
 
   it('writes no ranking call from the row itself, only from what follows it', async () => {
     /**
-     * *Update your rating* opens the log sheet's band chooser and stops there. The
+     * *Edit ranking* opens the log sheet's band chooser and stops there. The
      * ranking call is decided by what the reader chooses next — the same band is a
      * correction, a different one is a rebucket — and a row that fired one on the way in
      * would be deciding a rating on the reader's behalf.
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
 
     expect(againCalls()).toHaveLength(0);
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
@@ -3214,7 +3214,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
     // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
@@ -3233,13 +3233,13 @@ describe('adjusting a ranking versus watching it again', () => {
   /**
    * **The contract, as the founder stated it after device QA (2026-09-21).**
    *
-   *   Update your rating → the comparisons, immediately, and NO watch event.
+   *   Edit ranking → the comparisons, immediately, and NO watch event.
    *   Log another watch  → a separate sheet, and a watch event.
    *
    * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
    * halves are asserted together so that neither can drift toward the other.
    */
-  it('goes straight into the comparisons, and records no watch, from Update your rating', async () => {
+  it('goes straight into the comparisons, and records no watch, from Edit ranking', async () => {
     const view = await openMenu();
 
     await correctTheRating(view);
@@ -3427,7 +3427,7 @@ describe('a title in the collection that is not ranked', () => {
   it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of ['Update your rating', 'Log another watch', 'Who I watched with', 'Add a note']) {
+    for (const label of ['Edit ranking', 'Log another watch', 'Who I watched with', 'Add a note']) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
     expect(view.queryByText('Ranking')).toBeNull();
@@ -3477,7 +3477,7 @@ describe('a title in the collection that is not ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
     // The full ranked menu, unchanged.
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Remove from collection'));
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
 
@@ -4249,7 +4249,7 @@ describe('the immersive title page (experiment)', () => {
     /**
      * **Log rewatch, in place of Edit ranking** (founder, 2026-11-10). The ranked title's
      * primary action is another viewing: the existing *Log another watch* sheet, opened
-     * directly, with no chooser between log and edit. *Update your rating* stays in ⋯.
+     * directly, with no chooser between log and edit. *Edit ranking* stays in ⋯.
      */
     describe('Log rewatch on a ranked title', () => {
       const rewatchCalls = () =>
@@ -4283,7 +4283,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
         expect(view.getByLabelText('Log another watch of Inception')).toBeTruthy();
         // Not the rating sheet, and no menu or chooser in between.
-        expect(view.queryByLabelText('Update your rating')).toBeNull();
+        expect(view.queryByLabelText('Edit ranking')).toBeNull();
         expect(view.queryByLabelText('Options for Inception')).toBeNull();
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);
@@ -4398,15 +4398,15 @@ describe('the immersive title page (experiment)', () => {
         expect(rewatchCalls()).toHaveLength(1);
       });
 
-      it('keeps Update your rating in the menu, as a correction that records no watch', async () => {
+      it('keeps Edit ranking in the menu, as a correction that records no watch', async () => {
         ranked();
         const view = await open();
         await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
         await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
         expect(view.getByLabelText('Log another watch')).toBeTruthy();
 
-        await fireEvent.press(view.getByLabelText('Update your rating'));
+        await fireEvent.press(view.getByLabelText('Edit ranking'));
         await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
         await fireEvent.press(view.getByText('I liked it'));
 
@@ -4418,8 +4418,9 @@ describe('the immersive title page (experiment)', () => {
       /**
        * **No second, prominent Edit ranking** (founder decision, 2026-11-11). Log rewatch is
        * the page's one ranking control; correcting the ranking stays where it was — ⋯ →
-       * *Update your rating* on this page, and *Edit ranking* in an expanded watch on Watch
-       * History (#258), which this page's Watch history row opens.
+       * *Edit ranking* on this page, and the same *Edit ranking* in an expanded watch on
+       * Watch History (#258), which this page's Watch history row opens. One label for the
+       * one correction since 2026-11-11 (it read *Update your rating* in ⋯ before).
        */
       it('draws no Edit ranking control on the page: the correction is in ⋯ and Watch History', async () => {
         ranked();
@@ -4435,13 +4436,13 @@ describe('the immersive title page (experiment)', () => {
         // second ranking control beside Log rewatch.
         expect(view.queryAllByText(/Edit ranking/i)).toHaveLength(0);
         expect(view.queryAllByLabelText(/Edit (your )?ranking/i)).toHaveLength(0);
-        expect(view.queryByLabelText('Update your rating')).toBeNull();
+        expect(view.queryByLabelText('Edit ranking')).toBeNull();
         expect(view.queryByTestId('title-action-rank')).toBeNull();
         expect(view.getAllByTestId('title-action-ranked')).toHaveLength(1);
 
         // The way to it: ⋯ holds the correction, beside Log another watch.
         await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
         expect(view.getByLabelText('Log another watch')).toBeTruthy();
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);

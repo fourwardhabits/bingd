@@ -67,14 +67,14 @@ export type WatchRowProps = {
  * **Left:** the date as the label — *(First watch)* on the earliest dated one only — then who
  * it was watched with and the watch's note, with More for a long one. **Right:** the
  * reader's score AT this watch, in the app's one score circle. Not the current score: a
- * later Update your rating moves the title page, never this row (`scoresByWatch`). No
+ * later Edit ranking moves the title page, never this row (`scoresByWatch`). No
  * poster (the reader is inside the title) and no `#X of Y` (the ledger keeps it; it is not
  * a historical opinion).
  *
  * **Edit** is a small text action directly under the date, and editing reuses the log
  * sheet's own rows (`WatchDetailsRows`) inline — no modal, so the ranking flow's sheets can
  * still stack. Editing a watch never touches the current ranking; that changes through
- * **Edit ranking**, a separate action in the editor that opens *Update your rating*'s
+ * **Edit ranking**, a separate action in the editor that opens *Edit ranking*'s
  * existing flow.
  *
  * The three acts stay three (UI consistency sprint, 2026-11-10):

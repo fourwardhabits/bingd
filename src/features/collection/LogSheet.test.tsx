@@ -588,7 +588,7 @@ describe('a title that is already ranked', () => {
    * **No confirmation, in either direction** (founder QA, 2026-09-21).
    *
    * A band tap on a ranked title used to stop on "Rank <title> again? … [Re-rank]
-   * [Cancel]". The approved contract is that *Update your rating* goes straight into the
+   * [Cancel]". The approved contract is that *Edit ranking* goes straight into the
    * comparisons — so each test below asserts the hand-off happened on the tap itself,
    * and `expectNoConfirmation` pins that none of the card's words or buttons exist, so it
    * cannot come back without turning these red.

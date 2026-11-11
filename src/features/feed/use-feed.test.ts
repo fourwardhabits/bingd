@@ -1497,7 +1497,7 @@ describe('a rewatch keeps each post at its own viewing', () => {
         ...(watch ? { again: true, watch_event_id: watch } : {}),
       },
     });
-  // The current opinion, after a later Update your rating.
+  // The current opinion, after a later Edit ranking.
   const current = {
     user_id: 'user-1',
     media_item_id: 'film-1',

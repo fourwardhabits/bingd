@@ -98,7 +98,7 @@ export default function WatchHistoryScreen() {
    * **Edit ranking: the title's existing correction flow, opened from here** (founder, UI
    * consistency sprint, 2026-11-10).
    *
-   * The same pair of sheets the title page's *Update your rating* opens, wired the way the
+   * The same pair of sheets the title page's *Edit ranking* opens, wired the way the
    * list page wires them: `LogSheet`'s band chooser, then `RankingSheet`'s comparisons,
    * then back to the sheet with the new score. Nothing about ranking is built here. On a
    * ranked title the chooser's two paths are `rank_rebucket` (a band change) and
@@ -131,7 +131,7 @@ export default function WatchHistoryScreen() {
 
   /**
    * The opinion held at each watch (founder delta QA, 2026-09-21): the same frozen number
-   * the Feed shows for that watch, never the current score. A pure Update your rating
+   * the Feed shows for that watch, never the current score. A pure Edit ranking
    * changes the title page and no row here. `scoresByWatch` holds the rule and its tests.
    */
   const posts = history.data?.posts;

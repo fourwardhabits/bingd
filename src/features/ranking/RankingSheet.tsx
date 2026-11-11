@@ -81,7 +81,7 @@ export type RankingSubject = {
    *
    * `rebucket` is a title that had a position and is changing band. `rank_rebucket`.
    *
-   * `rerank` is *Update your rating* re-choosing the band it already has. `rankAgain`
+   * `rerank` is *Edit ranking* re-choosing the band it already has. `rankAgain`
    * with `newWatch: false`, because `rank_rebucket` refuses a bucket that is not moving.
    * (The row was called *Change your rating* until 2026-09-08, and a second row —
    * *Rank it again* — reached this mode directly until the same pass consolidated the two
@@ -573,7 +573,7 @@ function Session({
         /**
          * A correction is not a ranking act, so it is not asked about the streak.
          *
-         * `rerank` and `rebucket` — both reached from *Update your rating* — replace a
+         * `rerank` and `rebucket` — both reached from *Edit ranking* — replace a
          * position and post no activity. Before `20261001000100` they also
          * re-inserted the `rankings` row with `created_at = now()`, which is the column
          * the streak is derived from — so a correction in an otherwise empty week
@@ -640,7 +640,7 @@ function Session({
               rankStart(id, bucket, operationId);
     const attempt = () =>
       withIntent(
-        // The mode is in the intent key, so Log another watch and Update your rating cannot
+        // The mode is in the intent key, so Log another watch and Edit ranking cannot
         // share an operation id: they are different acts and one of them writes an
         // activity the other must not.
         `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,

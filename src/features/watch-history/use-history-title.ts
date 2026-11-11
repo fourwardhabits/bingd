@@ -21,7 +21,7 @@ type TitleRow = {
  * consistency sprint, 2026-11-10).
  *
  * The same six fields the title page assembles into its `loggable` before it opens
- * *Update your rating*, read here because this screen can be opened without the title
+ * *Edit ranking*, read here because this screen can be opened without the title
  * page's query in the cache (a deep link, or a cold start). A read and nothing else.
  *
  * **Its own key, under the title's.** The title page's `queryKeys.title(id)` holds a wider
