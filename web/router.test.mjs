@@ -221,14 +221,14 @@ describe('installLabel', () => {
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play', url: 'x' }),
-      'Get bingd. on Google Play',
+      'Get bingd on Google Play',
     );
   });
 
   it('labels the iOS store button for an iPhone', () => {
     assert.equal(
       installLabel(destinationFor('ios', { ios: { storeUrl: 'https://apps.apple.com/x' } })),
-      'Get bingd. on the App Store',
+      'Get bingd on the App Store',
     );
   });
 
@@ -248,7 +248,7 @@ describe('installLabel', () => {
         android: { storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
       }),
     );
-    assert.equal(label, 'Get bingd. on Google Play');
+    assert.equal(label, 'Get bingd on Google Play');
     assert.ok(!/iphone/i.test(label), 'the Android button must not name an iPhone');
   });
 
@@ -1225,7 +1225,7 @@ describe('the built site', () => {
       kind: 'store',
       url: 'https://play.google.com/store/apps/details?id=app.bingd',
     });
-    assert.equal(installLabel(android), 'Get bingd. on Google Play');
+    assert.equal(installLabel(android), 'Get bingd on Google Play');
 
     const ios = destinationFor('ios', config.distribution);
     assert.deepEqual(ios, {
@@ -1233,7 +1233,7 @@ describe('the built site', () => {
       kind: 'store',
       url: 'https://apps.apple.com/app/id6803954532',
     });
-    assert.equal(installLabel(ios), 'Get bingd. on the App Store');
+    assert.equal(installLabel(ios), 'Get bingd on the App Store');
 
     // The fallbacks are still carried, and still lose. Keeping them is deliberate — see
     // distribution.config.json — so "they lose" has to be asserted rather than assumed
@@ -3191,7 +3191,7 @@ describe('the title page, painted', () => {
     // Get bingd., which on Android is the public Play listing and nothing else.
     const install = page.el('primary-install');
     assert.equal(install.href, PLAY);
-    assert.equal(install.textContent, 'Get bingd. on Google Play');
+    assert.equal(install.textContent, 'Get bingd on Google Play');
     assert.equal(install.hidden, false);
 
     // The generic line is replaced rather than left above the real one.
@@ -3201,7 +3201,7 @@ describe('the title page, painted', () => {
   it('sends an iPhone to the App Store from the same page', async () => {
     const page = await paint({ file: 'title.html', url: AT, userAgent: IPHONE_UA, row: AMADEUS });
     assert.equal(page.el('primary-install').href, APP_STORE);
-    assert.equal(page.el('primary-install').textContent, 'Get bingd. on the App Store');
+    assert.equal(page.el('primary-install').textContent, 'Get bingd on the App Store');
   });
 
   it('offers both stores to a desktop browser and chooses neither', async () => {
@@ -3334,7 +3334,7 @@ describe('the invitation page, painted', () => {
     const install = page.el('primary-install');
     assert.equal(install.href, PLAY);
     assert.ok(!install.href.includes('/apps/testing/'));
-    assert.equal(install.textContent, 'Get bingd. on Google Play');
+    assert.equal(install.textContent, 'Get bingd on Google Play');
 
     // The honest return instruction stays, because deferred attribution is still not
     // implemented and a store install still does not carry the invitation across.
@@ -3374,7 +3374,7 @@ describe('the front page, painted', () => {
     assert.ok(buttons.length >= 3, `only ${buttons.length} install buttons were painted`);
     for (const button of buttons) {
       assert.equal(button.href, PLAY);
-      assert.equal(button.textContent, 'Get bingd. on Google Play');
+      assert.equal(button.textContent, 'Get bingd on Google Play');
       assert.equal(button.hidden, false);
     }
 
@@ -4522,23 +4522,23 @@ describe('the ranking demo, painted', () => {
       const sticky = page.document.querySelector('.sticky [data-install="primary-install"]');
       assert.equal(sticky.hidden, false);
       assert.equal(sticky.href, PLAY);
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play');
 
       page.el('demo-left').click();
       page.el('demo-left').click();
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play', 'relabelled before the demo was finished');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play', 'relabelled before the demo was finished');
       page.el('demo-left').click();
 
       assert.equal(sticky.textContent, 'Keep ranking in bingd.');
       assert.equal(sticky.href, PLAY, 'the sticky bar lost its destination');
       // The hero and closing-band buttons keep the store's name.
-      assert.equal(page.el('primary-install').textContent, 'Get bingd. on Google Play');
+      assert.equal(page.el('primary-install').textContent, 'Get bingd on Google Play');
       for (const mirror of page.document.querySelectorAll('.closer [data-install="primary-install"]')) {
-        assert.equal(mirror.textContent, 'Get bingd. on Google Play');
+        assert.equal(mirror.textContent, 'Get bingd on Google Play');
       }
 
       page.el('demo-again').click();
-      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+      assert.equal(sticky.textContent, 'Get bingd on Google Play');
       assert.equal(sticky.href, PLAY);
     } finally {
       page.restore();
