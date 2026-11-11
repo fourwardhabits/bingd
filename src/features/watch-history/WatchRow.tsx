@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { formatWatchDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
@@ -44,7 +44,12 @@ export type WatchRowProps = {
   editing: boolean;
   onEdit: () => void;
   onDismissEdit: () => void;
-  onSave: (edit: WatchEdit) => void;
+  /**
+   * Writes the edit. Resolves `true` once every write it made succeeded, `false` when one
+   * failed (the screen shows why). The editor's own Save does not wait for it; Edit
+   * ranking's *Save* does, so it only moves on to the ranking once the watch is saved.
+   */
+  onSave: (edit: WatchEdit) => Promise<boolean>;
   onRemove: () => void;
   /**
    * **Edit ranking**, offered inside the editor when the title is ranked (UI consistency
@@ -197,10 +202,7 @@ export function WatchRow({
           onlyWatch={onlyWatch}
           busy={busy}
           onCancel={onDismissEdit}
-          onSave={(edit) => {
-            onSave(edit);
-            onDismissEdit();
-          }}
+          onSave={onSave}
           onRemove={onRemove}
           onEditRanking={onEditRanking}
         />
@@ -231,8 +233,10 @@ function WatchEditor({
   peopleLoading: boolean;
   onlyWatch: boolean;
   busy: boolean;
+  /** Closes the editor without saving; also how the editor's own Save closes it. */
   onCancel: () => void;
-  onSave: (edit: WatchEdit) => void;
+  /** Writes the edit; `true` once all of it landed. */
+  onSave: (edit: WatchEdit) => Promise<boolean>;
   onRemove: () => void;
   onEditRanking?: () => void;
 }) {
@@ -241,11 +245,8 @@ function WatchEditor({
   const titleNote = useTitleNote(mediaItemId);
   const [selected, setSelected] = useState(() => companions.map((person) => person.id));
 
-  const save = async () => {
-    // The note saves through `save_note`, on its own object, before the watch's own edit
-    // goes anywhere — so a failure to write one is never reported as the other.
-    await titleNote.flush();
-
+  /** What Save would write for this watch: only the parts the reader changed. */
+  const pendingEdit = (): WatchEdit => {
     const edit: WatchEdit = {};
     if (date !== event.watchedOn) edit.watchedOn = date;
     const before = companions.map((person) => person.id).sort().join(',');
@@ -253,7 +254,109 @@ function WatchEditor({
     // `note` is passed through untouched: nothing writes `watch_events.note` any more,
     // and an edit to companions must not quietly clear a line an older build saved.
     if (before !== after) edit.details = { note: note ?? null, companionIds: selected };
-    onSave(edit);
+    return edit;
+  };
+
+  /**
+   * Whether this editor is still the one open. A save that lands after the reader has
+   * cancelled, or opened another watch's editor, must not then open the ranking over
+   * whatever they are doing now (independent review).
+   */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  /**
+   * Set from the first tap of Save or Edit ranking until that act has finished, so the
+   * note's flush — a round trip, before the screen's own `busy` turns on — cannot be
+   * tapped into twice (independent review). The ref answers synchronously; the state
+   * draws the controls disabled.
+   */
+  const inFlight = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const begin = () => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setSubmitting(true);
+    return true;
+  };
+  const end = () => {
+    inFlight.current = false;
+    if (mounted.current) setSubmitting(false);
+  };
+  const locked = busy || submitting;
+
+  const save = async () => {
+    if (!begin()) return;
+    // The note saves through `save_note`, on its own object, before the watch's own edit
+    // goes anywhere — so a failure to write one is never reported as the other.
+    try {
+      await titleNote.flush();
+    } finally {
+      end();
+    }
+    // Not awaited, as before: the editor closes and the screen reports a failure.
+    void onSave(pendingEdit());
+    onCancel();
+  };
+
+  /**
+   * **Edit ranking never drops an unsaved edit silently** (stabilization pass,
+   * 2026-11-11). With nothing pending it opens the ranking flow as before. With a changed
+   * date or companions it asks first, in the app's own confirm — a native alert, as
+   * removing a title or signing out asks:
+   *
+   *   Save     writes the watch, and opens the ranking only once that write has landed.
+   *            A failed write shows the screen's error line and leaves the editor open
+   *            with the edits still in it.
+   *   Discard  drops the date and companions, as Cancel does, and opens the ranking.
+   *   Cancel   nothing: the editor stays open with the edits in it.
+   *
+   * The title's note is not one of these edits: it is written on blur and on flush, so it
+   * is flushed before the ranking opens on either path, exactly as before.
+   */
+  const editRanking = (open: () => void) => {
+    if (inFlight.current) return;
+    const edit = pendingEdit();
+    const goToRanking = async () => {
+      if (!begin()) return;
+      try {
+        await titleNote.flush();
+      } finally {
+        end();
+      }
+      if (mounted.current) open();
+    };
+    if (edit.watchedOn === undefined && !edit.details) {
+      void goToRanking();
+      return;
+    }
+    Alert.alert(
+      'Save changes to this watch?',
+      'You changed this watch’s date or who you watched with.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => void goToRanking() },
+        {
+          text: 'Save',
+          onPress: () =>
+            void (async () => {
+              if (!begin()) return;
+              let saved = false;
+              try {
+                await titleNote.flush();
+                saved = await onSave(edit);
+              } finally {
+                end();
+              }
+              if (saved && mounted.current) open();
+            })(),
+        },
+      ],
+    );
   };
 
   return (
@@ -273,8 +376,21 @@ function WatchEditor({
       />
 
       <View style={styles.actions}>
-        <Button label="Cancel" kind="secondary" size="sm" onPress={onCancel} />
-        <Button label="Save" size="sm" disabled={busy} onPress={() => void save()} />
+        <Button
+          label="Cancel"
+          kind="secondary"
+          size="sm"
+          disabled={submitting}
+          disabledReason={submitting ? 'Saving' : undefined}
+          onPress={onCancel}
+        />
+        <Button
+          label="Save"
+          size="sm"
+          disabled={locked}
+          disabledReason={locked ? 'Saving' : undefined}
+          onPress={() => void save()}
+        />
       </View>
 
       {/**
@@ -294,8 +410,8 @@ function WatchEditor({
        *
        * *Edit ranking* changes the title's current ranking through the existing flow and
        * leaves this watch alone. A note typed above is flushed first, as Save does, so the
-       * rating sheet opens on it; the date and the companions are not saved, exactly as
-       * Cancel leaves them — the sheet is about the ranking, not this viewing.
+       * rating sheet opens on it; a changed date or companions are never dropped silently
+       * — the reader chooses Save, Discard or Cancel first (`editRanking`).
        *
        * *Remove* is unchanged: the destructive act, behind Edit, exactly as before.
        */}
@@ -305,22 +421,14 @@ function WatchEditor({
             <SheetRow
               icon="swap-vertical-outline"
               label="Edit ranking"
-              onPress={
-                busy
-                  ? undefined
-                  : () =>
-                      void (async () => {
-                        await titleNote.flush();
-                        onEditRanking();
-                      })()
-              }
-              disabledReason={busy ? 'Saving' : undefined}
+              onPress={locked ? undefined : () => editRanking(onEditRanking)}
+              disabledReason={locked ? 'Saving' : undefined}
             />
           </View>
         ) : null}
         <Pressable
           accessibilityRole="button"
-          disabled={busy}
+          disabled={locked}
           onPress={onRemove}
           style={({ pressed }) => [styles.remove, pressed && styles.editPressed]}
           testID={`watch-remove-${event.id}`}

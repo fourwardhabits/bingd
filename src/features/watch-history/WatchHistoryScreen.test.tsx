@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { Alert, StyleSheet, type AlertButton } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -837,5 +837,382 @@ describe('Edit ranking', () => {
     expect(view.getByLabelText(/^8\.3 out of 10/)).toBeTruthy();
     expect(view.queryByLabelText(/^6\.4 out of 10/)).toBeNull();
     expect(view.getAllByTestId(/^watch-row-/)).toHaveLength(2);
+  });
+});
+
+/**
+ * **Edit ranking with unsaved watch edits** (stabilization pass, 2026-11-11). It used to
+ * close the editor and drop a changed date or companions without a word. Now, with
+ * something pending, it asks Save / Discard / Cancel in the app's native confirm; with
+ * nothing pending it opens the ranking exactly as before.
+ */
+describe('Edit ranking with unsaved watch edits', () => {
+  let alert: jest.SpyInstance;
+  /** The buttons of the last confirm, so a test can press one as a person would. */
+  const confirm = () => {
+    const call = alert.mock.calls.at(-1) as [string, string | undefined, AlertButton[]];
+    return {
+      title: call[0],
+      press: async (text: string) => {
+        const button = call[2].find((b) => b.text === text);
+        if (!button) throw new Error(`No "${text}" button in ${call[2].map((b) => b.text)}`);
+        await act(async () => {
+          button.onPress?.();
+        });
+      },
+      texts: call[2].map((b) => b.text),
+    };
+  };
+
+  const setUp = () => {
+    mockLogState.mockReturnValue({
+      data: {
+        note: 'Still holds up.',
+        noteVisibility: 'private' as const,
+        noteSpoilers: false,
+        noteVersion: '2026-09-24T00:00:00Z',
+        ranked: true,
+      },
+    });
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: 2,
+        events: [
+          event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+          event('w2', '2026-10-12', '2026-10-12T10:00:00Z'),
+        ],
+        details: new Map(),
+        placements: [placement('first', '2024-03-04T10:01:00Z', 9.0)],
+        posts: [post('2024-03-04T10:01:00Z', 9.0), post('2026-10-12T10:01:00Z', 8.3, 'w2')],
+      },
+    });
+  };
+
+  /** Opens w1's editor and changes the date (to Earlier) and the companions (adds Alex). */
+  const editW1 = async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Watch date/));
+    await fireEvent.press(view.getByText('Earlier'));
+    await fireEvent.press(view.getByLabelText(/^Who I watched with/));
+    await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
+    return view;
+  };
+
+  const pressEditRanking = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+  };
+
+  beforeEach(() => {
+    setUp();
+    mockLogSheet.props = null;
+    mockRankingSheet.props = null;
+    mockDelete.mockClear();
+    mockRemove.mockClear();
+    mockHistoryTitle.mockReturnValue({ data: FILM });
+    alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    alert.mockRestore();
+    // `mockReset` also empties any unused `mockImplementationOnce`, so a test that failed
+    // before its write ran cannot leave a failing or deferred write for the next one.
+    mockEdit.mockReset();
+    mockEdit.mockImplementation((_input: unknown) => Promise.resolve({ outcome: 'ok' }));
+    mockDetails.mockReset();
+    mockDetails.mockImplementation((_input: unknown) => Promise.resolve({ outcome: 'ok' }));
+    mockLogState.mockReturnValue({
+      data: {
+        note: 'Still holds up.',
+        noteVisibility: 'private' as const,
+        noteSpoilers: false,
+        noteVersion: '2026-09-24T00:00:00Z',
+        ranked: false,
+      },
+    });
+  });
+
+  it('with nothing pending, opens the ranking straight away and asks nothing', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await pressEditRanking(view);
+
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(alert).not.toHaveBeenCalled();
+    expect(view.queryByTestId('watch-editor-w1')).toBeNull();
+    expect(mockEdit).not.toHaveBeenCalled();
+    expect(mockDetails).not.toHaveBeenCalled();
+  });
+
+  it('with a changed date or companions, asks Save, Discard or Cancel before moving', async () => {
+    const view = await editW1();
+    await pressEditRanking(view);
+
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(confirm().title).toBe('Save changes to this watch?');
+    expect(confirm().texts).toEqual(['Cancel', 'Discard', 'Save']);
+    // Nothing has moved and nothing is written until the reader chooses.
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+    expect(mockEdit).not.toHaveBeenCalled();
+    expect(mockDetails).not.toHaveBeenCalled();
+  });
+
+  it('asks for a changed date alone', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Watch date/));
+    await fireEvent.press(view.getByText('Earlier'));
+    await pressEditRanking(view);
+    expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for changed companions alone', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Who I watched with/));
+    await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
+    await pressEditRanking(view);
+    expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save writes the watch, then opens the ranking once the write has landed', async () => {
+    let land!: (value: { outcome: string }) => void;
+    mockDetails.mockImplementationOnce(
+      () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
+    );
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Save');
+
+    expect(mockEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ watchEventId: 'w1', watchedOn: null, basis: 'none' }),
+    );
+    await waitFor(() =>
+      expect(mockDetails).toHaveBeenCalledWith(
+        expect.objectContaining({ watchEventId: 'w1', companionIds: ['friend-1'] }),
+      ),
+    );
+    // The companions write is still in flight: the ranking has not opened over it.
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+
+    await act(async () => {
+      land({ outcome: 'ok' });
+    });
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(view.queryByTestId('watch-editor-w1')).toBeNull();
+    expect(view.queryByTestId('watch-history-error')).toBeNull();
+    // Each written once: Save is not repeated by the ranking opening.
+    expect(mockEdit).toHaveBeenCalledTimes(1);
+    expect(mockDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed Save stays in the editor, edits intact, says why, and does not open the ranking', async () => {
+    mockDetails.mockImplementationOnce(() =>
+      Promise.resolve({ outcome: 'failed', message: 'Could not save this watch.' }),
+    );
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Save');
+
+    await waitFor(() =>
+      expect(view.getByTestId('watch-history-error').props.children).toBe(
+        'Could not save this watch.',
+      ),
+    );
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(mockRankingSheet.props?.subject ?? null).toBeNull();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+    // The edits are still there: the companion still ticked, the date still Earlier.
+    expect(view.getByRole('checkbox', { name: 'Alex' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true }),
+    );
+    await fireEvent.press(view.getByLabelText(/^Watch date/));
+    expect(view.getByRole('button', { name: 'Earlier', selected: true })).toBeTruthy();
+
+    // And asking again still asks, because the companions are still unsaved.
+    alert.mockClear();
+    await pressEditRanking(view);
+    expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('Discard drops the edits, writes nothing, and opens the ranking', async () => {
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Discard');
+
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(view.queryByTestId('watch-editor-w1')).toBeNull();
+    expect(mockEdit).not.toHaveBeenCalled();
+    expect(mockDetails).not.toHaveBeenCalled();
+
+    // Reopening the watch shows it as it was: the discarded edits are gone.
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Who I watched with/));
+    expect(view.getByRole('checkbox', { name: 'Alex' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: false }),
+    );
+  });
+
+  it('Cancel stays in the editor with the edits, writes nothing, and opens nothing', async () => {
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Cancel');
+
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(mockRankingSheet.props?.subject ?? null).toBeNull();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+    expect(view.getByRole('checkbox', { name: 'Alex' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true }),
+    );
+    expect(mockEdit).not.toHaveBeenCalled();
+    expect(mockDetails).not.toHaveBeenCalled();
+    expect(mockBack).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('after Save, the ranking is still a correction: rerank passes through, never a rewatch', async () => {
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Save');
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(mockLogSheet.props?.inWatchHistory).toBe(true);
+    expect(mockLogSheet.props?.postRank).toBeNull();
+
+    await act(async () => {
+      (mockLogSheet.props!.onRank as (bucket: string, mode: string) => void)('loved', 'rerank');
+    });
+    expect(mockRankingSheet.props?.subject).toEqual(
+      expect.objectContaining({ id: 'film-1', bucket: 'loved', mode: 'rerank' }),
+    );
+    expect(mockRankingSheet.props?.subject).not.toHaveProperty('watchEventId');
+    // The only watch writes are the reader's own Save — the ranking adds, edits and
+    // removes none, and creates no viewing.
+    expect(mockEdit).toHaveBeenCalledTimes(1);
+    expect(mockDetails).toHaveBeenCalledTimes(1);
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+    expect(view.getAllByTestId(/^watch-row-/)).toHaveLength(2);
+  });
+
+  it('the editor’s own Save is unchanged: it writes and closes without asking', async () => {
+    const view = await editW1();
+    await fireEvent.press(view.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+    expect(mockEdit).toHaveBeenCalledTimes(1);
+    expect(alert).not.toHaveBeenCalled();
+    expect(view.queryByTestId('watch-editor-w1')).toBeNull();
+    expect(mockLogSheet.props?.title).toBeNull();
+  });
+
+  it.each(['nothing pending', 'Discard', 'Save'] as const)(
+    'flushes a typed note before the ranking opens (%s)',
+    async (path) => {
+      const order: string[] = [];
+      mockSaveNote.mockImplementationOnce((_input: unknown) => {
+        order.push('note');
+        return Promise.resolve({ outcome: 'ok', noteVersion: '2026-11-11T00:00:00Z' });
+      });
+      const view =
+        path === 'nothing pending'
+          ? await renderWithProviders(<WatchHistoryScreen />)
+          : await editW1();
+      if (path === 'nothing pending') await fireEvent.press(view.getByTestId('watch-edit-w1'));
+      await fireEvent.press(view.getByLabelText(/^Note/));
+      await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), `Note: ${path}`);
+      await pressEditRanking(view);
+      if (path !== 'nothing pending') await confirm().press(path);
+      await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+      order.push('ranking');
+      expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ note: `Note: ${path}` }));
+      expect(order).toEqual(['note', 'ranking']);
+    },
+  );
+
+  it('a failed date write also stays in the editor and does not open the ranking', async () => {
+    mockEdit.mockImplementationOnce(() =>
+      Promise.resolve({ outcome: 'failed', message: 'Could not change the date.' }),
+    );
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Watch date/));
+    await fireEvent.press(view.getByText('Earlier'));
+    await pressEditRanking(view);
+    await confirm().press('Save');
+
+    await waitFor(() =>
+      expect(view.getByTestId('watch-history-error').props.children).toBe(
+        'Could not change the date.',
+      ),
+    );
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Earlier', selected: true })).toBeTruthy();
+  });
+
+  it('a change undone before Edit ranking is nothing pending, and asks nothing', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Who I watched with/));
+    await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
+    await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
+    await pressEditRanking(view);
+
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(alert).not.toHaveBeenCalled();
+  });
+
+  it('a Save that lands after the reader moved to another watch does not open the ranking', async () => {
+    let land!: (value: { outcome: string }) => void;
+    mockDetails.mockImplementationOnce(
+      () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
+    );
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Save');
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+
+    // While w1's write is in flight the reader opens w2 and starts editing it.
+    await fireEvent.press(view.getByTestId('watch-edit-w2'));
+    expect(view.queryByTestId('watch-editor-w1')).toBeNull();
+    await fireEvent.press(view.getByLabelText(/^Who I watched with/));
+    await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
+
+    await act(async () => {
+      land({ outcome: 'ok' });
+    });
+    // w1 saved, but the ranking does not open over w2's editor, and w2's edit is intact.
+    expect(mockLogSheet.props?.title).toBeNull();
+    expect(view.getByTestId('watch-editor-w2')).toBeTruthy();
+    expect(view.getByRole('checkbox', { name: 'Alex' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true }),
+    );
+  });
+
+  it('holds Cancel, Save and Edit ranking while its Save is in flight, so nothing is lost or doubled', async () => {
+    let land!: (value: { outcome: string }) => void;
+    mockDetails.mockImplementationOnce(
+      () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
+    );
+    const view = await editW1();
+    await pressEditRanking(view);
+    await confirm().press('Save');
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+
+    expect(view.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
+    alert.mockClear();
+    await pressEditRanking(view);
+    expect(alert).not.toHaveBeenCalled();
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+
+    await act(async () => {
+      land({ outcome: 'ok' });
+    });
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(mockDetails).toHaveBeenCalledTimes(1);
+    expect(mockEdit).toHaveBeenCalledTimes(1);
   });
 });

@@ -182,9 +182,9 @@ export default function WatchHistoryScreen() {
 
   const editRanking = () => {
     if (!loggable.data) return;
-    // The inline editor closes first: its unsaved date and companions are dropped as
-    // Cancel drops them (the note was flushed by the row), and one sheet edits the title
-    // at a time.
+    // The inline editor closes first, so one sheet edits the title at a time. The row has
+    // already settled any unsaved date or companions — saved, or discarded by the reader's
+    // choice — and flushed the note (`WatchRow`'s `editRanking`).
     setEditingId(null);
     setError(null);
     setPlacement(null);
@@ -198,8 +198,14 @@ export default function WatchHistoryScreen() {
     celebrate();
   };
 
-  const saveEdit = async (eventId: string, edit: WatchEdit) => {
-    if (edit.watchedOn === undefined && !edit.details) return;
+  /**
+   * Writes a watch's edit and says whether all of it landed: `true` when every write
+   * succeeded, `false` (with the error line set) when one failed. Edit ranking's *Save*
+   * waits on it so the ranking only opens over a saved watch (stabilization pass,
+   * 2026-11-11); the editor's own Save does not, as before.
+   */
+  const saveEdit = async (eventId: string, edit: WatchEdit): Promise<boolean> => {
+    if (edit.watchedOn === undefined && !edit.details) return true;
     setBusy(true);
     setError(null);
     const results = [];
@@ -230,9 +236,10 @@ export default function WatchHistoryScreen() {
     for (const result of results) {
       if (result.outcome === 'failed') {
         setError(result.message);
-        break;
+        return false;
       }
     }
+    return true;
   };
 
   /**
@@ -415,7 +422,7 @@ export default function WatchHistoryScreen() {
                 editing={editingId === item.id}
                 onEdit={() => setEditingId(item.id)}
                 onDismissEdit={() => setEditingId(null)}
-                onSave={(edit) => void saveEdit(item.id, edit)}
+                onSave={(edit) => saveEdit(item.id, edit)}
                 onRemove={() => void remove(item.id, count <= 1)}
                 onEditRanking={canEditRanking ? editRanking : undefined}
                 busy={busy}
