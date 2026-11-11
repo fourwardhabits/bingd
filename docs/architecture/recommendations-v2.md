@@ -177,8 +177,8 @@ compares a reader with every account. The refresh happens inside the first stale
 concurrent stale reads by one reader refresh once (a per-reader advisory lock plus a
 re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs`), and
 different readers do not contend. Capacity is **measured**, not asserted, on real
-PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark
-([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md), PR #253).
+PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark (PR #253, which adds
+`recommendations-v2-scale-benchmark.md`; land it with this PR).
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
 neighbour on a given day if a probe title has thousands of raters. Rotation finds different
