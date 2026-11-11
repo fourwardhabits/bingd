@@ -882,11 +882,14 @@ biased towards the oldest follows (independent review of B1, 2026-11-11).
 **Migration order with the other open work (2026-11-11).** This branch's migrations are
 `20261028000100`, `20261028000200`, `20261031000100`, `20261101000100` (from #220, dated when
 they were written) and `20261112000100`. The open Engine V2 PRs add `20261111000100` (#250)
-and `20261111000200` (#251), and the IMDb import draft #256 adds `20261111000300`. No object
-is defined by both stacks, so a fresh database applies them correctly in file order; but if
-either 20261111 migration reaches an environment before this branch does, `db push` refuses
-the four older files until it is run with `--include-all`, after a `--dry-run` that lists
-exactly this branch's files (the same procedure as `letterboxd-production-promotion.md`).
+and `20261111000200` (#251), the reaction-summary draft #249 adds `20261110000100`, and the
+IMDb import draft #256 adds `20261111000300`. The Engine V2 migrations define nothing this
+branch defines, so with them a fresh database applies everything correctly in file order
+(checked: the A stack and this branch merged together pass every DB test). #256 does not,
+see below. If any of those newer migrations reaches an environment before this branch does,
+`db push` refuses the four older files until it is run with `--include-all`, after a
+`--dry-run` that lists exactly this branch's files (the same procedure as
+`letterboxd-production-promotion.md`).
 **#256 and this branch both rebuild `claim_push_batch`.** This branch drops the one-argument
 form and owns `claim_push_batch(integer, timestamptz)`; #256 (written against `main`)
 recreates `claim_push_batch(integer)`. Whichever merges second must rebuild the two-argument
