@@ -201,11 +201,15 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
   }));
 
   const social = v2 ? [] : socialMirror(world, reader, follows ?? world.people[reader.person]!.follows).map((t) => titles[t]!.id);
-  const collaborativeIds = variant.collaborativeSource ? [...collaborative.keys()].map((t) => titles[t]!.id) : [];
+  // As the hook: only endorsed rows (support > 0) are a source; disputed rows are evidence.
+  const collaborativeIds = variant.collaborativeSource
+    ? [...collaborative].filter(([, evidence]) => evidence.support > 0).map(([t]) => titles[t]!.id)
+    : [];
   const trending = world.trending.map((t) => titles[t]!.id);
   const ids = candidateIdsFrom(anchors, [...social, ...collaborativeIds], trending);
   const listed = ids.map((id) => toCandidate(titles[indexOfId(id)]!));
 
+  const exclude = new Set([...metOf(reader)].map((t) => titles[t]!.id));
   let filled: Candidate[] = [];
   if (profile && variant.catalogue) {
     const request = { kind: 'movie' as const, languages: sourceLanguages(profile), decades: sourceDecades(profile, 'movie') };
@@ -214,6 +218,8 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
       catalogueMirror(world, reader, request.languages, request.decades, anchorSeed),
       profile,
       request,
+      // As the hook: the collection and the anchors are not coverage.
+      new Set([...exclude, ...anchors.map((anchor) => anchor.mediaItemId)]),
     );
   }
   const merged = [...listed, ...filled];
@@ -224,7 +230,6 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
       })
     : merged;
 
-  const exclude = new Set([...metOf(reader)].map((t) => titles[t]!.id));
   const scored = scoreWith(variant, candidates, anchors, taste, exclude, profile);
   const wall = drawSlate(scored, { pageSize: SLATE_SIZE, pages: 1, seed: drawSeed, now: 0 });
 
