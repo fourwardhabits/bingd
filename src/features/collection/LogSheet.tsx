@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { invalidateAfterCollectionChange } from './invalidate';
+import { asRankingCategory, CATEGORY_NAME } from './use-collection';
 import { diagnose } from '@/lib/diagnose';
 import { queryKeys } from '@/lib/query';
-import { track, type Surface } from '@/lib/analytics';
+import { mediaKindFor, track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -60,8 +61,11 @@ export type LoggableTitle = {
   title: string;
   year: number | null;
   posterUri: string | null;
-  /** Decides the category line. A series is not loggable — log a season (AD-1). */
-  kind: 'movie' | 'season';
+  /**
+   * Decides the category line. A whole show is loggable and rankable in its own pool since
+   * 20261114000200; its seasons are separate titles with separate rankings.
+   */
+  kind: 'movie' | 'season' | 'series';
   /** For a season, the series it belongs to, so the header is not just "Season 3". */
   seriesTitle?: string | null;
   /** For a season, its number, so the header reads "The Last of Us, S1". */
@@ -100,7 +104,7 @@ export type LogSheetProps = {
    * the server owns the change, and on a rerank there is no change to write — either
    * way `set_bucket` answers with its 55000 refusal.
    */
-  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank') => void;
+  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank', context?: RankContext) => void;
   /**
    * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
    * and the route underneath it is not the same question as where somebody decided to
@@ -175,6 +179,17 @@ export type LogSheetProps = {
 };
 
 /**
+ * What the act that led to a ranking was, for the completion screen to know.
+ *
+ * `freshLog` is true only when this sheet's tap created the title's seen row and its first
+ * watch, which is the same fact `watch_logged` is counted on (`log_title` answered
+ * `created`, or this sheet's own detail write did a moment earlier). It is what makes a
+ * season's placement "tied to a new watch" for **Update Show**: a re-rating of something
+ * already in the collection, or an import being ranked, is not. No timestamp is read.
+ */
+export type RankContext = { freshLog: boolean };
+
+/**
  * What a ranking just decided, as this sheet needs to restate it.
  *
  * Passed in rather than read: the ranking session already had all three from
@@ -184,7 +199,7 @@ export type LogSheetProps = {
 export type PostRank = {
   score: number;
   position: number;
-  /** The server's own word — `movies` or `tv_seasons`. */
+  /** The server's own word — `movies`, `tv_seasons` or `tv_shows`. */
   category: string;
 };
 
@@ -863,7 +878,7 @@ function Body({
       track({
         name: 'title_logged',
         props: {
-          media_kind: title.kind === 'season' ? 'tv_season' : 'movie',
+          media_kind: mediaKindFor(title.kind),
           surface,
           bucket: chosen === 'notForMe' ? 'not_for_me' : chosen,
         },
@@ -978,7 +993,9 @@ function Body({
     }
 
     refresh();
-    onRank?.(chosen, 'start');
+    onRank?.(chosen, 'start', {
+      freshLog: result.outcome === 'ok' && (Boolean(result.created) || createdByDetails),
+    });
   };
 
   /**
@@ -1451,7 +1468,8 @@ function Body({
    */
   const storedBucket = bucket === 'notForMe' ? 'not_for_me' : bucket;
 
-  const category = title.kind === 'movie' ? 'Movies' : 'TV season';
+  const category =
+    title.kind === 'movie' ? 'Movies' : title.kind === 'series' ? 'TV show' : 'TV season';
   // The compact identity, which is what a sheet heading is: one line, series and
   // season joined the way every other row in the app joins them (`lib/titles.ts`).
   const heading = compactName(title) ?? title.title;
@@ -1591,7 +1609,7 @@ function Body({
             <View style={styles.rankedText}>
               <Text variant="headline">Ranked</Text>
               <Text variant="footnote" tone="secondary">
-                {`#${postRank.position} in ${postRank.category === 'tv_seasons' ? 'TV' : 'Movies'}`}
+                {`#${postRank.position} in ${CATEGORY_NAME[asRankingCategory(postRank.category)]}`}
               </Text>
             </View>
           </View>

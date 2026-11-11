@@ -29,7 +29,7 @@ type TitleRow = {
  * screen overwrite the other's cache with the wrong shape. Nested under it, so anything
  * that invalidates the title refreshes this too.
  *
- * Null for a series, which is not rankable — its seasons are (AD-1).
+ * A film, a season, or a whole show (rankable in its own pool since 2026-11-14).
  */
 export function useHistoryTitle(mediaItemId: string) {
   return useQuery({
@@ -43,7 +43,7 @@ export function useHistoryTitle(mediaItemId: string) {
         .single();
       if (error) throw error;
       const row = data as unknown as TitleRow;
-      if (row.kind !== 'movie' && row.kind !== 'season') return null;
+      if (row.kind !== 'movie' && row.kind !== 'season' && row.kind !== 'series') return null;
       const parent = Array.isArray(row.parent) ? row.parent[0] : row.parent;
       return {
         id: row.id,

@@ -158,7 +158,13 @@ const TAIL: Partial<Record<ActivityType, string>> = {
   award_earned: 'award',
 };
 
-export const verbFor = (type: ActivityType): string => VERB[type];
+/**
+ * The verb, for one event. A TV ranking update (20261114000300) reads "updated their
+ * ranking of": the reader moved a show or a season they had already ranked, and saying
+ * "ranked" again would read as a second first ranking.
+ */
+export const verbFor = (type: ActivityType, event?: { update?: boolean }): string =>
+  type === 'title_ranked' && event?.update ? 'updated their ranking of' : VERB[type];
 
 /**
  * The words after the emphasised slot.
@@ -223,9 +229,9 @@ export function followTail(count: number): string | null {
  * this", `50m` for a twenty-hour season is worse than a blank. So the fall-through
  * that genres and certification both use is deliberately absent for length.
  *
- * **A series shows no length at all**, for the same reason. Nothing is ranked at the
- * series level (PRD §10), but a whole show *can* be put on a watchlist, so the case is
- * real; a series-level episode total is explicitly not what the founder wants, and its
+ * **A series shows no length at all**, for the same reason. A whole show can be ranked
+ * (in its own pool, since 2026-11-14) and put on a watchlist, so the case is real; a
+ * series-level episode total is explicitly not what the founder wants, and its
  * `runtime_minutes` is the per-episode figure. It gets `TV-MA · Drama · Thriller`.
  *
  * **Two genres maximum.** The line sits under a sentence in a column about 192pt wide

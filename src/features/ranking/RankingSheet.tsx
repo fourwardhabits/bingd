@@ -29,10 +29,11 @@ import {
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import {
+  asRankingCategory,
+  CATEGORY_NAME,
   useRankedCollection,
-  type RankingCategory,
 } from '@/features/collection/use-collection';
-import { track, type Surface } from '@/lib/analytics';
+import { mediaKindFor, track, type Surface } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
@@ -56,6 +57,7 @@ import {
   rankRebucket,
   rankSkip,
   rankStart,
+  type Placed,
   type PlacedMovement,
   type SessionStep,
 } from './session';
@@ -73,7 +75,7 @@ export type RankingSubject = {
    * server has said what category it opened, so the kind cannot come from the answer
    * the way `ranking_completed`'s does.
    */
-  kind: 'movie' | 'season';
+  kind: 'movie' | 'season' | 'series';
   /**
    * How this session begins, which is four different acts over three calls.
    *
@@ -111,6 +113,31 @@ export type RankingSubject = {
    * rather than a fabricated date (§D.6 path 15).
    */
   watchEventId?: string | null;
+  /**
+   * **This first ranking began with a new watch log** (`LogSheet`'s `RankContext`): the
+   * tap that chose the band also created the title's seen row and its first watch. With
+   * `mode: 'again'` (a rewatch's re-check) it is one of the two ways a season's placement
+   * is "tied to a new watch", which is the first condition for offering **Update Show**.
+   * Absent everywhere else, including a resumed placement and a re-rating, which therefore
+   * never offer it. No timestamp is consulted: a ranking time is not a watch.
+   */
+  freshLog?: boolean;
+  /**
+   * Set only on the show correction **Update Show** opens (20261114000300): the season
+   * placement whose completion offered it. Sent with `rank_again` / `rank_rebucket`, so the
+   * server records the link and posts nothing for the show. A session that carries one is
+   * itself never offered Update Show again.
+   */
+  linkedPlacementId?: string | null;
+};
+
+/** What **Update Show** hands the caller: which show, its band, and the link. */
+export type UpdateShowLink = {
+  showId: string;
+  /** The show's band as the server read it at the season's placement. */
+  bucket: string | null;
+  /** The season placement that offered it. */
+  linkedPlacementId: string;
 };
 
 export type RankingSheetProps = {
@@ -184,6 +211,22 @@ export type RankingSheetProps = {
    */
   onPlaced?: (placement: { score: number; position: number; category: string }) => void;
   /**
+   * **Update Show** (founder brief §5), offered on a season's reveal beside Add details,
+   * with Done centred underneath. The caller opens the parent show's ordinary correction
+   * (the band chooser, then comparisons from where it stands) carrying the link.
+   *
+   * Offered only when every one of these holds, and otherwise the reveal is exactly the
+   * Add details + Done it has always been:
+   *   - the caller mounts it (an individual title flow: never the backlog, Refine or
+   *     onboarding, which do not pass it);
+   *   - the subject is a season, and this placement was tied to a new watch log
+   *     (`freshLog`) or a rewatch (`mode: 'again'`);
+   *   - the server said the parent show is ranked (`placed.parent.ranked`), and named the
+   *     placement to link to;
+   *   - the session is not itself a linked show update.
+   */
+  onUpdateShow?: (link: UpdateShowLink) => void;
+  /**
    * Which screen opened this, for `ranking_completed` alone.
    *
    * Passed in rather than inferred from the route: the sheet is mounted by three
@@ -224,6 +267,7 @@ export function RankingSheet({
   onClose,
   onFinishLog,
   onPlaced,
+  onUpdateShow,
   surface,
   visible = true,
   onDismissed,
@@ -240,6 +284,7 @@ export function RankingSheet({
       onClose={onClose}
       onFinishLog={onFinishLog}
       onPlaced={onPlaced}
+      onUpdateShow={onUpdateShow}
       surface={surface}
       visible={visible}
       onDismissed={onDismissed}
@@ -275,13 +320,33 @@ const noopClose = () => {};
  * translation has to happen somewhere. It happens here, once, because three events now
  * need it and three copies of one conditional is three places for it to drift.
  */
-const mediaKindOf = (kind: 'movie' | 'season') => (kind === 'season' ? 'tv_season' : 'movie');
+const mediaKindOf = mediaKindFor;
+
+/**
+ * Whether this placement may offer **Update Show** (founder brief §5). Every condition is
+ * a fact about the act, and none is a timestamp:
+ *
+ *   - a season, placed in a session that is not itself a linked show update;
+ *   - tied to a new watch: the first ranking began with a new log (`freshLog`), or this is
+ *     a rewatch's re-check (`mode: 'again'`). A correction (`rerank`, `rebucket`) never is;
+ *   - the server said its show is ranked, and named the placement to link to.
+ */
+export function offersUpdateShow(
+  subject: Pick<RankingSubject, 'kind' | 'mode' | 'freshLog' | 'linkedPlacementId'>,
+  placed: Pick<Placed, 'parent' | 'placementId'>,
+): boolean {
+  if (subject.kind !== 'season' || subject.linkedPlacementId) return false;
+  const mode = subject.mode ?? 'start';
+  const newWatch = mode === 'again' || (mode === 'start' && subject.freshLog === true);
+  return newWatch && Boolean(placed.parent?.ranked) && Boolean(placed.placementId);
+}
 
 function Session({
   subject,
   onClose,
   onFinishLog,
   onPlaced,
+  onUpdateShow,
   surface,
   visible = true,
   onDismissed,
@@ -517,7 +582,12 @@ function Session({
         track({
           name: 'ranking_completed',
           props: {
-            media_kind: next.category === 'tv_seasons' ? 'tv_season' : 'movie',
+            media_kind:
+              next.category === 'tv_seasons'
+                ? 'tv_season'
+                : next.category === 'tv_shows'
+                  ? 'tv_series'
+                  : 'movie',
             surface,
             comparisons: answeredCount.current,
             rebucket: subject.mode === 'rebucket',
@@ -623,10 +693,12 @@ function Session({
   useEffect(() => {
     let live = true;
     const newWatch = subject.mode === 'again';
+    // Update Show's link (20261114000300), on the two correction calls only.
+    const linked = subject.linkedPlacementId ?? null;
     const open =
       subject.mode === 'rebucket'
         ? (id: string, bucket: BucketId, operationId: string) =>
-            rankRebucket(id, bucket, operationId)
+            rankRebucket(id, bucket, operationId, linked)
         : subject.mode === 'rerank' || subject.mode === 'again'
           ? (id: string, bucket: BucketId, operationId: string) =>
               // 20261005000100: the viewing this re-check is about, when the caller has
@@ -635,7 +707,7 @@ function Session({
               // `log_rewatch` made and updates its score rather than writing a second.
               // Null on every other path, and on an installed client, where the server
               // supplies an undated event instead of inventing a date.
-              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null)
+              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null, linked)
           : (id: string, bucket: BucketId, operationId: string) =>
               rankStart(id, bucket, operationId);
     const attempt = () =>
@@ -643,7 +715,7 @@ function Session({
         // The mode is in the intent key, so Log another watch and Edit ranking cannot
         // share an operation id: they are different acts and one of them writes an
         // activity the other must not.
-        `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,
+        `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}${linked ? `:${linked}` : ''}`,
         (operationId) => open(subject.id, subject.bucket, operationId),
         outcomeUnknown,
       );
@@ -807,6 +879,20 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
+            onUpdateShow={
+              onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
+                ? () => {
+                    // The same way out Add details takes, and for the same reason: the
+                    // flow is not over, so what the ranking earned waits for its end.
+                    void close();
+                    onUpdateShow({
+                      showId: step.parent!.mediaItemId,
+                      bucket: step.parent!.bucket,
+                      linkedPlacementId: step.placementId!,
+                    });
+                  }
+                : undefined
+            }
             onFinishLog={
               onFinishLog && !onPlaced
                 ? () => {
@@ -1017,7 +1103,12 @@ export function Comparison({
    * pressed. It is on `RankingSubject` already; this only stops the type dropping it on
    * the way through.
    */
-  subject: { id: string; title: string; posterUri?: string | null; kind: 'movie' | 'season' };
+  subject: {
+    id: string;
+    title: string;
+    posterUri?: string | null;
+    kind: 'movie' | 'season' | 'series';
+  };
   pivotId: string;
   skipped: boolean;
   busy: boolean;
@@ -1067,7 +1158,7 @@ export function Comparison({
       if (error) throw error;
       return data as {
         id: string;
-        kind: 'movie' | 'season' | null;
+        kind: 'movie' | 'season' | 'series' | null;
         title: string;
         poster_path: string | null;
       };
@@ -1105,7 +1196,8 @@ export function Comparison({
    * is no kind at all. Both collapse to `movie`, which is what the card said for every
    * title before this and is only ever read while it is unpressable.
    */
-  const pivotKind = pivot?.kind === 'season' ? 'season' : 'movie';
+  const pivotKind =
+    pivot?.kind === 'season' ? 'season' : pivot?.kind === 'series' ? 'series' : 'movie';
 
   return (
     <View style={styles.comparison}>
@@ -1421,7 +1513,7 @@ function Card({
    * What the Details sheet under this card will actually contain, or null while the
    * card does not know yet. Null buys silence rather than a guess — see the hint below.
    */
-  kind: 'movie' | 'season' | null;
+  kind: 'movie' | 'season' | 'series' | null;
   posterUri?: string | null;
   disabled: boolean;
   onPress: () => void;
@@ -1536,7 +1628,9 @@ function Card({
             ? undefined
             : kind === 'season'
               ? 'Shows the year, the episodes in it, and what it is about.'
-              : 'Shows the year, the runtime, the cast, and what it is about.'
+              : kind === 'series'
+                ? 'Shows the year, who created it, and what it is about.'
+                : 'Shows the year, the runtime, the cast, and what it is about.'
         }
         hitSlop={theme.layout.minTapTarget / 2}
         onPress={onRecall}
@@ -1593,7 +1687,14 @@ function Reveal({
   earned = [],
   onDone,
   onFinishLog,
+  onUpdateShow,
 }: {
+  /**
+   * **Update Show**, when this season's placement may lead into its show's correction.
+   * Present only when the session decided every condition holds (`onUpdateShow` on the
+   * sheet); absent, the reveal ends exactly as it always has.
+   */
+  onUpdateShow?: () => void;
   /** Awards this placement unlocked, from the ledger diff. Empty is the ordinary case. */
   earned?: { awardKey: string; tierKey: string }[];
   score: number;
@@ -1610,13 +1711,13 @@ function Reveal({
   onFinishLog?: () => void;
 }) {
   const profile = useCurrentProfile();
-  const readableCategory = category === 'tv_seasons' ? 'TV' : 'Movies';
+  const readableCategory = CATEGORY_NAME[asRankingCategory(category)];
   const shown = useCountUp(score, bucket);
 
   // The ranked list for this category, which the collection already caches under the
   // key `apply` invalidated when the title was placed — so this resolves to the list
   // *including* it, and no new query or endpoint is needed to derive a genre rank.
-  const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
+  const { data: ranked } = useRankedCollection(profile.id, asRankingCategory(category));
 
   /**
    * **The reveal never names a placement worse than tenth** (founder, 2026-09-05, off a
@@ -2134,16 +2235,60 @@ function Reveal({
        * neither label decides the row's proportions. The accessibility order follows the
        * visual order because it is the same JSX order — nothing here reorders at paint.
        */}
-      <View style={styles.revealExits}>
-        <View style={styles.revealExit}>
-          <Button label="Done" kind="secondary" fit onPress={onDone} />
-        </View>
-        {onFinishLog ? (
-          <View style={styles.revealExit}>
-            <Button label="Add details" fit onPress={onFinishLog} />
+      {/**
+       * **Update Show** (founder brief §5, 2026-11-11): a season that was just watched, of
+       * a show the reader has ranked. Two rows, and no new modal, card or confirmation:
+       *
+       *   [ Add details ] [ Update Show ]
+       *               Done
+       *
+       * Add details keeps the filled treatment; Update Show is the outlined second act;
+       * Done drops to a quiet text control centred across the full width, still one tap
+       * and always reachable. Anywhere Update Show is not offered, the row below is the
+       * unchanged Done | Add details pair.
+       */}
+      {onUpdateShow ? (
+        <View style={styles.revealExitsStacked}>
+          <View style={styles.revealExits}>
+            {onFinishLog ? (
+              <View style={styles.revealExit}>
+                <Button label="Add details" fit onPress={onFinishLog} />
+              </View>
+            ) : null}
+            <View style={styles.revealExit}>
+              <Button
+                label="Update Show"
+                kind="secondary"
+                fit
+                onPress={onUpdateShow}
+                accessibilityHint="Re-ranks the show this season belongs to"
+                testID="reveal-update-show"
+              />
+            </View>
           </View>
-        ) : null}
-      </View>
+          <View style={styles.revealDoneRow}>
+            <Button
+              label="Done"
+              kind="tertiary"
+              tone="secondary"
+              fit
+              onPress={onDone}
+              testID="reveal-done"
+            />
+          </View>
+        </View>
+      ) : (
+        <View style={styles.revealExits}>
+          <View style={styles.revealExit}>
+            <Button label="Done" kind="secondary" fit onPress={onDone} />
+          </View>
+          {onFinishLog ? (
+            <View style={styles.revealExit}>
+              <Button label="Add details" fit onPress={onFinishLog} />
+            </View>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }
@@ -2343,6 +2488,9 @@ const styles = StyleSheet.create({
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
+  revealExitsStacked: { gap: theme.space[2] },
+  /** Done under the Update Show row: centred across the full width, and quiet. */
+  revealDoneRow: { alignSelf: 'stretch', alignItems: 'center' },
   centre: { textAlign: 'center' },
   /**
    * The title and the placement beneath it: one block, tight (founder, 2026-09-07).

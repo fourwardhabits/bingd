@@ -52,8 +52,16 @@ import type { NotificationKind } from '@/features/notifications/use-notification
 // Common property vocabularies
 // ---------------------------------------------------------------------------
 
-/** A film or one season of a show. A series is neither — it is not loggable (AD-1). */
-export type MediaKind = 'movie' | 'tv_season';
+/**
+ * A film, one season of a show, or a whole show. `tv_series` joined on 2026-11-14, when a
+ * whole show became rankable in its own pool (20261114000200); it is the word the list
+ * events already used for a whole series, so the two vocabularies agree.
+ */
+export type MediaKind = 'movie' | 'tv_season' | 'tv_series';
+
+/** The analytics word for a catalogue kind. */
+export const mediaKindFor = (kind: 'movie' | 'season' | 'series'): MediaKind =>
+  kind === 'season' ? 'tv_season' : kind === 'series' ? 'tv_series' : 'movie';
 
 /**
  * Where in the app the action was taken.

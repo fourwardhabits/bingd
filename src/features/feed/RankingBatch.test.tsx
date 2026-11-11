@@ -70,13 +70,14 @@ describe('the expanded list', () => {
     expect(mockRpc).toHaveBeenCalledWith('ranking_batch_titles', { p_event_id: 'event-1' });
   });
 
-  it('uses the TV wording for a season sitting', async () => {
+  it('names the season pool for a season sitting', async () => {
     mockRpc.mockResolvedValue({ data: [titles[0]], error: null });
     const view = await renderWithProviders(
       <RankingBatchSheet eventId="event-1" medium="tv_seasons" onClose={() => {}} />,
     );
 
-    await waitFor(() => expect(view.getByText('#24 in TV')).toBeTruthy());
+    // "TV seasons" since 2026-11-14: TV is two rankings, so the pool is named.
+    await waitFor(() => expect(view.getByText('#24 in TV seasons')).toBeTruthy());
   });
 
   it('scrolls, because a sitting has no ceiling', async () => {

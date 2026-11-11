@@ -35,8 +35,9 @@ export type TitleRowActionsProps = {
  *                 ranking left unfinished. No dashed ring and no Finish pill: the incomplete
  *                 state stays internal, where the tap uses it to resume.
  *
- * A series cannot be ranked (PRD §10), so it never draws a score; its `+` leads to its
- * seasons. Share is not here: in browse and list contexts it is secondary, and the title
+ * A whole show is ranked in its own pool since 2026-11-14, so a ranked show draws its own
+ * score exactly as a film does, and its `+` starts a show-level ranking. Its seasons are
+ * ranked from the show's page. Share is not here: in browse and list contexts it is secondary, and the title
  * page carries it. Both controls carry `hitSlop` so each clears 44pt without growing the
  * row, and they are siblings of the row's own press target, not children of it.
  */
@@ -49,7 +50,7 @@ export function TitleRowActions({
   onRank,
   onToggleWatchlist,
 }: TitleRowActionsProps) {
-  if (kind !== 'series' && score) {
+  if (score) {
     return (
       <View style={styles.actions} testID="title-row-actions-ranked">
         <ScoreBadge score={score.score} bucket={score.bucket} size="sm" onPress={onRank} />

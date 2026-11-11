@@ -347,19 +347,19 @@ describe('the three kinds of title', () => {
     // The heading is the *show*; the subtitle is season number, episode count, then year
     // (founder hotfix, 2026-11-07), joined by the block's one separator.
     const view = await openOn(completeSeason, 'The Last of Us');
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+      /^Season 1 · 9 episodes · 2023$/,
+    );
   });
 
-  it('renders a series, which has no score block and no rank control', async () => {
+  it('renders a series with the same actions as a film: Rank Show, save, list, recommend', async () => {
     const view = await openOn(completeSeries, 'The Last of Us');
 
-    // A series cannot be ranked or recommended (PRD §10), so it gets neither — and it
-    // gets no aggregate row rather than a permanent "Not enough ratings".
-    expect(view.queryByTestId('personal-score')).toBeNull();
-    expect(view.queryByTestId('scores-section')).toBeNull();
-    expect(view.queryByTestId('title-action-rank')).toBeNull();
-    expect(view.queryByTestId('title-action-recommend')).toBeNull();
-    // Save survives, which is the one thing a series has always offered.
+    // A whole show is ranked in its own pool since 2026-11-14, so its page carries the
+    // film page's capabilities and a score row about the show alone.
+    expect(view.getByTestId('scores-section')).toBeTruthy();
+    expect(within(view.getByTestId('title-action-rank')).getByText('Rank Show')).toBeTruthy();
+    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
   });
 });
@@ -406,7 +406,9 @@ describe('optional metadata that is absent in the catalogue', () => {
     expect(view.getByTestId('title-name')).toHaveTextContent(/^Season 1$/);
     // Nine episodes is still the season's own length, on the subtitle, and no rating
     // means no metadata line at all rather than an empty one.
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+      /^Season 1 · 9 episodes · 2023$/,
+    );
     expect(view.queryByTestId('title-meta')).toBeNull();
   });
 
@@ -610,7 +612,9 @@ describe('the identity line', () => {
     // count is said once, on the subtitle, in the order season · episodes · year.
     const view = await openOn(completeSeason, 'The Last of Us');
 
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 9 episodes · 2023$/);
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+      /^Season 1 · 9 episodes · 2023$/,
+    );
     expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/);
     expect(view.getByTestId('title-subtitle')).not.toHaveTextContent(/min/);
   });
@@ -644,9 +648,7 @@ describe('the identity line', () => {
     const view = await openOn(completeSeason, 'The Last of Us');
 
     await waitFor(() =>
-      expect(view.getByTestId('title-meta')).toHaveTextContent(
-        /^TV-MA · Craig Mazin$/,
-      ),
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA · Craig Mazin$/),
     );
   });
 
@@ -669,7 +671,12 @@ describe('the identity line', () => {
           cast: [],
           crew: [
             { id: 1, name: 'Ali Abbasi', job: 'Director', department: 'Directing' },
-            { id: 2, name: 'Carolyn Strauss', job: 'Executive Producer', department: 'Production' },
+            {
+              id: 2,
+              name: 'Carolyn Strauss',
+              job: 'Executive Producer',
+              department: 'Production',
+            },
           ],
         },
       },
@@ -677,9 +684,7 @@ describe('the identity line', () => {
 
     const view = await openOn(completeSeason, 'The Last of Us');
 
-    await waitFor(() =>
-      expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/),
-    );
+    await waitFor(() => expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/));
     // Neither stand-in. An executive producer is routinely a financier or a star with a
     // production deal, and an episode director directed one episode.
     expect(view.getByTestId('title-meta')).not.toHaveTextContent(/Ali Abbasi/);
@@ -723,7 +728,9 @@ describe('the identity line', () => {
         facet: 'credits',
         payload: {
           cast: [],
-          crew: [{ id: 1, name: 'Christopher Nolan', job: 'Director', department: 'Directing' }],
+          crew: [
+            { id: 1, name: 'Christopher Nolan', job: 'Director', department: 'Directing' },
+          ],
         },
       },
     ];
@@ -785,7 +792,13 @@ describe('the identity line', () => {
      * six — past `MIN_GENRE_SIZE` — where it is first.
      */
     tableRows.rankings = [
-      { user_id: 'user-1', media_item_id: 'film-1', position: 13, category: 'movies', bucket: 'loved' },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 13,
+        category: 'movies',
+        bucket: 'loved',
+      },
       ...Array.from({ length: 12 }, (_, index) => ({
         user_id: 'user-1',
         media_item_id: `drama-${index}`,
@@ -817,9 +830,7 @@ describe('the identity line', () => {
 
     // The watch date is there, so there *is* a context line to inspect — which is what
     // makes the absence of an ordinal a statement rather than an empty element.
-    await waitFor(() =>
-      expect(view.getByTestId('title-context')).toHaveTextContent(/Watched/),
-    );
+    await waitFor(() => expect(view.getByTestId('title-context')).toHaveTextContent(/Watched/));
     expect(view.getByTestId('title-context')).not.toHaveTextContent(/#\d+ in Science Fiction/);
     expect(view.getByTestId('title-context')).not.toHaveTextContent(/#\d+ in Action/);
     expect(view.getByTestId('title-context')).not.toHaveTextContent(/#13 in Movies/);
@@ -1006,7 +1017,7 @@ describe('the action group', () => {
   it('opens the log rather than a comparison for an unranked title', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
-    expect(view.getByText('Rank')).toBeTruthy();
+    expect(view.getByText('Rank Movie')).toBeTruthy();
     await fireEvent.press(view.getByTestId('title-action-rank'));
 
     // The bucket chooser, which is where a first ranking begins. Nothing is ranked yet,
@@ -1255,7 +1266,9 @@ describe('where the action row lives', () => {
 
     const below = view.getByTestId('title-actions-full-width');
     expect(within(below).getByTestId('title-actions')).toBeTruthy();
-    expect(within(view.getByTestId('title-identity-copy')).queryByTestId('title-actions')).toBeNull();
+    expect(
+      within(view.getByTestId('title-identity-copy')).queryByTestId('title-actions'),
+    ).toBeNull();
   });
 
   it('stays beside the poster on a standard 390pt phone', async () => {
@@ -1264,7 +1277,9 @@ describe('where the action row lives', () => {
     const view = await openOn(completeFilm, 'Inception');
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
 
-    expect(within(view.getByTestId('title-identity-copy')).getByTestId('title-actions')).toBeTruthy();
+    expect(
+      within(view.getByTestId('title-identity-copy')).getByTestId('title-actions'),
+    ).toBeTruthy();
     expect(view.queryByTestId('title-actions-full-width')).toBeNull();
   });
 
@@ -1370,7 +1385,9 @@ describe('where the action row lives', () => {
     await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
 
     const order = structure(view);
-    expect(order.indexOf('synopsis-column')).toBeGreaterThan(order.indexOf('title-poster-column'));
+    expect(order.indexOf('synopsis-column')).toBeGreaterThan(
+      order.indexOf('title-poster-column'),
+    );
     expect(order.indexOf('synopsis-column')).toBeGreaterThan(order.indexOf('title-actions'));
     expect(view.getByTestId('title-name').props.numberOfLines).toBe(2);
   });

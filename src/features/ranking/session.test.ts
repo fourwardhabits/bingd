@@ -88,6 +88,76 @@ describe('reading the server\u2019s answer', () => {
       activated: false,
       // No movement on a first ranking, and none from a backend that predates 20261004000100.
       movement: null,
+      // Neither is in the response above, which is a backend before 20261114000300: no
+      // link to offer Update Show with, and no show to offer it for.
+      placementId: null,
+      parent: null,
+    });
+  });
+
+  /**
+   * A season's reply names its show (20261114000300), read inside the placement's locks.
+   * It is what decides Update Show, so it is parsed strictly: a malformed value is no
+   * parent at all, which never offers the button.
+   */
+  it("carries the placement id and a season's show, ranked or not", async () => {
+    mockRpc.mockResolvedValue({
+      data: {
+        done: true,
+        position: 3,
+        category: 'tv_seasons',
+        bucket: 'loved',
+        score: 9.1,
+        adjustable: false,
+        placement_id: 'p-1',
+        parent: { media_item_id: 'show-1', ranked: true, bucket: 'fine' },
+      },
+      error: null,
+    });
+    const placed = await rankStart(subject, 'loved', op);
+    expect(placed).toMatchObject({
+      state: 'placed',
+      placementId: 'p-1',
+      parent: { mediaItemId: 'show-1', ranked: true, bucket: 'fine' },
+    });
+
+    mockRpc.mockResolvedValue({
+      data: {
+        done: true,
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+        score: 10,
+        parent: 'x',
+      },
+      error: null,
+    });
+    expect(await rankStart(subject, 'loved', op)).toMatchObject({
+      parent: null,
+      placementId: null,
+    });
+  });
+
+  it('sends the Update Show link only when there is one', async () => {
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: 's', pivot: 'p' },
+      error: null,
+    });
+
+    await rankAgain(subject, 'loved', op, false);
+    expect(mockRpc.mock.calls.at(-1)?.[1]).not.toHaveProperty('p_linked_placement_id');
+
+    await rankAgain(subject, 'loved', op, false, null, 'season-placement');
+    expect(mockRpc.mock.calls.at(-1)?.[1]).toMatchObject({
+      p_linked_placement_id: 'season-placement',
+      p_new_watch: false,
+    });
+
+    await rankRebucket(subject, 'fine', op);
+    expect(mockRpc.mock.calls.at(-1)?.[1]).not.toHaveProperty('p_linked_placement_id');
+    await rankRebucket(subject, 'fine', op, 'season-placement');
+    expect(mockRpc.mock.calls.at(-1)?.[1]).toMatchObject({
+      p_linked_placement_id: 'season-placement',
     });
   });
 
@@ -106,7 +176,10 @@ describe('reading the server\u2019s answer', () => {
       error: null,
     });
 
-    expect(await rankStart(subject, 'loved', op)).toMatchObject({ state: 'placed', activated: true });
+    expect(await rankStart(subject, 'loved', op)).toMatchObject({
+      state: 'placed',
+      activated: true,
+    });
   });
 
   it('carries the adjustable flag rather than inferring it', async () => {
@@ -194,19 +267,31 @@ describe('rankCancel', () => {
   it('treats an already-gone session as success', async () => {
     // Closing the sheet twice, or closing one the server already finalised, is not an
     // error the user should be shown.
-    mockRpc.mockResolvedValue({ data: null, error: { code: 'P0002', message: 'no such session' } });
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: 'P0002', message: 'no such session' },
+    });
     expect(await rankCancel(session)).toEqual({ state: 'ended' });
   });
 
   it('reports a real failure', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { code: '08006', message: 'connection lost' } });
-    expect(await rankCancel(session)).toMatchObject({ state: 'failed', message: 'connection lost' });
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '08006', message: 'connection lost' },
+    });
+    expect(await rankCancel(session)).toMatchObject({
+      state: 'failed',
+      message: 'connection lost',
+    });
   });
 });
 
 describe('arguments', () => {
   it('translates the bucket name the UI uses', async () => {
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
     await rankStart(subject, 'notForMe', op);
 
     expect(mockRpc).toHaveBeenCalledWith('rank_start', {
@@ -219,7 +304,10 @@ describe('arguments', () => {
   it('sends the winner as the winner, not as the subject', async () => {
     // Getting these two the wrong way round would silently invert every comparison, and
     // the ranking would still look plausible.
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
     await rankAnswer(session, pivot, subject, op);
 
     expect(mockRpc).toHaveBeenCalledWith('rank_answer', {
@@ -237,7 +325,10 @@ describe('arguments', () => {
     // calling the wrong one is invisible to every other test here. rankBack reaching
     // rank_cancel would end the session instead of stepping back a comparison, which the
     // user would read as the app losing their answers (PRD §26.3.9).
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
     await fn(session, subject, op);
 
     expect(mockRpc).toHaveBeenCalledWith(rpc, { p_session_id: session, p_operation_id: op });
@@ -266,7 +357,10 @@ describe('arguments', () => {
     ['rankSkip', () => rankSkip(session, subject, op)],
     ['rankBack', () => rankBack(session, subject, op)],
   ] as const)('sends an operation id from %s', async (_name, run) => {
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
     await run();
 
     const [, args] = mockRpc.mock.calls[0] as [string, Record<string, unknown>];
@@ -280,7 +374,10 @@ describe('an already ranked title', () => {
     // reaches the screen (api.md §8 maps it to BG409).
     mockRpc.mockResolvedValue({
       data: null,
-      error: { code: '23505', message: 'title is already ranked; use rank_rebucket to move it' },
+      error: {
+        code: '23505',
+        message: 'title is already ranked; use rank_rebucket to move it',
+      },
     });
 
     const result = await rankStart(subject, 'loved', op);
@@ -372,7 +469,10 @@ describe('ranking a title again in the same bucket', () => {
   });
 
   it('carries a not-for-me bucket through unchanged', async () => {
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
     await rankAgain(subject, 'notForMe', op, true);
 
     // The client's own vocabulary is camelCase and the database's is snake_case, and the
@@ -399,7 +499,10 @@ describe('ranking a title again in the same bucket', () => {
    * the second one post a duplicate every time, which is what this flag is for.
    */
   it('says whether the placement is another watch or a correction', async () => {
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
 
     await rankAgain(subject, 'loved', op, false);
     expect(mockRpc).toHaveBeenCalledWith(
@@ -442,7 +545,10 @@ describe('ranking a title again in the same bucket', () => {
     // The client used to absorb a P0002 from its own `rank_unrank` here, because "not
     // ranked" is the state this call was reaching for. The server takes the same reading
     // now, so an unranked title simply opens a session and there is nothing to absorb.
-    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    mockRpc.mockResolvedValue({
+      data: { done: false, session_id: session, pivot },
+      error: null,
+    });
 
     expect(await rankAgain(subject, 'loved', op, true)).toMatchObject({ state: 'comparing' });
     expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_again']);

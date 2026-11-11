@@ -315,8 +315,9 @@ describe('the four metrics, in the order the chips draw them', () => {
   });
 
   it('never counts a series row, which is not loggable at all', async () => {
-    // PRD §10: a series is browsed, not watched. It cannot be ranked, and a catalogue
-    // row of the wrong kind must not reach a total through a direct write.
+    // The board counts films and seasons. A whole show is loggable and rankable since
+    // 20261114000200, but counting its log beside its seasons' would count one series
+    // twice, so a series row still never reaches a total.
     const show = await t.createSeries('Whole Show', seq++);
     await watch(alice, show, thisMonth(2));
     assert.deepEqual(names(await board(alice, 'titles')), []);

@@ -41,6 +41,7 @@ import {
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { batchMedium } from '@/features/ranking/RankedSummary';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
@@ -545,14 +546,11 @@ export default function FeedScreen() {
    * sheet sends to a named friend *and* ends in "Share off Bingd", so the off-platform
    * path survives one tap further in.
    *
-   * A series is not offered, for the same reason it cannot be ranked (PRD §10). That
-   * guard used to be theoretical — every feed event was a ranking or a log, and neither
-   * can name a series. `watchlist_added` can: `set_watchlist` is the one collection
-   * write that accepts a whole show, so "Suraj added Severance to their watchlist" is a
-   * real row and the guard is now load-bearing rather than defensive.
+   * A whole show is offered too since 2026-11-14: it is rankable in its own pool, and
+   * `recommend_title` resolves it the same way it resolves a film or a season.
    */
   const openRecommend = (event: FeedItem) => {
-    if (!event.mediaItemId || event.kind === 'series') return;
+    if (!event.mediaItemId) return;
     setRecommendedTo(null);
     setRecommending(event);
   };
@@ -950,7 +948,7 @@ export default function FeedScreen() {
                         ? undefined
                         : () => router.push(`/u/${event.actorUsername}`)
                     }
-                    verb={verbFor(event.type)}
+                    verb={verbFor(event.type, event)}
                     tail={tailFor(event.type, event.title)}
                     tailAction={
                       event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
@@ -960,7 +958,7 @@ export default function FeedScreen() {
                             onPress: () =>
                               setRankingBatchFor({
                                 id: event.id,
-                                medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                                medium: batchMedium(event.kind),
                               }),
                           }
                         : null
@@ -999,7 +997,7 @@ export default function FeedScreen() {
                         : undefined
                     }
                     saved={saved.has(event.mediaItemId!)}
-                    onPressShare={event.kind !== 'series' ? () => openRecommend(event) : undefined}
+                    onPressShare={() => openRecommend(event)}
                   />
                 ) : (
                 <ActivityRow
@@ -1013,7 +1011,7 @@ export default function FeedScreen() {
                       ? undefined
                       : () => router.push(`/u/${event.actorUsername}`)
                   }
-                  verb={verbFor(event.type)}
+                  verb={verbFor(event.type, event)}
                   tail={tailFor(event.type, event.title)}
                   /* A grouped sitting reads "ranked Sheroes and 2 more": the connector
                      is ordinary ink so the eye finds the break after the title, and the
@@ -1026,7 +1024,7 @@ export default function FeedScreen() {
                           onPress: () =>
                             setRankingBatchFor({
                               id: event.id,
-                              medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                              medium: batchMedium(event.kind),
                             }),
                         }
                       : null
@@ -1116,11 +1114,7 @@ export default function FeedScreen() {
                       : undefined
                   }
                   inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
-                  onPressRecommend={
-                    event.mediaItemId && event.kind !== 'series'
-                      ? () => openRecommend(event)
-                      : undefined
-                  }
+                  onPressRecommend={event.mediaItemId ? () => openRecommend(event) : undefined}
                   reaction={reactionFor(event.id, event.actorId)}
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}

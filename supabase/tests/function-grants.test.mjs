@@ -153,7 +153,11 @@ const ALLOWED = {
   // the one hole that makes a placement history untrustworthy. It has never had a
   // caller, and a drag-to-reorder UI is an explicit non-goal (epic §Q). Granting it back
   // means teaching it to write a `manual` placement first (§E.1).
-  'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
+  //
+  // 20261114000300 added a trailing `p_linked_placement_id` (default null) to both
+  // correction RPCs, for Update Show, and dropped the old forms rather than overloading
+  // them, for the same ambiguity rule. Every installed call resolves here unchanged.
+  'rank_rebucket(uuid,taste_bucket,uuid,uuid)': ['authenticated'],
   // New in 20260825000200, and re-signed in 20260826000500. The same-band re-rank the
   // client used to perform as an unrank followed by a start. It no longer unranks at
   // all: the session runs over the position the title already has, and only a completed
@@ -168,7 +172,7 @@ const ALLOWED = {
   // an installed client's four-argument call resolves here unchanged; a new client
   // passes the watch event it has just logged, and the placement links to that viewing
   // so the re-check enriches one feed activity instead of posting a second (§K).
-  'rank_again(uuid,taste_bucket,uuid,boolean,uuid)': ['authenticated'],
+  'rank_again(uuid,taste_bucket,uuid,boolean,uuid,uuid)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:

@@ -788,7 +788,7 @@ where it comes from.
 
 | Property | Values |
 |---|---|
-| `media_kind` | `movie`, `tv_season` |
+| `media_kind` | `movie`, `tv_season`, `tv_series` (a whole show, ranked in its own pool since 2026-11-14) |
 | `surface` | `search`, `collection`, `feed`, `for_you`, `sent_to_you`, `profile`, `title`, `onboarding`, `awards`, `notifications` |
 | `bucket` | `loved`, `fine`, `not_for_me` |
 | `method` | `email_code`, `apple`, `google` |

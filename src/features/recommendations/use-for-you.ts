@@ -36,6 +36,7 @@ import {
   candidateIdsFrom,
   selectAnchors,
   seriesAlreadyMet,
+  seriesUnitWeights,
   socialSeriesFrom,
   type LikedTitle,
 } from './anchors';
@@ -285,28 +286,46 @@ export function likedFrom(
    * reader who picked Comedy would find their anchors had all become equally weak,
    * for no reason they did anything to cause.
    */
-  const sizes = bandSizes(ranked);
+  //
+  // **Per pool** (2026-11-14): on TV the list is the seasons and the whole shows, two
+  // rankings with their own bands, so each entry is scored against its own.
+  const sizesBy = new Map<string, ReturnType<typeof bandSizes>>();
+  for (const category of new Set(ranked.map((entry) => entry.category))) {
+    sizesBy.set(category, bandSizes(ranked.filter((entry) => entry.category === category)));
+  }
   const seen = new Set<string>();
   const anchors: LikedTitle[] = [];
 
   for (const entry of anchorScope(ranked, filters)) {
     if (entry.bucket !== 'loved') continue;
-    const id = medium === 'tv' ? entry.seriesId : entry.mediaItemId;
+    // On TV the anchor is the show: a season's parent, or a whole show ranked in its own
+    // right. One anchor per show, however many of its seasons are loved.
+    const id =
+      medium === 'tv'
+        ? entry.kind === 'series'
+          ? entry.mediaItemId
+          : entry.seriesId
+        : entry.mediaItemId;
     // A ranked season whose parent did not come back is skipped rather than anchored
     // on the season itself, which TMDB cannot answer about.
     if (!id || seen.has(id)) continue;
     seen.add(id);
     anchors.push({
       mediaItemId: id,
-      title: medium === 'tv' ? (entry.seriesTitle ?? entry.title) : entry.title,
-      score: scoreFor(entry.bucket, entry.position, sizes),
+      title:
+        medium === 'tv' && entry.kind !== 'series'
+          ? (entry.seriesTitle ?? entry.title)
+          : entry.title,
+      score: scoreFor(entry.bucket, entry.position, sizesBy.get(entry.category) ?? bandSizes([])),
       // A season's genres are its show's (`resolveMetadata`), so a TV anchor covers what
       // the show covers.
       genres: entry.genres,
     });
   }
 
-  return anchors;
+  // Best first across both TV pools, by the score each anchor carries; the sort is
+  // stable, so each pool keeps its own order. Movies arrive in position order already.
+  return medium === 'tv' ? anchors.sort((a, b) => b.score - a.score) : anchors;
 }
 
 /**
@@ -432,12 +451,13 @@ async function socialCandidates(medium: Medium): Promise<string[]> {
   const ids = (data as { media_item_id: string }[]).map((row) => row.media_item_id);
   if (medium !== 'tv' || ids.length === 0) return ids;
 
-  // A followee's TV ranking is a season; the TV wall is series. See `socialSeriesFrom`.
+  // A followee's TV ranking is a season or (2026-11-14) a whole show; the TV wall is
+  // series. See `socialSeriesFrom`.
   const { data: rows, error: rowsError } = await supabase
     .from('media_items')
     .select('id, kind, parent_id')
     .in('id', ids)
-    .eq('kind', 'season');
+    .in('kind', ['season', 'series']);
   if (rowsError || !rows) return [];
   return socialSeriesFrom(
     ids,
@@ -628,6 +648,11 @@ export function useForYou(
   // evidence behind every genre for no reason anybody could state.
   const movies = useRankedCollection(userId, 'movies');
   const seasons = useRankedCollection(userId, 'tv_seasons');
+  /**
+   * Whole shows (20261114000100): a signal of their own beside the seasons, never a fake
+   * season and never derived from one. Fails open: a failed read is no shows, not no wall.
+   */
+  const shows = useRankedCollection(userId, 'tv_shows');
 
   // Read through its own hook rather than inside the query, so it is an *input* with a
   // key of its own rather than a hidden read inside a cached result. Already cached and
@@ -704,13 +729,21 @@ export function useForYou(
   // The liked band only. Which of it anchors this launch is decided in the queryFn
   // (`selectAnchors`), because the selection prefers titles whose lists are already cached
   // and only the query can know that.
-  const liked = ranked.data ? likedFrom(ranked.data, medium, filters) : [];
+  const liked = ranked.data
+    ? likedFrom(
+        medium === 'tv' ? [...ranked.data, ...(shows.data ?? [])] : ranked.data,
+        medium,
+        filters,
+      )
+    : [];
   const likedCount = liked.length;
   /** Fixed per process: a cold launch draws new anchors; a render, refetch or Refresh does not. */
   const anchorSeed = recommendationAnchorSeed();
   /** The shows already met, for the TV wall. Empty on Movies, where ids already match. */
   const metSeries =
-    medium === 'tv' ? seriesAlreadyMet(logged.data?.entries, seasons.data) : new Set<string>();
+    medium === 'tv'
+      ? seriesAlreadyMet(logged.data?.entries, seasons.data, shows.data)
+      : new Set<string>();
 
   /**
    * Everything the *viewer* controls that changes this slate, as one string.
@@ -746,7 +779,7 @@ export function useForYou(
    * comfortably inside them. Nothing the person using the app can do falls in that gap.
    */
   const inputs = [
-    rankingFingerprint(movies.data ?? [], seasons.data ?? []),
+    rankingFingerprint(movies.data ?? [], seasons.data ?? [], shows.data ?? []),
     setFingerprint(watched.data ?? []),
     /**
      * **This launch's anchor seed** (2026-09-13). The rankings above no longer decide the
@@ -797,6 +830,7 @@ export function useForYou(
       Boolean(userId) &&
       movies.isSuccess &&
       seasons.isSuccess &&
+      !shows.isPending &&
       watched.isSuccess &&
       (medium !== 'tv' || logged.isSuccess) &&
       !dismissed.isPending,
@@ -863,15 +897,26 @@ export function useForYou(
       [drawSeed, arrangementStart, shownAt, refreshedAway, dismissed.data, exposure.data, pages],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
+      // Films, seasons and whole shows, each scored against its own pool's bands, and the
+      // rows of one series sharing one unit of influence (`seriesUnitWeights`).
+      const pools = {
+        movies: movies.data ?? [],
+        tv_seasons: seasons.data ?? [],
+        tv_shows: shows.data ?? [],
+      };
+      const sizes = {
+        movies: bandSizes(pools.movies),
+        tv_seasons: bandSizes(pools.tv_seasons),
+        tv_shows: bandSizes(pools.tv_shows),
+      };
+      const signals = [...pools.movies, ...pools.tv_seasons, ...pools.tv_shows];
+      const weights = seriesUnitWeights(signals);
       const taste = tasteFrom(
-        [...(movies.data ?? []), ...(seasons.data ?? [])].map((entry) => ({
-          score: scoreFor(
-            entry.bucket,
-            entry.position,
-            bandSizes(entry.category === 'movies' ? (movies.data ?? []) : (seasons.data ?? [])),
-          ),
+        signals.map((entry) => ({
+          score: scoreFor(entry.bucket, entry.position, sizes[entry.category]),
           genres: entry.genres,
           language: entry.language,
+          weight: weights.get(entry.mediaItemId) ?? 1,
         })),
       );
 

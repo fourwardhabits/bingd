@@ -264,7 +264,7 @@ export default function ActivityScreen() {
                 ? undefined
                 : () => router.push(`/u/${event.actorUsername}`)
             }
-            verb={verbFor(event.type)}
+            verb={verbFor(event.type, event)}
             tail={tailFor(event.type, event.title)}
             companions={event.companions}
             title={event.title}

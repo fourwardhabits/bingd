@@ -132,7 +132,42 @@ export type LoggedEntry = {
   addedAt: string | null;
 };
 
-export type RankingCategory = 'movies' | 'tv_seasons';
+/**
+ * The three independent comparison pools (20261114000100): films, whole shows and single
+ * seasons. Each has its own positions, bands and scores, and nothing is ever derived from
+ * one for another; in particular a show's score is never computed from its seasons.
+ */
+export type RankingCategory = 'movies' | 'tv_seasons' | 'tv_shows';
+
+/**
+ * A Collection medium: what the Movies | TV switch chooses. **TV is two rankings**,
+ * `tv_seasons` and `tv_shows`, drawn together under Candidate A's precedence
+ * (`watched-rows.ts`). The TV medium keeps the key `tv_seasons` it has always had, so a
+ * stored preference, a `?medium=` link and the backlog keep working.
+ */
+export type CollectionMedium = 'movies' | 'tv_seasons';
+
+/**
+ * How a ranking is named in a sentence: `#2 in TV shows`. While TV was one pool it was
+ * just "TV"; with two, a bare "TV" would not say which list the number counts in.
+ */
+export const CATEGORY_NAME: Record<RankingCategory, string> = {
+  movies: 'Movies',
+  tv_seasons: 'TV seasons',
+  tv_shows: 'TV shows',
+};
+
+/** The rankings a Collection medium draws. */
+export const categoriesOf = (medium: CollectionMedium): RankingCategory[] =>
+  medium === 'movies' ? ['movies'] : ['tv_seasons', 'tv_shows'];
+
+/** The ranking a title of this kind is placed in. */
+export const categoryOfKind = (kind: 'movie' | 'season' | 'series'): RankingCategory =>
+  kind === 'movie' ? 'movies' : kind === 'season' ? 'tv_seasons' : 'tv_shows';
+
+/** A server category, narrowed: anything unrecognised reads as `movies`, as before. */
+export const asRankingCategory = (value: unknown): RankingCategory =>
+  value === 'tv_seasons' || value === 'tv_shows' ? value : 'movies';
 
 const yearOf = (date: string | null) => (date ? Number(date.slice(0, 4)) : null);
 
@@ -274,9 +309,12 @@ export async function readRankedCollection(
  * (PRD §5) — and two independently cached fetches produce a pair of numbers that disagree
  * for a moment every time either one lands.
  */
-export function useLoggedCollection(userId: string) {
+export function useLoggedCollection(userId: string, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.collection(userId),
+    // Optional, default on: every existing caller is unchanged. The series page asks only
+    // on a series, where its season rows need each season's unfinished-placement bucket.
+    enabled: enabled && Boolean(userId),
     queryFn: async () => {
       const [logged, ranked] = await Promise.all([
         readAllByKey<any>(

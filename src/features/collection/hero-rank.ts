@@ -1,5 +1,5 @@
 import { genreRanksFor, MIN_GENRE_SIZE, TOP_RANK_SHOWN, type RankedRow } from './genre-rank';
-import type { RankingCategory } from './use-collection';
+import { CATEGORY_NAME, type RankingCategory } from './use-collection';
 
 /**
  * The hero consults the overall ranking and the genre ranking, and nothing else.
@@ -17,12 +17,8 @@ export type HeroRank = {
   basis: 'overall' | 'genre';
 };
 
-/** How the two ranked lists are named in a sentence. "TV" is the visible category
- *  everywhere; the ranked objects behind `#2 in TV` are still individual seasons. */
-const CATEGORY_LABEL: Record<RankingCategory, string> = {
-  movies: 'Movies',
-  tv_seasons: 'TV',
-};
+/** How the three ranked lists are named in a sentence (`CATEGORY_NAME`). */
+const CATEGORY_LABEL: Record<RankingCategory, string> = CATEGORY_NAME;
 
 /**
  * Above this, a placement stops being a statement about the title.

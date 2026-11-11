@@ -285,11 +285,13 @@ describe('I5: a replayed ranking mutation applies exactly once', () => {
     // The claim rolls back with everything else, which is what makes a refusal
     // retryable. Anything else would turn one bad request into a permanently poisoned
     // operation id.
-    const series = await t.createSeries('Unrankable', (seq += 1) + 90000);
+    // A title that does not exist is the guaranteed refusal. (A whole series was, until
+    // 20261114000200 made a show rankable in its own pool.)
+    const missing = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
     const id = await op();
 
-    const refused = await t.errorFrom(`select rank_start($1, 'loved', $2)`, [series, id]);
-    assert.equal(refused?.code, '22023', 'a series cannot be ranked');
+    const refused = await t.errorFrom(`select rank_start($1, 'loved', $2)`, [missing, id]);
+    assert.equal(refused?.code, 'P0002', 'an unknown title cannot be ranked');
 
     const film = await movie('After a refusal');
     const ok = await one(t.db, `select rank_start($1, 'loved', $2) as r`, [film, id]);
@@ -459,9 +461,8 @@ describe('I6: Rank Again is one transaction', () => {
    * be committed and the start refused, leaving the title logged and unranked with
    * nobody having asked for that.
    *
-   * A series cannot be ranked in the first place, so it is used here only as a
-   * guaranteed failure at the right point in the body. What is being asserted is the
-   * rollback, not the refusal.
+   * (This used a series as the guaranteed failure until 20261114000200 made a show
+   * rankable.) What is being asserted is the rollback, not the refusal.
    */
   it('leaves the old position standing when the fresh session cannot be opened', async () => {
     const film = await movie('Atomic rank again');
@@ -720,14 +721,18 @@ describe('TV-1: ranking a season is the watch claim', () => {
     assert.equal((await collectionRow(item)).bucket, 'fine');
   });
 
-  it('still refuses to rank a whole series', async () => {
-    // The one TV rule that is real and stays real: PRD §10 makes the season the unit,
-    // because "I watched this show" is ambiguous about which of it.
+  it('ranks a whole show in its own pool, apart from its seasons', async () => {
+    // Reversed by the founder on 2026-11-11 (20261114000200): a show is rankable, as an
+    // independent `tv_shows` ranking. Ranking it claims nothing about any season.
     const series = await t.createSeries('Whole show', (seq += 1) + 90000);
-    const error = await t.errorFrom(`select rank_start($1, 'loved')`, [series]);
+    const item = await t.createSeason(series, 1, 'Season 1');
+    const r = await one(t.db, `select rank_start($1, 'loved') as r`, [series]);
 
-    assert.equal(error?.code, '22023');
-    assert.match(error.message, /series cannot be ranked/);
+    assert.equal(r.done, true);
+    assert.equal(r.category, 'tv_shows');
+    assert.equal((await collectionRow(series)).bucket, 'loved');
+    assert.equal(await collectionRow(item), null, 'no season is logged by ranking its show');
+    await t.assertValid(user, 'tv_shows');
   });
 
   it('ranks a season that is marked watching rather than completed', async () => {

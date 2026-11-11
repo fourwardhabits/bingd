@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { batchMedium } from '@/features/ranking/RankedSummary';
 import { useCurrentProfile } from '@/features/auth';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
@@ -249,6 +250,7 @@ export default function ProfileScreen() {
     void queryClient.refetchQueries({ queryKey: queryKeys.goals(profile.id, currentYear()) });
     void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'movies') });
     void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'tv_seasons') });
+    void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'tv_shows') });
   };
 
   return (
@@ -528,7 +530,7 @@ export default function ProfileScreen() {
                         onPress: () =>
                           setRankingBatchFor({
                             id: event.id,
-                            medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                            medium: batchMedium(event.kind),
                           }),
                       }
                     : null

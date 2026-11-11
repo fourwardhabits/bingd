@@ -3,7 +3,7 @@ import { Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-n
 
 import { newOperationId } from '@/features/collection/writes';
 import { PeoplePicker } from '@/features/people/PeoplePicker';
-import { track, type Surface } from '@/lib/analytics';
+import { mediaKindFor, track, type Surface } from '@/lib/analytics';
 import { compactName, type MediaKind } from '@/lib/titles';
 import { Button, EmptyState, Sheet, Text } from '@/ui/components';
 import { inputText, theme } from '@/ui/tokens';
@@ -220,7 +220,7 @@ export function RecommendSheet({
         track({
           name: 'recommendation_sent',
           props: {
-            media_kind: kind === 'season' ? 'tv_season' : 'movie',
+            media_kind: mediaKindFor(kind),
             surface,
             // Whether, never what: the note's text is not an analytics property.
             has_note: normaliseNote(note) !== null,

@@ -3,6 +3,7 @@ import type { SortAxisSpec, SortState } from '@/ui/sort';
 import { ANIME_GENRE as PRODUCT_ANIME_GENRE, isAnimeLabels } from '@/lib/media-metadata';
 
 import type { Bucket } from './score';
+import type { RankingCategory } from './use-collection';
 
 /**
  * One row of a collection, whichever surface is showing it.
@@ -38,6 +39,12 @@ export type CollectionItem = {
    * Watched list has a ranking to read it from.
    */
   position?: number | null;
+  /**
+   * Which ranking `position` counts in, for a ranked row (20261114000100). On TV a
+   * show's ordinal and a season's are in two different pools and say nothing about each
+   * other, so the Rating order compares two ordinals only when this matches.
+   */
+  category?: RankingCategory | null;
   bucket: Bucket | null;
   /**
    * A bucket chosen in bingd and no completed placement — internal only; never drawn
@@ -606,6 +613,11 @@ export const offersRuntime = (items: readonly Pick<CollectionItem, 'kind'>[]): b
  * comes *before* the direction rather than inside it, which is the rule
  * `RankedTitlesSheet.compareBySort` already states for undated rows.
  */
+/** A fixed order between pools, for the one tie the ordinal cannot break. */
+const POOL_ORDER: Record<RankingCategory, number> = { movies: 0, tv_seasons: 1, tv_shows: 2 };
+const poolOrder = (category: RankingCategory | null | undefined) =>
+  category ? POOL_ORDER[category] : 3;
+
 export function compareItems(sort: CollectionSortState) {
   const flip = sort.direction === 'desc' ? -1 : 1;
 
@@ -621,9 +633,18 @@ export function compareItems(sort: CollectionSortState) {
         // score's own direction — a better (smaller) position is the higher score — so the
         // title the reader picked stays above the one they picked it over. The id is only
         // for rows with no ordinal to compare.
+        //
+        // **Only within one pool** (TV show & season ranking, 2026-11-14). A show's #3 and
+        // a season's #3 are two different lists, so an equal score between a show and a
+        // season is broken by a fixed pool order and then the id: deterministic, and it
+        // never presents the two rankings as one comparison.
+        const samePool = (a.category ?? null) === (b.category ?? null);
         const byOrdinal =
-          a.position != null && b.position != null ? (b.position - a.position) * flip : 0;
-        return (a.score - b.score) * flip || byOrdinal || byId;
+          samePool && a.position != null && b.position != null
+            ? (b.position - a.position) * flip
+            : 0;
+        const byPool = samePool ? 0 : poolOrder(a.category) - poolOrder(b.category);
+        return (a.score - b.score) * flip || byOrdinal || byPool || byId;
       }
       /**
        * **The latest watch, with undated titles beneath the dated ones.**
