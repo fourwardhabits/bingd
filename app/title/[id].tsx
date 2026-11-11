@@ -1389,6 +1389,12 @@ export default function TitleScreen() {
    * sheet, so there is nothing to serialise against.
    */
   const openRewatch = () => {
+    // Only from a closed sheet. While it is still sliding away after a band was chosen
+    // (`leaving`, iOS), a press that reached this button would present the sheet again
+    // mid-dismissal and drop the re-check that `onDismissed` is about to open. UIKit
+    // normally ignores touches during the transition; this does not rely on it
+    // (independent review, 2026-11-11). The ⋯ row is behind the menu, so never met it.
+    if (rewatchPhase !== 'closed') return;
     setActionError(null);
     setRewatchPhase('open');
   };
