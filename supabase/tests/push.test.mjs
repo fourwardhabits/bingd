@@ -1060,6 +1060,7 @@ describe('deleting an account takes its push state with it', () => {
 describe('claim_push_batch carries the comment, when it may', () => {
   let movie;
   let event;
+  let nextTmdb = 70000;
 
   const eventOf = async (who, mediaItemId) => {
     const { rows } = await t.sql(
@@ -1086,7 +1087,7 @@ describe('claim_push_batch carries the comment, when it may', () => {
     await clearTokens();
     await t.sql(`delete from notifications`);
     await register(reader, TOKEN(70), 'ios');
-    movie = await t.createMovie(`Excerpted ${Date.now()}`, 70000 + Math.floor(Math.random() * 1000));
+    movie = await t.createMovie(`Excerpted ${Date.now()}`, nextTmdb++);
     event = await eventOf(reader, movie);
   });
 
