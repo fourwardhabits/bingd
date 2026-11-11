@@ -1110,11 +1110,12 @@ describe('Edit ranking with unsaved watch edits', () => {
   it.each(['nothing pending', 'Discard', 'Save'] as const)(
     'flushes a typed note before the ranking opens (%s)',
     async (path) => {
-      const order: string[] = [];
-      mockSaveNote.mockImplementationOnce((_input: unknown) => {
-        order.push('note');
-        return Promise.resolve({ outcome: 'ok', noteVersion: '2026-11-11T00:00:00Z' });
-      });
+      // The note write is held open, so the test can see whether the sheet waits for it.
+      let noteLands!: (value: { outcome: string; noteVersion: string }) => void;
+      mockSaveNote.mockImplementationOnce(
+        (_input: unknown) =>
+          new Promise<{ outcome: string; noteVersion: string }>((resolve) => (noteLands = resolve)),
+      );
       const view =
         path === 'nothing pending'
           ? await renderWithProviders(<WatchHistoryScreen />)
@@ -1124,10 +1125,16 @@ describe('Edit ranking with unsaved watch edits', () => {
       await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), `Note: ${path}`);
       await pressEditRanking(view);
       if (path !== 'nothing pending') await confirm().press(path);
+      await waitFor(() =>
+        expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ note: `Note: ${path}` })),
+      );
+      // While the note is still being written, the ranking has not opened over it.
+      expect(mockLogSheet.props?.title ?? null).toBeNull();
+      await act(async () => {
+        noteLands({ outcome: 'ok', noteVersion: '2026-11-11T00:00:00Z' });
+      });
       await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
-      order.push('ranking');
-      expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ note: `Note: ${path}` }));
-      expect(order).toEqual(['note', 'ranking']);
+      expect(mockSaveNote).toHaveBeenCalledTimes(1);
     },
   );
 
