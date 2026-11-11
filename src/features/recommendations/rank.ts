@@ -512,7 +512,8 @@ export type EngineWeights = {
 export const ENGINES: Record<EngineId, { version: string; weights: EngineWeights }> = {
   v1: { version: CONFIG_VERSION, weights: { ...WEIGHTS, era: 0, collaborative: 0 } },
   v2_metadata: {
-    version: 'foryou-v2-metadata-2026-11-10',
+    // 2026-11-11: a disliked genre lowers a multi-genre title (independent review).
+    version: 'foryou-v2-metadata-2026-11-11',
     weights: { anchor: 0.56, genre: 0.17, language: 0.11, era: 0.07, popularity: 0.09, collaborative: 0 },
   },
   /**
@@ -521,7 +522,8 @@ export const ENGINES: Record<EngineId, { version: string; weights: EngineWeights
    * sensitivity sweep reports how ordering moves across 0.05–0.35 on synthetic readers.
    */
   v2_hybrid: {
-    version: 'foryou-v2-hybrid-2026-11-10',
+    // 2026-11-11: A1's genre rule, and neighbours' dislikes lower a title (review).
+    version: 'foryou-v2-hybrid-2026-11-11',
     weights: { anchor: 0.48, genre: 0.14, language: 0.09, era: 0.06, popularity: 0.08, collaborative: 0.15 },
   },
 };
@@ -536,7 +538,8 @@ export const COLLABORATIVE_FULL = 0.5;
 export const COLLABORATIVE_NAMED_AT = 3;
 
 export function engineFrom(value: unknown): EngineId {
-  return typeof value === 'string' && value in ENGINES ? (value as EngineId) : 'v1';
+  // Own keys only: `'toString' in ENGINES` is true.
+  return typeof value === 'string' && Object.hasOwn(ENGINES, value) ? (value as EngineId) : 'v1';
 }
 
 /**
@@ -563,12 +566,19 @@ export function scoreCandidateV2(
   const breadth = 1 + 0.25 * Math.min(3, Math.max(0, hits.length - 1));
   const anchorSignal = saturate(raw * breadth);
 
+  // The best genre carries interest, as in V1; the worst genre's distance *below* neutral
+  // is taken off it, one for one. Without the second half a disliked genre would count
+  // only on titles where every genre is disliked — a Horror-Thriller would score exactly
+  // like a Western for a reader who keeps putting horror in Not for me (independent
+  // review, 2026-11-11). A title is never excluded by it: the term bottoms out at zero.
   let genre: Explanation['genre'] = null;
+  let worst: number = NEUTRAL.genre;
   for (const name of candidate.genres) {
     const affinity = genreAffinity(profile, name);
     if (affinity > (genre?.affinity ?? -1)) genre = { genre: name, affinity };
+    if (affinity < worst) worst = affinity;
   }
-  const genreValue = genre?.affinity ?? NEUTRAL.genre;
+  const genreValue = Math.max(0, (genre?.affinity ?? NEUTRAL.genre) - (NEUTRAL.genre - worst));
 
   const languageValue = languageAffinity(profile, candidate.language);
   const kind = candidate.kind === 'movie' ? 'movie' : 'series';

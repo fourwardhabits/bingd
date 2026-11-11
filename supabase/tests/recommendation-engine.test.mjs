@@ -87,6 +87,7 @@ beforeEach(async () => {
   await setConfig('recommendations.v2_engine', 'v1');
   await setConfig('recommendations.v2_rollout_percent', 0);
   await setConfig('recommendations.v2_allowlist', []);
+  await setConfig('recommendations.v2_allowlist_engine', null);
 });
 
 describe('the engine switch', () => {
@@ -98,6 +99,7 @@ describe('the engine switch', () => {
       rows.map((row) => [row.key, row.value]),
       [
         ['recommendations.v2_allowlist', []],
+        ['recommendations.v2_allowlist_engine', null],
         ['recommendations.v2_engine', 'v1'],
         ['recommendations.v2_rollout_percent', 0],
       ],
@@ -139,6 +141,24 @@ describe('the engine switch', () => {
     await setConfig('recommendations.v2_engine', 'v1');
     assert.equal(await engineFor(reader), 'v1');
     assert.equal(await engineFor(other), 'v1');
+  });
+
+  it('gives the allowlist its own engine when one is set, and the cohort keeps v2_engine', async () => {
+    // The override names an engine this schema knows; anything else falls back to v2_engine.
+    await enableFor(reader);
+    await setConfig('recommendations.v2_rollout_percent', 100);
+    await setConfig('recommendations.v2_allowlist_engine', 'v2_metadata');
+    assert.equal(await engineFor(reader), 'v2_metadata');
+    await setConfig('recommendations.v2_allowlist_engine', 'v9_experimental');
+    assert.equal(await engineFor(reader), 'v2_metadata');
+    assert.equal(await engineFor(other), 'v2_metadata');
+  });
+
+  it('keeps v2_engine as the master switch: v1 there is v1 for the allowlist too', async () => {
+    await enableFor(reader);
+    await setConfig('recommendations.v2_allowlist_engine', 'v2_metadata');
+    await setConfig('recommendations.v2_engine', 'v1');
+    assert.equal(await engineFor(reader), 'v1');
   });
 
   it('ignores a malformed percentage and allowlist rather than failing open', async () => {
@@ -260,6 +280,33 @@ describe('catalogue_candidates', () => {
       const year = Number(String(row.release_date instanceof Date ? row.release_date.toISOString() : row.release_date).slice(0, 4));
       assert.ok(year >= 1950 && year < 1960, `got ${year}`);
       assert.equal(row.source, 'era:1950');
+    }
+  });
+
+  it('reads a decade window as one ordered index range, not a sort of the decade', async () => {
+    // The plan of the window's own query shape. Seq and bitmap scans are switched off so the
+    // small fixture table cannot hide the question: can the index hand back a decade in
+    // popularity order? Before 20261111000100 used a decade expression it could not, and
+    // every call sorted the whole decade (independent review, 2026-11-11).
+    await t.actAs(null);
+    await t.sql(`set enable_seqscan = off`);
+    await t.sql(`set enable_bitmapscan = off`);
+    try {
+      const { rows } = await t.sql(
+        `explain (format json)
+         select mi.id from media_items mi
+          where mi.kind = 'movie' and mi.poster_path is not null
+            and ((extract(year from mi.release_date)::integer / 10) * 10) = 1970
+            and mi.release_date <= current_date
+          order by mi.popularity desc nulls last
+          limit 60`,
+      );
+      const plan = JSON.stringify(rows[0]['QUERY PLAN']);
+      assert.match(plan, /media_items_catalogue_decade/);
+      assert.doesNotMatch(plan, /"Node Type":"Sort"/);
+    } finally {
+      await t.sql(`reset enable_seqscan`);
+      await t.sql(`reset enable_bitmapscan`);
     }
   });
 

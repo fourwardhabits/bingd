@@ -41,7 +41,7 @@ brought forward on a new branch (B1); #220 itself is not touched.
 | Spec requirement | Exists in #220 | Gap | Ships in |
 |---|---|---|---|
 | Affinity: 90-day lookback, 30-day half-life, interaction families | `_proactive_affinity(reader, friend, now)` exactly so, computed on demand, never stored or exposed. | Reuse as is. Notion's open item: the blocked-user edge case is not covered by an explicit test. | B1 (audit + tests) |
-| High-affinity threshold from the distribution | — (affinity only orders clusters and picks which two names) | No threshold; no distribution measured. | B1 (simulated distribution; labelled synthetic) |
+| High-affinity threshold from the distribution | — (affinity only orders clusters and picks which two names) | No threshold; no distribution measured. | B1 ships the *actual*-distribution read (`proactive_affinity_distribution`, service role); choosing the threshold, and any simulated distribution, is B2 |
 | Mutual follow mandatory; high affinity without mutual never qualifies; mutual alone insufficient | `watchlist_social` counts mutual friends; affinity plays no part in qualifying. | "Qualifying friend" = mutual ∧ affinity ≥ threshold is new. | B1/B2 |
 | Type A: one qualifying friend watches/ranks a title on the recipient's Watchlist | Needs **two** mutual friends. | One qualifying friend suffices; copy "Ravi watched Dune. It's on your Watchlist." | B2 |
 | Type B: ≥2 distinct qualifying friends within a configurable window, no Watchlist needed | — | New trigger and cluster. | B2 |
@@ -56,9 +56,10 @@ brought forward on a new branch (B1); #220 itself is not touched.
 
 The reaction-summary PR (another agent) wants "the highlighted name uses Affinity with
 recency fallback". `_proactive_affinity(reader, friend, now)` is that lookup; it is
-server-only and must stay so (never in an RPC result). B1 adds a bounded batch form over a
-caller-supplied candidate list; its signature is in the B1 PR body so that PR can adopt it
-without this work touching any reaction component.
+server-only and must stay so (never in an RPC result). B1 did **not** add a batch form
+(status 2026-11-11): it guards `_proactive_affinity` against blocked and inactive pairs, so
+a caller that loops over a bounded candidate list gets the right answer. A batch form is
+left to whichever PR first needs one.
 
 ## 5. What this analysis does not claim
 
