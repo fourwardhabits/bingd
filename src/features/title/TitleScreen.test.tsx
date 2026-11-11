@@ -1740,6 +1740,75 @@ describe('a series', () => {
     expect(mockPush).not.toHaveBeenCalledWith('/title/season-2');
   });
 
+  /**
+   * **Update Show, end to end** (founder brief §5, 2026-11-14). A season of a ranked show,
+   * ranked for the first time from its row's `+`, ends on a reveal offering Update Show;
+   * Update Show opens the show's own band chooser, and the correction it starts carries
+   * the season placement as its link, so the server posts nothing for the show.
+   */
+  it('offers Update Show after a fresh season ranking and links the show correction to it', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: 'fine',
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    mockRpcResults.log_title = { status: 'ok', created: true, watch_event_id: 'w-1' };
+    mockRpcResults.rank_start = {
+      done: true,
+      position: 1,
+      category: 'tv_seasons',
+      bucket: 'loved',
+      score: 10,
+      adjustable: false,
+      placement_id: 'placement-s2',
+      parent: { media_item_id: 'series-1', ranked: true, bucket: 'fine' },
+    };
+    mockRpcResults.rank_again = {
+      done: false,
+      session_id: 'show-session',
+      pivot: 'other-show',
+    };
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+    await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    const update = await view.findByText('Update Show');
+    await fireEvent.press(update);
+
+    // The show's band chooser, on the band it already has: the same band re-ranks it
+    // from where it stands, and the link rides along.
+    await waitFor(() => expect(view.getByLabelText('It was fine')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({
+          p_media_item_id: 'series-1',
+          p_new_watch: false,
+          p_linked_placement_id: 'placement-s2',
+        }),
+      ),
+    );
+  });
+
   it('draws a ranked season row as its score circle, against seasons only', async () => {
     tableRows.rankings = [
       {

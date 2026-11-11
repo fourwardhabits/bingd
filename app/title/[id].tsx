@@ -1290,6 +1290,9 @@ export default function TitleScreen() {
   ) => {
     if (!rankable) return;
     setActionError(null);
+    // Any other log sheet is not the Update Show it may have been left from: the link
+    // must never ride along into an unrelated correction.
+    setPendingShowLink(null);
     setLogIntent(intent);
     setOpenWriting(writing);
     setOpenSection(section);
@@ -1348,6 +1351,7 @@ export default function TitleScreen() {
     const state = rankingStateOf({ ranked: Boolean(myScores.data?.has(season.id)), bucket });
     const resume = state === 'unfinished' && bucket ? resumeSubject(seasonTitle, bucket) : null;
     setActionError(null);
+    setPendingShowLink(null);
     setPlacement(null);
     if (resume) {
       setRankedTitle(seasonTitle);
@@ -3048,6 +3052,7 @@ export default function TitleScreen() {
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
+          setPendingShowLink(null);
           celebrate();
         }}
         onClose={() => {
