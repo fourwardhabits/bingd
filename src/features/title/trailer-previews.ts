@@ -1,22 +1,20 @@
-import { lane } from '@/lib/env';
-
 /**
- * **Whether trailer thumbnails load without being asked for** (founder Preview QA and the
- * release pass, 2026-11-07).
+ * **Whether trailer thumbnails load without being asked for.**
  *
- * Each still is a request from the device to Google's image host (`i.ytimg.com`), carrying
- * the reader's IP address and the video's id. The founder approved automatic stills for
- * production *subject to accurate, verified disclosures*. The privacy policy now names
- * YouTube's image servers (`web/build.mjs`, live with this release). The App Store and
- * Google Play privacy answers could not be checked from here — nobody but the founder can
- * open those consoles — so, by the founder's own fallback instruction:
+ * Each still is an `expo-image` request from the device to Google's image host
+ * (`i.ytimg.com`). It carries the reader's IP address, the platform's User-Agent and the
+ * video's id. Android sends no cookie or app/account identifier on this path; iOS uses the
+ * shared cookie store if one exists for the host. TMDB images go out the same way. The
+ * privacy policy at `https://bingd.app/privacy/` already describes these requests, and
+ * Apple's label needs no change. One Play Data safety question is unresolved: whether that IP
+ * must be declared as Approximate location (F-6). No sharing exemption covers automatic loads.
+ * See `docs/release/pr239-thumbnail-privacy-review.md`.
  *
- * - **every lane but production** (Preview, Beta, development) loads the stills with the
- *   page;
- * - **production keeps the opt-in** — Show previews, once per page — until the founder has
- *   confirmed both store forms against `docs/release/store-privacy-inventory.md`. Turning it
- *   on is then this one line (`=> true`), shipped as an ordinary production update.
+ * Production has a manual "Show previews" opt-in (OTA of 2026-11-07). This returns `true` for
+ * every lane in preparation for automatic stills, and **is not live in production**: the PR
+ * must not be merged and the production OTA must not be published until F-6 is resolved.
  *
- * Read per call, so a test can vary the lane.
+ * Original layout never mounts `TrailerRail`, so it never sends a YouTube image request
+ * regardless of this value.
  */
-export const trailerPreviewsByDefault = (): boolean => lane !== 'production';
+export const trailerPreviewsByDefault = (): boolean => true;

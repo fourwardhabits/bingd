@@ -1,27 +1,15 @@
 import { trailerPreviewsByDefault } from './trailer-previews';
 
-let mockLane: string | undefined = 'preview';
-jest.mock('@/lib/env', () => ({
-  get lane() {
-    return mockLane;
-  },
-}));
-
 /**
- * **Stills by default everywhere but production** (release pass, 2026-11-07). Production
- * keeps Show previews until the founder has confirmed the store privacy forms; the privacy
- * policy already names YouTube's image servers.
+ * **Stills prepared for all lanes including production** (2026-11-09 — production change
+ * ready, pending founder confirmation of F-6 before merge/OTA).
+ *
+ * The function is unconditionally `true`; no lane mock is needed here. Behaviour in the
+ * Cinematic and Original layouts is covered by `TitleScreen.test.tsx` (trailer tiles and
+ * Original-layout-never-loads-YouTube-thumbnails tests).
  */
 describe('trailerPreviewsByDefault', () => {
-  it('is on in Preview, Beta and development, and in a local build with no lane', () => {
-    for (const lane of ['preview', 'beta', 'development', undefined]) {
-      mockLane = lane;
-      expect(trailerPreviewsByDefault()).toBe(true);
-    }
-  });
-
-  it('is off in production, which keeps the Show previews opt-in', () => {
-    mockLane = 'production';
-    expect(trailerPreviewsByDefault()).toBe(false);
+  it('returns true in every lane, including production', () => {
+    expect(trailerPreviewsByDefault()).toBe(true);
   });
 });

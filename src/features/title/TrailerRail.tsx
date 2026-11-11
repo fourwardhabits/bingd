@@ -14,12 +14,12 @@ import type { TitleVideo } from './use-title-extras';
  * (Cinematic Editorial brief, §5; a section rather than a tab since the title-page sprint,
  * 2026-11-06).
  *
- * **Thumbnails only when asked for.** A thumbnail is an image from YouTube's own host
- * (`i.ytimg.com`), which is a request to a third party carrying the reader's IP. When this
- * was a tab, those requests waited for the reader to open it. As an always-visible section
- * they would go out on every title page, so the cards draw without them until the reader
- * asks for previews (`previews`), once per page. Opening a video is unchanged, and was
- * always theirs to ask for.
+ * **Thumbnails when the page says so.** A thumbnail is an image from YouTube's own host
+ * (`i.ytimg.com`), which is a request to a third party carrying the reader's IP. The caller
+ * decides through `previews`. Production deployed today passes `false` until the reader
+ * taps Show previews; the prepared change (`trailerPreviewsByDefault`, gated on F-6) passes
+ * `true`, so the stills load with the page. Opening a video is unchanged, and was always
+ * theirs to ask for.
  *
  * **A video tile, not a missing picture** (final title refinement, 2026-11-06). The cards
  * used to be Parchment boxes with a play glyph, which on the phone read as artwork that had

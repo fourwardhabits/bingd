@@ -1264,9 +1264,9 @@ const LIST_BODY = `        <div id="list" class="list" hidden>
  * one, and the install button is what matters above it.
  */
 const SHOWCASE = `      <div class="showcase" aria-hidden="false">
-        <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1447"
+        <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1430"
              alt="A bingd. collection of ranked series, each with a score out of ten." />
-        <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="811"
+        <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="989"
              loading="lazy"
              alt="Two films side by side in bingd., under the question which did you like more." />
       </div>`;
@@ -2345,8 +2345,8 @@ const LANDING_STYLES = `
       .hero { padding-block: 2.25rem 3.25rem; }
 
       /* The heading is two sentences and reads as exactly two lines: "Rank what you watch."
-         and "See where it really lands." Each is its own block, and from 30rem up neither
-         may break. At the heading's full 3.4rem the second line is about 580px, which is
+         and "Keep the fun going." Each is its own block, and from 30rem up neither may
+         break. At the heading's full 3.4rem the longer line is over 500px, which is
          wider than half the page, so the hero does not go side by side at the usual 56rem:
          it stays one column until 64rem, where the copy gets a 37rem column and the phones
          the rest. Below 30rem, on a narrow phone, the lines may wrap rather than overflow
@@ -2724,18 +2724,70 @@ const LANDING_STYLES = `
          .band and the inset: auto 0 0 0 sticky bar. */
       .phone-pair .phone { max-width: 13rem; margin-inline: 0; min-width: 0; flex: 0 1 auto; }
 
+      /* The swipe hint is for the phone layout only, where the pair scrolls. */
+      .shot-hint { display: none; }
+
       /* And the breakpoint, corrected with it. Two phones stop being legible at about
          29.5rem rather than 26, which is the width the pair actually needs. */
       @media (max-width: 30rem) {
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
 
-        /* Except where the second picture is the point: the TV collection beside the Movies
-           one in the hero, the score a ranking lands on, the conversation under a friend's
-           ranking, and Group Picks beside the recommendations. Those pairs stack instead
-           of dropping their second half. */
-        .phone-pair.stack-narrow { flex-direction: column; }
+        /* Except where the second picture is the point: the score a comparison lands on,
+           TV beside Movies, the conversation under a friend's ranking, and Group Picks
+           beside For you. Those pairs used to stack, which made each section two full
+           phone screens tall. They are a swipe rail instead: one screenshot across most
+           of the width and about a fifth of the next one showing at the edge, which is
+           the whole affordance. Native overflow and scroll-snap, so a finger, a trackpad
+           and the arrow keys all move it the way they move anything else, and nothing
+           moves on its own.
+
+           The rail runs to the screen's edges: the negative inline margin undoes .wrap's
+           gutter and the padding puts it back inside the scroller, so the peek is cut by
+           the edge of the phone rather than by an invisible box. Exactly to the edges
+           and no further, so the page never scrolls sideways. A scroller clips what
+           overflows it, so the block padding is room for the phones' shadow, and the
+           negative top margin hands that room back to the gap above. */
+        .phone-pair.stack-narrow {
+          --rail-gutter: 1.25rem;
+          --rail-gap: 0.75rem;
+          justify-content: flex-start;
+          gap: var(--rail-gap);
+          margin: -0.75rem calc(-1 * var(--rail-gutter)) 0;
+          padding: 0.75rem var(--rail-gutter) 2.5rem;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+          scroll-snap-type: x mandatory;
+          scroll-padding-inline: var(--rail-gutter);
+          scrollbar-width: none;
+        }
+        .phone-pair.stack-narrow::-webkit-scrollbar { display: none; }
+        .phone-pair.stack-narrow:focus-visible { outline: 2px solid var(--maroon); outline-offset: -2px; }
+
+        /* 100% is the rail's content box, the screen less both gutters, so this is the
+           width that leaves 22% of the next phone in view at every phone width. The cap
+           keeps a 480px screen from getting a phone taller than it can show. Width only:
+           .phone's height: auto keeps every screenshot at its own proportions. */
+        .phone-pair.stack-narrow .phone {
+          flex: none;
+          width: calc((100% + var(--rail-gutter) - var(--rail-gap)) / 1.22);
+          max-width: 22rem;
+          scroll-snap-align: start;
+        }
         .phone-pair.stack-narrow .phone + .phone { display: block; }
+
+        /* Sits in the rail's bottom padding, which is only there for the shadow. It takes
+           no touches, so a swipe that starts on it still moves the rail. */
+        .shot-hint {
+          display: block;
+          position: relative;
+          margin-top: -1.5rem;
+          text-align: center;
+          font-size: 0.8125rem;
+          color: var(--tertiary);
+          pointer-events: none;
+        }
       }
 
       /* -------------------------------------------------------------- final CTA */
@@ -2830,14 +2882,14 @@ const SHOT = {
   compare: {
     src: '/shot-compare.webp',
     w: 640,
-    h: 1285,
-    alt: 'The bingd. ranking sheet asking which did you like more, Harry Potter and the Goblet of Fire or Spider-Man: Far From Home',
+    h: 1269,
+    alt: 'The bingd. ranking sheet asking which did you like more, You Can See Everything or Inception',
   },
   score: {
     src: '/shot-score.webp',
     w: 640,
-    h: 1285,
-    alt: 'The score a bingd. ranking lands on, 9.1 for Harry Potter and the Goblet of Fire, in the sheet shown after ranking',
+    h: 1269,
+    alt: 'The score a bingd. ranking lands on, 9.8 for You Can See Everything, in the sheet shown after ranking',
   },
   comments: {
     src: '/shot-comments.webp',
@@ -2848,26 +2900,26 @@ const SHOT = {
   movies: {
     src: '/shot-movies.webp',
     w: 640,
-    h: 1286,
+    h: 1270,
     alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
   },
   tv: {
     src: '/shot-tv.webp',
     w: 640,
-    h: 1285,
+    h: 1271,
     alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
   },
   feed: {
     src: '/shot-feed.webp',
     w: 640,
-    h: 1285,
+    h: 1271,
     alt: 'The bingd. feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
   },
   recommended: {
     src: '/shot-recommended.webp',
     w: 640,
-    h: 1286,
-    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to you, Group Picks and Filters',
+    h: 1271,
+    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
   },
   grouppicks: {
     src: '/shot-grouppicks.webp',
@@ -2884,6 +2936,21 @@ const shot = (key, { eager = false } = {}) => {
   return `<img class="phone" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
                alt="${s.alt}" />`;
 };
+
+/**
+ * A section's two screenshots: side by side from 30rem up, a swipe rail below it.
+ *
+ * The rail is a labelled group so a screen reader names it when it takes focus, and
+ * `page.mjs` makes it focusable only while it actually scrolls. The hint is hidden from
+ * assistive technology, which reads both pictures in order and has nothing to swipe.
+ */
+const shotPair = (label, first, second) => `<div class="shots">
+            <div class="phone-pair stack-narrow" role="group" aria-label="${label}">
+              ${shot(first)}
+              ${shot(second)}
+            </div>
+            <p class="shot-hint" aria-hidden="true">Swipe for more &rarr;</p>
+          </div>`;
 
 /**
  * The install row, which the page needs in three places.
@@ -3078,7 +3145,7 @@ const SOFTWARE_APPLICATION = {
     : {}),
   url: `${ORIGIN}/`,
   description:
-    'Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, see what your friends are watching, and find what to watch next.',
+    'Rank movies and TV with head-to-head picks, build your own rankings, compare taste with friends, and find your next binge on bingd.',
   author: { '@type': 'Person', name: 'Suraj Kandukuri' },
   ...(PUBLIC_STORES.length === 1
     ? { installUrl: PUBLIC_STORES[0][1] }
@@ -3132,28 +3199,28 @@ await writeFile(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>bingd. Rank the movies and TV you watch</title>
+    <title>bingd | Rank Movies &amp; TV Your Way</title>
     <!-- No robots meta, and no X-Robots-Tag on / either. This page is the install page
          and the address published on the App Store listing, in the privacy policy, in
          the Terms and in TestFlight's developer-website field; a launch page that asks
          not to be found is the wrong half of the trade the old mode-keyed rule made.
          The routes that name an account keep both, unconditionally. -->
-    <meta name="description" content="Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, and see where your friends put theirs." />
+    <meta name="description" content="Rank movies and TV with head-to-head picks, build your own rankings, compare taste with friends, and find your next binge on bingd." />
     <link rel="canonical" href="${ORIGIN}/" />
     <meta name="theme-color" content="#773744" />
 
     <meta property="og:site_name" content="bingd." />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="bingd. Rank the movies and TV you watch" />
-    <meta property="og:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
+    <meta property="og:title" content="bingd | Rank What You Watch" />
+    <meta property="og:description" content="Pick favorites head-to-head, compare taste with friends, and find your next binge." />
     <meta property="og:image" content="${ORIGIN}/social-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="The bingd. wordmark" />
     <meta property="og:url" content="${ORIGIN}/" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="bingd. Rank the movies and TV you watch" />
-    <meta name="twitter:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
+    <meta name="twitter:title" content="bingd | Rank What You Watch" />
+    <meta name="twitter:description" content="Pick favorites head-to-head, compare taste with friends, and find your next binge." />
     <meta name="twitter:image" content="${ORIGIN}/social-card.png" />
 
     <link rel="icon" href="/bingd-icon.png" />
@@ -3182,10 +3249,10 @@ await writeFile(
       <section class="hero wrap" id="get">
         <div class="split">
           <div class="split-copy">
-            <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
+            <h1><span class="line">Rank what you watch.</span> <span class="line">Keep the fun going.</span></h1>
             <p class="lede">
-              bingd is your new post-watch ritual. A movie and TV logging app to surface
-              your favorite titles and make watching a shared experience
+              Put movies and TV head-to-head, build rankings that reflect your taste, and
+              compare favorites with friends. Then find your next binge.
             </p>
 
 ${installRow({ primary: true })}
@@ -3203,15 +3270,13 @@ ${DEMO}
             <p class="kicker">How it works</p>
             <h2>Stop guessing between 3.5 and 4 stars.</h2>
             <p class="section-lede">
-              bingd uses head-to-head comparisons between titles you&rsquo;ve watched to
-              create a ranked list of your favorite watches. No more ambiguous ratings
+              Which did you like more? Make quick head-to-head picks, and bingd turns your
+              choices into a ranked list and personalized scores. No more guessing at a
+              number.
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('compare')}
-            ${shot('score')}
-          </div>
+          ${shotPair('Ranking screenshots', 'compare', 'score')}
         </div>
       </section>
 
@@ -3219,57 +3284,47 @@ ${DEMO}
         <div class="wrap split">
           <div class="split-copy">
             <p class="kicker">Your collection</p>
-            <h2>A collection that actually reflects your taste.</h2>
+            <h2>Your favorites, in your order.</h2>
             <p class="section-lede">
-              Every movie and TV season you rank takes its place in your collection, so
-              your list reads in the order you really feel about them
+              Build separate movie and TV season rankings with scores shaped by your picks,
+              so your collection reflects what you actually like.
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('movies')}
-            ${shot('tv')}
-          </div>
+          ${shotPair('Collection screenshots', 'movies', 'tv')}
         </div>
       </section>
 
       <section class="band">
         <div class="wrap split flip">
           <div class="split-copy">
-            <p class="kicker">Find your next binge</p>
-            <h2>Spend less time deciding.</h2>
+            <p class="kicker">Better with friends</p>
+            <h2>Compare taste. Trade takes.</h2>
             <p class="section-lede">
-              Save what you want to watch, and get stronger recommendations through a better
-              rating system
-            </p>
-            <p class="section-lede">
-              Plus Group Picks generates recommendations based on shared taste (a favorite
-              feature for couples and movie clubs)
+              Follow friends, see what they&rsquo;re watching, react to their rankings, and
+              swap recommendations. Because watching something great is only half the fun.
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('recommended')}
-            ${shot('grouppicks')}
-          </div>
+          ${shotPair('Friends screenshots', 'feed', 'comments')}
         </div>
       </section>
 
       <section>
         <div class="wrap split">
           <div class="split-copy">
-            <p class="kicker">A social experience</p>
-            <h2>See what your friends are watching.</h2>
+            <p class="kicker">Find your next binge</p>
+            <h2>Less scrolling. More watching.</h2>
             <p class="section-lede">
-              Follow friends to comment on and save their latest watches, compare taste,
-              and share recommendations in-app
+              Get movie and TV recommendations shaped by your rankings, and save what
+              catches your eye.
+            </p>
+            <p class="section-lede">
+              Watching together? Group Picks suggests titles based on everyone&rsquo;s taste.
             </p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('feed')}
-            ${shot('comments')}
-          </div>
+          ${shotPair('Discovery screenshots', 'recommended', 'grouppicks')}
         </div>
       </section>
 
@@ -3296,9 +3351,10 @@ ${DEMO}
 
       <section class="closer">
         <div class="wrap">
-          <h2>Start with five movies or TV you love.</h2>
+          <h2>Start with five favorites.</h2>
           <p class="section-lede">
-            That is enough for bingd. to have an opinion about everything else
+            Pick five movies or TV seasons you love. A few quick comparisons get your
+            ranking started.
           </p>
 
 ${installRow({})}
