@@ -419,7 +419,11 @@ describe('the actions', () => {
       { feed_event_id: 'e1', user_id: 'priya', kind: 'funny', profiles: { id: 'priya', username: 'priyan', display_name: 'Priya', avatar_path: null } },
     ];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByLabelText('2 reactions. See who reacted.')).toBeTruthy());
+    // Mixed kinds, so "reacted" rather than "like this"; with nothing to rank them by,
+    // the tie falls to the id, which is stable.
+    await waitFor(() =>
+      expect(view.getByLabelText('Priya and 1 other reacted. See who reacted.')).toBeTruthy(),
+    );
   });
 
   /**
@@ -442,14 +446,14 @@ describe('the actions', () => {
     expect(view.getByText('Like')).toBeTruthy();
   });
 
-  it('says 1 reaction, in the singular, with its glyph and no line under it', async () => {
+  it('names the one person who reacted, with their glyph and no line under it', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'wow')];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
-    expect(within(summary).getByText('1 reaction')).toBeTruthy();
+    expect(within(summary).getByText('THEO reacted')).toBeTruthy();
     expect(within(summary).getByText('😮', { includeHiddenElements: true })).toBeTruthy();
-    expect(summary.props.accessibilityLabel).toBe('1 reaction. See who reacted.');
+    expect(summary.props.accessibilityLabel).toBe('THEO reacted. See who reacted.');
     // The summary and the actions are one group: nothing is drawn between them.
     expect(view.queryByTestId('feed-card-social-divider')).toBeNull();
   });
@@ -465,7 +469,7 @@ describe('the actions', () => {
     ];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
-    expect(within(summary).getByText('5 reactions')).toBeTruthy();
+    expect(within(summary).getByText('ANA and 4 others reacted')).toBeTruthy();
     const glyphs = within(summary)
       .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
       .map((node) => node.props.children);
@@ -483,7 +487,7 @@ describe('the actions', () => {
       .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
       .map((node) => node.props.children);
     expect(glyphs[0]).toBe('😮');
-    expect(within(summary).getByText('3 reactions')).toBeTruthy();
+    expect(within(summary).getByText('You, PRIYA and 1 other reacted')).toBeTruthy();
 
     const like = view.getByTestId('feed-card-like');
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
@@ -539,7 +543,7 @@ describe('the actions', () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
-    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions-line'));
     const gutter = theme.layout.gutter;
     expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
     for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-save', 'feed-card-share']) {
@@ -575,8 +579,97 @@ describe('the actions', () => {
   it('offers no Save on the reader’s own activity', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' })];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByTestId('feed-card-like')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('feed-card-comment')).toBeTruthy());
     expect(view.queryByTestId('feed-card-save')).toBeNull();
+  });
+
+  /**
+   * **Nobody reacts to themselves** (founder, 2026-11-10). On the reader's own post the
+   * Like is gone and nothing takes its place; other people's reactions are still named
+   * and still open the list.
+   */
+  describe('on the reader’s own post', () => {
+    const own = () =>
+      event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' });
+
+    it('offers no Like, and draws no summary when nobody has reacted', async () => {
+      mockRows = [own()];
+      const view = await renderWithProviders(<FeedScreen />);
+      await waitFor(() => expect(view.getByTestId('feed-card-comment')).toBeTruthy());
+      expect(view.queryByTestId('feed-card-like')).toBeNull();
+      expect(view.queryByText('Like')).toBeNull();
+      expect(view.queryByTestId('feed-card-reactions')).toBeNull();
+    });
+
+    it('still names who reacted, and still opens the list', async () => {
+      mockRows = [own()];
+      mockReactions = [reactor('priya', 'love'), reactor('theo', 'love')];
+      const view = await renderWithProviders(<FeedScreen />);
+      const summary = await waitFor(() =>
+        view.getByLabelText('PRIYA and 1 other like this. See who reacted.'),
+      );
+      expect(view.queryByTestId('feed-card-like')).toBeNull();
+      fireEvent.press(summary);
+      await waitFor(() =>
+        expect(view.getByLabelText('THEO, Liked. Open their profile.')).toBeTruthy(),
+      );
+    });
+
+    it('leaves a self-reaction from before the rule out of the count and the names', async () => {
+      mockRows = [own()];
+      mockReactions = [
+        { ...reactor('user-1', 'love'), event: { actor_id: 'user-1' } },
+        { ...reactor('priya', 'love'), event: { actor_id: 'user-1' } },
+      ];
+      const view = await renderWithProviders(<FeedScreen />);
+      await waitFor(() =>
+        expect(view.getByLabelText('PRIYA likes this. See who reacted.')).toBeTruthy(),
+      );
+    });
+  });
+
+  it('says "like this" only when every reaction is a like', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love'), reactor('priya', 'love'), reactor('ana', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() =>
+      expect(view.getByLabelText('ANA and 2 others like this. See who reacted.')).toBeTruthy(),
+    );
+  });
+
+  it('draws the Like the same size whether it is set or not', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER), event('e2', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('user-1', 'wow')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const [set, unset] = await waitFor(() => {
+      const likes = view.getAllByTestId('feed-card-like');
+      expect(within(likes[0]!).getByText('Wow')).toBeTruthy();
+      expect(within(likes[1]!).getByText('Like')).toBeTruthy();
+      return likes;
+    });
+    const slot = (like: typeof set) =>
+      StyleSheet.flatten(within(like!).getByTestId('reaction-slot').props.style);
+
+    expect(slot(set)).toEqual(slot(unset));
+    expect(slot(unset).width).toBe(theme.layout.icon.sm);
+  });
+
+  it('names the reader once their reaction is saved and the read comes back', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
+
+    // The server's answer to the next read; `useSetReaction` invalidates, so it is read.
+    mockReactions = [reactor('theo', 'love'), reactor('user-1', 'love')];
+    fireEvent.press(view.getByTestId('feed-card-like'));
+    await waitFor(() =>
+      expect(view.getByLabelText('You and THEO like this. See who reacted.')).toBeTruthy(),
+    );
+
+    mockReactions = [reactor('theo', 'love')];
+    fireEvent.press(view.getByTestId('feed-card-like'));
+    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
   });
 
   it('opens the title from the artwork', async () => {

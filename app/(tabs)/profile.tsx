@@ -18,7 +18,9 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useReactions, useSetReaction, REACTION_GLYPH, REACTION_LABEL } from '@/features/feed/use-reactions';
+import { activityReaction } from '@/features/feed/reaction-summary';
+import { ReactionDetail } from '@/features/feed/ReactionDetail';
+import { useReactions, useSetReaction } from '@/features/feed/use-reactions';
 import {
   feedItems,
   trimActorActivityToFirstPage,
@@ -72,7 +74,7 @@ import {
  * housekeeping rather than the thing a profile is for.
  *
  * Recent activity uses the Feed's own row rather than a weakened copy of it, so a
- * ranking on a profile can be reacted to, commented on and shared like the same event
+ * ranking on a profile shows its reactions, comments and shares like the same event
  * in the feed — which it is.
  */
 export default function ProfileScreen() {
@@ -83,6 +85,8 @@ export default function ProfileScreen() {
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /** The activity whose reactor list is open — the summary line is the way in. */
+  const [detailFor, setDetailFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
   const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
     null,
@@ -567,14 +571,15 @@ export default function ProfileScreen() {
                 }
                 // The same interactions the Feed offers, because it is the same event.
                 // Reading what people said about your own ranking is the point of
-                // having the row here at all.
-                reaction={{
-                  count: summary?.total ?? 0,
-                  mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-                  mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
-                  glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-                  onPress: () => void setReaction(event.id, summary?.mine ? null : 'love'),
-                }}
+                // having the row here at all — and, every row here being yours, that
+                // is all the reaction line does: no heart (founder, 2026-11-10).
+                reaction={activityReaction({
+                  summary,
+                  viewerId: profile.id,
+                  isOwn: event.actorId === profile.id,
+                  onToggle: () => void setReaction(event.id, summary?.mine ? null : 'love'),
+                  onOpenDetail: () => setDetailFor(event.id),
+                })}
                 onPressComments={() => setCommentsFor(event.id)}
                 commentCount={commentCounts.data?.get(event.id) ?? 0}
               />
@@ -599,6 +604,15 @@ export default function ProfileScreen() {
           onClose={() => setRankingBatchFor(null)}
         />
       ) : null}
+
+      <ReactionDetail
+        summary={detailFor ? (reactions.data?.get(detailFor) ?? null) : null}
+        onClose={() => setDetailFor(null)}
+        onPressPerson={(username) => {
+          setDetailFor(null);
+          router.push(`/u/${username}`);
+        }}
+      />
 
       <CommentSheet
         eventId={commentsFor}

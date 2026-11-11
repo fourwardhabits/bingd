@@ -251,7 +251,7 @@ describe('the reactions on the post above the conversation', () => {
     mockReactions.summary = summary({ total: 6 });
     const view = await renderWithProviders(<ActivityScreen />);
 
-    await waitFor(() => expect(view.getByText('6')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('6 reactions')).toBeTruthy());
   });
 
   /**
@@ -267,6 +267,34 @@ describe('the reactions on the post above the conversation', () => {
     await waitFor(() =>
       expect(view.getByLabelText(/^Liked\. You reacted to Sinners/)).toBeTruthy(),
     );
+  });
+
+  /**
+   * The founder's report of 2026-11-10, as it was reached: their own ranking of Logan,
+   * opened from a notification, with one friend's heart on it. It drew an outline heart
+   * to react with, the friend's heart, and a bare "1".
+   */
+  it('offers no reaction on the viewer’s own post, and names who reacted', async () => {
+    mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai', title: 'Logan', year: 2017 });
+    mockReactions.summary = summary({
+      total: 1,
+      kinds: ['love'],
+      byKind: { love: 1 },
+      people: [
+        { userId: 'priya', username: 'priya', name: 'Priya Raman', avatarUri: null, kind: 'love' },
+      ],
+    });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    const summaryLine = await waitFor(() =>
+      view.getByLabelText('Priya Raman likes this. See who reacted.'),
+    );
+    expect(view.queryByLabelText(/React to|You reacted to/)).toBeNull();
+    expect(view.queryByTestId('reaction-action')).toBeNull();
+    expect(view.queryByText('1')).toBeNull();
+
+    fireEvent.press(summaryLine as never);
+    await waitFor(() => expect(view.getByText('Priya Raman')).toBeTruthy());
   });
 
   it('sets the default reaction on a tap, and clears it on the next one', async () => {
@@ -306,7 +334,7 @@ describe('the reactions on the post above the conversation', () => {
 
     await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
     expect(control(view, false)).toBeTruthy();
-    expect(view.queryByText('6')).toBeNull();
+    expect(view.queryByText(/reaction/)).toBeNull();
   });
 
   /**

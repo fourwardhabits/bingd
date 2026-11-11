@@ -3,7 +3,15 @@ import { Image } from 'expo-image';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import type { Bucket } from '@/features/collection/score';
-import { Avatar, Poster, ScoreBadge, SpoilerNote, Text } from '@/ui/components';
+import {
+  Avatar,
+  Poster,
+  ReactionSlot,
+  ReactionSummary,
+  ScoreBadge,
+  SpoilerNote,
+  Text,
+} from '@/ui/components';
 import type { ActivityReaction } from '@/ui/components/ActivityRow';
 import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 
@@ -60,7 +68,7 @@ export type FeedCardProps = {
  *     │  backdrop, 150–190pt                 (9.2)│
  *     └──────────────────────────────────────────┘
  *     "The review, if one was published…"            ← absent, not empty, without one
- *     ❤️😂 4 reactions                                ← absent with no reactions
+ *     ❤️😂 Priya and 3 others reacted                 ← absent with no reactions
  *     ──────────────────────────────────────────      ← hairline, only under a summary
  *     ♡ Like      💬 Comment      🔖 Save      ➤ Share
  *
@@ -108,7 +116,8 @@ export function FeedCard({
   const posterWidth = Math.round((posterHeight * 2) / 3);
   const subline = [timeLabel, watchLabel, metadata].filter(Boolean).join(' · ');
 
-  const mine = reaction.mineGlyph ?? null;
+  const canReact = reaction.canReact !== false;
+  const mine = canReact ? (reaction.mineGlyph ?? null) : null;
   const othersGlyphs = (reaction.glyphs ?? []).filter((glyph) => glyph !== mine).slice(0, 3);
 
   return (
@@ -256,79 +265,57 @@ export function FeedCard({
        */}
       <View style={styles.social} testID="feed-card-social">
         {reaction.count > 0 ? (
-          <>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${reactionCountLabel(reaction.count)}. See who reacted.`}
-              onPress={reaction.onPressSummary}
-              disabled={!reaction.onPressSummary}
-              hitSlop={{ top: 6, bottom: 6 }}
-              style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
-              testID="feed-card-reactions"
-            >
-              <View
-                style={styles.glyphs}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-              >
-                {(mine ? [mine, ...othersGlyphs] : othersGlyphs)
-                  .slice(0, 3)
-                  .map((glyph, index) => (
-                    <Text
-                      key={glyph}
-                      variant="footnote"
-                      allowFontScaling={false}
-                      style={[styles.glyph, index > 0 && styles.glyphOverlap]}
-                    >
-                      {glyph}
-                    </Text>
-                  ))}
-              </View>
-              <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>
-                {reactionCountLabel(reaction.count)}
-              </Text>
-            </Pressable>
-          </>
+          <ReactionSummary
+            glyphs={reaction.summaryGlyphs ?? (mine ? [mine, ...othersGlyphs] : othersGlyphs).slice(0, 3)}
+            forms={
+              reaction.summaryForms?.length
+                ? reaction.summaryForms
+                : [reactionCountLabel(reaction.count)]
+            }
+            onPress={reaction.onPressSummary}
+            style={styles.summary}
+            testID="feed-card-reactions"
+          />
         ) : null}
 
-        {reaction.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
+        {reaction.picker && canReact ? <View style={styles.picker}>{reaction.picker}</View> : null}
 
         <View style={styles.actions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: Boolean(mine) }}
-          accessibilityLabel={
-            mine
-              ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${filmName}. Tap to remove, long press to change.`
-              : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
-          }
-          accessibilityHint={
-            reaction.onLongPress ? 'Long press to choose a different reaction' : undefined
-          }
-          onPress={reaction.onPress}
-          onLongPress={reaction.onLongPress}
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-          testID="feed-card-like"
-        >
-          {/* Every selected state is its emoji and its word, a Like included: the ❤️ and
-              Liked, the way 😂 Laugh and 😮 Wow are drawn (founder, nav cohesion sprint,
-              2026-11-06). The filled Maroon heart was a seventh look for one of six. */}
-          {mine ? (
-            <Text variant="caption" allowFontScaling={false} style={styles.mineGlyph}>
-              {mine}
-            </Text>
-          ) : (
-            <Ionicons name="heart-outline" size={theme.layout.icon.sm} color={theme.text.secondary} />
-          )}
-          <Text
-            variant="footnote"
-            tone={mine ? 'action' : 'secondary'}
-            numberOfLines={1}
-            style={styles.shrink}
+        {/* Not on the reader's own post (founder, 2026-11-10): reacting to yourself is
+            not something the card offers. Everyone else's reactions stay on the line
+            above, and it still opens the list. */}
+        {canReact ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: Boolean(mine) }}
+            accessibilityLabel={
+              mine
+                ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${filmName}. Tap to remove, long press to change.`
+                : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
+            }
+            accessibilityHint={
+              reaction.onLongPress ? 'Long press to choose a different reaction' : undefined
+            }
+            onPress={reaction.onPress}
+            onLongPress={reaction.onLongPress}
+            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+            testID="feed-card-like"
           >
-            {mine ? (reaction.mineLabel ?? 'Reacted') : 'Like'}
-          </Text>
-        </Pressable>
+            {/* Every selected state is its emoji and its word, a Like included: the ❤️ and
+                Liked, the way 😂 Laugh and 😮 Wow are drawn (founder, nav cohesion sprint,
+                2026-11-06). The filled Maroon heart was a seventh look for one of six.
+                Both states sit in the one fixed slot, so a tap moves nothing. */}
+            <ReactionSlot glyph={mine} color={theme.text.secondary} />
+            <Text
+              variant="footnote"
+              tone={mine ? 'action' : 'secondary'}
+              numberOfLines={1}
+              style={styles.shrink}
+            >
+              {mine ? (reaction.mineLabel ?? 'Reacted') : 'Like'}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {onPressComments ? (
           <Action
@@ -373,7 +360,7 @@ export function FeedCard({
   );
 }
 
-/** "1 reaction", "4 reactions" — a count only; who reacted is the detail sheet's job. */
+/** "1 reaction", "4 reactions" — the summary for a caller that has not named anybody. */
 export function reactionCountLabel(count: number) {
   return `${count} ${count === 1 ? 'reaction' : 'reactions'}`;
 }
@@ -493,17 +480,7 @@ const styles = StyleSheet.create({
    * actions read as one group, 8pt under the artwork or the review.
    */
   social: { marginTop: -theme.space[1] },
-  summary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: theme.space[2],
-    marginHorizontal: theme.layout.gutter,
-    minHeight: 32,
-  },
-  glyphs: { flexDirection: 'row', alignItems: 'center' },
-  glyph: { fontSize: 15, lineHeight: undefined, includeFontPadding: false },
-  glyphOverlap: { marginLeft: -3 },
+  summary: { marginHorizontal: theme.layout.gutter },
   picker: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   /**
    * The actions sit on the gutters too: each target is padded 8pt either side, and the
@@ -529,6 +506,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space[2],
   },
   shrink: { flexShrink: 1 },
-  mineGlyph: { fontSize: 17, lineHeight: undefined, includeFontPadding: false },
   pressed: { opacity: 0.7 },
 });

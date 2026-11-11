@@ -42,6 +42,17 @@ export type ReactionControlProps = {
    * in the heart's label.
    */
   onOpenDetail?: () => void;
+  /**
+   * False on the viewer's own post or comment (founder, 2026-11-10): there is no action
+   * slot at all, so nothing invites a reaction to yourself, and the cluster — everyone
+   * else's reactions, still a way into the reactor list — is all that is drawn.
+   */
+  canReact?: boolean;
+  /**
+   * False where the surface draws the summary on a line of its own (`ReactionSummary`,
+   * on `ActivityRow`), so the cluster and count are not drawn twice.
+   */
+  showSummary?: boolean;
 };
 
 /**
@@ -128,6 +139,8 @@ export function ReactionControl({
   onToggle,
   onOpenPicker,
   onOpenDetail,
+  canReact = true,
+  showSummary = true,
 }: ReactionControlProps) {
   /**
    * The one line that removes the duplicate. Keyed on the glyph rather than the kind
@@ -137,42 +150,35 @@ export function ReactionControl({
    * reaction has just been cleared — shows the whole summary rather than silently
    * dropping a kind other people used.
    */
-  const mine = active ? mineGlyph : null;
+  // With no action slot the viewer's glyph has nowhere else to be drawn, so nothing
+  // is subtracted from the cluster.
+  const mine = active && canReact ? mineGlyph : null;
   const summary = mine ? glyphs.filter((glyph) => glyph !== mine) : glyphs;
+
+  if (!canReact && !(showSummary && count > 0)) return null;
 
   return (
     <View style={styles.control}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ selected: active }}
-        accessibilityLabel={label}
-        // Only where a long press does something — a surface wired without the
-        // picker (the profile's compact rows) must not announce an action it
-        // cannot perform.
-        accessibilityHint={onOpenPicker ? 'Long press to choose a different reaction' : undefined}
-        onPress={onToggle}
-        onLongPress={onOpenPicker}
-        hitSlop={slotSlop}
-        style={({ pressed }) => [styles.slot, pressed && styles.pressed]}
-      >
-        {mine ? (
-          // No pill, no label, no name beside it: the emoji alone, in the slot the
-          // heart was in, so the row's width and rhythm are unchanged (founder §6,
-          // visual restraint). `allowFontScaling={false}` matches the cluster —
-          // emoji do not gain legibility from Dynamic Type, they just reflow the row.
-          <Text variant="caption" allowFontScaling={false} style={styles.emoji}>
-            {mine}
-          </Text>
-        ) : (
-          <Ionicons
-            name={active ? 'heart' : 'heart-outline'}
-            size={theme.layout.icon.sm}
-            color={active ? theme.semantic.action : theme.text.tertiary}
-          />
-        )}
-      </Pressable>
+      {canReact ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: active }}
+          accessibilityLabel={label}
+          // Only where a long press does something — a surface wired without the
+          // picker (the profile's compact rows) must not announce an action it
+          // cannot perform.
+          accessibilityHint={onOpenPicker ? 'Long press to choose a different reaction' : undefined}
+          onPress={onToggle}
+          onLongPress={onOpenPicker}
+          hitSlop={slotSlop}
+          style={({ pressed }) => [styles.slot, pressed && styles.pressed]}
+          testID="reaction-action"
+        >
+          <ReactionGlyph glyph={mine} filled={active} />
+        </Pressable>
+      ) : null}
 
-      {count > 0 ? (
+      {showSummary && count > 0 ? (
         onOpenDetail ? (
           <Pressable
             accessibilityRole="button"
@@ -196,6 +202,63 @@ export function ReactionControl({
           </View>
         )
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * What the action slot holds: the reader's emoji, or the heart.
+ *
+ * No pill, no label, no name beside it: the emoji alone, in the slot the heart was in,
+ * so the row's width and rhythm are unchanged (founder §6, visual restraint).
+ * `allowFontScaling={false}` matches the cluster — emoji do not gain legibility from
+ * Dynamic Type, they just reflow the row.
+ */
+function ReactionGlyph({
+  glyph,
+  filled = false,
+  color = theme.text.tertiary,
+}: {
+  glyph: string | null;
+  filled?: boolean;
+  color?: string;
+}) {
+  if (glyph) {
+    return (
+      <Text variant="caption" allowFontScaling={false} style={styles.emoji}>
+        {glyph}
+      </Text>
+    );
+  }
+  return (
+    <Ionicons
+      name={filled ? 'heart' : 'heart-outline'}
+      size={theme.layout.icon.sm}
+      color={filled ? theme.semantic.action : color}
+    />
+  );
+}
+
+/**
+ * The action slot on its own, for a surface that puts it inside a larger control —
+ * `FeedCard`'s Like, where the slot sits beside a word (founder, 2026-11-10: the outline
+ * heart and the chosen emoji were two different boxes, so the label moved on a tap).
+ *
+ * The same box and the same glyph rules as `ReactionControl`'s slot, so the heart and
+ * every emoji occupy identical bounds wherever a reaction is offered.
+ */
+export function ReactionSlot({
+  glyph,
+  filled,
+  color,
+}: {
+  glyph: string | null;
+  filled?: boolean;
+  color?: string;
+}) {
+  return (
+    <View style={styles.slot} testID="reaction-slot">
+      <ReactionGlyph glyph={glyph} filled={filled} color={color} />
     </View>
   );
 }

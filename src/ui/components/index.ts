@@ -55,7 +55,8 @@ export {
   type PosterShelfProps,
   type PosterTile,
 } from './PosterWall';
-export { ReactionControl, type ReactionControlProps } from './ReactionControl';
+export { ReactionControl, ReactionSlot, type ReactionControlProps } from './ReactionControl';
+export { ReactionSummary, type ReactionSummaryProps } from './ReactionSummary';
 // Not only `Sheet`'s any more: the Comments *page* is not a sheet and needs the same
 // measurement, for the same Android edge-to-edge reason. See the hook's own header.
 export { useKeyboardHeight } from './use-keyboard-height';

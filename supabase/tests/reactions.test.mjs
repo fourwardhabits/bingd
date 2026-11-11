@@ -226,7 +226,9 @@ describe('the row belongs to whoever wrote it', () => {
     // There is no user parameter, which is the point: the only identity the
     // function will write is auth.uid(). A caller cannot react as someone else
     // because there is nowhere to say who.
-    const event = await eventOf(alice, await movie('react_ownership'));
+    // Somebody else's event, so both callers may react (20261110000100).
+    const kai = await t.createUser({ username: 'kai_react_ownership' });
+    const event = await eventOf(kai, await movie('react_ownership'));
     await t.actAs(alice);
     await react(event, 'funny');
     await t.actAs(bob);
@@ -301,9 +303,10 @@ describe('what the activity owner is told', () => {
     assert.equal(rows[0].n, 1);
   });
 
-  it('says nothing about reacting to your own activity', async () => {
+  it('says nothing about reacting to your own activity, which is refused', async () => {
     const event = await eventOf(bob, await movie('react_own'));
-    await react(event, 'love');
+    const error = await t.errorFrom(`select set_reaction(gen_random_uuid(), $1, 'love')`, [event]);
+    assert.equal(error?.code, '42501');
 
     const { rows } = await t.sql(`select count(*)::int as n from notifications where subject_id = $1`, [
       event,

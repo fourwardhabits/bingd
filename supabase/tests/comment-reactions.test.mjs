@@ -35,6 +35,7 @@ describe('comment reactions carry the six', () => {
   let alice;
   let bob;
   let carol;
+  let wren;
   let event;
   let comment;
 
@@ -71,6 +72,9 @@ describe('comment reactions carry the six', () => {
     alice = await t.createUser({ username: 'alice' });
     bob = await t.createUser({ username: 'bob' });
     carol = await t.createUser({ username: 'carol' });
+    // The comment's author, who never reacts: since 20261110000100 an author's
+    // reaction to their own comment is refused, and every reactor below is somebody else.
+    wren = await t.createUser({ username: 'wren' });
 
     const movie = await t.createMovie('Stalker', 920001);
     // The event is inserted directly, as every comment suite does: what is under test
@@ -84,13 +88,14 @@ describe('comment reactions carry the six', () => {
       )
     ).rows[0].id;
 
-    await t.actAs(bob);
+    await t.actAs(wren);
     comment = (
       await t.sql(`select (add_comment(gen_random_uuid(), $1, $2, false)->>'comment_id') as id`, [
         event,
         'The zone is a state of mind.',
       ])
     ).rows[0].id;
+    await t.actAs(bob);
   });
 
   after(async () => t.close());
@@ -205,7 +210,7 @@ describe('comment reactions carry the six', () => {
   it('refuses a comment the caller may not see, the same way a missing one is refused', async () => {
     const stranger = await t.createUser({ username: 'stranger' });
     const blockId = await uuid();
-    await t.asUser(bob, () => t.sql(`select block($1, $2)`, [blockId, stranger]));
+    await t.asUser(wren, () => t.sql(`select block($1, $2)`, [blockId, stranger]));
 
     const refused = await t.asUser(stranger, () =>
       t.errorFrom(`select set_comment_reaction(gen_random_uuid(), $1, 'love'::text)`, [comment]),
