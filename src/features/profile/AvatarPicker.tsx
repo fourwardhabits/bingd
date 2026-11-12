@@ -80,23 +80,32 @@ export function AvatarPicker() {
     <View style={styles.block}>
       <Text variant="subhead">Profile picture</Text>
 
-      <View style={styles.row}>
-        <Avatar
-          size="lg"
-          uri={profile.avatarUri}
-          name={profile.display_name || profile.username}
-        />
-        <View style={styles.actions}>
+      <Avatar size="lg" uri={profile.avatarUri} name={profile.display_name || profile.username} />
+
+      {/**
+       * **The app's ordinary action row** (founder QA, 2026-11-12), where this used to be
+       * two controls stacked beside the picture in two different styles. The same `Button`
+       * kinds and order as every other pair — Filters & Sort's *Clear all · Apply*, the goal
+       * sheet's *Cancel · Save*: the secondary act on the left, the Maroon one on the right.
+       * Under the picture rather than beside it, so the pair fits side by side at 320pt;
+       * it wraps, like Filters & Sort's, at the largest text sizes.
+       */}
+      <View style={styles.actions} testID="avatar-actions">
+        {profile.avatarUri ? (
           <Button
-            label={busy ? 'Working…' : profile.avatarUri ? 'Change' : 'Choose a picture'}
+            label="Remove"
             kind="secondary"
             disabled={busy}
-            onPress={() => void choose()}
+            disabledReason="Updating your picture."
+            onPress={() => void remove()}
           />
-          {profile.avatarUri ? (
-            <Button label="Remove" kind="tertiary" disabled={busy} onPress={() => void remove()} />
-          ) : null}
-        </View>
+        ) : null}
+        <Button
+          label={busy ? 'Working…' : profile.avatarUri ? 'Change' : 'Choose a picture'}
+          disabled={busy}
+          disabledReason="Updating your picture."
+          onPress={() => void choose()}
+        />
       </View>
 
       <Text variant="footnote" tone="tertiary">
@@ -114,6 +123,5 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.raised,
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[4] },
-  actions: { flex: 1, gap: theme.space[2], alignItems: 'flex-start' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[3] },
 });

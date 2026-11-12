@@ -58,7 +58,14 @@ export default function NotificationPreferencesScreen() {
   };
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12: a blank band under the header) — the inbox's
+     * fix (`settings/notifications.tsx`), for the same reason. This screen declares
+     * `headerShown: true`, and the native-stack header has already consumed the status-bar
+     * inset, so `Screen`'s default top edge added it a second time below the header. The
+     * horizontal insets stay; only the top one is the header's.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       {/* Not "Notifications": that is the inbox, one screen away, and two titles the
           same is how somebody ends up unable to say which one they are looking at. */}
       <Stack.Screen
