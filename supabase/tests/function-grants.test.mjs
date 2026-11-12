@@ -567,6 +567,10 @@ const ALLOWED = {
   // `_recommendation_cohort` takes an identity and is granted to nobody.
   'recommendation_engine()': ['authenticated'],
   'catalogue_candidates(text,text[],integer[],integer,integer)': ['authenticated'],
+  // 20261111000200, Engine V2 A2. About the caller only; returns ids, an aggregate and a
+  // count, never a person. `_scored_rankings`, `_taste_matches`, `_taste_neighbour_weight`
+  // and `_refresh_taste_neighbours` take identities and are granted to nobody.
+  'collaborative_candidates(text,integer)': ['authenticated'],
 
   // Added 2026-09-03 (20260907000100). Group Picks. **Security invoker**, which is the
   // argument for the grant in one word: it runs as the caller, so every cross-member

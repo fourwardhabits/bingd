@@ -120,6 +120,13 @@ describe('the engine switch', () => {
     assert.equal(await engineFor(other), 'v1');
   });
 
+  it('serves the hybrid engine (A2, 20261111000200) through the same switch', async () => {
+    await setConfig('recommendations.v2_engine', 'v2_hybrid');
+    await setConfig('recommendations.v2_allowlist', [reader]);
+    assert.equal(await engineFor(reader), 'v2_hybrid');
+    assert.equal(await engineFor(other), 'v1');
+  });
+
   it('treats an unknown engine as v1, even for an allowlisted account', async () => {
     await setConfig('recommendations.v2_engine', 'v9_experimental');
     await setConfig('recommendations.v2_allowlist', [reader]);
@@ -212,6 +219,14 @@ describe('catalogue_candidates', () => {
       assert.ok(['ja', 'te'].includes(row.original_language));
       assert.match(row.source, /^language:(ja|te)$/);
     }
+  });
+
+  it('keeps serving the hybrid engine, which builds on the metadata one', async () => {
+    await setConfig('recommendations.v2_engine', 'v2_hybrid');
+    await setConfig('recommendations.v2_allowlist', [reader]);
+    const ja = await title({ language: 'ja', popularity: 9_500_000 });
+    const rows = await candidates(reader, { kind: 'movie', languages: ['ja'] });
+    assert.ok(rows.some((row) => row.id === ja));
   });
 
   it('skips what the reader has logged, unreleased titles and titles with no poster', async () => {

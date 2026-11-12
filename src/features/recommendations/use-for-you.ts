@@ -26,6 +26,7 @@ import {
   tasteFrom,
   type Anchor,
   type Candidate,
+  type Collaborative,
   type EngineId,
   type Scored,
   type Taste,
@@ -82,6 +83,11 @@ import { useRecommendationExposure } from './use-exposure';
  * (`coverage.ts`), and `social_candidates` is not read at all — following somebody is not
  * evidence about taste, and under V2 it has no effect on the wall (founder spec
  * 2026-11-10, §2).
+ *
+ * The **`v2_hybrid`** engine adds `collaborative_candidates`: titles that taste-compatible
+ * public accounts scored well, chosen and aggregated server-side, whether or not the reader
+ * follows any of them. They arrive as ids with a support figure and an endorser count, take
+ * the slot the social source had, and are scored like everything else.
  */
 
 export type Medium = 'movies' | 'tv';
@@ -183,6 +189,8 @@ export type ForYouScoring = {
   engine: EngineId;
   /** The ids the V2 catalogue source added. Empty under V1. Ids only, like `socialIds`. */
   catalogueIds: string[];
+  /** The ids `collaborative_candidates` contributed. Empty unless the engine is `v2_hybrid`. */
+  collaborativeIds: string[];
 };
 
 /**
@@ -521,6 +529,25 @@ async function catalogueCandidates(
   });
   if (error || !Array.isArray(data)) return [];
   return (data as unknown as CandidateRow[]).map(candidateFrom);
+}
+
+/**
+ * Engine V2 hybrid's collaborative evidence: endorsed titles (positive support, strongest
+ * first) and disputed ones (negative support, evidence only).
+ *
+ * Ids, a support figure and an endorser count — the server never names who. Fails to
+ * empty for the same reason the catalogue source does.
+ */
+async function collaborativeCandidates(medium: Medium): Promise<Map<string, Collaborative>> {
+  const { data, error } = await supabase.rpc('collaborative_candidates', {
+    p_kind: KIND_FOR[medium],
+    p_limit: 40,
+  });
+  if (error || !Array.isArray(data)) return new Map();
+  const rows = data as unknown as { media_item_id: string; support: number; endorsers: number }[];
+  return new Map(
+    rows.map((row) => [row.media_item_id, { support: Number(row.support), endorsers: row.endorsers }]),
+  );
 }
 
 /** What the profile reads from the reader's collection: ranked titles first, so they win. */
@@ -975,7 +1002,7 @@ export function useForYou(
           // holding one is not "popular right now" either.
           popularityOnly: popularityOnlyFor(
             scoring.anchorsUsed,
-            [...scoring.socialIds, ...scoring.catalogueIds],
+            [...scoring.socialIds, ...scoring.catalogueIds, ...scoring.collaborativeIds],
             items,
           ),
           // The pool feeds the filter sheet's facet counts, so it takes the veto
@@ -1060,6 +1087,10 @@ export function useForYou(
       const catalogueRead = catalogueRequest
         ? catalogueCandidates(medium, catalogueRequest.languages, catalogueRequest.decades, anchorSeed)
         : Promise.resolve<Candidate[]>([]);
+      const collaborativeRead =
+        engine === 'v2_hybrid'
+          ? collaborativeCandidates(medium)
+          : Promise.resolve(new Map<string, Collaborative>());
       let lists = await cachedSimilar(readIds);
       const selectionKey = [
         userId,
@@ -1171,7 +1202,14 @@ export function useForYou(
        * instead of three is a slightly narrower slate rather than a broken one.
        */
       const social = await socialRead;
-      const candidateIds = candidateIdsFrom(anchors, social, fallback);
+      const collaborative = await collaborativeRead;
+      // Only endorsed titles are a source. A disputed one is evidence against a title some
+      // other source brought in, and never a reason to show it.
+      const collaborativeIds = [...collaborative]
+        .filter(([, evidence]) => evidence.support > 0)
+        .map(([id]) => id);
+      // Under V2 `social` is empty, so the collaborative ids take its place in the order.
+      const candidateIds = candidateIdsFrom(anchors, [...social, ...collaborativeIds], fallback);
 
       const listed = await candidatesFor(candidateIds, medium);
 
@@ -1202,7 +1240,16 @@ export function useForYou(
               new Set([...exclude, ...anchors.map((anchor) => anchor.mediaItemId)]),
             )
           : [];
-      const candidates = filled.length > 0 ? [...listed, ...filled] : listed;
+      const merged = filled.length > 0 ? [...listed, ...filled] : listed;
+      // Every candidate the neighbours have an opinion on carries it, whichever source
+      // brought it in: a title on an anchor's list that the cohort also loved is both.
+      const candidates =
+        collaborative.size > 0
+          ? merged.map((candidate) => {
+              const evidence = collaborative.get(candidate.mediaItemId);
+              return evidence ? { ...candidate, collaborative: evidence } : candidate;
+            })
+          : merged;
 
       /**
        * Filtered **before** scoring, not after.
@@ -1220,6 +1267,8 @@ export function useForYou(
           )
         : candidates;
 
+      const inPool = new Set(candidates.map((candidate) => candidate.mediaItemId));
+
       // Scored, and stopping there. The arrangement is `select`'s job, so that changing
       // it costs a sort rather than everything above this line.
       return {
@@ -1231,6 +1280,7 @@ export function useForYou(
         taste,
         engine,
         catalogueIds: filled.map((candidate) => candidate.mediaItemId),
+        collaborativeIds: collaborativeIds.filter((id) => inPool.has(id)),
       };
     },
   });

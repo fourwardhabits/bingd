@@ -759,6 +759,10 @@ describe('the guard is wired in, not merely present', () => {
     // account reaches no other person through either.
     'recommendation_engine',
     'catalogue_candidates',
+    // 20261111000200. Writes only `taste_neighbours`, a server-side cache about the caller,
+    // and returns ids and aggregates. A suspended account reaches nobody through it, and a
+    // suspended *neighbour* is dropped by `can_discover_profile` at read time.
+    'collaborative_candidates',
 
     // 20260907000100. Group Picks, a pure read and security invoker: the caller's own
     // RLS is the whole reach it has. The suspension question resolves in both

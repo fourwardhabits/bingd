@@ -14,6 +14,8 @@ import {
   type ProfileEntry,
 } from './profile';
 import {
+  COLLABORATIVE_FULL,
+  COLLABORATIVE_NAMED_AT,
   ENGINES,
   engineFrom,
   headlineFor,
@@ -270,6 +272,9 @@ describe('the V2 scorer', () => {
       expect(total).toBeCloseTo(1, 10);
     }
     expect(ENGINES.v1.weights.era).toBe(0);
+    expect(ENGINES.v1.weights.collaborative).toBe(0);
+    expect(ENGINES.v2_metadata.weights.collaborative).toBe(0);
+    expect(ENGINES.v2_hybrid.weights.collaborative).toBeGreaterThan(0);
   });
 
   it('reads an unknown engine as v1', () => {
@@ -368,6 +373,72 @@ describe('the V2 scorer', () => {
     const v1 = scoreCandidate(near, anchors, tasteFrom([]));
     expect(v2.explanation.anchors).toEqual(v1.explanation.anchors);
     expect(v2.explanation.lead).toBe('anchors');
+  });
+});
+
+describe('the hybrid scorer: collaborative evidence (A2)', () => {
+  const profile = profileFrom(many(12, { language: 'en', score: 8 }));
+  const cohort = (support: number, endorsers = 4) => ({ support, endorsers });
+
+  it('lifts a title the reader\'s taste neighbours loved, all else equal', () => {
+    const loved = scoreCandidateV2(candidate({ collaborative: cohort(0.4) }), [], profile, ENGINES.v2_hybrid);
+    const plain = scoreCandidateV2(candidate({}), [], profile, ENGINES.v2_hybrid);
+    expect(loved.explanation.total).toBeGreaterThan(plain.explanation.total);
+    expect(loved.explanation.collaborative).toEqual(cohort(0.4));
+    expect(plain.explanation.collaborative).toBeNull();
+  });
+
+  it('ignores the evidence under every engine that does not weigh it', () => {
+    const withIt = candidate({ collaborative: cohort(0.9) });
+    const without = { ...withIt, collaborative: undefined };
+    const metadata = scoreCandidateV2(withIt, [], profile, ENGINES.v2_metadata);
+    expect(metadata.explanation.total).toBe(scoreCandidateV2(without, [], profile, ENGINES.v2_metadata).explanation.total);
+    expect(metadata.explanation.collaborative).toBeNull();
+    const taste = tasteFrom([{ score: 8, genres: ['Drama'], language: 'en' }]);
+    expect(scoreCandidate(withIt, [], taste).explanation.total).toBe(
+      scoreCandidate(without, [], taste).explanation.total,
+    );
+  });
+
+  it("lowers a pooled title the reader's taste neighbours disliked, and never names that", () => {
+    const disputed = scoreCandidateV2(candidate({ collaborative: cohort(-0.4, 0) }), [], profile, ENGINES.v2_hybrid);
+    const plain = scoreCandidateV2(candidate({}), [], profile, ENGINES.v2_hybrid);
+    expect(disputed.explanation.total).toBeLessThan(plain.explanation.total);
+    expect(disputed.explanation.collaborative).toBeNull();
+    expect(disputed.explanation.lead).not.toBe('collaborative');
+    // Bounded the same way a liked title's lift is.
+    const floor = scoreCandidateV2(candidate({ collaborative: cohort(-COLLABORATIVE_FULL, 0) }), [], profile, ENGINES.v2_hybrid);
+    const below = scoreCandidateV2(candidate({ collaborative: cohort(-0.95, 0) }), [], profile, ENGINES.v2_hybrid);
+    expect(below.explanation.total).toBeCloseTo(floor.explanation.total, 10);
+  });
+
+  it('saturates: a cohort beyond full support adds nothing more', () => {
+    const full = scoreCandidateV2(candidate({ collaborative: cohort(COLLABORATIVE_FULL) }), [], profile, ENGINES.v2_hybrid);
+    const more = scoreCandidateV2(candidate({ collaborative: cohort(0.95) }), [], profile, ENGINES.v2_hybrid);
+    expect(more.explanation.total).toBeCloseTo(full.explanation.total, 10);
+  });
+
+  it('never outweighs a strong anchor on its own', () => {
+    const anchors: Anchor[] = [{ mediaItemId: 'a', title: 'Heat', score: 9.5, similarIds: ['near'] }];
+    const near = scoreCandidateV2(candidate({ mediaItemId: 'near' }), anchors, profile, ENGINES.v2_hybrid);
+    const cohortOnly = scoreCandidateV2(candidate({ collaborative: cohort(0.95, 30) }), anchors, profile, ENGINES.v2_hybrid);
+    expect(near.explanation.total).toBeGreaterThan(cohortOnly.explanation.total);
+  });
+
+  it('names the cohort only with enough endorsers and enough rankings, and never a person', () => {
+    const lead = (endorsers: number) =>
+      scoreCandidateV2(
+        candidate({ genres: [], language: null, popularity: 0, collaborative: cohort(0.5, endorsers) }),
+        [],
+        profileFrom([]),
+        ENGINES.v2_hybrid,
+      ).explanation;
+    const label = (code: string) => code;
+    const taste = { ...tasteFrom([]), sampleSize: 20 };
+    expect(lead(COLLABORATIVE_NAMED_AT).lead).toBe('collaborative');
+    expect(headlineFor(lead(COLLABORATIVE_NAMED_AT), taste, label)).toBe('Loved by people with taste like yours');
+    expect(headlineFor(lead(COLLABORATIVE_NAMED_AT - 1), taste, label)).toBe('Popular right now');
+    expect(headlineFor(lead(COLLABORATIVE_NAMED_AT), { ...taste, sampleSize: 2 }, label)).toBe('Popular right now');
   });
 });
 
