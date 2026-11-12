@@ -32,7 +32,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 | Product analytics | **PostHog** | yes — carries the account id | one activation funnel |
 | Crash and error reports | **Sentry** | yes — carries the account id | diagnostics |
 | Image requests | **TMDB CDN**, direct from the device | no | posters load from TMDB's servers |
-| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page. **Currently deployed (production OTA 2026-11-07):** opt-in — production shows plain frames until the reader taps Show previews. **Prepared change (PR #239, pending F-6):** automatic on Cinematic pages in all lanes once the production OTA ships. See below. |
+| Image requests | **YouTube image host** (`i.ytimg.com`), direct from the device | no | trailer still images on the Cinematic title page. **Automatic in production since the OTA of 2026-11-09** (PR #239, merge `19362af`): stills load with the page, no tap. Shipped under the existing Play declaration; the F-6 question stays open. See below. |
 
 **Trailer stills (added 2026-11-07, corrected 2026-11-07).** What the app actually requests,
 from the code rather than from intent:
@@ -55,12 +55,13 @@ from the code rather than from intent:
   Settings › Labs) holds the stills back until the stored layout choice has been read, so a
   reader who chose Original never sends one.
 - **When, by lane.** `trailerPreviewsByDefault()` (`src/features/title/trailer-previews.ts`)
-  returns `true` for all lanes as of the prepared production change (PR #239, 2026-11-09).
-  Preview, Beta, development, and **production (once the OTA ships)** all load stills with
-  the page. **Production stills are not yet live**: the production OTA must not be published
-  until **F-6** is resolved, which is the one open Play question (Approximate location via
-  IP; see below). Until that OTA runs, production keeps the opt-in. See
-  `pr239-thumbnail-privacy-review.md` and `privacy-decision-matrix.md` §16.
+  returns `true` for all lanes (PR #239). Preview, Beta, development and production all load
+  stills with the page. **Production has done so since the OTA of 2026-11-09** (merge
+  `19362af`). The founder chose on 2026-11-09 to ship under the existing Play Data safety
+  declaration while **F-6**, the open Play question (Approximate location via IP; see below),
+  stays an open privacy follow-up. That choice is not a compliance determination. See
+  `production-state.md`, `pr239-thumbnail-privacy-review.md` and `privacy-decision-matrix.md`
+  §16.
 
 **Disclosure status.** The live policy at <https://bingd.app/privacy/> (fetched 2026-11-07,
 "Last updated 7 November 2026") already says, under "Who else sees it", that **YouTube
@@ -77,7 +78,7 @@ not need to change to enable automatic stills in production.
   No Google or TMDB code is in the app, and bingd keeps nothing from these requests.
 - **Play: one question unresolved.** Google and TMDB are third parties, not service
   providers: they serve images under their own terms, not on bingd's instructions. No sharing
-  exemption covers automatic loads. The production opt-in's tap plausibly counted as a
+  exemption covers automatic loads. The former production opt-in's tap (OTA of 2026-11-07) plausibly counted as a
   user-initiated action; opening a page does not. No cookie or identifier is sent (verified),
   so Device or other IDs and User IDs are not triggered. *App interactions* is not supported
   either: the request carries no record of how the user uses bingd. Still open: Play says
@@ -484,8 +485,9 @@ attribution section exists to satisfy, which is why the file's provenance is rec
 7. **Have the privacy page read by a lawyer before public launch.** Not before the friend
    beta. What is there now is an accurate description of behaviour, which is what a beta
    owes its testers; it is not a document that has been reviewed for GDPR/CCPA sufficiency.
-8. **Before automatic trailer stills go to production** (§1, "Trailer stills"), open both
-   consoles and confirm the submitted answers still hold for the device loading
+8. **Automatic trailer stills are in production** (§1, "Trailer stills"; OTA of 2026-11-09,
+   shipped under the existing declarations by founder decision while F-6 stays open). Open
+   both consoles and confirm the submitted answers still hold for the device loading
    images from YouTube's image host on every Cinematic title page, movie and TV, without a tap:
    - **App Store Connect → the app → App Privacy:** the *Privacy Policy URL* is
      `https://bingd.app/privacy`; under *Data Collection*, the declared data types and,
@@ -502,8 +504,8 @@ attribution section exists to satisfy, which is why the file's provenance is rec
      - **If declaration is required** (or the founder decides to declare
        conservatively): select Approximate location; *collected, shared, or both* →
        Collected and Shared; *processed ephemerally* → No; Required; purpose → App
-       functionality. Publish before the OTA. This covers TMDB, which needs it
-       regardless of the OTA.
+       functionality. Publish it once decided: production already loads stills
+       automatically, and TMDB images have raised the same question all along.
      - **If it is not required:** no Play answer changes.
      - Do **not** add App interactions as Shared; the request does not carry it.
        Also confirm **App content → Privacy policy** is `https://bingd.app/privacy`.
