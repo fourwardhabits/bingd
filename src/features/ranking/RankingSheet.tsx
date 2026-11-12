@@ -1838,10 +1838,41 @@ function Reveal({
    * same explicit-height pattern the title page's cast sheet uses, and the exits sit under
    * it. On an ordinary phone the body is shorter than its bound and nothing scrolls.
    */
-  const { height: windowHeight, fontScale } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
+
+  /**
+   * The reveal's exits, secondary first and the accent last — left to right in a row,
+   * top to bottom when stacked, and in that order for a screen reader either way. Each
+   * keeps exactly the handler it had: Done is `onDone`, Add details `onFinishLog`, Update
+   * Show `onUpdateShow`. Done joins the pair unless Update Show is offered, in which case
+   * it is the quiet control under it (drawn below).
+   */
+  const exitPair: RevealExit[] = [
+    onUpdateShow
+      ? {
+          label: 'Update Show',
+          kind: 'secondary',
+          onPress: onUpdateShow,
+          hint: 'Re-ranks the show this season belongs to',
+          testID: 'reveal-update-show',
+        }
+      : { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
+    ...(onFinishLog
+      ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
+      : []),
+  ];
+  const exitsStacked = !revealExitsFitRow(
+    exitPair.map((exit) => exit.label),
+    windowWidth,
+    fontScale,
+  );
+  const exitRows = (exitsStacked ? exitPair.length : 1) + (onUpdateShow ? 1 : 0);
+
   const revealBodyMax = Math.max(
     REVEAL_BODY_MIN,
-    Math.round(windowHeight * 0.9) - REVEAL_CHROME - Math.round(REVEAL_EXIT_ROW * fontScale),
+    Math.round(windowHeight * 0.9) -
+      REVEAL_CHROME -
+      Math.round(REVEAL_EXIT_ROW * exitRows * fontScale),
   );
 
   const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
@@ -2231,64 +2262,75 @@ function Reveal({
        * it. Leading it with the filled button asked the reader to step over the thing they
        * were being encouraged to do in order to reach the way out.
        *
-       * Both are `fit` inside equal-flex wrappers, so the pair keeps its symmetry and
-       * neither label decides the row's proportions. The accessibility order follows the
-       * visual order because it is the same JSX order — nothing here reorders at paint.
+       * Both sit in equal-flex wrappers, so the pair keeps its symmetry and neither label
+       * decides the row's proportions (no longer `fit`: see the exits below, P0-3). The
+       * accessibility order follows the visual order because it is the same JSX order —
+       * nothing here reorders at paint.
        */}
       {/**
        * **Update Show** (founder brief §5, 2026-11-11): a season that was just watched, of
        * a show the reader has ranked. Two rows, and no new modal, card or confirmation:
        *
-       *   [ Add details ] [ Update Show ]
+       *   [ Update Show ] [ Add details ]
        *               Done
        *
-       * Add details keeps the filled treatment; Update Show is the outlined second act;
-       * Done drops to a quiet text control centred across the full width, still one tap
-       * and always reachable. Anywhere Update Show is not offered, the row below is the
-       * unchanged Done | Add details pair.
+       * Add details keeps the filled treatment and the trailing place (P0-3, 2026-11-12:
+       * it used to lead this row, the one reveal where the accent was on the left);
+       * Update Show is the outlined second act; Done is a quiet text control across the
+       * full width, still one tap and always reachable. Anywhere Update Show is not
+       * offered, the row is the unchanged Done | Add details pair.
        */}
-      {onUpdateShow ? (
-        <View style={styles.revealExitsStacked}>
-          <View style={styles.revealExits}>
-            {onFinishLog ? (
-              <View style={styles.revealExit}>
-                <Button label="Add details" fit onPress={onFinishLog} />
-              </View>
-            ) : null}
-            <View style={styles.revealExit}>
+      {/**
+       * **One row, one set of rules, on every reveal** (founder QA P0-3, Android, 2026-11-12).
+       *
+       *   movie / show / season, Edit ranking:   [ Done ]        [ Add details ]
+       *   season with Update Show:               [ Update Show ] [ Add details ]
+       *                                                     Done
+       *   no log sheet to return to (onboarding): [            Done            ]
+       *
+       * Secondary on the left, the accent on the right; Done is the quiet exit, and the
+       * accent only when it is the one action there is. Every control is a `md` Button of
+       * an established kind, at its natural label size: nothing here uses `fit`, because
+       * `fit`'s shrink is floored by `minimumFontScale`, which React Native's Android text
+       * layout ignores (it reads `minimumFontSize` alone), so on Android a label that did
+       * not fit its half shrank without limit. At 330pt "Update Show" needed 134pt of a
+       * 129pt half — that was the tiny, unreadable button.
+       *
+       * Instead the pair keeps equal halves while both labels fit them at the reader's
+       * width and text size (`revealExitsFitRow`), and stacks full width, in the same
+       * order, when they would not. A label is never shrunk, clipped or truncated.
+       */}
+      <View style={styles.revealControls}>
+        <View
+          style={exitsStacked ? styles.revealExitsStacked : styles.revealExits}
+          testID="reveal-exits"
+        >
+          {exitPair.map((exit) => (
+            <View
+              key={exit.label}
+              style={exitsStacked ? undefined : styles.revealExit}
+              testID={`reveal-exit-${exit.kind}`}
+            >
               <Button
-                label="Update Show"
-                kind="secondary"
-                fit
-                onPress={onUpdateShow}
-                accessibilityHint="Re-ranks the show this season belongs to"
-                testID="reveal-update-show"
+                label={exit.label}
+                kind={exit.kind}
+                onPress={exit.onPress}
+                accessibilityHint={exit.hint}
+                testID={exit.testID}
               />
             </View>
-          </View>
-          <View style={styles.revealDoneRow}>
-            <Button
-              label="Done"
-              kind="tertiary"
-              tone="secondary"
-              fit
-              onPress={onDone}
-              testID="reveal-done"
-            />
-          </View>
+          ))}
         </View>
-      ) : (
-        <View style={styles.revealExits}>
-          <View style={styles.revealExit}>
-            <Button label="Done" kind="secondary" fit onPress={onDone} />
-          </View>
-          {onFinishLog ? (
-            <View style={styles.revealExit}>
-              <Button label="Add details" fit onPress={onFinishLog} />
-            </View>
-          ) : null}
-        </View>
-      )}
+        {onUpdateShow ? (
+          <Button
+            label="Done"
+            kind="tertiary"
+            tone="secondary"
+            onPress={onDone}
+            testID="reveal-done"
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -2393,7 +2435,55 @@ const REVEAL_AWARDS_SHOWN = 2;
  * own padding and gap, and a bottom inset — and the exit row, which grows with text.
  */
 const REVEAL_CHROME = 120;
+/** One row of reveal exits: a `md` Button (48pt) and the gap above it, at default text. */
 const REVEAL_EXIT_ROW = 60;
+
+/** One of the reveal's exits: always a `md` Button of an established kind. */
+type RevealExit = {
+  label: string;
+  kind: 'primary' | 'secondary';
+  onPress: () => void;
+  hint?: string;
+  testID?: string;
+};
+
+/**
+ * Whether the reveal's exits fit side by side in equal halves at their natural size.
+ *
+ * The row is the window less the sheet's gutter and the reveal's padding (both
+ * `theme.layout.gutter`, each side), split by `space[2]`. Below that, or at a text size
+ * that makes a label wider than its half, the exits stack (see the exits in `Reveal`).
+ *
+ * Exported for the layout tests: jest has no layout engine, so the arithmetic is what
+ * can be pinned there, against the font itself.
+ */
+export function revealExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
+  if (labels.length < 2) return true;
+  const row = windowWidth - 4 * theme.layout.gutter;
+  const half = (row - theme.space[2] * (labels.length - 1)) / labels.length;
+  return labels.every((label) => revealLabelWidth(label, fontScale) <= half);
+}
+
+/**
+ * Each exit label's advance width in Inter SemiBold, in em, measured from the font file
+ * (`RankingSheet.test.tsx` re-measures them, so this cannot drift from the font).
+ */
+export const REVEAL_LABEL_EM: Record<string, number> = {
+  Done: 2.534,
+  'Add details': 5.443,
+  'Update Show': 6.465,
+};
+
+/**
+ * One reveal exit's width: its label at `headline`'s 17pt and the reader's text size,
+ * 4% over the measured advance, plus `md`'s 20pt of padding and the border either side.
+ * A label not in the table is counted at 0.62em a character, above any of the three.
+ */
+export function revealLabelWidth(label: string, fontScale: number) {
+  const em = REVEAL_LABEL_EM[label] ?? label.length * 0.62;
+  return em * 17 * fontScale * 1.04 + 2 * theme.space[5] + 4;
+}
+
 /** However small the phone, the body keeps room for the score and the title. */
 const REVEAL_BODY_MIN = 220;
 const REVEAL_AWARD_BADGE = 40;
@@ -2481,16 +2571,15 @@ const styles = StyleSheet.create({
   // Equal halves. Two controls of the same rank should be the same size, and letting
   // each hug its own label makes "Skip" visibly smaller than "Undo" for no reason.
   control: { flex: 1 },
-  // The reveal is an airy surface (PRD §5) and its two actions are the only thing to
-  // do on it, so they stack full-width rather than sharing a row.
+  // Every reveal's exits: the pair, then (under Update Show) the quiet Done, each
+  // across the reveal's full width.
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   // The two ways out, side by side under the one way on. Equal halves, so neither
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
+  /** The same exits, full width and in the same order, when the halves are too narrow. */
   revealExitsStacked: { gap: theme.space[2] },
-  /** Done under the Update Show row: centred across the full width, and quiet. */
-  revealDoneRow: { alignSelf: 'stretch', alignItems: 'center' },
   centre: { textAlign: 'center' },
   /**
    * The title and the placement beneath it: one block, tight (founder, 2026-09-07).
