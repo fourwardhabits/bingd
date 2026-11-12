@@ -57,7 +57,15 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12: an oversized gap between the Settings header and
+     * ACCOUNT), for the reason `notifications.tsx` records: this screen shows a native-stack
+     * header, which already consumes the status-bar inset, so `Screen`'s default `top` edge added
+     * the same inset a second time below it. Left and right still apply; only the top edge is the
+     * header's. The first section's `marginTop: space[6]` is the ordinary section interval and
+     * stays — it was never the band.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
         options={{
           headerShown: true,

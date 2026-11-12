@@ -843,8 +843,11 @@ export default function TitleScreen() {
   );
 
   if (!hasId) {
+    // No top edge: the root layout's native-stack header is still showing here (only the
+    // loaded page hides it, by drawing its own bar over the hero), and it has already consumed
+    // the status-bar inset. The Settings root's fix (founder QA, 2026-11-12).
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <EmptyState
           kind="nothingMatches"
           title="Title not found"
@@ -858,16 +861,18 @@ export default function TitleScreen() {
   // page's height depends on whether there is a backdrop, an overview, a cast,
   // seasons — so a skeleton here would guess wrong and relayout anyway.
   if (isPending) {
+    // No top edge, as above: the stack header is still showing.
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <LoadingScreen />
       </Screen>
     );
   }
 
   if (isError || !data?.title) {
+    // No top edge, as above: the stack header is still showing.
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <EmptyState
           kind="couldNotLoad"
           title="Could not load this title"

@@ -1,4 +1,5 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert, type AlertButton } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -21,6 +22,20 @@ import EditProfileScreen from '../../../app/settings/profile';
 
 const mockRpc = jest.fn();
 const mockBack = jest.fn();
+/** What the navigator is told to do once a guarded leave is allowed. */
+const mockDispatch = jest.fn();
+/**
+ * `save_profile`'s answer. `null` is the ordinary success; a promise holds the save open
+ * (for *Saving…*); an error is a refusal.
+ */
+let mockSaveAnswer: Promise<unknown> | { data: unknown; error: unknown } | null = null;
+/** The last `usePreventRemove` the screen registered: whether it guards, and with what. */
+let mockGuard: {
+  prevent: boolean;
+  callback: (event: { data: { action: unknown } }) => void;
+} | null = null;
+/** What the screen asked the navigator to draw in its header. */
+let mockHeaderOptions: { headerRight?: () => React.ReactNode } = {};
 
 let mockProfile = {
   id: 'user-1',
@@ -41,6 +56,7 @@ jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => {
       mockRpc(name, args);
+      if (mockSaveAnswer) return Promise.resolve(mockSaveAnswer);
       return Promise.resolve({ data: { status: 'ok' }, error: null });
     },
   },
@@ -49,8 +65,40 @@ jest.mock('@/lib/supabase', () => ({
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: () => {}, replace: () => {}, back: mockBack }),
-  Stack: { Screen: () => null },
+  useNavigation: () => ({ dispatch: mockDispatch }),
+  /**
+   * Draws what the screen asked the navigator to put on the right of its header, as
+   * `PublicProfileScreen.test.tsx` and `MyListsScreen.test.tsx` do — Save lives there now,
+   * and a stand-in that drew nothing would make it untestable.
+   */
+  Stack: {
+    Screen: ({ options }: { options?: { headerRight?: () => React.ReactNode } }) => {
+      mockHeaderOptions = options ?? {};
+      return options?.headerRight?.() ?? null;
+    },
+  },
 }));
+
+/**
+ * React Navigation's `beforeRemove` guard, held so a test can be the navigator: `leave()`
+ * below does what a Back press does — asks the guard if it is guarding, and otherwise
+ * just goes.
+ */
+jest.mock('expo-router/react-navigation', () => ({
+  usePreventRemove: (
+    prevent: boolean,
+    callback: (event: { data: { action: unknown } }) => void,
+  ) => {
+    mockGuard = { prevent, callback };
+  },
+}));
+
+const BACK = { type: 'GO_BACK' };
+const leave = () =>
+  act(async () => {
+    if (mockGuard?.prevent) mockGuard.callback({ data: { action: BACK } });
+    else mockDispatch(BACK);
+  });
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => mockProfile,
@@ -65,9 +113,16 @@ jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${(issued += 1)}` }));
 beforeEach(() => {
   mockRpc.mockClear();
   mockBack.mockClear();
+  mockDispatch.mockClear();
+  mockSaveAnswer = null;
+  mockGuard = null;
+  mockHeaderOptions = {};
   issued = 0;
   mockProfile = {
     ...mockProfile,
+    username: 'sai',
+    display_name: 'Sai',
+    bio: null,
     link_instagram: null,
     link_tiktok: null,
     link_youtube: null,
@@ -277,5 +332,212 @@ describe('a box that normalises to what is already stored', () => {
     const save = view.getByRole('button', { name: 'Save changes' });
 
     expect(save.props.accessibilityState?.disabled).toBe(true);
+  });
+});
+
+/**
+ * **Save in the header** (founder, 2026-11-12). The one Save was at the end of the form,
+ * under five social-link boxes; it is the header's text action now, calling the same
+ * `save()` under the same rule, and the bottom one is gone.
+ */
+describe('Save in the header', () => {
+  const save = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    view.getByRole('button', { name: 'Save changes' });
+
+  it('is the header’s action, and the only Save on the screen', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    expect(mockHeaderOptions.headerRight).toBeDefined();
+    expect(view.getAllByRole('button', { name: 'Save changes' })).toHaveLength(1);
+    // A short label for a tight header, and the whole action for a screen reader.
+    expect(view.getByText('Save')).toBeTruthy();
+    expect(view.queryByText('Save changes')).toBeNull();
+  });
+
+  it('is a tertiary text action, like Settings’ Close', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    const { StyleSheet } = jest.requireActual<typeof import('react-native')>('react-native');
+    const style = StyleSheet.flatten(
+      typeof save(view).props.style === 'function'
+        ? save(view).props.style({ pressed: false })
+        : save(view).props.style,
+    );
+    expect(style.backgroundColor).toBe('transparent');
+  });
+
+  it('is disabled until something has changed, and says why', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    expect(save(view).props.accessibilityState?.disabled).toBe(true);
+    expect(save(view).props.accessibilityHint).toBe('Nothing has changed yet');
+
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+    expect(save(view).props.accessibilityState?.disabled).toBeFalsy();
+  });
+
+  it.each([
+    ['an empty display name', 'Display name', '   '],
+    ['a handle under three characters', 'Handle', 'ab'],
+    ['a bio over the limit', 'Bio', 'x'.repeat(121)],
+  ])('is disabled with %s', async (_case, field, value) => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText(field), value);
+
+    expect(save(view).props.accessibilityState?.disabled).toBe(true);
+    expect(save(view).props.accessibilityHint).toBe('Fill in a name and a handle first');
+  });
+
+  it('saves through the same write, sending only what changed', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+    await fireEvent.press(save(view));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledTimes(1));
+    expect(mockRpc.mock.calls[0]?.[0]).toBe('save_profile');
+    expect(argsOf().p_bio).toBe('Mostly thrillers.');
+    expect(argsOf().p_display_name).toBeNull();
+    expect(argsOf().p_username).toBeNull();
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  });
+
+  it('says Saving… and cannot be pressed twice while the save is out', async () => {
+    let finish: (value: unknown) => void = () => {};
+    mockSaveAnswer = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+    await fireEvent.press(save(view));
+
+    const saving = await view.findByRole('button', { name: 'Saving changes' });
+    expect(view.getByText('Saving…')).toBeTruthy();
+    expect(saving.props.accessibilityState?.disabled).toBe(true);
+    expect(saving.props.accessibilityHint).toBe('Saving your changes');
+
+    await fireEvent.press(saving);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish({ data: { status: 'ok' }, error: null }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  });
+
+  it('still asks before a handle change, and saves nothing until it is confirmed', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Handle'), 'sai_k');
+    await fireEvent.press(save(view));
+
+    expect(alert).toHaveBeenCalledWith(
+      'Change your handle to @sai_k?',
+      'You can change it again in 30 days.',
+      expect.any(Array),
+    );
+    expect(mockRpc).not.toHaveBeenCalled();
+
+    const buttons = alert.mock.calls[0]?.[2] as AlertButton[];
+    await act(async () => buttons.find((b) => b.text === 'Save changes')?.onPress?.());
+    await waitFor(() => expect(argsOf().p_username).toBe('sai_k'));
+    alert.mockRestore();
+  });
+
+  it('shows a refused save in the form, and stays on the screen', async () => {
+    mockSaveAnswer = { data: null, error: new Error('That handle is not available.') };
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+    await fireEvent.press(save(view));
+
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
+    expect(mockBack).not.toHaveBeenCalled();
+  });
+
+  it('stays pressable with a bad link, and pressing it shows the error', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Website'), 'javascript:alert(1)');
+    expect(save(view).props.accessibilityState?.disabled).toBeFalsy();
+
+    await fireEvent.press(save(view));
+    await waitFor(() => expect(view.getByText(/must start with https/)).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * **Leaving with unsaved edits asks first.** There was no guard anywhere in the app; a
+ * Back press on a half-edited profile threw the edits away without a word.
+ */
+describe('leaving with unsaved changes', () => {
+  let alert: jest.SpyInstance;
+  beforeEach(() => {
+    alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+  afterEach(() => alert.mockRestore());
+
+  const buttons = () => alert.mock.calls.at(-1)?.[2] as AlertButton[];
+
+  it('just goes back when nothing has changed', async () => {
+    await renderWithProviders(<EditProfileScreen />);
+
+    await leave();
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(mockDispatch).toHaveBeenCalledWith(BACK);
+  });
+
+  it('asks, and Keep editing keeps the edits and the screen', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+
+    await leave();
+
+    expect(alert).toHaveBeenCalledWith(
+      'Discard your changes?',
+      'Your profile edits have not been saved.',
+      expect.any(Array),
+    );
+    expect(buttons().map((b) => b.text)).toEqual(['Keep editing', 'Discard']);
+    await act(async () => buttons()[0]?.onPress?.());
+
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(view.getByLabelText('Bio').props.value).toBe('Mostly thrillers.');
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('goes where it was going on Discard, without saving', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    await fireEvent.changeText(view.getByLabelText('Instagram'), 'suraj');
+
+    await leave();
+    await act(async () => buttons().find((b) => b.text === 'Discard')?.onPress?.());
+
+    expect(mockDispatch).toHaveBeenCalledWith(BACK);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('asks for a bad link too, since that is an edit somebody made', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    await fireEvent.changeText(view.getByLabelText('Website'), 'javascript:alert(1)');
+
+    await leave();
+
+    expect(alert).toHaveBeenCalledWith('Discard your changes?', expect.any(String), expect.any(Array));
+  });
+
+  it('does not ask on the way out after a save', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+
+    await fireEvent.press(view.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    // `router.back()` is a removal like any other; the navigator asks the guard.
+    await leave();
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(mockDispatch).toHaveBeenCalledWith(BACK);
   });
 });

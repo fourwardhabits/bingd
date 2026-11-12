@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import type { Edge } from 'react-native-safe-area-context';
 
 import type { ImportSurface } from '@/lib/analytics';
 import { unrankedMovies } from '@/lib/routes';
@@ -56,6 +57,11 @@ const COPY = {
 } as const satisfies Record<ImportProvider, Record<string, string>>;
 
 type Copy = (typeof COPY)[ImportProvider];
+
+/** Under a native-stack header: the header owns the top inset. See the render. */
+const HEADER_EDGES: readonly Edge[] = ['left', 'right'];
+/** With no header above it, as `Screen`'s own default. */
+const ONBOARDING_EDGES: readonly Edge[] = ['top', 'left', 'right'];
 
 /**
  * The importer, as one screen that changes rather than a flow of several.
@@ -236,7 +242,15 @@ export function ImportScreen({
   const asking = step !== undefined && state.phase === 'idle' && !chooser;
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **The top edge is onboarding's alone** (founder QA, 2026-11-12, the Settings root's fix).
+     * Settings ▸ Import from shows a native-stack header (`app/settings/import.tsx`), which
+     * already consumes the status-bar inset, so `Screen`'s default `top` edge added it a second
+     * time below the header. The onboarding step has no header (`headerShown: false` on
+     * `onboarding/letterboxd`) and draws its own chrome inside this `Screen`, so there the top
+     * edge is still this screen's. Left and right apply in both.
+     */
+    <Screen includeBottomInset edges={onboarding ? ONBOARDING_EDGES : HEADER_EDGES}>
       {onboarding?.header}
       {choosing ? (
         <ChooseProvider
