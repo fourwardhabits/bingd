@@ -2,9 +2,18 @@ import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { DEFAULT_REACTION, REACTIONS, useReactions, useSetReaction } from './use-reactions';
+import {
+  DEFAULT_REACTION,
+  REACTIONS,
+  SELF_REACTION_MESSAGE,
+  isSelfReactionRefusal,
+  reactionFailureAlert,
+  useReactions,
+  useSetReaction,
+} from './use-reactions';
 
 let mockRows: unknown[] = [];
+let mockReads = 0;
 const mockRpc = jest.fn();
 
 // A fresh id every call, so a held one is visibly held rather than two undefineds
@@ -24,7 +33,10 @@ jest.mock('@/lib/supabase', () => ({
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
         select: () => chain,
-        in: () => Promise.resolve({ data: mockRows, error: null }),
+        in: () => {
+          mockReads += 1;
+          return Promise.resolve({ data: mockRows, error: null });
+        },
       });
       return chain;
     },
@@ -134,6 +146,93 @@ describe('one operation id per reaction', () => {
 });
 
 /**
+ * **A reaction to your own post is refused calmly, by a server that still refuses one**
+ * (20261110000100 without 20261115000100). Dead-safe handling: self-reactions are allowed
+ * (founder, 2026-11-11) and a current server never raises this.
+ *
+ * Such a server raises 42501 "cannot react to your own activity". 42501 is also the
+ * suspension refusal, so the message decides which sentence the reader gets; the codes
+ * and the RPC are the migration's and are not changed by the client.
+ */
+describe('a refused self-reaction', () => {
+  const SELF = { code: '42501', message: 'cannot react to your own activity' };
+
+  const mount = async () => {
+    const view = await renderHookWithProviders(() => useSetReaction('me'));
+    return (kind: 'love' | null) =>
+      act(() => view.result.current.setReaction('event-1', kind));
+  };
+
+  it('is recognised by its code and its words, for a post and a comment', () => {
+    expect(isSelfReactionRefusal(SELF)).toBe(true);
+    expect(
+      isSelfReactionRefusal({ code: '42501', message: 'cannot react to your own comment' }),
+    ).toBe(true);
+    // A suspended account is 42501 too, and keeps its own wording.
+    expect(isSelfReactionRefusal({ code: '42501', message: 'account is suspended' })).toBe(false);
+    expect(isSelfReactionRefusal({ code: 'P0002', message: 'no such activity' })).toBe(false);
+    expect(isSelfReactionRefusal(null)).toBe(false);
+  });
+
+  it('answers in its own words and reads the reactions again', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: SELF });
+    const before = mockRpc.mock.calls.length;
+    // The read and the writer together, as a surface mounts them, so the rollback (a
+    // fresh read of what is stored) is visible.
+    const view = await renderHookWithProviders(() => ({
+      read: useReactions(['event-1'], 'me'),
+      write: useSetReaction('me'),
+    }));
+    await waitFor(() => expect(view.result.current.read.isPending).toBe(false));
+    const readsBefore = mockReads;
+
+    const result = await act(() => view.result.current.write.setReaction('event-1', 'love'));
+
+    await waitFor(() => expect(mockReads).toBeGreaterThan(readsBefore));
+
+    expect(result).toEqual({
+      ok: false,
+      message: SELF_REACTION_MESSAGE.post,
+      selfReaction: true,
+    });
+    expect(SELF_REACTION_MESSAGE.post).toBe('You can’t react to your own post.');
+    expect(mockRpc.mock.calls.length - before).toBe(1);
+    // The calm sentence alone, not under "Could not save your reaction".
+    expect(reactionFailureAlert(result, 'Could not save your reaction')).toEqual([
+      'You can’t react to your own post.',
+    ]);
+  });
+
+  it('leaves every other failure its existing alert', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'account is suspended' },
+    });
+    const react = await mount();
+
+    const result = await react('love');
+
+    expect(result.ok).toBe(false);
+    expect(result.selfReaction).toBeFalsy();
+    expect(reactionFailureAlert(result, 'Could not save your reaction')).toEqual([
+      'Could not save your reaction',
+      'account is suspended',
+    ]);
+  });
+
+  it('still sends a removal, which the server allows on your own post', async () => {
+    // Taking a self-reaction back is a null kind, and nothing here refuses it first.
+    const react = await mount();
+    const result = await react(null);
+    expect(result).toEqual({ ok: true, message: null });
+    expect(mockRpc).toHaveBeenCalledWith(
+      'set_reaction',
+      expect.objectContaining({ p_feed_event_id: 'event-1', p_kind: null }),
+    );
+  });
+});
+
+/**
  * The counting is done here rather than in an aggregate RPC, because `reactions_read`
  * already applies AD-5 to both the reactor and the event's actor. That is the reason
  * for the first test: a blocked reactor's row never arrives, so it must not be
@@ -230,6 +329,44 @@ describe('useReactions', () => {
     ];
     expect((await summaries())?.get('event-1')?.people.map((p) => p.name)).toEqual(['jerry']);
   });
+});
+
+/**
+ * **A reaction to your own post counts** (founder, 2026-11-11; 20261115000100). Rows the
+ * author wrote on their own activity — before 20261110000100 or after its reversal — are
+ * counted, named and drawn like anybody else's.
+ */
+describe('an author’s reaction to their own post', () => {
+  it('is in the count, the kinds, mine and the people', async () => {
+    mockRows = [
+      row({
+        user_id: 'me',
+        kind: 'wow',
+        profiles: { id: 'me', display_name: 'Sai', username: 'sai', avatar_path: null },
+      }),
+      row({ user_id: 'jerry', kind: 'love' }),
+    ];
+    const summary = (await summaries('me'))?.get('event-1');
+    expect(summary?.total).toBe(2);
+    expect(summary?.mine).toBe('wow');
+    expect([...(summary?.kinds ?? [])].sort()).toEqual(['love', 'wow']);
+    expect(summary?.people.map((person) => person.userId)).toEqual(['me', 'jerry']);
+  });
+
+  it('is counted for every reader, not only the author', async () => {
+    mockRows = [
+      row({ user_id: 'anna', kind: 'love' }),
+      row({ user_id: 'jerry', kind: 'love' }),
+    ];
+    expect((await summaries('someone-else'))?.get('event-1')?.total).toBe(2);
+  });
+
+  it('carries when each person reacted, for the summary’s tie-break', async () => {
+    mockRows = [row({ created_at: '2026-11-09T10:00:00Z' })];
+    const summary = (await summaries('me'))?.get('event-1');
+    expect(summary?.people[0]?.reactedAt).toBe('2026-11-09T10:00:00Z');
+  });
+
 });
 
 describe('the reaction set', () => {

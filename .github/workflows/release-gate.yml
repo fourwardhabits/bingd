@@ -85,8 +85,12 @@ jobs:
       # genuine server, so these tests can interleave two transactions the way two
       # phones do — which is the only way the ranking, redemption and block-barrier
       # races can be observed at all. PGlite cannot express them: it is one connection.
+      #
+      # `test:race` spelled out with a five-minute timeout, for the reason db-races.yml gives:
+      # the timeout bounds the one file every race suite runs in, and `package.json` scripts
+      # move the Expo fingerprint.
       - name: Concurrency suite (real PostgreSQL)
-        run: npm run test:race
+        run: node --test --test-timeout=300000 "supabase/tests/concurrency/*.test.mjs"
 
       # And the check on that check: each race invariant is deliberately broken and the
       # suite is required to go red. A concurrency test that passes against a broken

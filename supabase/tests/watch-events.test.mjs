@@ -101,12 +101,17 @@ describe('T1 · seen implies a watch', () => {
     assert.equal(rows[0].same, true);
   });
 
-  it('a series never gets an event, because a series is never watched', async () => {
-    // `rankable_category` is asked rather than assumed. `_assert_loggable` refuses a
-    // series today; a phantom event for one would sit in W1's way for ever.
+  it('a whole show, once loggable, gets its one undated event like any title', async () => {
+    // 20261114000200 made a show loggable. Its row obeys W1 exactly as a film's does:
+    // bucketing it says it was seen, not when, so the event is undated.
     const s = await t.createSeries('The Wire', (seq += 1) + 92000);
-    const err = await t.errorFrom(`select set_bucket($1, $2, 'loved')`, [await op(), s]);
-    assert.ok(err, 'a series cannot be logged at all');
+    await t.sql(`select set_bucket($1, $2, 'loved')`, [await op(), s]);
+    const { rows } = await t.sql(
+      `select watched_on, basis from watch_events where user_id = $1 and media_item_id = $2`,
+      [user, s],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].watched_on, null);
     await valid();
   });
 });

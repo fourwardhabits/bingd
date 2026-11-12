@@ -15,7 +15,6 @@ import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-sta
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
-import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { allRows, type AllRow, type AllSection } from '@/features/search/all-sections';
 import { cooldownClock, providerQueryOf } from '@/features/search/provider-budget';
 import { useCastSearch, type CastSearchResult } from '@/features/search/use-cast-search';
@@ -93,7 +92,6 @@ export default function LogScreen() {
   const profile = useCurrentProfile();
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
   /**
@@ -136,7 +134,6 @@ export default function LogScreen() {
     useCallback(() => {
       setInput('');
       setFilter('all');
-      setSeries(null);
       field.current?.focus();
     }, []),
   );
@@ -414,17 +411,18 @@ export default function LogScreen() {
   const openLog = (result: SearchResult) => {
     commitSelection(result.title);
 
-    if (result.kind === 'series') {
-      setSeries({ id: result.id, title: result.title });
-      return;
-    }
-
+    /**
+     * **`+` on a series ranks the show** (TV show & season ranking, 2026-11-14). It used to
+     * open a season picker, because the season was the only rankable unit; a whole show is
+     * now ranked in its own pool, and this is the show-level ranking. Its seasons are
+     * ranked from the show's page, where each season row has its own `+`.
+     */
     const title: LoggableTitle = {
       id: result.id,
       title: result.title,
       year: yearOf(result.release_date),
       posterUri: posterUri(result.poster_path, 'card'),
-      kind: result.kind === 'season' ? 'season' : 'movie',
+      kind: result.kind === 'season' ? 'season' : result.kind === 'series' ? 'series' : 'movie',
     };
     // An unfinished native placement resumes its session — `rank_start` restores the
     // comparison and every answer — rather than starting over from "How was it?".
@@ -608,25 +606,6 @@ export default function LogScreen() {
           onToggleWatchlist={toggleWatchlist}
         />
       )}
-
-      <SeasonPicker
-        series={series}
-        onClose={() => setSeries(null)}
-        onPick={(season) => {
-          // The series title travels with the season, or the sheet header says "Season 3"
-          // and nothing else.
-          setLogging({
-            id: season.id,
-            title: season.title,
-            year: season.year,
-            posterUri: posterUri(season.posterPath, 'card'),
-            kind: 'season',
-            seriesTitle: series?.title ?? null,
-            seasonNumber: season.seasonNumber,
-          });
-          setSeries(null);
-        }}
-      />
 
       <LogSheet
         title={logging}
@@ -1190,9 +1169,9 @@ function Results({
                      * they had never opened, `+` and all. The fact lives on the season and
                      * the row is about the series; `seriesChildState` is the join.
                      *
-                     * Still no score and still a `+`: seasons are the rankable unit, and
-                     * the `+` opens the season picker, which is the correct next step for
-                     * every one of these states — including "one ranked, two to go".
+                     * The line is unchanged since 2026-11-14, and the trailing control now
+                     * follows the show's own ranking: its score once the show is ranked,
+                     * else the `+` that starts a show-level ranking.
                      */
                     seriesSecondaryLine(title.season_count, seriesState.get(title.id))
                   ) : (
@@ -1226,12 +1205,9 @@ function Results({
                  * ranked title for a rebucket or a rerank, and inventing a second route
                  * into ranking is how two flows come to disagree about what a re-rank is.
                  *
-                 * **A series gets no score** — it cannot be ranked
-                 * (PRD §10), so either badge there would be a control lying about what it
-                 * does. It keeps the `+`, which is not a ranking claim: it opens the
-                 * season picker, and the season is the rankable unit. Removing it would
-                 * take away the only fast path from "search Breaking Bad" to "rank the
-                 * season", which is the capture this whole row exists for.
+                 * **A series is ranked as a show** (2026-11-14): its own explicit show
+                 * score once ranked, and otherwise the same `+`, which now starts the
+                 * show-level ranking. Seasons are ranked from the show's page.
                  *
                  * Both controls carry `hitSlop`, so each clears 44pt without the row
                  * growing. The row itself still opens the title: these are `Pressable`

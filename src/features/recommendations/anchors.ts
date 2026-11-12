@@ -172,15 +172,45 @@ export function candidateIdsFrom(
  * it happened to be one of their anchors.
  */
 export function seriesAlreadyMet(
-  ...lists: readonly (readonly { kind?: string; seriesId?: string | null }[] | undefined)[]
+  ...lists: readonly (
+    | readonly { kind?: string; seriesId?: string | null; mediaItemId?: string }[]
+    | undefined
+  )[]
 ): Set<string> {
   const met = new Set<string>();
   for (const list of lists) {
     for (const entry of list ?? []) {
       if (entry.kind === 'season' && entry.seriesId) met.add(entry.seriesId);
+      // A whole show logged or ranked in its own right (2026-11-14) has been met too.
+      if (entry.kind === 'series' && entry.mediaItemId) met.add(entry.mediaItemId);
     }
   }
   return met;
+}
+
+/**
+ * **Each series is one unit of taste** (TV show & season ranking, 2026-11-14): the share
+ * of influence each TV observation carries, so the ranked seasons and the show ranking of
+ * one series divide one unit between them. A film is always 1. Nothing is dropped: every
+ * observation still informs the taste, a series just cannot outvote everything else by
+ * having many seasons.
+ */
+export function seriesUnitWeights(
+  entries: readonly { mediaItemId: string; kind: string; seriesId?: string | null }[],
+): Map<string, number> {
+  const unitOf = (entry: (typeof entries)[number]) =>
+    entry.kind === 'season' ? (entry.seriesId ?? entry.mediaItemId) : entry.mediaItemId;
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.kind === 'movie') continue;
+    counts.set(unitOf(entry), (counts.get(unitOf(entry)) ?? 0) + 1);
+  }
+  return new Map(
+    entries.map((entry) => [
+      entry.mediaItemId,
+      entry.kind === 'movie' ? 1 : 1 / (counts.get(unitOf(entry)) ?? 1),
+    ]),
+  );
 }
 
 /**
@@ -198,6 +228,9 @@ export function socialSeriesFrom(
   const parentOf = new Map<string, string>();
   for (const row of rows) {
     if (row.kind === 'season' && row.parent_id) parentOf.set(row.id, row.parent_id);
+    // A followee's whole-show ranking (2026-11-14) is a signal about that show itself,
+    // beside their seasons of it; the set below keeps it to one entry per show.
+    if (row.kind === 'series') parentOf.set(row.id, row.id);
   }
   return [
     ...new Set(

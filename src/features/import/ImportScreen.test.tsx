@@ -206,7 +206,7 @@ describe('before a file is chosen', () => {
 
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
-      props: { surface: 'onboarding' },
+      props: { surface: 'onboarding', provider: 'letterboxd' },
     });
   });
 });
@@ -253,7 +253,7 @@ describe('choosing an export', () => {
     expect(mockRpc).not.toHaveBeenCalled();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
-      props: { outcome: 'ok' },
+      props: { outcome: 'ok', provider: 'letterboxd' },
     });
   });
 
@@ -278,7 +278,7 @@ describe('choosing an export', () => {
     expect(screen.getByText(/unzipped it/)).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
-      props: { outcome: 'not_a_zip' },
+      props: { outcome: 'not_a_zip', provider: 'letterboxd' },
     });
   });
 
@@ -309,7 +309,7 @@ describe('choosing an export', () => {
     await waitFor(() =>
       expect(mockTrack).toHaveBeenCalledWith({
         name: 'import_archive_selected',
-        props: { outcome: 'cancelled' },
+        props: { outcome: 'cancelled', provider: 'letterboxd' },
       }),
     );
     // No apology for a decision somebody made on purpose.
@@ -348,7 +348,7 @@ describe('uploading', () => {
     expect((stageArgs as { p_rows: unknown[] }).p_rows).toHaveLength(2);
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_started',
-      props: { films: 2, viewings: 0 },
+      props: { films: 2, tv_shows: 0, viewings: 0, provider: 'letterboxd' },
     });
   });
 
@@ -441,7 +441,7 @@ describe('when it is over', () => {
     expect(screen.getByText(/couldn.+t find 1 film/)).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
-      props: { applied: 1, unresolved: 1 },
+      props: { applied: 1, unresolved: 1, provider: 'letterboxd' },
     });
   });
 
@@ -524,6 +524,38 @@ describe('when it is over', () => {
     );
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
     // Nothing arrived, so there is nothing to rank.
+    expect(screen.queryByText('Rank imported movies')).toBeNull();
+  });
+
+  it('says nothing was added, not "already here", when nothing matched', async () => {
+    // 2026-11-11: a file whose films all went unmatched used to be told its history was
+    // already here, which nothing on the server made true.
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 0, watched: 0, kept: 0, watchlist: 0, unmatched: 2 },
+              completed_at: '2026-09-11T00:00:00.000Z',
+            };
+      },
+    };
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('Nothing was added')).toBeTruthy());
+    expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
+    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    // The unmatched line still says why.
+    expect(screen.getByText(/couldn.+t find 2 films/)).toBeTruthy();
     expect(screen.queryByText('Rank imported movies')).toBeNull();
   });
 });

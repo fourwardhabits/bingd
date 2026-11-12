@@ -54,7 +54,7 @@ import {
   seedFromSentToYou,
   titleRecommendationsKey,
 } from '@/features/recommendations/use-title-recommendations';
-import { track } from '@/lib/analytics';
+import { mediaKindFor, track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { useTabReset } from '@/ui/use-tab-reset';
@@ -632,7 +632,7 @@ export default function RecommendationsScreen() {
     if (!row.openedAt) {
       markOpened.mutate({
         recommendationId: row.id,
-        mediaKind: row.kind === 'movie' ? 'movie' : 'tv_season',
+        mediaKind: mediaKindFor(row.kind),
         hasNote: Boolean(row.message),
       });
     }
@@ -682,9 +682,17 @@ export default function RecommendationsScreen() {
    * Top Rated, as they always were).
    *
    * It scrolls away with the wall rather than standing over it: it is the first thing in the
-   * wall's scroller, and in Sent to You's. Where there is nothing to scroll (loading, empty,
-   * a failed read) it is drawn above the state instead, so it is always reachable. The
-   * medium stays the header's switch.
+   * wall's scroller, and in Sent to You's. The medium stays the header's switch.
+   *
+   * **One scroller in every state, so the toolbar is never remounted** (2026-11-11). It used
+   * to be drawn above the state while the wall loaded, was empty or failed, and inside the
+   * wall's scroller once it landed: two places in the tree, so switching Movies/TV or
+   * Recommended/Top Rated and opening the Recommended ▾ menu before the new wall arrived
+   * remounted `MediumSelector` and the open menu closed by itself. The loading, empty and
+   * error states are now drawn under the toolbar inside the same scroller (its content
+   * grows to fill the page, so they sit where they did). Its `refreshControl` stays in every
+   * state for the same reason: React Native's `ScrollView` wraps itself in the control when
+   * there is one, so adding it on load would remount everything inside.
    */
   const toolbar = (
     <View testID="for-you-toolbar">
@@ -802,7 +810,6 @@ export default function RecommendationsScreen() {
       />
       <HeaderBoundary />
 
-          {!sentOnly && !wallScrolls ? toolbar : null}
           {sentOnly ? (
             <SentList
               header={toolbar}
@@ -816,7 +823,65 @@ export default function RecommendationsScreen() {
                 void toggleSaveById(row.mediaItemId, !savedIds.has(row.mediaItemId))
               }
             />
-          ) : wall.isError ? (
+          ) : (
+            <ScrollView
+              ref={wallScroller}
+              contentContainerStyle={[styles.content, !wallScrolls && styles.stateContent]}
+              /* The only way a test can reach the scroll that pages the wall — the same
+                 reason `for-you-refresh` exists on the control below. A `ScrollView` has
+                 no accessible name and no role to query it by. */
+              testID={wallScrolls ? 'for-you-wall' : 'for-you-page'}
+              /**
+               * The wall grows as the reader nears its end (§18).
+               *
+               * `onScroll` with a threshold rather than a `FlatList`'s `onEndReached`,
+               * because the wall is a `PosterGrid` inside a `ScrollView` and converting it
+               * to a virtualised list is a change to how every tile is measured and drawn —
+               * a bigger risk than this tranche is buying. The grid is at most a hundred
+               * posters under `MAX_PAGES`, which is well inside what a `ScrollView` renders
+               * comfortably.
+               *
+               * `scrollEventThrottle` at 16 is one event a frame; `loadMore` is a no-op
+               * once the pool is exhausted, so the common case at the bottom of the wall is
+               * a comparison and a return.
+               */
+              scrollEventThrottle={16}
+              onScroll={({ nativeEvent }) => {
+                // Only a drawn wall pages; the same scroller holds a loading or empty
+                // state under the toolbar.
+                if (!wallScrolls) return;
+                const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+                const remaining =
+                  contentSize.height - (contentOffset.y + layoutMeasurement.height);
+                // Two screenfuls of slack, so the next page is already there by the time
+                // the reader arrives rather than appearing under their thumb.
+                if (remaining < layoutMeasurement.height * 2) loadMore();
+              }}
+              refreshControl={
+                <RefreshControl
+                  // The only way a test can reach a pull. There is no accessible name on
+                  // a refresh control and no role to query it by, and asserting on the
+                  // gesture matters more than usual here: it is the *replacement* for a
+                  // control that was removed, so a wiring mistake would look exactly like
+                  // the feature having been dropped.
+                  testID="for-you-refresh"
+                  // Not `slate.isRefetching`: this gesture rearranges rather than
+                  // refetching, and it completes in one render. Tying the spinner to a
+                  // query that never runs would leave it spinning for ever.
+                  refreshing={false}
+                  onRefresh={() => {
+                    // The wall's gesture on a wall; on a failed read, the same retry as
+                    // its Try again. Loading and empty have nothing to pull.
+                    if (wallScrolls) refreshSlate();
+                    else if (wall.isError) void wall.refetch();
+                  }}
+                  tintColor={theme.semantic.action}
+                  colors={[theme.semantic.action]}
+                />
+              }
+            >
+              {toolbar}
+              {wall.isError ? (
             <EmptyState
               kind="couldNotLoad"
               title={onTopRated ? 'Could not load Top Rated' : 'Could not load recommendations'}
@@ -920,55 +985,6 @@ export default function RecommendationsScreen() {
               />
             )
           ) : (
-            <ScrollView
-              ref={wallScroller}
-              contentContainerStyle={styles.content}
-              /* The only way a test can reach the scroll that pages the wall — the same
-                 reason `for-you-refresh` exists on the control below. A `ScrollView` has
-                 no accessible name and no role to query it by. */
-              testID="for-you-wall"
-              /**
-               * The wall grows as the reader nears its end (§18).
-               *
-               * `onScroll` with a threshold rather than a `FlatList`'s `onEndReached`,
-               * because the wall is a `PosterGrid` inside a `ScrollView` and converting it
-               * to a virtualised list is a change to how every tile is measured and drawn —
-               * a bigger risk than this tranche is buying. The grid is at most a hundred
-               * posters under `MAX_PAGES`, which is well inside what a `ScrollView` renders
-               * comfortably.
-               *
-               * `scrollEventThrottle` at 16 is one event a frame; `loadMore` is a no-op
-               * once the pool is exhausted, so the common case at the bottom of the wall is
-               * a comparison and a return.
-               */
-              scrollEventThrottle={16}
-              onScroll={({ nativeEvent }) => {
-                const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-                const remaining =
-                  contentSize.height - (contentOffset.y + layoutMeasurement.height);
-                // Two screenfuls of slack, so the next page is already there by the time
-                // the reader arrives rather than appearing under their thumb.
-                if (remaining < layoutMeasurement.height * 2) loadMore();
-              }}
-              refreshControl={
-                <RefreshControl
-                  // The only way a test can reach a pull. There is no accessible name on
-                  // a refresh control and no role to query it by, and asserting on the
-                  // gesture matters more than usual here: it is the *replacement* for a
-                  // control that was removed, so a wiring mistake would look exactly like
-                  // the feature having been dropped.
-                  testID="for-you-refresh"
-                  // Not `slate.isRefetching`: this gesture rearranges rather than
-                  // refetching, and it completes in one render. Tying the spinner to a
-                  // query that never runs would leave it spinning for ever.
-                  refreshing={false}
-                  onRefresh={refreshSlate}
-                  tintColor={theme.semantic.action}
-                  colors={[theme.semantic.action]}
-                />
-              }
-            >
-              {toolbar}
               <View style={styles.wallBody}>
               {/* No line above the wall about how well bingd. knows the reader's taste
                   (founder, 2026-11-03). Until then a thin taste printed "Popular right now
@@ -1040,6 +1056,7 @@ export default function RecommendationsScreen() {
                 </Text>
               ) : null}
               </View>
+              )}
             </ScrollView>
           )}
 
@@ -1148,7 +1165,7 @@ function SentList({
   onToggleSave,
   header,
 }: {
-  /** The page's toolbar: first in the list's scroller, or above a state with none. */
+  /** The page's toolbar: first in the list's scroller, in every state. */
   header: React.ReactNode;
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
@@ -1158,61 +1175,17 @@ function SentList({
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
 }) {
-  if (query.isPending)
-    return (
-      <>
-        {header}
-        <SkeletonRow count={5} />
-      </>
-    );
-
-  if (query.isError) {
-    return (
-      <>
-        {header}
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load these"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void query.refetch() }}
-        />
-      </>
-    );
-  }
-
-  if (total === 0) {
-    return (
-      <>
-        {header}
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing sent your way yet"
-          body="When someone you follow back recommends a film or a season, it lands here."
-        />
-      </>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      // No button. Clear all is already on screen, in the chip row a few points above
-      // this, and a second one with the same label is the duplicated state the founder
-      // rejected on the Feed: the reader would have to work out whether the two do the
-      // same thing.
-      <>
-        {header}
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing matches your filters"
-          body="Clear your filters to see everything people have sent you."
-        />
-      </>
-    );
-  }
-
+  /**
+   * **One scroller in every state, so the toolbar is never remounted** (2026-11-11), the
+   * rule the wall follows: a list that landed, failed or emptied under an open
+   * Recommended ▾ menu used to move the toolbar from a fragment into a `ScrollView` and
+   * close the menu. Every state is drawn under the header inside the same scroller, which
+   * grows to fill the page so a state sits where it did.
+   */
+  const loaded = !query.isPending && !query.isError && total > 0 && rows.length > 0;
   return (
     <ScrollView
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, !loaded && styles.stateContent]}
       refreshControl={
         <RefreshControl
           refreshing={query.isRefetching}
@@ -1223,15 +1196,42 @@ function SentList({
       }
     >
       {header}
-      <View style={styles.wallBody}>
-      <SentToYouList
-        rows={rows}
-        saved={saved}
-        busyId={busyId}
-        onOpen={onOpen}
-        onToggleSave={onToggleSave}
-      />
-      </View>
+      {query.isPending ? (
+        <SkeletonRow count={5} />
+      ) : query.isError ? (
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load these"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void query.refetch() }}
+        />
+      ) : total === 0 ? (
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing sent your way yet"
+          body="When someone you follow back recommends a film or a season, it lands here."
+        />
+      ) : rows.length === 0 ? (
+        // No button. Clear all is already on screen, in the chip row a few points above
+        // this, and a second one with the same label is the duplicated state the founder
+        // rejected on the Feed: the reader would have to work out whether the two do the
+        // same thing.
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing matches your filters"
+          body="Clear your filters to see everything people have sent you."
+        />
+      ) : (
+        <View style={styles.wallBody}>
+          <SentToYouList
+            rows={rows}
+            saved={saved}
+            busyId={busyId}
+            onOpen={onOpen}
+            onToggleSave={onToggleSave}
+          />
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -1286,7 +1286,7 @@ function Nothing({
       title={medium === 'tv' ? 'Nothing to suggest yet' : 'Still gathering suggestions'}
       body={
         medium === 'tv'
-          ? 'Rank a season or two and this fills up with shows.'
+          ? 'Rank a show or a season or two and this fills up with shows.'
           : 'This fills in as the catalogue learns what your favourites are near.'
       }
       action={{ label: 'Rank something', onPress: onRank }}
@@ -1307,6 +1307,9 @@ const styles = StyleSheet.create({
   // Top Rated has no features row; this is the seam the row's foot would have given.
   topRatedGap: { height: theme.space[3] },
   content: { paddingBottom: theme.space[10] },
+  // A loading, empty or failed wall under the toolbar fills the page, as it did when it
+  // was drawn outside the scroller.
+  stateContent: { flexGrow: 1 },
   // The wall and its end line, under the toolbar, 12pt apart as they always were.
   wallBody: { gap: theme.space[3] },
   exhausted: {

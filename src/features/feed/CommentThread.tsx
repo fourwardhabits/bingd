@@ -25,6 +25,7 @@ import {
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
+  reactionFailureAlert,
   type ReactionKind,
 } from './use-reactions';
 
@@ -423,7 +424,8 @@ export function CommentThread({
       // The state wanted, not "the opposite of what I am showing" — see `react` in
       // `use-comments.ts`. A retry after a lost reply converges instead of undoing.
       const result = await react({ commentId: comment.id, kind });
-      if (!result.ok) Alert.alert('Could not do that', result.message);
+      const alert = reactionFailureAlert(result, 'Could not do that');
+      if (alert) Alert.alert(...alert);
     })();
   };
 

@@ -288,9 +288,9 @@ the upload key is still what an EAS-distributed production APK carries.
 
 | key | value | what a visitor gets |
 |---|---|---|
-| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd. on the App Store* — **wins** |
+| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd on the App Store* — **wins** |
 | `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | kept as a fallback, never chosen |
-| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd. on Google Play* — **wins** |
+| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd on Google Play* — **wins** |
 | `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | kept as a fallback, never chosen |
 | `android.betaUrl` | `null` | — |
 
@@ -536,6 +536,15 @@ on); the friends section `shot-feed` + `shot-comments`; the last section `shot-r
 `web/src/`, but the page no longer references them. The section labels read How it works,
 A social experience and Find your next binge.
 
+**Refreshed 2026-11-09** from the founder's prepared screen layers, the same screens as the
+approved App Store set (`store-assets/listings/2026-11-09/`) before they went into a phone
+frame: `shot-movies`, `shot-tv`, `shot-compare`, `shot-score`, `shot-feed`,
+`shot-recommended`, and the router's `shot-collection.jpg` and `shot-ranking.jpg`. The
+layers arrive redacted and cropped, so `node web/shots.mjs --layers <dir>` only scales them
+(`LAYER_SHOTS`). `shot-comments` and `shot-grouppicks` have no newer capture and are
+unchanged. (The approved set lives on the Forward Habits Drive; it is not in this
+repository.)
+
 ### Adding or replacing a landing-page screenshot
 
 1. **Raw capture.** Save the untouched phone screenshot into `02 Screenshots/App Store/` in
@@ -688,7 +697,7 @@ arrival and at the result, at every width. The store buttons beside it never mov
   hero's in-flow store row and the result's small call to action are hidden, and the
   sticky bar is the store button.
 - **Sticky bar label:** before and during the demo it reads the platform's own wording
-  ("Get bingd. on Google Play" / "…on the App Store"). Once the third pick is made it reads
+  ("Get bingd on Google Play" / "…on the App Store"). Once the third pick is made it reads
   *Keep ranking in bingd.* and keeps the same destination. *Try again* puts the store's
   name back.
 - **How "phone" is decided:** the hiding rule uses the sticky bar's own condition, so it

@@ -55,6 +55,12 @@ export type Reactor = {
   name: string;
   avatarUri: string | null;
   kind: ReactionKind;
+  /**
+   * When they first reacted — `reactions.created_at`, which a change of kind does not
+   * move. The tie-breaker, and today the whole rule, for whom a summary names
+   * (`reaction-summary.ts`). Null where a surface's read does not carry it.
+   */
+  reactedAt?: string | null;
 };
 
 export type ReactionSummary = {
@@ -83,6 +89,7 @@ type ReactionRow = {
   feed_event_id: string;
   user_id: string;
   kind: ReactionKind;
+  created_at?: string | null;
   profiles:
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }[]
@@ -120,7 +127,7 @@ async function readReactions(
   const { data, error } = await supabase
     .from('reactions')
     .select(
-      'feed_event_id, user_id, kind, profiles:user_id(id, display_name, username, avatar_path)',
+      'feed_event_id, user_id, kind, created_at, profiles:user_id(id, display_name, username, avatar_path)',
     )
     .in('feed_event_id', eventIds);
   if (error) throw error;
@@ -128,6 +135,8 @@ async function readReactions(
   const byEvent = new Map<string, ReactionSummary>();
 
   for (const row of (data ?? []) as unknown as ReactionRow[]) {
+    // An author's reaction to their own activity counts like anybody else's (founder,
+    // 2026-11-11; 20261115000100), in the total, the glyphs, the names and the list.
     const summary =
       byEvent.get(row.feed_event_id) ?? { ...EMPTY, kinds: [], byKind: {}, people: [] };
     summary.total += 1;
@@ -147,6 +156,7 @@ async function readReactions(
         name,
         avatarUri: avatarUri(profile.avatar_path),
         kind: row.kind,
+        reactedAt: row.created_at ?? null,
       });
     }
 
@@ -169,6 +179,61 @@ async function readReactions(
 
 export const emptyReactionSummary = () => EMPTY;
 
+/** What a reaction is attached to, for the words a refusal uses. */
+export type ReactionTarget = 'post' | 'comment';
+
+/**
+ * The calm sentence for a server that still refuses a reaction to your own post or
+ * comment (20261110000100 applied, 20261115000100 not yet).
+ *
+ * **Dead-safe handling only.** Reacting to yourself is allowed (founder, 2026-11-11) and
+ * this client offers it everywhere; a database with 20261115000100 never sends the
+ * refusal. It stays for the window in which a database has the older migration alone,
+ * so a tap there reads as a calm sentence rather than as a failure.
+ */
+export const SELF_REACTION_MESSAGE: Record<ReactionTarget, string> = {
+  post: 'You can’t react to your own post.',
+  comment: 'You can’t react to your own comment.',
+};
+
+/**
+ * Whether a reaction write was refused for being the author's own (20261110000100, which
+ * 20261115000100 reverses: see `SELF_REACTION_MESSAGE`).
+ *
+ * There, `set_reaction` and `_set_comment_reaction` raise **42501** "cannot react to your
+ * own activity" / "…comment" for a non-null kind on the caller's own post or comment. 42501
+ * is also `assert_can_write`'s suspension refusal, so the message is part of the test:
+ * a suspended account keeps the generic alert and its own wording. The codes and the
+ * messages are the migration's and are not changed here, so an older client, which does
+ * not know this function, still shows them in its existing alert.
+ */
+export function isSelfReactionRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    code === '42501' && typeof message === 'string' && /cannot react to your own/i.test(message)
+  );
+}
+
+/** A reaction write's answer, shared by the post and the comment writers. */
+export type ReactionWriteResult =
+  | { ok: true; message: null; selfReaction?: false }
+  | { ok: false; message: string | null; selfReaction?: boolean };
+
+/**
+ * The alert a failed reaction write shows, the same on every surface: the calm sentence
+ * alone for a self-reaction, else `fallbackTitle` over the write's message. Null when
+ * there is nothing to say (a write refused locally because another was in flight).
+ */
+export function reactionFailureAlert(
+  result: { ok: boolean; message?: string | null; selfReaction?: boolean },
+  fallbackTitle: string,
+): [title: string, message?: string] | null {
+  if (result.ok) return null;
+  if (result.selfReaction && result.message) return [result.message];
+  return result.message ? [fallbackTitle, result.message] : null;
+}
+
 /**
  * Sets, changes or clears the viewer's reaction.
  *
@@ -182,7 +247,10 @@ export function useSetReaction(viewerId: string) {
   const [pending, setPending] = useState<string | null>(null);
   const withIntent = useOperationIntent();
 
-  const setReaction = async (feedEventId: string, kind: ReactionKind | null) => {
+  const setReaction = async (
+    feedEventId: string,
+    kind: ReactionKind | null,
+  ): Promise<ReactionWriteResult> => {
     if (pending) return { ok: false as const, message: null };
     setPending(feedEventId);
 
@@ -213,10 +281,21 @@ export function useSetReaction(viewerId: string) {
     // loses its reply leaves the pill showing the previous state, and the reader's next
     // tap sends the *opposite* intent against a row that already moved
     // (`lib/write-outcome.ts`). Independent review 21e's invariant, in a fifth place.
-    if (mustReconcile(classifyWrite(error))) {
+    /**
+     * **A refused self-reaction is reconciled too** (2026-11-11), on a server that still
+     * refuses one (`SELF_REACTION_MESSAGE`). Nothing was written, but
+     * whatever drew a heart on the reader's own post was holding a state the server does
+     * not have, so the cache is read again and the surface returns to what is stored.
+     * There is no optimistic state to undo in this hook; this is its rollback.
+     */
+    const selfReaction = isSelfReactionRefusal(error);
+    if (selfReaction || mustReconcile(classifyWrite(error))) {
       await queryClient.invalidateQueries({ queryKey: ['reactions', viewerId] });
     }
 
+    if (selfReaction) {
+      return { ok: false as const, message: SELF_REACTION_MESSAGE.post, selfReaction: true };
+    }
     if (error) return { ok: false as const, message: diagnose(error) ?? error.message };
     // The event's actor has a `reaction` notification as of the statement above, and this
     // reader is the only person holding a phone on its behalf. Debounced, and awaited by

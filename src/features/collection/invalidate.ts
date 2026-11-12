@@ -36,11 +36,17 @@ export function invalidateAfterCollectionChange(
   // The ranked list this title landed in. Both are invalidated when the category is
   // not known, because a re-bucket can move a title between them and the caller that
   // knows which one is the one that just finished a session.
-  if (options.category === 'movies' || options.category === 'tv_seasons') {
+  if (
+    options.category === 'movies' ||
+    options.category === 'tv_seasons' ||
+    options.category === 'tv_shows'
+  ) {
     invalidate(queryKeys.rankings(userId, options.category));
   } else {
+    // All three pools (20261114000100): a whole show is ranked in its own.
     invalidate(queryKeys.rankings(userId, 'movies'));
     invalidate(queryKeys.rankings(userId, 'tv_seasons'));
+    invalidate(queryKeys.rankings(userId, 'tv_shows'));
   }
 
   // Logged/ranked counts, the unranked queue, and — by prefix — the watchlist, whose

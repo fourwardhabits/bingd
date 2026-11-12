@@ -31,7 +31,7 @@
 >
 > - **Watch History** (#196): multiple watches and rewatches, the Watch History screen,
 >   per-watch date and watched-with (the note is the title's one note; see below). A **rewatch** (*Log another watch*) is a new watch.
->   A **rerank** (*Update your rating*) is a correction that writes no watch and no post. Each
+>   A **rerank** (*Edit ranking*, labelled *Update your rating* until 2026-11-11) is a correction that writes no watch and no post. Each
 >   watch's feed post keeps the score held at that watch; a correction moves only the latest
 >   watch's post. Design: [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md).
 > - **Native Lists v1** (#196): mixed media, privacy (Only you / Anyone with the link /
@@ -1047,7 +1047,7 @@ Three properties this is required to keep:
 > | | What the reader is saying | Feed activity |
 > |---|---|---|
 > | **Log another watch** (was *Rank again*, then *I watched it again*; renamed 2026-09-07) | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
-> | **Update your rating** (see the 2026-09-08 note below) | the opinion I recorded was wrong, or it is in the wrong place | **none** — the original activity stands |
+> | **Edit ranking** (*Update your rating* until 2026-11-11; see the 2026-09-08 note below) | the opinion I recorded was wrong, or it is in the wrong place | **none** — the original activity stands |
 >
 > A **band change** — loved to fine — is an Update your rating and writes no activity
 > either. Moving a title between bands is a correction to a rating, not a second viewing.
@@ -1296,10 +1296,31 @@ The Collection's sort chip said **Recently watched** over a wall that was plainl
 
 | Surface | Axes | Default |
 | --- | --- | --- |
-| Collection · Watched | Rating, **Recently watched**, Release year, Title, Shuffle | Rating, highest first |
-| Collection · Unranked | **Recently watched**, Release year, Title, Shuffle | Recently watched, newest first |
-| Collection · Watchlist | Recently added, Release year, Title, Shuffle | Recently added, newest first |
+| Collection · Watched | Rating, **Recently watched**, Release year, Runtime†, Title, Shuffle | Rating, highest first |
+| Collection · Unranked | **Recently watched**, Release year, Runtime†, Title, Shuffle | Recently watched, newest first |
+| Collection · Watchlist | Recently added, Release year, Runtime†, Title, Shuffle | Recently added, newest first |
 | Profile · See all | Rank, Recently ranked | Rank, highest first |
+
+† **Runtime and the Shuffle UX (approved spec, 2026-11-10).** Runtime orders on
+`media_items.runtime_minutes`, numerically. Its first press is **Shortest first ↑** and the
+second **Longest first ↓**, alternating after that. It is the one axis besides Title whose
+first press is ascending. Null, missing, non-numeric, zero and negative runtimes sink in both
+directions. A tie breaks A–Z on the row's name, in both directions, then on the id. **What
+the number means depends on the kind:** a film's own length; for a **series** (Watchlist
+only), one typical episode (`episode_run_time[0]`); and **none for a season**, which carries
+no runtime by construction (`20260820000400`) and is never given a borrowed or totalled one.
+So Runtime is offered only on a list that holds a film or a series. It is not offered on TV
+Watched or TV Unranked, which are seasons only. No column or migration was added.
+**Shuffle**: every press deals a new seed, whether Shuffle is chosen from another axis or
+pressed again while selected. The seed walks forward until the visible order differs from the
+one on screen. Shuffle applies at once and closes the sheet; it never waits for Filter Apply
+and never applies an unapplied filter draft. The toolbar reshuffle glyph is gone with no
+replacement. The selected Shuffle row stays enabled, with the accessibility hint *Tap again
+to reshuffle*. Each title's place is drawn from the existing seeded generator (`mulberry32`), seeded
+by the shuffle seed mixed with a hash of the title's id. So the order depends only on the
+seed and the titles themselves. Scrolling, re-renders, refetches (in any arrival order),
+filter changes and Grid ↔ List switches never reorder it. A title that joins or leaves the
+list (ranked out of Unranked, taken off the Watchlist) moves nobody else.
 
 > **Current state (2026-09-24, #208; frozen at `9d9683a`).** The table above is the current one.
 > On Watched and Unranked, **Recently watched replaced Recently added**: seven hundred titles

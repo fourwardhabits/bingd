@@ -117,6 +117,11 @@ export function SortMenu<Axis extends string>({
             accessibilityRole="radio"
             accessibilityState={{ selected }}
             accessibilityLabel={words ? `${option.label}, ${words}` : option.label}
+            // The selected row of an undirected axis repeats on a press (Shuffle reshuffles);
+            // it is never disabled, and the hint is the only place that says so.
+            accessibilityHint={
+              selected && !isDirectional(option) ? option.repeatHint : undefined
+            }
             onPress={() => press(option.axis)}
             // The same chip, the same slop: a 32pt row in a wrapping `space[2]` grid.
             hitSlop={theme.layout.chipHitSlop}

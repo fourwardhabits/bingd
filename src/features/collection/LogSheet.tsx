@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { invalidateAfterCollectionChange } from './invalidate';
+import { asRankingCategory, CATEGORY_NAME } from './use-collection';
 import { diagnose } from '@/lib/diagnose';
 import { queryKeys } from '@/lib/query';
-import { track, type Surface } from '@/lib/analytics';
+import { mediaKindFor, track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -60,8 +61,11 @@ export type LoggableTitle = {
   title: string;
   year: number | null;
   posterUri: string | null;
-  /** Decides the category line. A series is not loggable — log a season (AD-1). */
-  kind: 'movie' | 'season';
+  /**
+   * Decides the category line. A whole show is loggable and rankable in its own pool since
+   * 20261114000200; its seasons are separate titles with separate rankings.
+   */
+  kind: 'movie' | 'season' | 'series';
   /** For a season, the series it belongs to, so the header is not just "Season 3". */
   seriesTitle?: string | null;
   /** For a season, its number, so the header reads "The Last of Us, S1". */
@@ -100,7 +104,7 @@ export type LogSheetProps = {
    * the server owns the change, and on a rerank there is no change to write — either
    * way `set_bucket` answers with its 55000 refusal.
    */
-  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank') => void;
+  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank', context?: RankContext) => void;
   /**
    * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
    * and the route underneath it is not the same question as where somebody decided to
@@ -164,7 +168,26 @@ export type LogSheetProps = {
    * ranking sheet behind this one is still mounted. Falls back to `onClose`.
    */
   onDone?: () => void;
+  /**
+   * Set by Watch History, which opens this sheet for its **Edit ranking** (UI consistency
+   * sprint, 2026-11-10). From the second viewing the sheet's date row becomes `Watched N
+   * times ›`, a push to Watch History — which, opened from Watch History, would stack the
+   * same screen on itself. The row is simply not drawn there: the reader is already on it.
+   * Nothing else about the sheet changes.
+   */
+  inWatchHistory?: boolean;
 };
+
+/**
+ * What the act that led to a ranking was, for the completion screen to know.
+ *
+ * `freshLog` is true only when this sheet's tap created the title's seen row and its first
+ * watch, which is the same fact `watch_logged` is counted on (`log_title` answered
+ * `created`, or this sheet's own detail write did a moment earlier). It is what makes a
+ * season's placement "tied to a new watch" for **Update Show**: a re-rating of something
+ * already in the collection, or an import being ranked, is not. No timestamp is read.
+ */
+export type RankContext = { freshLog: boolean };
 
 /**
  * What a ranking just decided, as this sheet needs to restate it.
@@ -176,7 +199,7 @@ export type LogSheetProps = {
 export type PostRank = {
   score: number;
   position: number;
-  /** The server's own word — `movies` or `tv_seasons`. */
+  /** The server's own word — `movies`, `tv_seasons` or `tv_shows`. */
   category: string;
 };
 
@@ -198,6 +221,7 @@ export function LogSheet({
   openWriting,
   openSection,
   onDone,
+  inWatchHistory,
 }: LogSheetProps) {
   if (!title) return null;
 
@@ -218,6 +242,7 @@ export function LogSheet({
       openWriting={openWriting}
       openSection={openSection}
       onDone={onDone}
+      inWatchHistory={inWatchHistory}
     />
   );
 }
@@ -284,6 +309,7 @@ function Body({
   openWriting = null,
   openSection = null,
   onDone,
+  inWatchHistory = false,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -696,7 +722,7 @@ function Body({
    *   - ranked, different bucket: move the band, and re-run the comparisons in it.
    *
    * **Both ranked branches are reached from one row.** Since 2026-09-08 the Ranked menu
-   * offers *Update your rating*, which lands here, and *Log another watch*, which does
+   * offers *Edit ranking*, which lands here, and *Log another watch*, which does
    * not — the second and third cases above are the two halves of that one correction, and
    * the chooser is where the reader says which they meant.
    *
@@ -705,7 +731,7 @@ function Body({
    *
    * Both ranked branches used to stop on a card — "Rank <title> again? You will compare it
    * again. Nothing changes until you finish. [Re-rank] [Cancel]" — before handing off.
-   * The approved contract is that *Update your rating* goes **straight into the
+   * The approved contract is that *Edit ranking* goes **straight into the
    * comparisons**: the band tap is the decision, and a second question about the same
    * decision is a step the reader has already answered.
    *
@@ -852,7 +878,7 @@ function Body({
       track({
         name: 'title_logged',
         props: {
-          media_kind: title.kind === 'season' ? 'tv_season' : 'movie',
+          media_kind: mediaKindFor(title.kind),
           surface,
           bucket: chosen === 'notForMe' ? 'not_for_me' : chosen,
         },
@@ -967,7 +993,9 @@ function Body({
     }
 
     refresh();
-    onRank?.(chosen, 'start');
+    onRank?.(chosen, 'start', {
+      freshLog: result.outcome === 'ok' && (Boolean(result.created) || createdByDetails),
+    });
   };
 
   /**
@@ -1440,7 +1468,8 @@ function Body({
    */
   const storedBucket = bucket === 'notForMe' ? 'not_for_me' : bucket;
 
-  const category = title.kind === 'movie' ? 'Movies' : 'TV season';
+  const category =
+    title.kind === 'movie' ? 'Movies' : title.kind === 'series' ? 'TV show' : 'TV season';
   // The compact identity, which is what a sheet heading is: one line, series and
   // season joined the way every other row in the app joins them (`lib/titles.ts`).
   const heading = compactName(title) ?? title.title;
@@ -1580,7 +1609,7 @@ function Body({
             <View style={styles.rankedText}>
               <Text variant="headline">Ranked</Text>
               <Text variant="footnote" tone="secondary">
-                {`#${postRank.position} in ${postRank.category === 'tv_seasons' ? 'TV' : 'Movies'}`}
+                {`#${postRank.position} in ${CATEGORY_NAME[asRankingCategory(postRank.category)]}`}
               </Text>
             </View>
           </View>
@@ -1668,17 +1697,19 @@ function Body({
            * which is also the first moment it says anything the date alone did not.
            */}
           {multipleWatches ? (
-            <SheetRow
-              icon="repeat-outline"
-              label={watchLabel ?? 'Watch history'}
-              onPress={() => {
-                // The sheet closes BEFORE the push, which is the iOS two-modal rule this
-                // codebase has paid for: navigating out from under a presented sheet
-                // leaves a screen that is mounted, visible and dead to touch.
-                close();
-                router.push(`/title/${title.id}/history` as never);
-              }}
-            />
+            inWatchHistory ? null : (
+              <SheetRow
+                icon="repeat-outline"
+                label={watchLabel ?? 'Watch history'}
+                onPress={() => {
+                  // The sheet closes BEFORE the push, which is the iOS two-modal rule this
+                  // codebase has paid for: navigating out from under a presented sheet
+                  // leaves a screen that is mounted, visible and dead to touch.
+                  close();
+                  router.push(`/title/${title.id}/history` as never);
+                }}
+              />
+            )
           ) : (
             <SheetRow
               icon="calendar-outline"

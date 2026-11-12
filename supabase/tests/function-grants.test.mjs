@@ -95,7 +95,9 @@ const ALLOWED = {
   // 20260917000300. The four things a client does during an import. Each one resolves the
   // job from auth.uid() and refuses a job belonging to anybody else, so the job id is a
   // handle rather than an authorisation. Not anon: there is no collection to import into.
-  'import_create()': ['authenticated'],
+  // 20261113000100: gained `p_provider text default 'letterboxd'`, so a call with no
+  // argument is still a Letterboxd import. The signature, and so this key, changed.
+  'import_create(text)': ['authenticated'],
   'import_stage(uuid,jsonb)': ['authenticated'],
   'import_ready(uuid)': ['authenticated'],
   'import_status(uuid)': ['authenticated'],
@@ -151,7 +153,11 @@ const ALLOWED = {
   // the one hole that makes a placement history untrustworthy. It has never had a
   // caller, and a drag-to-reorder UI is an explicit non-goal (epic §Q). Granting it back
   // means teaching it to write a `manual` placement first (§E.1).
-  'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
+  //
+  // 20261114000300 added a trailing `p_linked_placement_id` (default null) to both
+  // correction RPCs, for Update Show, and dropped the old forms rather than overloading
+  // them, for the same ambiguity rule. Every installed call resolves here unchanged.
+  'rank_rebucket(uuid,taste_bucket,uuid,uuid)': ['authenticated'],
   // New in 20260825000200, and re-signed in 20260826000500. The same-band re-rank the
   // client used to perform as an unrank followed by a start. It no longer unranks at
   // all: the session runs over the position the title already has, and only a completed
@@ -166,7 +172,7 @@ const ALLOWED = {
   // an installed client's four-argument call resolves here unchanged; a new client
   // passes the watch event it has just logged, and the placement links to that viewing
   // so the re-check enriches one feed activity instead of posting a second (§K).
-  'rank_again(uuid,taste_bucket,uuid,boolean,uuid)': ['authenticated'],
+  'rank_again(uuid,taste_bucket,uuid,boolean,uuid,uuid)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:
@@ -835,7 +841,11 @@ const ALLOWED = {
   // `_push_eligible` and `_enqueue_push` join the internal side for the reason
   // `_apply_notification_preference` does: the second writes the delivery queue, and a
   // client holding it could enqueue a push for anybody.
-  'register_device_token(uuid,text,text)': ['authenticated'],
+  //
+  // 20261028000100 added a fourth, defaulted argument: the proactive-notification version
+  // of the build registering, bounded 1-100 and stored on that token only (latest-wins).
+  // An old client's three-argument call reaches it through the default and records null.
+  'register_device_token(uuid,text,text,integer)': ['authenticated'],
   'revoke_device_token(uuid,text)': ['authenticated'],
 
   // 20260930000100, release awareness. The device's IANA timezone and locale region, for
@@ -845,6 +855,13 @@ const ALLOWED = {
   // nothing a client can call reads it back, including this. Every other release
   // function is service_role only and is not on this list.
   'report_device_context(text,text)': ['authenticated'],
+
+  // 20261028000100. A tap on one of the caller's OWN notifications, for proactive
+  // attribution. It reads the notification by `id = $1 and recipient_id = auth.uid()` and
+  // writes only then, answering the same `ok` either way, so it is neither an oracle nor
+  // a way to write about anybody else. Everything else proactive (the ledger, the arbiter,
+  // the collectors, the tick, the status) is service_role or internal and is not here.
+  'record_notification_open(uuid,text,text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

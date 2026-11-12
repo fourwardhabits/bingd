@@ -30,6 +30,12 @@ type Row = { media_item_id: string; score: number; rating_count: number; min_rat
 let mockTopRatedPages: Record<string, Row[]> = {};
 /** Set to a message to make the RPC answer with an error rather than rows. */
 let mockTopRatedError: string | null = null;
+/**
+ * How late `top_rated_titles` answers, in real milliseconds. Zero answers at once. A test
+ * sets it to have the wall arrive while the reader is already acting, as it does on a slow
+ * runner (`pickWall` below explains why that matters).
+ */
+let mockTopRatedDelayMs = 0;
 
 const mockCatalogue: Record<string, Record<string, unknown>> = {};
 /** The reader's own `rankings` rows: what `useMyScores` derives their score chips from. */
@@ -43,7 +49,10 @@ jest.mock('@/lib/supabase', () => ({
         if (mockTopRatedError)
           return Promise.resolve({ data: null, error: { message: mockTopRatedError } });
         const key = (args.p_after_id as string | null) ?? 'first';
-        return Promise.resolve({ data: mockTopRatedPages[key] ?? [], error: null });
+        const answer = { data: mockTopRatedPages[key] ?? [], error: null };
+        return mockTopRatedDelayMs > 0
+          ? new Promise((resolve) => setTimeout(() => resolve(answer), mockTopRatedDelayMs))
+          : Promise.resolve(answer);
       }
       return Promise.resolve({ data: null, error: null });
     },
@@ -141,16 +150,50 @@ const open = async () => {
 };
 
 /**
+ * Opens the Recommended / Top Rated dropdown and picks a wall — **once the wall on screen
+ * has finished arriving**.
+ *
+ * This is the For You flake (CI run 42943045415, attempt 1: "Unable to find an element
+ * with role: menuitem"). The toolbar that holds the dropdown is drawn *above* a wall that
+ * is still loading and *inside* the wall's scroller once it has loaded (`wallScrolls` in
+ * `app/(tabs)/recommendations.tsx`), so the dropdown is unmounted and mounted afresh when
+ * a wall lands. And its anchored menu opens a beat after the press: it measures the
+ * control first, and under Jest `measureInWindow` never answers, so it opens from its
+ * 120ms fallback timer. A wall that lands at any point between the press and the press on
+ * the menu item moves the toolbar: before the timer, the timer opens the menu on the
+ * dropdown that has just been unmounted; after it, the remount takes the open menu down
+ * before `findByRole` (which polls) sees it. Either way the dropdown on screen is closed
+ * and there is no menu to find, however long the test waits. Whether the wall landed in
+ * that window was down to how fast the runner was (the CI snapshot shows the wall loaded
+ * and the dropdown `expanded: false`).
+ *
+ * So the test opens the dropdown on a settled wall, as a person does: they tap the control
+ * they can see, not one that is about to move. The `a slow server` case below sets the
+ * race up every run — the wall answers after the press — so this helper is what keeps it
+ * passing. It guards the helper, not the screen: the remount itself is screen behaviour
+ * (see the PR).
+ *
+ * The screen no longer remounts the dropdown (2026-11-11): the toolbar is in the same
+ * scroller in every state, and `a wall that lands under an open menu` below pins that. The
+ * wait stays, because it is still how a person uses the control.
+ */
+const pickWall = async (view: Awaited<ReturnType<typeof open>>, wall: 'Recommended' | 'Top Rated') => {
+  await waitFor(() => expect(view.queryByTestId('skeleton-grid')).toBeNull());
+  await fireEvent.press(view.getByLabelText(/^Showing /));
+  await fireEvent.press(await view.findByRole('menuitem', { name: new RegExp(`^${wall}`) }));
+};
+
+/**
  * The wall and the medium are two controls (founder final polish, 2026-11-04): the page's
  * dropdown on the left (Recommended / Top Rated) and the Movies | TV switch on the right,
  * the same pair Collection uses. `choose` takes the four walls by their full names.
  */
 const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
   const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV)$/.exec(category) ?? [];
-  if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
+  if ((wall !== 'Recommended' && wall !== 'Top Rated') || !medium)
+    throw new Error(`not a For You wall: ${category}`);
   if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${wall}`) {
-    await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(await view.findByRole('menuitem', { name: new RegExp(`^${wall}`) }));
+    await pickWall(view, wall);
   }
   await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
@@ -175,6 +218,7 @@ beforeEach(() => {
   });
   mockTopRatedPages = { first: [row('best-1', 9.4), row('best-2', 9.1), row('best-3', 8.8)] };
   mockTopRatedError = null;
+  mockTopRatedDelayMs = 0;
   mockRankings = [];
 });
 
@@ -537,24 +581,75 @@ describe('keep looking on a deeply scrolled wall', () => {
  * chooses the wall and the switch the medium; together they are the four walls, so changing
  * one must never reset the other.
  */
-describe('the dropdown and the switch together', () => {
-  it('keeps the medium across a change of wall, and the wall across a change of medium', async () => {
+/**
+ * **The dropdown stays open when the wall under it finishes loading** (2026-11-11).
+ *
+ * The screen bug behind #260's flake, which #260 fixed only in the test: the toolbar that
+ * holds Recommended ▾ was drawn above a loading wall and inside the wall's scroller once
+ * it landed, so a wall arriving under an open menu remounted the dropdown and closed it.
+ * A person meets it by changing wall or medium and opening the menu straight away. The
+ * server answers 400ms after the request here, well after the menu has opened.
+ */
+describe('a wall that lands under an open menu', () => {
+  it('leaves the menu open, on the same dropdown', async () => {
+    mockTopRatedDelayMs = 400;
     const view = await open();
-
-    await choose(view, 'Recommended TV');
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
-
-    await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(await view.findByRole('menuitem', { name: /^Top Rated/ }));
-    await waitFor(() => expect(showing(view)).toBe('Showing Top Rated TV'));
-
-    await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: 'Movies' }));
-    await waitFor(() => expect(showing(view)).toBe('Showing Top Rated Movies'));
+    await pickWall(view, 'Top Rated');
+    await waitFor(() => expect(view.getByTestId('skeleton-grid')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(await view.findByRole('menuitem', { name: /^Recommended/ }));
+    await view.findByRole('menuitem', { name: /^Recommended/ });
+    expect(view.getByTestId('skeleton-grid')).toBeTruthy();
+
+    // The wall arrives while the menu is open.
+    await waitFor(() => expect(view.queryByTestId('skeleton-grid')).toBeNull(), {
+      timeout: 3000,
+    });
+    expect(view.getByTestId('for-you-wall')).toBeTruthy();
+    expect(view.getByRole('menuitem', { name: /^Recommended/ })).toBeTruthy();
+    expect(view.getByLabelText(/^Showing /).props.accessibilityState).toMatchObject({
+      expanded: true,
+    });
+
+    // And it still works: the choice lands.
+    await fireEvent.press(view.getByRole('menuitem', { name: /^Recommended/ }));
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
   });
+});
+
+describe('the dropdown and the switch together', () => {
+  /**
+   * Run twice: with the server answering at once, and with it answering 60ms after each
+   * request — after the press and before the menu item is pressed, the CI flake's window
+   * (see `pickWall`). Without `pickWall`'s wait the slow run failed every time, until the
+   * screen stopped remounting the dropdown (2026-11-11); the wait stays. The 60ms
+   * sits inside that window only because the menu opens from the 120ms fallback timer; if
+   * `MEASURE_TIMEOUT_MS` changes a lot, revisit it.
+   */
+  it.each([
+    ['a fast server', 0],
+    ['a slow server', 60],
+  ])(
+    'keeps the medium across a change of wall, and the wall across a change of medium (%s)',
+    async (_server, delay) => {
+      mockTopRatedDelayMs = delay;
+      const view = await open();
+
+      await choose(view, 'Recommended TV');
+      await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
+
+      await pickWall(view, 'Top Rated');
+      await waitFor(() => expect(showing(view)).toBe('Showing Top Rated TV'));
+
+      await fireEvent.press(
+        within(view.getByLabelText('Medium')).getByRole('radio', { name: 'Movies' }),
+      );
+      await waitFor(() => expect(showing(view)).toBe('Showing Top Rated Movies'));
+
+      await pickWall(view, 'Recommended');
+      await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
+    },
+  );
 });
 
 /**

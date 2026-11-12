@@ -33,9 +33,14 @@ import { BUCKET_IDS } from '@/features/collection/use-log-state';
 import { heroRankFor } from '@/features/collection/hero-rank';
 import {
   useRankedCollection,
+  asRankingCategory,
+  CATEGORY_NAME,
+  useLoggedCollection,
   type RankingCategory,
 } from '@/features/collection/use-collection';
-import { useTitleScore } from '@/features/collection/use-score';
+import { useMyScores, useTitleScore } from '@/features/collection/use-score';
+import { TitleRowActions } from '@/features/collection/TitleRowActions';
+import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
 import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-state';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
@@ -48,7 +53,11 @@ import {
   removeFromCollection,
   setWatchlist,
 } from '@/features/collection/writes';
-import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import {
+  RankingSheet,
+  type RankingSubject,
+  type UpdateShowLink,
+} from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
@@ -60,7 +69,7 @@ import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
-import { TitleActions, titleActionsFit } from '@/features/title/TitleActions';
+import { RANK_LABEL, TitleActions, titleActionsFit } from '@/features/title/TitleActions';
 import { ImmersiveHero } from '@/features/title/ImmersiveHero';
 import { directedBy } from '@/features/title/directors';
 import { ImmersiveScores } from '@/features/title/ImmersiveScores';
@@ -342,6 +351,18 @@ export default function TitleScreen() {
   const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   /**
+   * **Update Show in progress** (founder brief §5, 2026-11-14): the show whose correction a
+   * season's reveal just opened, and the season placement that offered it. Held from the
+   * reveal's Update Show to the show's band choice, and handed to the ranking subject
+   * there, so the server records the link and posts nothing for the show. Cleared the
+   * moment the reader leaves that sheet without choosing: an abandoned Update Show keeps
+   * the show's ranking exactly where it was, and carries nothing into a later correction.
+   */
+  const [pendingShowLink, setPendingShowLink] = useState<{
+    showId: string;
+    linkedPlacementId: string;
+  } | null>(null);
+  /**
    * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
    *
    * It used to open the ranking sheet directly in `mode: 'again'` — a forced full re-rank
@@ -575,13 +596,15 @@ export default function TitleScreen() {
   /**
    * Who recommended this to the reader, and what they said (20260929000100).
    *
-   * Asked only of a film or a season — nothing can recommend a series — and only once the
+   * Asked of any title (a whole show too, since 2026-11-14), and only once the
    * reader's own state is known and says they have not ranked it: a ranked title is not a
    * recommendation any more, which is the rule Sent to you already keeps. The same gate
    * applies to what is drawn, so a card seeded by a Sent to you tap cannot flash on a
    * title that turns out to be ranked.
    */
-  const recommendable = data.title?.kind === 'movie' || data.title?.kind === 'season';
+  // Every kind since 2026-11-14: a whole show is rankable in its own pool, so it can be
+  // recommended like a film or a season (recommend_title resolves it the same way).
+  const recommendable = Boolean(data.title?.kind);
   const askRecommendations = hasId && recommendable && personal.isSuccess && !data.ranked;
   const recommendations = useTitleRecommendations(profile.id, id ?? '', askRecommendations);
   // Memoised, because the effect below depends on it: a fresh `[]` on every render would
@@ -736,8 +759,7 @@ export default function TitleScreen() {
   );
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
-  const rankCategory: RankingCategory =
-    data?.ranked?.category === 'tv_seasons' ? 'tv_seasons' : 'movies';
+  const rankCategory: RankingCategory = asRankingCategory(data?.ranked?.category);
   const titleScore = useTitleScore(profile.id, rankCategory, data?.ranked ?? null);
   /**
    * The ranked list this title sits in, for the hero's one rank line.
@@ -772,6 +794,16 @@ export default function TitleScreen() {
     () => new Set((rankedSeasons.data ?? []).map((entry) => entry.mediaItemId)),
     [rankedSeasons.data],
   );
+  /**
+   * The season rows' own controls (TV show & season ranking, 2026-11-14): each season's
+   * score circle comes from the reader's scores, which `useMyScores` computes per ranking
+   * pool, so a season's number is always against seasons and never against shows. The
+   * bookmark is the same one-tap Watchlist Search rows carry.
+   */
+  const myScores = useMyScores(profile.id, isSeriesTitle);
+  const seasonWatchlist = useWatchlistToggle(profile.id, 'title');
+  /** Each season's logged bucket, so a season row's `+` can resume an unfinished placement. */
+  const loggedForSeasons = useLoggedCollection(profile.id, { enabled: isSeriesTitle });
 
   /**
    * How far the page has scrolled, as one animated value.
@@ -955,14 +987,16 @@ export default function TitleScreen() {
   /** The band this title is already in, in the chips' spelling. Null until the read lands. */
   const rankedBucket = data.ranked?.bucket ? (BUCKET_IDS[data.ranked.bucket] ?? null) : null;
 
-  const rankCategoryLabel = data.ranked?.category === 'tv_seasons' ? 'TV' : 'Movies';
+  const rankCategoryLabel = CATEGORY_NAME[rankCategory];
   // One line only, chosen by the founder's rule: top ten overall, else the
   // strongest category placement. Derived from rows already cached.
   const heroRank = data.ranked
     ? heroRankFor(title.id, rankedList.data ?? [], rankCategory)
     : null;
   const { score, total } = titleScore;
-  const rankable = title.kind === 'movie' || title.kind === 'season';
+  // Every kind (2026-11-14): a film, a whole show and a season are each ranked in their
+  // own pool. A show's score is its own explicit ranking, never its seasons'.
+  const rankable = title.kind === 'movie' || title.kind === 'season' || title.kind === 'series';
   const isSeries = title.kind === 'series';
   const isSeason = title.kind === 'season';
   const year = yearOf(title.release_date);
@@ -1256,6 +1290,9 @@ export default function TitleScreen() {
   ) => {
     if (!rankable) return;
     setActionError(null);
+    // Any other log sheet is not the Update Show it may have been left from: the link
+    // must never ride along into an unrelated correction.
+    setPendingShowLink(null);
     setLogIntent(intent);
     setOpenWriting(writing);
     setOpenSection(section);
@@ -1285,6 +1322,76 @@ export default function TitleScreen() {
     setPlacement(null);
     setRankedTitle(loggable);
     setRankingSubject(resume);
+  };
+
+  /**
+   * **A season row's `+`** (TV show & season ranking, 2026-11-14): straight into ranking
+   * that season, through the same log sheet and the same resume rule as Rank on its own
+   * page. Tapping the row itself still opens the season's page.
+   */
+  const rankSeason = (season: {
+    id: string;
+    title: string;
+    season_number?: number | null;
+    release_date: string | null;
+    poster_path: string | null;
+  }) => {
+    const seasonTitle: LoggableTitle = {
+      id: season.id,
+      title: season.title,
+      year: yearOf(season.release_date),
+      posterUri: posterUri(season.poster_path, 'card') ?? posterUri(title.poster_path, 'card'),
+      kind: 'season',
+      seriesTitle: title.title,
+      seasonNumber: season.season_number ?? null,
+    };
+    const bucket = (loggedForSeasons.data?.entries ?? []).find(
+      (entry) => entry.mediaItemId === season.id,
+    )?.bucket;
+    const state = rankingStateOf({ ranked: Boolean(myScores.data?.has(season.id)), bucket });
+    const resume = state === 'unfinished' && bucket ? resumeSubject(seasonTitle, bucket) : null;
+    setActionError(null);
+    setPendingShowLink(null);
+    setPlacement(null);
+    if (resume) {
+      setRankedTitle(seasonTitle);
+      setRankingSubject(resume);
+      return;
+    }
+    setLogIntent('note');
+    setOpenWriting(null);
+    setOpenSection(null);
+    setLoggingTitle(seasonTitle);
+  };
+
+  /**
+   * **Update Show, from a season's reveal**: the show's ordinary correction, the one *Edit
+   * ranking* opens — its band chooser, then comparisons from where it already stands
+   * (`rank_again` for the same band, `rank_rebucket` for another) — with the link held
+   * until the band is chosen. On a season's page the show is its parent; on a show's page
+   * (a season row's `+`) it is this page's own title.
+   */
+  const updateShow = (link: UpdateShowLink) => {
+    const show: LoggableTitle | null =
+      title.kind === 'series' && title.id === link.showId
+        ? loggable
+        : parent && parent.id === link.showId
+          ? {
+              id: parent.id,
+              title: parent.title,
+              year: null,
+              posterUri: posterUri(parent.poster_path ?? null, 'card'),
+              kind: 'series',
+            }
+          : null;
+    setRankingSubject(null);
+    if (!show) return;
+    setPendingShowLink({ showId: link.showId, linkedPlacementId: link.linkedPlacementId });
+    setLogIntent('note');
+    setOpenWriting(null);
+    setOpenSection(null);
+    setPlacement(null);
+    setLoggingTitle(show);
   };
 
   const toggleWatchlist = async () => {
@@ -1372,11 +1479,30 @@ export default function TitleScreen() {
       title: title.title,
       bucket: pending.bucket,
       posterUri: posterUri(title.poster_path, 'card'),
-      // Only a film or a season is ever ranked; a series has no menu.
-      kind: title.kind === 'season' ? 'season' : 'movie',
+      kind: title.kind,
       mode: 'again',
       watchEventId: pending.watchEventId,
     });
+  };
+
+  /**
+   * *Log another watch*, from the immersive page's *Log rewatch*. The same sheet and the
+   * same `rewatchPhase` the ⋯ menu's row opens, so the iOS hand-off to the comparisons
+   * (`onDismissed` → `openRecheck`) is unchanged.
+   *
+   * Straight to `open` on both platforms, without the menu's `menuHandoff`: that wait is
+   * for the menu's own dismissal, and a button on the page is not leaving a presented
+   * sheet, so there is nothing to serialise against.
+   */
+  const openRewatch = () => {
+    // Only from a closed sheet. While it is still sliding away after a band was chosen
+    // (`leaving`, iOS), a press that reached this button would present the sheet again
+    // mid-dismissal and drop the re-check that `onDismissed` is about to open. UIKit
+    // normally ignores touches during the transition; this does not rely on it
+    // (independent review, 2026-11-11). The ⋯ row is behind the menu, so never met it.
+    if (rewatchPhase !== 'closed') return;
+    setActionError(null);
+    setRewatchPhase('open');
   };
 
   const confirmRemoval = () => {
@@ -1443,9 +1569,12 @@ export default function TitleScreen() {
     theme.layout.gutter * 2 -
     theme.space[4] -
     (theme.poster.detail.width + theme.space[1] * 2);
+  /** The unranked word, by kind: Rank Movie, Rank Show, Rank Season (brief §8). */
+  const rankLabel = RANK_LABEL[title.kind as keyof typeof RANK_LABEL] ?? 'Rank';
   const actionsBesidePoster = titleActionsFit(identityColumn, fontScale, {
     rank: rankable,
     icons: rankable ? 3 : 2,
+    label: data.ranked ? 'Ranked' : rankLabel,
   });
   const actions = (
     <TitleActions
@@ -1453,6 +1582,7 @@ export default function TitleScreen() {
         rankable
           ? {
               ranked: Boolean(data.ranked),
+              label: data.ranked ? undefined : rankLabel,
               accessibilityLabel: data.ranked
                 ? 'Ranked. Change or remove this.'
                 : `Rank ${displayTitle ?? title.title}`,
@@ -1781,6 +1911,23 @@ export default function TitleScreen() {
                   // "Season 2". What a returning reader wants from this list is where
                   // they are up to, so the row says whether they have ranked it.
                   secondary={rankedSeasonIds.has(season.id) ? 'Ranked' : 'Not ranked yet'}
+                  /**
+                   * The search row's controls, unchanged (brief §3): the Maroon `+` that
+                   * ranks this season directly, or its score circle once ranked, and the
+                   * one-tap Watchlist. No labelled Rank button in a row; the row's own tap
+                   * still opens the season.
+                   */
+                  trailing={
+                    <TitleRowActions
+                      name={`${title.title}, ${season.title}`}
+                      kind="season"
+                      score={myScores.data?.get(season.id) ?? null}
+                      saved={seasonWatchlist.isSaved(season.id)}
+                      busy={seasonWatchlist.busy === season.id}
+                      onRank={() => rankSeason(season)}
+                      onToggleWatchlist={() => void seasonWatchlist.toggle(season.id)}
+                    />
+                  }
                   onPress={() => router.push(`/title/${season.id}`)}
                 />
               ))}
@@ -1897,26 +2044,34 @@ export default function TitleScreen() {
   );
   /**
    * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
-   * Rank exactly as it was; a ranked one shows the smaller *Edit ranking*, which opens the
-   * rating sheet (*Update your rating*) — its score is the emphasis, in the score row.
+   * Rank exactly as it was; a ranked one shows the smaller *Log rewatch* (founder,
+   * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
+   * the score row. *Edit ranking*, the same-watch correction this button used to
+   * open, is still the ⋯ menu's first Ranking row.
+   *
+   * **No second, prominent Edit ranking beside it** (founder decision, 2026-11-11). Log
+   * rewatch stays the primary action; the ranking correction is reached from ⋯ here and
+   * from *Edit ranking* in an expanded watch on Watch History (the Watch history row
+   * below opens it). Both open the same correction flow, which records no viewing.
    */
   const immersiveActions = cloneElement(actions, {
     rank: rankable
       ? {
           ranked: Boolean(data.ranked),
-          label: data.ranked ? 'Edit ranking' : undefined,
-          icon: data.ranked ? 'create-outline' : undefined,
+          label: data.ranked ? 'Log rewatch' : rankLabel,
+          icon: data.ranked ? 'repeat-outline' : undefined,
           compact: Boolean(data.ranked),
-          // The card is the full width less 12pt a side: Rank and Edit ranking are never
-          // truncated there, at any text size; the icons wrap under them instead.
+          // The card is the full width less 12pt a side. Rank Season and Log rewatch are
+          // never cut there: the whole cluster stays on one row, and past 1.5x text the
+          // word fits itself to the row rather than wrapping the icons (2026-11-14).
           unclamped: true,
           accessibilityLabel: data.ranked
-            ? `Edit your ranking of ${displayTitle ?? title.title}`
+            ? `Log a rewatch of ${displayTitle ?? title.title}`
             : `Rank ${displayTitle ?? title.title}`,
           accessibilityHint: data.ranked
-            ? 'Opens the rating sheet, where you can rank it again'
+            ? 'Opens a sheet to record another viewing'
             : 'Opens the rating sheet',
-          onPress: () => (data.ranked ? openLog() : rank()),
+          onPress: () => (data.ranked ? openRewatch() : rank()),
         }
       : null,
   });
@@ -2102,7 +2257,10 @@ export default function TitleScreen() {
 
         {immersiveActions}
 
-        {!isSeries ? (
+        {/* Every kind since 2026-11-14. On a show, each number is about the show alone:
+            Your score is your explicit show ranking, and bingd and Following average
+            other readers' show rankings. A season's rankings never stand in for one. */}
+        {rankable ? (
           <ImmersiveScores
             you={
               rankable
@@ -2779,8 +2937,8 @@ export default function TitleScreen() {
          * are core bingd. data and must not appear and disappear as somebody looks at the
          * cast.
          *
-         * A series has no aggregate of its own, because it cannot be ranked (PRD §10), so
-         * it gets no row rather than a permanent "Not enough ratings".
+         * A whole show has its own row since 2026-11-14: its own explicit rankings, never
+         * an average of its seasons'.
          *
          * **The reader's own score leads this row** (founder, 2026-09-07). It was on the
          * poster and is not any more; the poster carries artwork and nothing else. Three
@@ -2788,7 +2946,7 @@ export default function TitleScreen() {
          * hierarchy of relevance to one reader rather than a leaderboard: me, then the
          * people I chose, then the room. The number is stated once on this page, here.
          */}
-        {!isSeries ? (
+        {rankable ? (
           <ScoresSection
             you={
               rankable
@@ -2820,7 +2978,7 @@ export default function TitleScreen() {
         ) : null}
 
         {/* Under the scores, over the tabs, and on every kind of title — including
-            a series, which has no score block of its own because it cannot be ranked.
+            a series.
 
             The founder's placement decision, and the reason it is not a tab: a film
             opens on Cast and a season opens on Episodes, both of which are those
@@ -2894,16 +3052,27 @@ export default function TitleScreen() {
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
+          setPendingShowLink(null);
           celebrate();
         }}
         onClose={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setActionError(null);
+          // Leaving the show's band chooser without choosing abandons Update Show.
+          setPendingShowLink(null);
           celebrate();
         }}
-        onRank={(bucket, mode) => {
+        onRank={(bucket, mode, context) => {
           if (!loggingTitle) return;
+          // Update Show's link, only on the show it was offered for and only on the
+          // correction calls (a show that lost its ranking meanwhile is a first ranking,
+          // which the server would refuse to link).
+          const linked =
+            pendingShowLink?.showId === loggingTitle.id && mode !== 'start'
+              ? pendingShowLink.linkedPlacementId
+              : null;
+          setPendingShowLink(null);
           setRankingSubject({
             id: loggingTitle.id,
             title: loggingTitle.title,
@@ -2911,6 +3080,8 @@ export default function TitleScreen() {
             posterUri: loggingTitle.posterUri,
             kind: loggingTitle.kind,
             mode,
+            freshLog: context?.freshLog ?? false,
+            linkedPlacementId: linked,
           });
           setRankedTitle(loggingTitle);
           setPlacement(null);
@@ -2989,6 +3160,7 @@ export default function TitleScreen() {
           setPlacement(result);
           setLoggingTitle(rankedTitle);
         }}
+        onUpdateShow={updateShow}
         surface="title"
       />
       {/* Mounted only while open, like every other sheet here: it seeds its own
@@ -3166,7 +3338,7 @@ export default function TitleScreen() {
                  * ---------------------------------------------------------------------------
                  * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
                  *
-                 * **`Update your rating` is the single same-watch correction path, and it can
+                 * **`Edit ranking` is the single same-watch correction path, and it can
                  * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
                  * has had three branches since 2026-08-15 and keeps all of them:
                  *
@@ -3189,9 +3361,11 @@ export default function TitleScreen() {
                  * ---------------------------------------------------------------------------
                  * THE SEMANTICS ARE UNTOUCHED
                  *
-                 *   Update your rating   corrects the current watch. `p_new_watch` false, no
-                 *                        new watch record, no feed activity, no timestamp
-                 *                        heuristic anywhere.
+                 *   Edit ranking         corrects the current watch. `p_new_watch` false, no
+                 *                        new watch record, no timestamp heuristic anywhere.
+                 *                        No feed activity for a film; for a show or season
+                 *                        (20261114000300), one "updated their ranking of"
+                 *                        post only when the correction moved it.
                  *   Log another watch    an explicit second viewing. `p_new_watch` true, and
                  *                        exactly one `title_ranked` on completion.
                  *
@@ -3209,7 +3383,7 @@ export default function TitleScreen() {
                     viewing is the rare one. */}
                 <SheetRow
                   icon="star-outline"
-                  label="Update your rating"
+                  label="Edit ranking"
                   onPress={() => {
                     setManaging(false);
                     openLog();

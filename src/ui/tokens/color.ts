@@ -210,6 +210,23 @@ export const medal = {
   bronze: { fill: '#8C5A2E', numeral: brand.paper },
 } as const;
 
+/**
+ * **Other companies' marks, for the import choice only** (founder spec 2026-11-10, §7).
+ *
+ * Not bingd's palette and never to be used as it: these are the colours of the Letterboxd
+ * and IMDb logos, which the Settings row and the provider choice draw at a small fixed size
+ * so a person recognises the service they are bringing history from. Each mark sits on
+ * `surface.raised`; IMDb's wordmark is Ink on its own gold (contrast 11.5:1).
+ *
+ * The marks are drawn from Views (`src/features/import/ProviderLogo.tsx`) because the
+ * binary ships no SVG renderer and adding one would end OTA delivery. If the brand kits'
+ * official raster files are preferred, they replace the drawing without touching a caller.
+ */
+export const partnerMark = {
+  letterboxd: { orange: '#FF8000', green: '#00E054', blue: '#40BCF4' },
+  imdb: { gold: '#F5C518', ink: '#000000' },
+} as const;
+
 export const color = {
   brand,
   surface,

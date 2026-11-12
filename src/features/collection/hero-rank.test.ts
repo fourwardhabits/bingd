@@ -29,12 +29,23 @@ const filler = (count: number, genres: string[], from = 100) =>
 describe('a top-ten overall placement', () => {
   it('is the label, with no qualifier', () => {
     const rows = [row('a', 3, ['Sci-Fi']), ...filler(10, ['Sci-Fi'])];
-    expect(heroRankFor('a', rows, 'movies')).toEqual({ label: '#3 in Movies', basis: 'overall' });
+    expect(heroRankFor('a', rows, 'movies')).toEqual({
+      label: '#3 in Movies',
+      basis: 'overall',
+    });
   });
 
   it('names the TV list by the category the caller ranked in', () => {
     const rows = [row('a', 2, [])];
-    expect(heroRankFor('a', rows, 'tv_seasons')).toEqual({ label: '#2 in TV', basis: 'overall' });
+    // Named by pool since 2026-11-14: TV is two rankings, seasons and whole shows.
+    expect(heroRankFor('a', rows, 'tv_seasons')).toEqual({
+      label: '#2 in TV seasons',
+      basis: 'overall',
+    });
+    expect(heroRankFor('a', rows, 'tv_shows')).toEqual({
+      label: '#2 in TV shows',
+      basis: 'overall',
+    });
   });
 
   /**
@@ -45,7 +56,8 @@ describe('a top-ten overall placement', () => {
   it('keeps movie and TV semantics apart', () => {
     const rows = [row('a', 2, [])];
     expect(heroRankFor('a', rows, 'movies')?.label).toBe('#2 in Movies');
-    expect(heroRankFor('a', rows, 'tv_seasons')?.label).toBe('#2 in TV');
+    expect(heroRankFor('a', rows, 'tv_seasons')?.label).toBe('#2 in TV seasons');
+    expect(heroRankFor('a', rows, 'tv_shows')?.label).toBe('#2 in TV shows');
   });
 
   it('includes the tenth and excludes the eleventh', () => {
@@ -68,7 +80,10 @@ describe('a top-ten overall placement', () => {
       row('x3', 3, []),
     ];
 
-    expect(heroRankFor('a', rows, 'movies')).toEqual({ label: '#4 in Movies', basis: 'overall' });
+    expect(heroRankFor('a', rows, 'movies')).toEqual({
+      label: '#4 in Movies',
+      basis: 'overall',
+    });
   });
 });
 
@@ -119,7 +134,10 @@ describe('a genre placement, when the overall one is not good enough', () => {
   });
 
   it('gives the same answer however the genres arrive on the row', () => {
-    const forwards = [row('a', 40, ['Drama', 'Thriller']), ...filler(9, ['Drama', 'Thriller'], 300)];
+    const forwards = [
+      row('a', 40, ['Drama', 'Thriller']),
+      ...filler(9, ['Drama', 'Thriller'], 300),
+    ];
     const backwards = [
       row('a', 40, ['Thriller', 'Drama']),
       ...filler(9, ['Thriller', 'Drama'], 300),

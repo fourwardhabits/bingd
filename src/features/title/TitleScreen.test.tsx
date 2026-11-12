@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, Linking, StyleSheet } from 'react-native';
 
@@ -677,9 +678,7 @@ describe('a title this user has ranked', () => {
     // Top of a two-title Loved band, so the band's high. **Once**, and in the Scores
     // section: it sat on the poster's corner until the founder's 2026-09-07 lock, and
     // before that it was in both places at once.
-    await waitFor(() =>
-      expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1),
-    );
+    await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
   });
 
   it('puts its one copy in the Scores row and never on the poster', async () => {
@@ -757,7 +756,7 @@ describe('a title this user has ranked', () => {
     expect(view.getByText('Ranked')).toBeTruthy();
 
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Update your rating')).toBeTruthy();
+    expect(view.getByText('Edit ranking')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
@@ -767,7 +766,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    expect(view.getByText('Update your rating')).toBeTruthy();
+    expect(view.getByText('Edit ranking')).toBeTruthy();
   });
 
   /**
@@ -789,7 +788,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     // Five rows in one column with no structure is a list you read rather than a menu
     // you use, and the destructive one has to be last and on its own.
     expect(view.getByText('YOUR LOG')).toBeTruthy();
@@ -854,7 +853,7 @@ describe('a title this user has ranked', () => {
   /**
    * **The Ranking group is two rows, and it is the founder's list** (2026-09-08).
    *
-   *   ★ Update your rating   the current watch, corrected
+   *   ★ Edit ranking         the current watch, corrected
    *   ↻ Log another watch    an explicit second viewing
    *
    * It was three. *Rank it again* and *Change your rating* were two doors into the same
@@ -874,7 +873,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
 
     // The two labels the founder retired, in both the forms they were ever drawn in.
@@ -906,7 +905,7 @@ describe('a title this user has ranked', () => {
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Update your rating',
+      'Edit ranking',
       'Log another watch',
       'Remove from collection',
     ]) {
@@ -938,7 +937,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     return view;
   };
 
@@ -1133,7 +1132,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
 
     expect(view.queryByLabelText('Remove ranking')).toBeNull();
     expect(view.queryByText('Keeps it in your collection')).toBeNull();
@@ -1544,8 +1543,13 @@ describe('reviews', () => {
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'Top, most helpful first' }).props.accessibilityState.selected).toBe(true);
+    await waitFor(() =>
+      expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy(),
+    );
+    expect(
+      view.getByRole('tab', { name: 'Top, most helpful first' }).props.accessibilityState
+        .selected,
+    ).toBe(true);
   });
 
   it('invites the first one rather than showing an empty box', async () => {
@@ -1711,15 +1715,122 @@ describe('a series', () => {
     // "Where am I up to" is the question a series page is opened to answer. Saying
     // "Season" beside a row already titled "Season 1" answered nothing.
     await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
-    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    // Twice since 2026-11-14: Season 2's row, and the show's own Your score, which is the
+    // show's explicit ranking and is not made up from the ranked Season 1.
+    expect(view.getAllByText('Not ranked yet')).toHaveLength(2);
   });
 
-  it('offers no way to rank the series itself', async () => {
+  it('offers Rank Show for the series itself, as its own ranking (2026-11-14)', async () => {
     const view = await openSeries();
 
     await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
-    expect(view.queryByTestId('title-action-rank')).toBeNull();
-    expect(view.queryByLabelText('Ranked. Change your rating.')).toBeNull();
+    const rank = view.getByTestId('title-action-rank');
+    expect(within(rank).getByText('Rank Show')).toBeTruthy();
+    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
+  });
+
+  it('gives each season row the search row’s +, and ranks that season from it', async () => {
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+
+    // The season's own log sheet, with its bands: a first season ranking begins here.
+    await waitFor(() => expect(view.getByText(/liked it/i)).toBeTruthy());
+    expect(mockPush).not.toHaveBeenCalledWith('/title/season-2');
+  });
+
+  /**
+   * **Update Show, end to end** (founder brief §5, 2026-11-14). A season of a ranked show,
+   * ranked for the first time from its row's `+`, ends on a reveal offering Update Show;
+   * Update Show opens the show's own band chooser, and the correction it starts carries
+   * the season placement as its link, so the server posts nothing for the show.
+   */
+  it('offers Update Show after a fresh season ranking and links the show correction to it', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: 'fine',
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    mockRpcResults.log_title = { status: 'ok', created: true, watch_event_id: 'w-1' };
+    mockRpcResults.rank_start = {
+      done: true,
+      position: 1,
+      category: 'tv_seasons',
+      bucket: 'loved',
+      score: 10,
+      adjustable: false,
+      placement_id: 'placement-s2',
+      parent: { media_item_id: 'series-1', ranked: true, bucket: 'fine' },
+    };
+    mockRpcResults.rank_again = {
+      done: false,
+      session_id: 'show-session',
+      pivot: 'other-show',
+    };
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+    await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    const update = await view.findByText('Update Show');
+    await fireEvent.press(update);
+
+    // The show's band chooser, on the band it already has: the same band re-ranks it
+    // from where it stands, and the link rides along.
+    await waitFor(() => expect(view.getByLabelText('It was fine')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({
+          p_media_item_id: 'series-1',
+          p_new_watch: false,
+          p_linked_placement_id: 'placement-s2',
+        }),
+      ),
+    );
+  });
+
+  it('draws a ranked season row as its score circle, against seasons only', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+      },
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    const view = await openSeries();
+
+    // A band of one scores its high: 10.0 for the loved season, never the show's 6.9.
+    await waitFor(() => expect(view.getAllByTestId('title-row-actions-ranked').length).toBe(1));
+    expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy();
   });
 
   it('keeps a route onward even before the seasons have arrived', async () => {
@@ -1867,7 +1978,9 @@ describe('the following score', () => {
     expect(view.queryByText(/friend/i)).toBeNull();
   });
 
-  it('asks for nothing on a series, which cannot be ranked', async () => {
+  it('shows a series its own Following and bingd scores (2026-11-14)', async () => {
+    // A whole show is ranked in its own pool, so its aggregates are other readers' show
+    // rankings — the RPCs are asked about the show itself, never about its seasons.
     mockOpenId = 'series-1';
     tableRows.media_items = [
       { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
@@ -1876,8 +1989,10 @@ describe('the following score', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByText('Following')).toBeNull();
-    expect(view.queryByText('bingd')).toBeNull();
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('following_score', { p_media_item_id: 'series-1' }),
+    );
+    expect(mockRpc).toHaveBeenCalledWith('community_score', { p_media_item_id: 'series-1' });
   });
 });
 
@@ -1971,7 +2086,9 @@ describe('a title opened from a recommendation', () => {
   });
 
   it('says who sent it, and quotes the note they wrote', async () => {
-    mockRpcResults.title_recommendations_for_me = [sent({ message: 'The second half is insane.' })];
+    mockRpcResults.title_recommendations_for_me = [
+      sent({ message: 'The second half is insane.' }),
+    ];
     const view = await open();
 
     await waitFor(() => expect(view.getByText(/^Ada · /)).toBeTruthy());
@@ -2018,7 +2135,9 @@ describe('a title opened from a recommendation', () => {
   });
 
   it('does not mark one that was already opened', async () => {
-    mockRpcResults.title_recommendations_for_me = [sent({ opened_at: new Date().toISOString() })];
+    mockRpcResults.title_recommendations_for_me = [
+      sent({ opened_at: new Date().toISOString() }),
+    ];
     const view = await open();
 
     await waitFor(() => expect(view.getByText(/^Recommended by Ada · /)).toBeTruthy());
@@ -2201,9 +2320,9 @@ describe('the action row', () => {
     expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
-  it('does not offer Recommend on a series, which is not a thing anybody watched', async () => {
-    // PRD §10 makes the season the rankable TV unit, and `recommend_title` refuses a
-    // series outright. A control that always fails is worse than its absence.
+  it('offers Recommend on a series, which is rankable in its own pool (2026-11-14)', async () => {
+    // `recommend_title` resolves a series through `rankable_category`, which maps it to
+    // tv_shows, so the show page has the same capabilities as a film's.
     const film = (tableRows.media_items ?? [])[0] as Record<string, unknown>;
     mockOpenId = 'series-1';
     tableRows.media_items = [
@@ -2212,7 +2331,7 @@ describe('the action row', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+    expect(view.getByLabelText(/^Recommend /)).toBeTruthy();
   });
 });
 
@@ -2634,10 +2753,9 @@ describe('where to watch', () => {
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
   });
 
-  it('is on a series page too, which has no score block of its own', async () => {
-    // A series cannot be ranked, so it gets no Scores section — and availability is
-    // still the thing somebody on that page wants. "Under the scores" is a placement
-    // rule, not a dependency.
+  it('is on a series page too, under the show’s own scores', async () => {
+    // A whole show is ranked in its own pool since 2026-11-14, so it has a Scores section
+    // of its own, and availability still follows it.
     mockOpenId = 'series-1';
     tableRows.media_items = [
       {
@@ -2651,7 +2769,7 @@ describe('where to watch', () => {
 
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
-    expect(view.queryByTestId('scores-section')).toBeNull();
+    expect(view.getByTestId('scores-section')).toBeTruthy();
   });
 });
 
@@ -2858,7 +2976,7 @@ describe('the score row and what surrounds it', () => {
     expect(order.indexOf('scores-divider')).toBeLessThan(order.indexOf('scores-layout'));
   });
 
-  it('draws no score row on a series, which cannot be ranked', async () => {
+  it('draws the score row on a series, about the show alone (2026-11-14)', async () => {
     mockOpenId = 'series-1';
     tableRows.media_items = [
       { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
@@ -2867,8 +2985,8 @@ describe('the score row and what surrounds it', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByTestId('scores-section')).toBeNull();
-    expect(view.queryByTestId('scores-divider')).toBeNull();
+    expect(view.getByTestId('scores-section')).toBeTruthy();
+    expect(view.getByTestId('scores-unit-you')).toBeTruthy();
   });
 
   it('keeps the insufficient-ratings state, in each row’s own words', async () => {
@@ -2943,7 +3061,7 @@ describe('the score row and what surrounds it', () => {
  * one skipped the band chooser — a mechanism, which is precisely what the 2026-09-07
  * pass had decided this menu must stop exposing. So the menu is:
  *
- *   Update your rating  the same-watch correction, whole. Opens the log sheet's band
+ *   Edit ranking  the same-watch correction, whole. Opens the log sheet's band
  *                       chooser, from which a *different* band is `rank_rebucket` and
  *                       the *same* band is `rankAgain(newWatch: false)` — which is
  *                       exactly the call *Rank it again* used to make directly.
@@ -2986,14 +3104,14 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     return view;
   };
 
   /**
    * **The same-watch correction, taken the way a reader now takes it.**
    *
-   * *Update your rating* opens the log sheet's band chooser; re-choosing the band the
+   * *Edit ranking* opens the log sheet's band chooser; re-choosing the band the
    * title already has is the correction, and it goes **straight into the comparisons** —
    * `rankAgain(newWatch: false)` on the tap, with no confirmation card between (founder QA,
    * 2026-09-21). That is the exact call the retired *Rank it again* row made in one tap,
@@ -3002,7 +3120,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
   const correctTheRating = async (view: Awaited<ReturnType<typeof openMenu>>) => {
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
   };
@@ -3022,7 +3140,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Update your rating')).toBeTruthy();
+    expect(view.getByLabelText('Edit ranking')).toBeTruthy();
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
     // Every label this row has ever worn that meant "another viewing" while reading like
     // "redo my ranking", plus the second correction door the founder consolidated away.
@@ -3180,7 +3298,7 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
 
     await correctTheRating(view);
 
@@ -3190,14 +3308,14 @@ describe('adjusting a ranking versus watching it again', () => {
 
   it('writes no ranking call from the row itself, only from what follows it', async () => {
     /**
-     * *Update your rating* opens the log sheet's band chooser and stops there. The
+     * *Edit ranking* opens the log sheet's band chooser and stops there. The
      * ranking call is decided by what the reader chooses next — the same band is a
      * correction, a different one is a rebucket — and a row that fired one on the way in
      * would be deciding a rating on the reader's behalf.
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
 
     expect(againCalls()).toHaveLength(0);
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
@@ -3213,7 +3331,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await fireEvent.press(view.getByLabelText('Edit ranking'));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
     // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
@@ -3232,13 +3350,13 @@ describe('adjusting a ranking versus watching it again', () => {
   /**
    * **The contract, as the founder stated it after device QA (2026-09-21).**
    *
-   *   Update your rating → the comparisons, immediately, and NO watch event.
+   *   Edit ranking → the comparisons, immediately, and NO watch event.
    *   Log another watch  → a separate sheet, and a watch event.
    *
    * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
    * halves are asserted together so that neither can drift toward the other.
    */
-  it('goes straight into the comparisons, and records no watch, from Update your rating', async () => {
+  it('goes straight into the comparisons, and records no watch, from Edit ranking', async () => {
     const view = await openMenu();
 
     await correctTheRating(view);
@@ -3426,7 +3544,12 @@ describe('a title in the collection that is not ranked', () => {
   it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of ['Update your rating', 'Log another watch', 'Who I watched with', 'Add a note']) {
+    for (const label of [
+      'Edit ranking',
+      'Log another watch',
+      'Who I watched with',
+      'Add a note',
+    ]) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
     expect(view.queryByText('Ranking')).toBeNull();
@@ -3464,19 +3587,27 @@ describe('a title in the collection that is not ranked', () => {
       ),
     );
     // One write, and it is the removal: no ranking is started, finished or cleared on the way.
-    expect(mockRpc.mock.calls.map(([name]) => name).filter((name) => /^rank_/.test(name))).toEqual([]);
+    expect(
+      mockRpc.mock.calls.map(([name]) => name).filter((name) => /^rank_/.test(name)),
+    ).toEqual([]);
     expect(mockRpc.mock.calls.filter(([name]) => name === 'unlog')).toHaveLength(1);
   });
 
   it('still clears a ranked title’s ranking first, which is the path that already worked', async () => {
     tableRows.rankings = [
-      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
     ];
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
     // The full ranked menu, unchanged.
-    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Remove from collection'));
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
 
@@ -3532,7 +3663,9 @@ describe('Add to list', () => {
       .getAllByTestId(/^title-action-(save|list|recommend)$/)
       .map((node) => node.props.testID as string);
     expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
-    expect(ids.indexOf('title-action-list')).toBeLessThan(ids.indexOf('title-action-recommend'));
+    expect(ids.indexOf('title-action-list')).toBeLessThan(
+      ids.indexOf('title-action-recommend'),
+    );
   });
 
   it('opens the Add-to-list sheet directly, with nothing refused', async () => {
@@ -3542,8 +3675,7 @@ describe('Add to list', () => {
     await fireEvent.press(view.getByTestId('title-action-list'));
 
     await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
-    const shows = (globalThis as unknown as { __modalShows: { refused: number } })
-      .__modalShows;
+    const shows = (globalThis as unknown as { __modalShows: { refused: number } }).__modalShows;
     expect(shows.refused).toBe(0);
   });
 
@@ -3629,8 +3761,20 @@ describe('the ranking state on the title page', () => {
 describe('the immersive title page (experiment)', () => {
   const ranked = () => {
     tableRows.rankings = [
-      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
-      { user_id: 'user-1', media_item_id: 'other', position: 2, category: 'movies', bucket: 'loved' },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
+      {
+        user_id: 'user-1',
+        media_item_id: 'other',
+        position: 2,
+        category: 'movies',
+        bucket: 'loved',
+      },
     ];
     tableRows.user_media = [
       {
@@ -3746,7 +3890,9 @@ describe('the immersive title page (experiment)', () => {
         walk(children);
       };
       walk(view.toJSON());
-      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-section-about'));
+      expect(ids.indexOf('immersive-module')).toBeLessThan(
+        ids.indexOf('immersive-section-about'),
+      );
     });
 
     it('opens on the cinematic first screen, with none of the original identity block', async () => {
@@ -3830,14 +3976,18 @@ describe('the immersive title page (experiment)', () => {
         // The heading sits above the rail's scroller, outside it, with the section's own
         // gap between them, so a fling on the rail cannot land on the heading.
         expect(within(rail).queryByText('Episodes')).toBeNull();
-        expect(StyleSheet.flatten(view.getByTestId('immersive-body-episodes').props.style).paddingTop)
-          .toBeGreaterThan(0);
+        expect(
+          StyleSheet.flatten(view.getByTestId('immersive-body-episodes').props.style)
+            .paddingTop,
+        ).toBeGreaterThan(0);
         expect(view.queryByText('Five years after the events of the first season.')).toBeNull();
 
         await fireEvent.press(within(section).getByTestId('episode-card-1'));
         const sheet = within(view.getByTestId('episode-sheet'));
         expect(sheet.getByText('Season 2 · Episode 1')).toBeTruthy();
-        expect(sheet.getByText('Five years after the events of the first season.')).toBeTruthy();
+        expect(
+          sheet.getByText('Five years after the events of the first season.'),
+        ).toBeTruthy();
       });
     });
 
@@ -3850,7 +4000,9 @@ describe('the immersive title page (experiment)', () => {
       // Not repeated in About: the module is where the genres live now.
       expect(view.queryByTestId('genre-row')).toBeNull();
       const order = readingOrder(view.toJSON());
-      expect(order.indexOf('Inception')).toBeLessThan(order.findIndex((t) => t.includes('Science Fiction')));
+      expect(order.indexOf('Inception')).toBeLessThan(
+        order.findIndex((t) => t.includes('Science Fiction')),
+      );
     });
 
     it('states the title, the scores, Rank and the synopsis once each', async () => {
@@ -3866,7 +4018,9 @@ describe('the immersive title page (experiment)', () => {
       // The three labels the brief names, inside the one module.
       // Compact since post-QA sprint 2: the rating count rides in the label.
       expect(view.getByTestId('immersive-score-you-label')).toHaveTextContent('Your score');
-      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd\.( \(\d+\))?$/);
+      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(
+        /^bingd( \(\d+\))?$/,
+      );
       expect(view.getByTestId('immersive-score-following-label')).toHaveTextContent(
         /^Following( \(\d+\))?$/,
       );
@@ -3931,7 +4085,9 @@ describe('the immersive title page (experiment)', () => {
       await fireEvent.press(view.getByRole('button', { name: 'More details' }));
 
       expect(director).toHaveTextContent('Directed by Christopher Nolan');
-      expect(within(view.getByTestId('immersive-module')).getByTestId('title-director')).toBeTruthy();
+      expect(
+        within(view.getByTestId('immersive-module')).getByTestId('title-director'),
+      ).toBeTruthy();
       // Under the metadata, and the genres above both.
       const order = readingOrder(view.toJSON());
       const at = (text: string) => order.findIndex((t) => t.includes(text));
@@ -3954,7 +4110,14 @@ describe('the immersive title page (experiment)', () => {
           ...credits,
           payload: {
             ...credits.payload,
-            crew: [{ id: 1, name: 'An Assistant', job: 'First Assistant Director', department: 'Directing' }],
+            crew: [
+              {
+                id: 1,
+                name: 'An Assistant',
+                job: 'First Assistant Director',
+                department: 'Directing',
+              },
+            ],
           },
         },
       ];
@@ -3978,7 +4141,10 @@ describe('the immersive title page (experiment)', () => {
         const walk = (node: unknown): void => {
           if (Array.isArray(node)) return node.forEach(walk);
           if (!node || typeof node !== 'object') return;
-          const { props, children } = node as { props?: { source?: unknown }; children?: unknown };
+          const { props, children } = node as {
+            props?: { source?: unknown };
+            children?: unknown;
+          };
           const source = props?.source as { uri?: string } | { uri?: string }[] | undefined;
           for (const item of Array.isArray(source) ? source : [source]) {
             if (item?.uri?.includes('ytimg')) found.push(item.uri);
@@ -4022,7 +4188,9 @@ describe('the immersive title page (experiment)', () => {
       const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
 
       await fireEvent.press(within(section).getAllByRole('link')[0]!);
-      expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//));
+      expect(openURL).toHaveBeenCalledWith(
+        expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//),
+      );
       openURL.mockRestore();
     });
 
@@ -4037,17 +4205,27 @@ describe('the immersive title page (experiment)', () => {
         payload: {
           results: [
             ...videos.payload.results,
-            { id: 'v2', key: 'abcdefghijk', name: 'Teaser', type: 'Teaser', site: 'YouTube', official: true },
+            {
+              id: 'v2',
+              key: 'abcdefghijk',
+              name: 'Teaser',
+              type: 'Teaser',
+              site: 'YouTube',
+              official: true,
+            },
           ],
         },
       };
-      const tiles = (section: ReturnType<typeof within>) => section.getAllByTestId('trailer-thumb');
+      const tiles = (section: ReturnType<typeof within>) =>
+        section.getAllByTestId('trailer-thumb');
 
       it('draws the stills with the page outside production, with no Show previews', async () => {
         mockPreviewsByDefault = true;
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         expect(section.getAllByTestId('trailer-still')).toHaveLength(2);
         expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
         // The frame, kind and link are unchanged under the still.
@@ -4058,7 +4236,9 @@ describe('the immersive title page (experiment)', () => {
       it('draws each trailer as a video frame with its kind, before any preview', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
 
         expect(tiles(section)).toHaveLength(2);
         for (const tile of tiles(section)) {
@@ -4074,9 +4254,13 @@ describe('the immersive title page (experiment)', () => {
       it('keeps the frame for a trailer whose still YouTube cannot serve', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         await fireEvent.press(
-          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+          view.getByRole('button', {
+            name: 'Show trailer previews. Loads images from YouTube.',
+          }),
         );
         const stills = await waitFor(() => {
           const found = section.getAllByTestId('trailer-still');
@@ -4088,7 +4272,9 @@ describe('the immersive title page (experiment)', () => {
           uri: 'https://i.ytimg.com/vi/YoHD9XEInc0/hqdefault.jpg',
         });
 
-        await act(async () => stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }));
+        await act(async () =>
+          stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }),
+        );
 
         expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
         // The failed card is still the frame, its kind and its link.
@@ -4104,9 +4290,13 @@ describe('the immersive title page (experiment)', () => {
       it('keeps the frame when YouTube answers with its small placeholder image', async () => {
         tableRows.media_cache = [credits, twoVideos];
         const view = await open();
-        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        const section = within(
+          await waitFor(() => view.getByTestId('immersive-section-trailers')),
+        );
         await fireEvent.press(
-          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+          view.getByRole('button', {
+            name: 'Show trailer previews. Loads images from YouTube.',
+          }),
         );
         const stills = await waitFor(() => {
           const found = section.getAllByTestId('trailer-still');
@@ -4117,10 +4307,14 @@ describe('the immersive title page (experiment)', () => {
         // Decoded at YouTube's size, so the width is the image's and not the card's.
         expect(stills[0]!.props.allowDownscaling).toBe(false);
         await act(async () =>
-          stills[0]!.props.onLoad?.({ nativeEvent: { source: { width: 480, height: 360, url: 'real' } } }),
+          stills[0]!.props.onLoad?.({
+            nativeEvent: { source: { width: 480, height: 360, url: 'real' } },
+          }),
         );
         await act(async () =>
-          stills[1]!.props.onLoad?.({ nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } } }),
+          stills[1]!.props.onLoad?.({
+            nativeEvent: { source: { width: 120, height: 90, url: 'placeholder' } },
+          }),
         );
 
         expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
@@ -4143,7 +4337,9 @@ describe('the immersive title page (experiment)', () => {
 
       await fireEvent.press(toggle);
 
-      expect(view.getByRole('button', { name: 'More details' }).props.accessibilityState).toMatchObject({
+      expect(
+        view.getByRole('button', { name: 'More details' }).props.accessibilityState,
+      ).toMatchObject({
         expanded: true,
       });
       const facts = within(view.getByTestId('more-details'));
@@ -4168,7 +4364,9 @@ describe('the immersive title page (experiment)', () => {
       const body = (key: string) =>
         StyleSheet.flatten(view.getByTestId(`immersive-body-${key}`).props.style);
 
-      expect(StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight).toBe(0);
+      expect(
+        StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight,
+      ).toBe(0);
       expect(body('about')).toMatchObject({ paddingTop: 4 });
       expect(body('similar')).toMatchObject({ paddingTop: 8 });
       // A rail's space is outside its scroll view, where See all's slop can use it without
@@ -4191,7 +4389,9 @@ describe('the immersive title page (experiment)', () => {
       mockFetchWatchProviders.mockResolvedValue({
         region: 'US',
         link: null,
-        providers: [{ provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] }],
+        providers: [
+          { provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] },
+        ],
       });
       tableRows.media_cache = [credits];
       const view = await open();
@@ -4222,11 +4422,11 @@ describe('the immersive title page (experiment)', () => {
     });
 
     /**
-     * **Rank and Edit ranking are never cut** (UI cohesion pass, 2026-11-06): in the card the
+     * **Rank and Log rewatch are never cut** (UI cohesion pass, 2026-11-06): in the card the
      * control may take the row's full width and the icons wrap, at any text size; the
      * original page's narrow column keeps its ceiling.
      */
-    it('lets Edit ranking take the card’s width rather than truncating', async () => {
+    it('keeps Log rewatch and the icons on one row, fitting the word rather than cutting it', async () => {
       ranked();
       const view = await open();
       const control = await waitFor(() => view.getByTestId('title-action-ranked'));
@@ -4236,21 +4436,370 @@ describe('the immersive title page (experiment)', () => {
           : control.props.style,
       );
       expect(style.maxWidth).toBe('100%');
-      expect(style.flexShrink).toBe(0);
+      // It gives width back to the icons beside it (2026-11-14): one row, never two.
+      expect(style.flexShrink).toBe(1);
+      expect(StyleSheet.flatten(view.getByTestId('title-actions').props.style).flexWrap).toBe(
+        'nowrap',
+      );
+      // One line, never cut: past 1.5x text the word fits itself to the row.
+      const label = within(control).getByText('Log rewatch');
+      expect(label.props.numberOfLines).toBe(1);
+      expect(label.props.adjustsFontSizeToFit).toBe(true);
+      expect(label.props.maxFontSizeMultiplier).toBe(1.5);
+      const cluster = within(view.getByTestId('title-actions'));
+      for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+        expect(cluster.getByTestId(id)).toBeTruthy();
+      }
     });
 
-    it('keeps a smaller Edit ranking on a ranked title, and no second Rank', async () => {
-      ranked();
+    /**
+     * **Log rewatch, in place of Edit ranking** (founder, 2026-11-10). The ranked title's
+     * primary action is another viewing: the existing *Log another watch* sheet, opened
+     * directly, with no chooser between log and edit. *Edit ranking* stays in ⋯.
+     */
+    describe('Log rewatch on a ranked title', () => {
+      const rewatchCalls = () =>
+        mockRpc.mock.calls.filter(([name]: [string]) => name === 'log_rewatch_with_details');
+      const againCalls = () =>
+        mockRpc.mock.calls.filter(([name]: [string]) => name === 'rank_again');
+
+      it('reads Log rewatch with the repeat icon, and no second Rank', async () => {
+        ranked();
+        const view = await open();
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+        expect(within(control).queryByText('Edit ranking')).toBeNull();
+        // An Ionicon renders as its glyph, so the icon is asserted by its character.
+        const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+          String.fromCodePoint(Ionicons.glyphMap[name] as number);
+        expect(within(control).getByText(glyph('repeat-outline'))).toBeTruthy();
+        expect(within(control).queryByText(glyph('create-outline'))).toBeNull();
+        expect(control.props.accessibilityLabel).toBe('Log a rewatch of Inception');
+        expect(control.props.accessibilityHint).toBe('Opens a sheet to record another viewing');
+        expect(view.queryByTestId('title-action-rank')).toBeNull();
+        // The reader's own score is the prominent one, stated once.
+        await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
+      });
+
+      it('opens the rewatch sheet directly, and records nothing by opening it', async () => {
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch of Inception')).toBeTruthy();
+        // Not the rating sheet, and no menu or chooser in between.
+        expect(view.queryByLabelText('Edit ranking')).toBeNull();
+        expect(view.queryByLabelText('Options for Inception')).toBeNull();
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
+
+      it('does the same for a ranked season', async () => {
+        mockOpenId = 'season-1';
+        tableRows.media_items = [
+          {
+            ...film,
+            id: 'season-1',
+            kind: 'season',
+            title: 'Season 1',
+            release_date: '2023-04-01',
+            runtime_minutes: null,
+            parent: {
+              id: 'series-1',
+              title: 'Breaking Bad',
+              poster_path: null,
+              backdrop_path: null,
+            },
+          },
+        ];
+        tableRows.rankings = [
+          {
+            user_id: 'user-1',
+            media_item_id: 'season-1',
+            position: 1,
+            category: 'tv_seasons',
+            bucket: 'loved',
+          },
+        ];
+        tableRows.user_media = [
+          {
+            user_id: 'user-1',
+            media_item_id: 'season-1',
+            bucket: 'loved',
+            watched_on: null,
+            note: null,
+          },
+        ];
+        const view = await renderWithProviders(<TitleScreen />);
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+
+        await fireEvent.press(control);
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+        expect(rewatchCalls()).toHaveLength(0);
+      });
+
+      it('records no watch when the sheet is closed', async () => {
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+
+        await waitFor(() => expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull());
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+        expect(
+          within(view.getByTestId('title-action-ranked')).getByText('Log rewatch'),
+        ).toBeTruthy();
+      });
+
+      it('saves exactly one viewing, then re-checks on that viewing rather than a new one', async () => {
+        mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        await fireEvent.press(view.getByText('I liked it'));
+
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(rewatchCalls()).toHaveLength(1);
+        // The comparisons are tied to the viewing just saved, so finishing them enriches
+        // that one activity rather than writing a second (§K).
+        expect(againCalls()[0]![1]).toEqual(
+          expect.objectContaining({ p_bucket: 'loved', p_watch_event_id: 'event-2' }),
+        );
+        // Nothing else that records a viewing, or moves the ranking outside the session.
+        for (const name of [
+          'log_rewatch',
+          'log_title',
+          'set_watch_date',
+          'rank_rebucket',
+          'rank_unrank',
+        ]) {
+          expect(mockRpc).not.toHaveBeenCalledWith(name, expect.anything());
+        }
+      });
+
+      /**
+       * **A second press while the sheet is still leaving does nothing** (cross-PR review,
+       * 2026-11-11). On iOS the sheet slides away after a band is chosen and only then
+       * hands over to the comparisons (`onDismissed`). Log rewatch is on the page rather
+       * than in the menu; if a press ever reached it in that gap, it would present the
+       * sheet again mid-dismissal and drop the re-check. Defence in depth.
+       */
+      it('ignores Log rewatch while the sheet is still leaving, and the re-check still opens', async () => {
+        type Held = { hold: boolean; pending: (() => void)[] };
+        const { __modalDismissals: dismissals, __modalShows: shows } =
+          globalThis as unknown as {
+            __modalDismissals: Held;
+            __modalShows: Held;
+          };
+        mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
+        ranked();
+        const view = await open();
+        await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
+        await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+
+        dismissals.hold = true;
+        await fireEvent.press(view.getByText('I liked it'));
+        await waitFor(() => expect(rewatchCalls()).toHaveLength(1));
+        await waitFor(() => expect(dismissals.pending.length).toBeGreaterThan(0));
+        // Inside the slide-out: the comparisons have not opened yet.
+        expect(againCalls()).toHaveLength(0);
+
+        // The page counts as covered while the sheet is still presented — as UIKit, which
+        // normally ignores touches during the transition — so the press is made on the
+        // hidden control on purpose: this guards the state, not the platform.
+        shows.hold = true;
+        await fireEvent.press(
+          view.getByTestId('title-action-ranked', { includeHiddenElements: true }),
+        );
+        // No presentation was issued over the dismissing sheet.
+        expect(shows.pending).toHaveLength(0);
+        shows.hold = false;
+
+        dismissals.hold = false;
+        await act(async () => {
+          for (const finish of dismissals.pending.splice(0)) finish();
+        });
+        // The re-check still opens, on the viewing just saved, and only one viewing exists.
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(againCalls()[0]![1]).toEqual(
+          expect.objectContaining({ p_watch_event_id: 'event-2' }),
+        );
+        expect(rewatchCalls()).toHaveLength(1);
+      });
+
+      it('keeps Edit ranking in the menu, as a correction that records no watch', async () => {
+        ranked();
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+        await fireEvent.press(view.getByTestId('title-more'));
+        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+
+        await fireEvent.press(view.getByLabelText('Edit ranking'));
+        await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+        await fireEvent.press(view.getByText('I liked it'));
+
+        await waitFor(() => expect(againCalls()).toHaveLength(1));
+        expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
+        expect(rewatchCalls()).toHaveLength(0);
+      });
+
+      /**
+       * **No second, prominent Edit ranking** (founder decision, 2026-11-11). Log rewatch is
+       * the page's one ranking control; correcting the ranking stays where it was — ⋯ →
+       * *Edit ranking* on this page, and the same *Edit ranking* in an expanded watch on
+       * Watch History (#258), which this page's Watch history row opens. One label for the
+       * one correction since 2026-11-11 (it read *Update your rating* in ⋯ before).
+       */
+      it('draws no Edit ranking control on the page: the correction is in ⋯ and Watch History', async () => {
+        ranked();
+        tableRows.watch_events = [
+          { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
+          { id: 'w2', media_item_id: 'film-1', user_id: 'user-1' },
+        ];
+        const view = await open();
+        const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+        expect(within(control).getByText('Log rewatch')).toBeTruthy();
+
+        // Nothing on the page itself offers to edit the ranking: no button, no label, no
+        // second ranking control beside Log rewatch.
+        expect(view.queryAllByText(/Edit ranking/i)).toHaveLength(0);
+        expect(view.queryAllByLabelText(/Edit (your )?ranking/i)).toHaveLength(0);
+        expect(view.queryByLabelText('Edit ranking')).toBeNull();
+        expect(view.queryByTestId('title-action-rank')).toBeNull();
+        expect(view.getAllByTestId('title-action-ranked')).toHaveLength(1);
+
+        // The way to it: ⋯ holds the correction, beside Log another watch.
+        await fireEvent.press(view.getByTestId('title-more'));
+        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
+
+      /**
+       * The same decision checked by behaviour rather than by wording (independent review):
+       * whatever a control is called, none on the page opens the rating sheet — the
+       * correction's band chooser — or writes a ranking. Each button is pressed on a fresh
+       * page. Only ⋯'s own rows do that, and they are not on the page until ⋯ is opened.
+       */
+      it('has no control outside ⋯ that opens the ranking correction, whatever it is called', async () => {
+        const correctionWrites = () =>
+          mockRpc.mock.calls.filter(([name]: [string]) =>
+            ['rank_again', 'rank_rebucket', 'set_bucket'].includes(name),
+          );
+        ranked();
+        const first = await open();
+        await waitFor(() => expect(first.getByTestId('title-action-ranked')).toBeTruthy());
+        // The cluster is exactly Log rewatch and the three icon controls.
+        const cluster = within(first.getByTestId('title-actions'));
+        expect(
+          cluster
+            .getAllByRole('button')
+            .map((node) => node.props.testID as string | undefined)
+            .filter(Boolean)
+            .sort(),
+        ).toEqual(
+          [
+            'title-action-list',
+            'title-action-ranked',
+            'title-action-recommend',
+            'title-action-save',
+          ].sort(),
+        );
+        const count = first.getAllByRole('button').length;
+        expect(count).toBeGreaterThan(3);
+        await first.unmount();
+
+        /**
+         * A control's name, the way a screen reader reads it: its label, or the words
+         * inside it — the app's own `Button` names itself by its text and sets no label,
+         * so a label-only list would never press one (independent review).
+         */
+        const nameOf = (node: ReturnType<typeof first.getByTestId>) =>
+          (node.props.accessibilityLabel as string | undefined) ??
+          within(node)
+            .queryAllByText(/\S/)
+            .map((text) => String(text.props.children))
+            .join(' ');
+        // Back only leaves the page (and this file's router stand-in has no `back`).
+        // *Write a review* (Reviews) is the one existing door into the same log sheet: it
+        // opens on the review composer, for the reader's note, and is on main unchanged —
+        // a writing control, not a ranking one. Anything else that opens the sheet fails.
+        const allowed = new Set(['Back', 'Write a review']);
+
+        // Every button, by position, each on a fresh page.
+        for (let index = 0; index < count; index += 1) {
+          mockRpc.mockClear();
+          ranked();
+          const view = await open();
+          await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+          const buttons = view.getAllByRole('button');
+          // The same page each time, so the same button is at the same position.
+          expect(buttons).toHaveLength(count);
+          const name = nameOf(buttons[index]!);
+          if (!allowed.has(name)) {
+            await fireEvent.press(buttons[index]!);
+            // The correction's band chooser never opens, and nothing is re-ranked.
+            expect({ name, chooser: view.queryAllByLabelText('How was it?').length }).toEqual({
+              name,
+              chooser: 0,
+            });
+            expect({ name, writes: correctionWrites().length }).toEqual({ name, writes: 0 });
+          }
+          await view.unmount();
+        }
+      });
+
+      it('opens Watch History from its row (where #258 puts Edit ranking in an expanded watch)', async () => {
+        ranked();
+        tableRows.watch_events = [
+          { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
+          { id: 'w2', media_item_id: 'film-1', user_id: 'user-1' },
+        ];
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+        const row = await waitFor(() => view.getByRole('button', { name: 'Watch history' }));
+        await fireEvent.press(row);
+        expect(mockPush).toHaveBeenCalledWith('/title/film-1/history');
+        expect(rewatchCalls()).toHaveLength(0);
+        expect(againCalls()).toHaveLength(0);
+      });
+    });
+
+    it('still resumes an unfinished ranking from Rank', async () => {
+      tableRows.user_media = [
+        {
+          user_id: 'user-1',
+          media_item_id: 'film-1',
+          bucket: 'fine',
+          watched_on: null,
+          note: null,
+          note_visibility: 'private',
+          note_has_spoilers: false,
+        },
+      ];
       const view = await open();
-      await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+      const control = await waitFor(() => view.getByTestId('title-action-rank'));
+      expect(within(control).getByText('Rank Movie')).toBeTruthy();
+      expect(view.queryByText('Log rewatch')).toBeNull();
 
-      expect(within(view.getByTestId('title-action-ranked')).getByText('Edit ranking')).toBeTruthy();
-      expect(view.queryByTestId('title-action-rank')).toBeNull();
-      // The reader's own score is the prominent one, stated once.
-      await waitFor(() => expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1));
-
-      await fireEvent.press(view.getByTestId('title-action-ranked'));
-      await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      await fireEvent.press(control);
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith(
+          'rank_start',
+          expect.objectContaining({ p_media_item_id: 'film-1', p_bucket: 'fine' }),
+        ),
+      );
+      expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull();
     });
 
     it('saves to the watchlist from the bookmark', async () => {
@@ -4260,7 +4809,10 @@ describe('the immersive title page (experiment)', () => {
       await fireEvent.press(view.getByTestId('title-action-save'));
 
       await waitFor(() =>
-        expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.objectContaining({ p_present: true })),
+        expect(mockRpc).toHaveBeenCalledWith(
+          'set_watchlist',
+          expect.objectContaining({ p_present: true }),
+        ),
       );
     });
 
@@ -4274,7 +4826,9 @@ describe('the immersive title page (experiment)', () => {
 
     it('opens the recommendation sheet from Share', async () => {
       const view = await open();
-      await waitFor(() => expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy());
+      await waitFor(() =>
+        expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy(),
+      );
 
       await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
       await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
@@ -4305,7 +4859,9 @@ describe('the immersive title page (experiment)', () => {
       };
       const sheetOf = async (view: Awaited<ReturnType<typeof open>>) => {
         await fireEvent.press(
-          await waitFor(() => view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ })),
+          await waitFor(() =>
+            view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ }),
+          ),
         );
         return within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
       };
@@ -4345,7 +4901,12 @@ describe('the immersive title page (experiment)', () => {
         withNote('public');
         mockRpcResults.title_reviews_v2 = [
           reviewBy(1),
-          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          {
+            ...reviewBy(9),
+            user_id: 'user-1',
+            note: 'My own words on it.',
+            display_name: 'Sai',
+          },
           reviewBy(2),
         ];
         mockRpcResults.title_review_count = 3;
@@ -4359,7 +4920,9 @@ describe('the immersive title page (experiment)', () => {
         expect(preview.getByText('Review number 1.')).toBeTruthy();
         expect(preview.queryByText('Review number 2.')).toBeNull();
         const order = readingOrder(view.toJSON());
-        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(
+          order.indexOf('Review number 1.'),
+        );
         // No score circle on your own review.
         expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
 
@@ -4468,9 +5031,13 @@ describe('the immersive title page (experiment)', () => {
         const sheet = await sheetOf(view);
 
         await fireEvent.press(sortTab(sheet, 'Newest'));
-        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), { timeout: 4000 });
+        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), {
+          timeout: 4000,
+        });
         await fireEvent.press(sortTab(sheet, 'Newest first'));
-        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), { timeout: 4000 });
+        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), {
+          timeout: 4000,
+        });
         expect(sortTab(sheet, 'Oldest first')).toBeSelected();
       });
 
@@ -4524,7 +5091,9 @@ describe('the immersive title page (experiment)', () => {
       });
 
       it('never offers Rating over a list the server may have cut short', async () => {
-        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) => reviewBy(n + 1));
+        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) =>
+          reviewBy(n + 1),
+        );
         mockRpcResults.title_review_count = 140;
         const view = await open();
         const sheet = await sheetOf(view);
@@ -4556,9 +5125,12 @@ describe('the immersive title page (experiment)', () => {
 
         full = true;
         await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
-        await waitFor(() => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(), {
-          timeout: 4000,
-        });
+        await waitFor(
+          () => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(),
+          {
+            timeout: 4000,
+          },
+        );
         expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
         expect(sheet.getByTestId('reviews-truncated')).toBeTruthy();
       });
@@ -4579,7 +5151,12 @@ describe('the immersive title page (experiment)', () => {
         withNote('public');
         mockRpcResults.title_reviews_v2 = [
           reviewBy(1),
-          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          {
+            ...reviewBy(9),
+            user_id: 'user-1',
+            note: 'My own words on it.',
+            display_name: 'Sai',
+          },
         ];
         mockRpcResults.title_review_count = 2;
         const view = await open();
@@ -4587,7 +5164,9 @@ describe('the immersive title page (experiment)', () => {
         const mine = sheet.getByTestId('your-review');
         expect(sheet.getAllByText('My own words on it.')).toHaveLength(1);
         const order = readingOrder(view.getByTestId('reviews-sheet-list'));
-        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(
+          order.indexOf('Review number 1.'),
+        );
 
         // Edit from inside the sheet: the sheet goes, then the one composer opens.
         await fireEvent.press(within(mine).getByTestId('edit-review'));

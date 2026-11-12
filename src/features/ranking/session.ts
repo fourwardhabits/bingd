@@ -77,7 +77,7 @@ export type Comparison = {
 /** The four columns a comparison card reads, in the shape its query caches them. */
 export type ComparisonCard = {
   id: string;
-  kind: 'movie' | 'season' | null;
+  kind: 'movie' | 'season' | 'series' | null;
   title: string;
   poster_path: string | null;
 };
@@ -125,6 +125,26 @@ export type Placed = {
    * 2026-09-21) — the reader's own call is the only place movement appears.
    */
   movement: PlacedMovement | null;
+  /**
+   * The ledger row this placement wrote (`ranking_placements.id`, 20261004000100). Null on
+   * a backend that predates it. **Update Show** (20261114000300) passes it back as the
+   * link that makes the show's correction the second half of this season's act.
+   */
+  placementId: string | null;
+  /**
+   * A season's show, as the database saw it inside the placement's own locks
+   * (20261114000300): whether the reader has ranked the show, and in which band. It is
+   * what decides whether the completion offers **Update Show**, rather than a cached list
+   * that may predate the show's ranking or its removal. Null for a film, a show, and a
+   * backend that predates it (which therefore never offers the button).
+   */
+  parent: PlacedParent | null;
+};
+
+export type PlacedParent = {
+  mediaItemId: string;
+  ranked: boolean;
+  bucket: string | null;
 };
 
 export type PlacedMovement = {
@@ -176,6 +196,15 @@ type RankResponse = {
   skipped?: boolean;
   pivot_card?: ComparisonCard | null;
   movement?: { outcome?: string; from_position?: number | null } | null;
+  placement_id?: string | null;
+  parent?: { media_item_id?: string; ranked?: boolean; bucket?: string | null } | null;
+};
+
+/** A season's show, only when the server named one. */
+const parentOf = (data: RankResponse): PlacedParent | null => {
+  const p = data.parent;
+  if (!p || typeof p.media_item_id !== 'string') return null;
+  return { mediaItemId: p.media_item_id, ranked: p.ranked === true, bucket: p.bucket ?? null };
 };
 
 /** The movement, only when there was somewhere to move from. */
@@ -198,7 +227,8 @@ const cardFor = (data: RankResponse, pivot: string): ComparisonCard | undefined 
   if (!card || card.id !== pivot || typeof card.title !== 'string') return undefined;
   return {
     id: card.id,
-    kind: card.kind === 'season' ? 'season' : card.kind === 'movie' ? 'movie' : null,
+    kind:
+      card.kind === 'season' || card.kind === 'movie' || card.kind === 'series' ? card.kind : null,
     title: card.title,
     poster_path: card.poster_path ?? null,
   };
@@ -208,6 +238,20 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
   // Every branch below is a refusal this app raises on purpose except the default, and
   // the default is where a dropped connection or an `08007` arrives.
   const ambiguous = classifyWrite(error) === 'unknown' ? { changed: true as const } : {};
+
+  // Update Show's own refusals (20261114000300), before the generic codes they share:
+  // the link was already spent, or the show is no longer ranked. Neither is a session
+  // that ended or a title with a position, which is what those codes say otherwise.
+  if (/already updated from that season/.test(error.message)) {
+    return { state: 'failed', message: 'You already updated this show.', restart: false };
+  }
+  if (/show is not ranked|not a season of this show/.test(error.message)) {
+    return {
+      state: 'failed',
+      message: 'This show is not ranked any more, so there is nothing to update.',
+      restart: false,
+    };
+  }
 
   switch (error.code) {
     case CODES.notFound:
@@ -276,6 +320,8 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
       // is a number that looks like growth and is not.
       activated: Boolean(data.activated),
       movement: movementOf(data),
+      placementId: typeof data.placement_id === 'string' ? data.placement_id : null,
+      parent: parentOf(data),
     };
   }
 
@@ -359,12 +405,31 @@ export const rankStart = (mediaItemId: string, bucket: BucketId, operationId: st
  * Never a new watch. Changing your mind about a rating is not a second viewing, so this
  * writes no feed activity at all.
  */
-export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId: string) =>
+export const rankRebucket = (
+  mediaItemId: string,
+  bucket: BucketId,
+  operationId: string,
+  /** Update Show's link to the season placement that offered it. See {@link rankAgain}. */
+  linkedPlacementId: string | null = null,
+) =>
   call(
     'rank_rebucket',
-    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket], p_operation_id: operationId },
+    {
+      p_media_item_id: mediaItemId,
+      p_bucket: BUCKET_VALUES[bucket],
+      p_operation_id: operationId,
+      ...linked(linkedPlacementId),
+    },
     mediaItemId,
   );
+
+/**
+ * `p_linked_placement_id` only when there is one (20261114000300). Sent unconditionally,
+ * a backend that predates the parameter would find no function with that argument name
+ * and refuse every correction; absent, every call is the one it has always been.
+ */
+const linked = (linkedPlacementId: string | null) =>
+  linkedPlacementId ? { p_linked_placement_id: linkedPlacementId } : {};
 
 /**
  * Ranks an already-ranked title **again, inside the band it is already in**.
@@ -376,7 +441,7 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId:
  * placing it a second time. `newWatch` is true, and completing it writes exactly one new
  * `title_ranked` activity.
  *
- * *Update your rating* re-choosing the band it already has is a **correction**. The
+ * *Edit ranking* re-choosing the band it already has is a **correction**. The
  * founder reproduced the original bug on the device — a Loved title, Change your
  * rating (as the row was then called), Loved, and nothing happened, because `LogSheet`
  * read "same bucket" as "no change" and returned before anything ran. It is not no
@@ -428,6 +493,12 @@ export const rankAgain = (
    * at finalize rather than inventing a date for it.
    */
   watchEventId: string | null = null,
+  /**
+   * **Update Show** (20261114000300): the season placement whose completion screen
+   * offered this correction of its show. The server checks the link and posts nothing for
+   * the show, because the season is the activity. Null everywhere else.
+   */
+  linkedPlacementId: string | null = null,
 ) =>
   call(
     'rank_again',
@@ -437,6 +508,7 @@ export const rankAgain = (
       p_operation_id: operationId,
       p_new_watch: newWatch,
       p_watch_event_id: watchEventId,
+      ...linked(linkedPlacementId),
     },
     mediaItemId,
   );

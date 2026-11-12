@@ -203,7 +203,7 @@ const MUTANTS = [
      * This was the correct order for six weeks and is the obvious thing to restore if
      * somebody reads the comment about opt-in pages without the date on it. With
      * `optInUrl` leading, every public Android visitor is sent to a tester page for a
-     * track they are not on, from a button labelled "Join the bingd. Android beta" —
+     * track they are not on, from a button labelled "Join the bingd Android beta" —
      * and the site still builds, still passes a shape check, and still has a working
      * link under every button.
      */

@@ -29,10 +29,11 @@ import {
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import {
+  asRankingCategory,
+  CATEGORY_NAME,
   useRankedCollection,
-  type RankingCategory,
 } from '@/features/collection/use-collection';
-import { track, type Surface } from '@/lib/analytics';
+import { mediaKindFor, track, type Surface } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
@@ -56,6 +57,7 @@ import {
   rankRebucket,
   rankSkip,
   rankStart,
+  type Placed,
   type PlacedMovement,
   type SessionStep,
 } from './session';
@@ -73,7 +75,7 @@ export type RankingSubject = {
    * server has said what category it opened, so the kind cannot come from the answer
    * the way `ranking_completed`'s does.
    */
-  kind: 'movie' | 'season';
+  kind: 'movie' | 'season' | 'series';
   /**
    * How this session begins, which is four different acts over three calls.
    *
@@ -81,7 +83,7 @@ export type RankingSubject = {
    *
    * `rebucket` is a title that had a position and is changing band. `rank_rebucket`.
    *
-   * `rerank` is *Update your rating* re-choosing the band it already has. `rankAgain`
+   * `rerank` is *Edit ranking* re-choosing the band it already has. `rankAgain`
    * with `newWatch: false`, because `rank_rebucket` refuses a bucket that is not moving.
    * (The row was called *Change your rating* until 2026-09-08, and a second row —
    * *Rank it again* — reached this mode directly until the same pass consolidated the two
@@ -111,6 +113,31 @@ export type RankingSubject = {
    * rather than a fabricated date (§D.6 path 15).
    */
   watchEventId?: string | null;
+  /**
+   * **This first ranking began with a new watch log** (`LogSheet`'s `RankContext`): the
+   * tap that chose the band also created the title's seen row and its first watch. With
+   * `mode: 'again'` (a rewatch's re-check) it is one of the two ways a season's placement
+   * is "tied to a new watch", which is the first condition for offering **Update Show**.
+   * Absent everywhere else, including a resumed placement and a re-rating, which therefore
+   * never offer it. No timestamp is consulted: a ranking time is not a watch.
+   */
+  freshLog?: boolean;
+  /**
+   * Set only on the show correction **Update Show** opens (20261114000300): the season
+   * placement whose completion offered it. Sent with `rank_again` / `rank_rebucket`, so the
+   * server records the link and posts nothing for the show. A session that carries one is
+   * itself never offered Update Show again.
+   */
+  linkedPlacementId?: string | null;
+};
+
+/** What **Update Show** hands the caller: which show, its band, and the link. */
+export type UpdateShowLink = {
+  showId: string;
+  /** The show's band as the server read it at the season's placement. */
+  bucket: string | null;
+  /** The season placement that offered it. */
+  linkedPlacementId: string;
 };
 
 export type RankingSheetProps = {
@@ -184,6 +211,22 @@ export type RankingSheetProps = {
    */
   onPlaced?: (placement: { score: number; position: number; category: string }) => void;
   /**
+   * **Update Show** (founder brief §5), offered on a season's reveal beside Add details,
+   * with Done centred underneath. The caller opens the parent show's ordinary correction
+   * (the band chooser, then comparisons from where it stands) carrying the link.
+   *
+   * Offered only when every one of these holds, and otherwise the reveal is exactly the
+   * Add details + Done it has always been:
+   *   - the caller mounts it (an individual title flow: never the backlog, Refine or
+   *     onboarding, which do not pass it);
+   *   - the subject is a season, and this placement was tied to a new watch log
+   *     (`freshLog`) or a rewatch (`mode: 'again'`);
+   *   - the server said the parent show is ranked (`placed.parent.ranked`), and named the
+   *     placement to link to;
+   *   - the session is not itself a linked show update.
+   */
+  onUpdateShow?: (link: UpdateShowLink) => void;
+  /**
    * Which screen opened this, for `ranking_completed` alone.
    *
    * Passed in rather than inferred from the route: the sheet is mounted by three
@@ -224,6 +267,7 @@ export function RankingSheet({
   onClose,
   onFinishLog,
   onPlaced,
+  onUpdateShow,
   surface,
   visible = true,
   onDismissed,
@@ -240,6 +284,7 @@ export function RankingSheet({
       onClose={onClose}
       onFinishLog={onFinishLog}
       onPlaced={onPlaced}
+      onUpdateShow={onUpdateShow}
       surface={surface}
       visible={visible}
       onDismissed={onDismissed}
@@ -275,13 +320,33 @@ const noopClose = () => {};
  * translation has to happen somewhere. It happens here, once, because three events now
  * need it and three copies of one conditional is three places for it to drift.
  */
-const mediaKindOf = (kind: 'movie' | 'season') => (kind === 'season' ? 'tv_season' : 'movie');
+const mediaKindOf = mediaKindFor;
+
+/**
+ * Whether this placement may offer **Update Show** (founder brief §5). Every condition is
+ * a fact about the act, and none is a timestamp:
+ *
+ *   - a season, placed in a session that is not itself a linked show update;
+ *   - tied to a new watch: the first ranking began with a new log (`freshLog`), or this is
+ *     a rewatch's re-check (`mode: 'again'`). A correction (`rerank`, `rebucket`) never is;
+ *   - the server said its show is ranked, and named the placement to link to.
+ */
+export function offersUpdateShow(
+  subject: Pick<RankingSubject, 'kind' | 'mode' | 'freshLog' | 'linkedPlacementId'>,
+  placed: Pick<Placed, 'parent' | 'placementId'>,
+): boolean {
+  if (subject.kind !== 'season' || subject.linkedPlacementId) return false;
+  const mode = subject.mode ?? 'start';
+  const newWatch = mode === 'again' || (mode === 'start' && subject.freshLog === true);
+  return newWatch && Boolean(placed.parent?.ranked) && Boolean(placed.placementId);
+}
 
 function Session({
   subject,
   onClose,
   onFinishLog,
   onPlaced,
+  onUpdateShow,
   surface,
   visible = true,
   onDismissed,
@@ -517,7 +582,12 @@ function Session({
         track({
           name: 'ranking_completed',
           props: {
-            media_kind: next.category === 'tv_seasons' ? 'tv_season' : 'movie',
+            media_kind:
+              next.category === 'tv_seasons'
+                ? 'tv_season'
+                : next.category === 'tv_shows'
+                  ? 'tv_series'
+                  : 'movie',
             surface,
             comparisons: answeredCount.current,
             rebucket: subject.mode === 'rebucket',
@@ -573,7 +643,7 @@ function Session({
         /**
          * A correction is not a ranking act, so it is not asked about the streak.
          *
-         * `rerank` and `rebucket` — both reached from *Update your rating* — replace a
+         * `rerank` and `rebucket` — both reached from *Edit ranking* — replace a
          * position and post no activity. Before `20261001000100` they also
          * re-inserted the `rankings` row with `created_at = now()`, which is the column
          * the streak is derived from — so a correction in an otherwise empty week
@@ -623,10 +693,12 @@ function Session({
   useEffect(() => {
     let live = true;
     const newWatch = subject.mode === 'again';
+    // Update Show's link (20261114000300), on the two correction calls only.
+    const linked = subject.linkedPlacementId ?? null;
     const open =
       subject.mode === 'rebucket'
         ? (id: string, bucket: BucketId, operationId: string) =>
-            rankRebucket(id, bucket, operationId)
+            rankRebucket(id, bucket, operationId, linked)
         : subject.mode === 'rerank' || subject.mode === 'again'
           ? (id: string, bucket: BucketId, operationId: string) =>
               // 20261005000100: the viewing this re-check is about, when the caller has
@@ -635,15 +707,15 @@ function Session({
               // `log_rewatch` made and updates its score rather than writing a second.
               // Null on every other path, and on an installed client, where the server
               // supplies an undated event instead of inventing a date.
-              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null)
+              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null, linked)
           : (id: string, bucket: BucketId, operationId: string) =>
               rankStart(id, bucket, operationId);
     const attempt = () =>
       withIntent(
-        // The mode is in the intent key, so Log another watch and Update your rating cannot
+        // The mode is in the intent key, so Log another watch and Edit ranking cannot
         // share an operation id: they are different acts and one of them writes an
         // activity the other must not.
-        `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,
+        `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}${linked ? `:${linked}` : ''}`,
         (operationId) => open(subject.id, subject.bucket, operationId),
         outcomeUnknown,
       );
@@ -807,6 +879,20 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
+            onUpdateShow={
+              onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
+                ? () => {
+                    // The same way out Add details takes, and for the same reason: the
+                    // flow is not over, so what the ranking earned waits for its end.
+                    void close();
+                    onUpdateShow({
+                      showId: step.parent!.mediaItemId,
+                      bucket: step.parent!.bucket,
+                      linkedPlacementId: step.placementId!,
+                    });
+                  }
+                : undefined
+            }
             onFinishLog={
               onFinishLog && !onPlaced
                 ? () => {
@@ -1017,7 +1103,12 @@ export function Comparison({
    * pressed. It is on `RankingSubject` already; this only stops the type dropping it on
    * the way through.
    */
-  subject: { id: string; title: string; posterUri?: string | null; kind: 'movie' | 'season' };
+  subject: {
+    id: string;
+    title: string;
+    posterUri?: string | null;
+    kind: 'movie' | 'season' | 'series';
+  };
   pivotId: string;
   skipped: boolean;
   busy: boolean;
@@ -1067,7 +1158,7 @@ export function Comparison({
       if (error) throw error;
       return data as {
         id: string;
-        kind: 'movie' | 'season' | null;
+        kind: 'movie' | 'season' | 'series' | null;
         title: string;
         poster_path: string | null;
       };
@@ -1105,7 +1196,8 @@ export function Comparison({
    * is no kind at all. Both collapse to `movie`, which is what the card said for every
    * title before this and is only ever read while it is unpressable.
    */
-  const pivotKind = pivot?.kind === 'season' ? 'season' : 'movie';
+  const pivotKind =
+    pivot?.kind === 'season' ? 'season' : pivot?.kind === 'series' ? 'series' : 'movie';
 
   return (
     <View style={styles.comparison}>
@@ -1421,7 +1513,7 @@ function Card({
    * What the Details sheet under this card will actually contain, or null while the
    * card does not know yet. Null buys silence rather than a guess — see the hint below.
    */
-  kind: 'movie' | 'season' | null;
+  kind: 'movie' | 'season' | 'series' | null;
   posterUri?: string | null;
   disabled: boolean;
   onPress: () => void;
@@ -1536,7 +1628,9 @@ function Card({
             ? undefined
             : kind === 'season'
               ? 'Shows the year, the episodes in it, and what it is about.'
-              : 'Shows the year, the runtime, the cast, and what it is about.'
+              : kind === 'series'
+                ? 'Shows the year, who created it, and what it is about.'
+                : 'Shows the year, the runtime, the cast, and what it is about.'
         }
         hitSlop={theme.layout.minTapTarget / 2}
         onPress={onRecall}
@@ -1593,7 +1687,14 @@ function Reveal({
   earned = [],
   onDone,
   onFinishLog,
+  onUpdateShow,
 }: {
+  /**
+   * **Update Show**, when this season's placement may lead into its show's correction.
+   * Present only when the session decided every condition holds (`onUpdateShow` on the
+   * sheet); absent, the reveal ends exactly as it always has.
+   */
+  onUpdateShow?: () => void;
   /** Awards this placement unlocked, from the ledger diff. Empty is the ordinary case. */
   earned?: { awardKey: string; tierKey: string }[];
   score: number;
@@ -1610,13 +1711,13 @@ function Reveal({
   onFinishLog?: () => void;
 }) {
   const profile = useCurrentProfile();
-  const readableCategory = category === 'tv_seasons' ? 'TV' : 'Movies';
+  const readableCategory = CATEGORY_NAME[asRankingCategory(category)];
   const shown = useCountUp(score, bucket);
 
   // The ranked list for this category, which the collection already caches under the
   // key `apply` invalidated when the title was placed — so this resolves to the list
   // *including* it, and no new query or endpoint is needed to derive a genre rank.
-  const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
+  const { data: ranked } = useRankedCollection(profile.id, asRankingCategory(category));
 
   /**
    * **The reveal never names a placement worse than tenth** (founder, 2026-09-05, off a
@@ -1737,10 +1838,41 @@ function Reveal({
    * same explicit-height pattern the title page's cast sheet uses, and the exits sit under
    * it. On an ordinary phone the body is shorter than its bound and nothing scrolls.
    */
-  const { height: windowHeight, fontScale } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
+
+  /**
+   * The reveal's exits, secondary first and the accent last — left to right in a row,
+   * top to bottom when stacked, and in that order for a screen reader either way. Each
+   * keeps exactly the handler it had: Done is `onDone`, Add details `onFinishLog`, Update
+   * Show `onUpdateShow`. Done joins the pair unless Update Show is offered, in which case
+   * it is the quiet control under it (drawn below).
+   */
+  const exitPair: RevealExit[] = [
+    onUpdateShow
+      ? {
+          label: 'Update Show',
+          kind: 'secondary',
+          onPress: onUpdateShow,
+          hint: 'Re-ranks the show this season belongs to',
+          testID: 'reveal-update-show',
+        }
+      : { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
+    ...(onFinishLog
+      ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
+      : []),
+  ];
+  const exitsStacked = !revealExitsFitRow(
+    exitPair.map((exit) => exit.label),
+    windowWidth,
+    fontScale,
+  );
+  const exitRows = (exitsStacked ? exitPair.length : 1) + (onUpdateShow ? 1 : 0);
+
   const revealBodyMax = Math.max(
     REVEAL_BODY_MIN,
-    Math.round(windowHeight * 0.9) - REVEAL_CHROME - Math.round(REVEAL_EXIT_ROW * fontScale),
+    Math.round(windowHeight * 0.9) -
+      REVEAL_CHROME -
+      Math.round(REVEAL_EXIT_ROW * exitRows * fontScale),
   );
 
   const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
@@ -2130,18 +2262,73 @@ function Reveal({
        * it. Leading it with the filled button asked the reader to step over the thing they
        * were being encouraged to do in order to reach the way out.
        *
-       * Both are `fit` inside equal-flex wrappers, so the pair keeps its symmetry and
-       * neither label decides the row's proportions. The accessibility order follows the
-       * visual order because it is the same JSX order — nothing here reorders at paint.
+       * Both sit in equal-flex wrappers, so the pair keeps its symmetry and neither label
+       * decides the row's proportions (no longer `fit`: see the exits below, P0-3). The
+       * accessibility order follows the visual order because it is the same JSX order —
+       * nothing here reorders at paint.
        */}
-      <View style={styles.revealExits}>
-        <View style={styles.revealExit}>
-          <Button label="Done" kind="secondary" fit onPress={onDone} />
+      {/**
+       * **Update Show** (founder brief §5, 2026-11-11): a season that was just watched, of
+       * a show the reader has ranked. Two rows, and no new modal, card or confirmation:
+       *
+       *   [ Update Show ] [ Add details ]
+       *               Done
+       *
+       * Add details keeps the filled treatment and the trailing place (P0-3, 2026-11-12:
+       * it used to lead this row, the one reveal where the accent was on the left);
+       * Update Show is the outlined second act; Done is a quiet text control across the
+       * full width, still one tap and always reachable. Anywhere Update Show is not
+       * offered, the row is the unchanged Done | Add details pair.
+       */}
+      {/**
+       * **One row, one set of rules, on every reveal** (founder QA P0-3, Android, 2026-11-12).
+       *
+       *   movie / show / season, Edit ranking:   [ Done ]        [ Add details ]
+       *   season with Update Show:               [ Update Show ] [ Add details ]
+       *                                                     Done
+       *   no log sheet to return to (onboarding): [            Done            ]
+       *
+       * Secondary on the left, the accent on the right; Done is the quiet exit, and the
+       * accent only when it is the one action there is. Every control is a `md` Button of
+       * an established kind, at its natural label size: nothing here uses `fit`, because
+       * `fit`'s shrink is floored by `minimumFontScale`, which React Native's Android text
+       * layout ignores (it reads `minimumFontSize` alone), so on Android a label that did
+       * not fit its half shrank without limit. At 330pt "Update Show" needed 134pt of a
+       * 129pt half — that was the tiny, unreadable button.
+       *
+       * Instead the pair keeps equal halves while both labels fit them at the reader's
+       * width and text size (`revealExitsFitRow`), and stacks full width, in the same
+       * order, when they would not. A label is never shrunk, clipped or truncated.
+       */}
+      <View style={styles.revealControls}>
+        <View
+          style={exitsStacked ? styles.revealExitsStacked : styles.revealExits}
+          testID="reveal-exits"
+        >
+          {exitPair.map((exit) => (
+            <View
+              key={exit.label}
+              style={exitsStacked ? undefined : styles.revealExit}
+              testID={`reveal-exit-${exit.kind}`}
+            >
+              <Button
+                label={exit.label}
+                kind={exit.kind}
+                onPress={exit.onPress}
+                accessibilityHint={exit.hint}
+                testID={exit.testID}
+              />
+            </View>
+          ))}
         </View>
-        {onFinishLog ? (
-          <View style={styles.revealExit}>
-            <Button label="Add details" fit onPress={onFinishLog} />
-          </View>
+        {onUpdateShow ? (
+          <Button
+            label="Done"
+            kind="tertiary"
+            tone="secondary"
+            onPress={onDone}
+            testID="reveal-done"
+          />
         ) : null}
       </View>
     </View>
@@ -2248,7 +2435,55 @@ const REVEAL_AWARDS_SHOWN = 2;
  * own padding and gap, and a bottom inset — and the exit row, which grows with text.
  */
 const REVEAL_CHROME = 120;
+/** One row of reveal exits: a `md` Button (48pt) and the gap above it, at default text. */
 const REVEAL_EXIT_ROW = 60;
+
+/** One of the reveal's exits: always a `md` Button of an established kind. */
+type RevealExit = {
+  label: string;
+  kind: 'primary' | 'secondary';
+  onPress: () => void;
+  hint?: string;
+  testID?: string;
+};
+
+/**
+ * Whether the reveal's exits fit side by side in equal halves at their natural size.
+ *
+ * The row is the window less the sheet's gutter and the reveal's padding (both
+ * `theme.layout.gutter`, each side), split by `space[2]`. Below that, or at a text size
+ * that makes a label wider than its half, the exits stack (see the exits in `Reveal`).
+ *
+ * Exported for the layout tests: jest has no layout engine, so the arithmetic is what
+ * can be pinned there, against the font itself.
+ */
+export function revealExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
+  if (labels.length < 2) return true;
+  const row = windowWidth - 4 * theme.layout.gutter;
+  const half = (row - theme.space[2] * (labels.length - 1)) / labels.length;
+  return labels.every((label) => revealLabelWidth(label, fontScale) <= half);
+}
+
+/**
+ * Each exit label's advance width in Inter SemiBold, in em, measured from the font file
+ * (`RankingSheet.test.tsx` re-measures them, so this cannot drift from the font).
+ */
+export const REVEAL_LABEL_EM: Record<string, number> = {
+  Done: 2.534,
+  'Add details': 5.443,
+  'Update Show': 6.465,
+};
+
+/**
+ * One reveal exit's width: its label at `headline`'s 17pt and the reader's text size,
+ * 4% over the measured advance, plus `md`'s 20pt of padding and the border either side.
+ * A label not in the table is counted at 0.62em a character, above any of the three.
+ */
+export function revealLabelWidth(label: string, fontScale: number) {
+  const em = REVEAL_LABEL_EM[label] ?? label.length * 0.62;
+  return em * 17 * fontScale * 1.04 + 2 * theme.space[5] + 4;
+}
+
 /** However small the phone, the body keeps room for the score and the title. */
 const REVEAL_BODY_MIN = 220;
 const REVEAL_AWARD_BADGE = 40;
@@ -2336,13 +2571,15 @@ const styles = StyleSheet.create({
   // Equal halves. Two controls of the same rank should be the same size, and letting
   // each hug its own label makes "Skip" visibly smaller than "Undo" for no reason.
   control: { flex: 1 },
-  // The reveal is an airy surface (PRD §5) and its two actions are the only thing to
-  // do on it, so they stack full-width rather than sharing a row.
+  // Every reveal's exits: the pair, then (under Update Show) the quiet Done, each
+  // across the reveal's full width.
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   // The two ways out, side by side under the one way on. Equal halves, so neither
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
+  /** The same exits, full width and in the same order, when the halves are too narrow. */
+  revealExitsStacked: { gap: theme.space[2] },
   centre: { textAlign: 'center' },
   /**
    * The title and the placement beneath it: one block, tight (founder, 2026-09-07).

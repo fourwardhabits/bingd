@@ -56,7 +56,14 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { messagesFor, stillQueued, summarise } from './batch.ts';
+import {
+  type Addressed,
+  lateResults,
+  messagesFor,
+  partitionByDeadline,
+  stillQueued,
+  summarise,
+} from './batch.ts';
 import type { PushJob } from './copy.ts';
 import { chunk, isDeadToken, isRetryable, redactTokens, sendChunk } from './expo.ts';
 
@@ -126,7 +133,7 @@ function claimsServiceRole(token: string): boolean {
  */
 function counts(
   caller: Caller,
-  body: { claimed: number; sent: number; failed: number; revoked: number },
+  body: { claimed: number; sent: number; failed: number; revoked: number; expired?: number },
 ) {
   return caller === 'service_role' ? body : { ok: true };
 }
@@ -250,9 +257,24 @@ Deno.serve(async (req) => {
    * summary below be written without knowing about chunking at all.
    */
   const outcomes: { retryable: boolean; dead: boolean; message: string | null }[] = [];
+  // What was actually handed to Expo, in step with `outcomes`, and what missed its
+  // deadline before it could be.
+  const submitted: Addressed[] = [];
+  const late: Addressed[] = [];
 
-  for (const batch of chunk(addressed)) {
+  for (const all of chunk(addressed)) {
+    /**
+     * The deadline, checked on each chunk immediately before it is submitted (Codex
+     * re-review, MAJOR). A proactive message whose `expiration` has passed is dropped
+     * here rather than handed to a provider that would refuse it or deliver it late. A
+     * reactive message has no `expiration` and is always due.
+     */
+    const { due: batch, late: past } = partitionByDeadline(all, Date.now());
+    late.push(...past);
+    if (batch.length === 0) continue;
+
     const { tickets, failure } = await sendChunk(batch.map((entry) => entry.message));
+    submitted.push(...batch);
 
     if (failure) {
       // One log line per failed chunk, not per message. It names no token: a token is an
@@ -277,7 +299,9 @@ Deno.serve(async (req) => {
     }
   }
 
-  const { results, deadTokens } = summarise(addressed, (index) => outcomes[index]);
+  const { results: sentResults, deadTokens } = summarise(submitted, (index) => outcomes[index]);
+  const expired = lateResults(late, sentResults);
+  const results = [...sentResults, ...expired];
 
   const { data: settled, error: settleError } = await db.rpc('settle_push_batch', {
     p_results: results,
@@ -291,15 +315,17 @@ Deno.serve(async (req) => {
     return json({ error: 'sent but not settled' }, 500);
   }
 
-  const failed = results.filter((r) => !r.delivered).length;
+  const failed = sentResults.filter((r) => !r.delivered).length;
   return json(
     counts(caller, {
       // What the claim took, not what survived the last look before dispatch. A drop is
       // visible as claimed > sent + failed rather than by pretending it was never leased.
       claimed: allClaimed.length,
-      sent: results.length - failed,
+      sent: sentResults.length - failed,
       failed,
       revoked: (settled as { revoked?: number } | null)?.revoked ?? 0,
+      // Proactive notifications whose deadline passed before submission. Not sent.
+      expired: expired.length,
     }),
   );
 });

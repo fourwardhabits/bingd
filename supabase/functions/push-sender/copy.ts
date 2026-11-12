@@ -93,7 +93,45 @@ export type PushJob = {
    * (20260917001500). Absent from a database that predates it; null for every other type.
    */
   import_job_id?: string | null;
-  import_counts?: { watched?: number; watchlist?: number } | null;
+  /**
+   * The notification's payload, for every import push since 20261113000100 (before it,
+   * only the completion's). `provider` names whose import it was; absent is Letterboxd.
+   */
+  import_counts?: { watched?: number; watchlist?: number; provider?: string } | null;
+  /**
+   * `goal_completed` only (20261028000100): which annual goal, and its target. The push had
+   * no copy before this — it is actorless, and only awards and imports had an actorless
+   * branch — so it was claimed and dropped without a word.
+   */
+  goal?: { year?: number | null; category?: string | null; target?: number | null } | null;
+  /**
+   * The proactive types only (20261028000100), resolved by the claim at the moment
+   * of sending: the film's opening date and the reader's own local date (so "next Friday"
+   * is about their Friday), the resurfacing reason, and the social cluster's size and
+   * first two display names as they stand now. Names, never anything anybody wrote.
+   */
+  proactive?: {
+    type: string;
+    opens_on?: string | null;
+    local_today?: string | null;
+    /**
+     * `season_premiere` only (20261031000100): which season it is, and the US date it
+     * became available. The number is null where the catalogue has none, and the copy
+     * then falls back to the season's own title.
+     */
+    season_number?: number | null;
+    available_on?: string | null;
+    /**
+     * The last instant this push may reach a phone, as an ISO timestamp: the earlier of the
+     * candidate's expiry and 20:00 local on the evening it was selected for. Sent to Expo
+     * as the message's `expiration` (see `messagesFor`). A proactive job without a usable
+     * one is not sent at all.
+     */
+    deliver_by?: string | null;
+    reason?: string | null;
+    actor_count?: number | null;
+    actor_names?: string[] | null;
+  } | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -248,7 +286,7 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
           : 'ranked your recommendation',
       };
     case 'invite_activated':
-      return { title: name, body: 'joined bingd. from your invite' };
+      return { title: name, body: 'joined bingd from your invite' };
     /**
      * The same sentence at the earlier moment (`20260831000100`): acceptance rather
      * than the tenth ranking. It is eligible because it *replaces* the `follow` push an
@@ -256,7 +294,7 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
      * nothing was taken away.
      */
     case 'invite_joined':
-      return { title: name, body: 'joined bingd. from your invite' };
+      return { title: name, body: 'joined bingd from your invite' };
     /**
      * The one push whose title is not a person, because it is the first thing anybody
      * ever sees from Bingd and the greeting is the point. The inbox row does the same —
@@ -300,8 +338,9 @@ function commentExcerpt(job: PushJob): string | null {
  * arrive. The inbox rows say the same headlines (`verbFor` in `use-notifications.ts`).
  *
  * The completion quotes one number, the films added as watched, because it is the one the
- * next action is about. A job that added none (every film was already here) says the
- * history is in rather than "0 movies added", which reads as a failure.
+ * next action is about. A job that added none quotes the films saved to the Watchlist, and a
+ * job that added nothing says so plainly rather than "0 movies added", which reads as a
+ * failure, or "your history is in", which is not true of it (2026-11-11).
  */
 function importContent(job: PushJob): PushContent | null {
   const data = (): PushData => ({
@@ -313,27 +352,41 @@ function importContent(job: PushJob): PushContent | null {
     importJobId: job.import_job_id ?? null,
   });
 
+  // Whose import, from the payload; absent (an older row or sender) is Letterboxd.
+  const service = job.import_counts?.provider === 'imdb' ? 'IMDb' : 'Letterboxd';
+
   switch (job.type) {
     case 'import_started':
       return {
-        title: 'Letterboxd import started',
+        title: `${service} import started`,
         body: 'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
         data: data(),
       };
     case 'import_completed': {
       const watched = Number(job.import_counts?.watched ?? 0);
+      const watchlist = Number(job.import_counts?.watchlist ?? 0);
+      /**
+       * **Says what was added, and never that history arrived when nothing did**
+       * (2026-11-11). The old fallback, "Your Letterboxd history is now in bingd.", was
+       * sent for every job that added no watched film, including a re-import that added
+       * nothing at all and a file whose films all went unmatched. The payload already
+       * carries both counts, so the body says which happened; the screen has the detail.
+       */
+      const body =
+        watched > 0
+          ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
+          : watchlist > 0
+            ? `${watchlist} ${watchlist === 1 ? 'film' : 'films'} added to your Watchlist.`
+            : 'Nothing new to add. Open bingd to see the summary.';
       return {
-        title: 'Your Letterboxd history is ready',
-        body:
-          watched > 0
-            ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
-            : 'Your Letterboxd history is now in bingd.',
+        title: `Your ${service} history is ready`,
+        body,
         data: data(),
       };
     }
     case 'import_failed':
       return {
-        title: 'We couldn’t finish your Letterboxd import',
+        title: `We couldn’t finish your ${service} import`,
         body: 'Open bingd to see what happened and try again.',
         data: data(),
       };
@@ -391,11 +444,151 @@ function awardContent(job: PushJob): PushContent {
   };
 }
 
+/**
+ * The annual goal's congratulations (20261028000100), the other actorless achievement.
+ *
+ * The same headline the inbox row draws ("You hit your 2026 Movies goal 🎉", `verbFor`)
+ * and the same second line ("Congrats on 50 movies", `goalAchievement`), so the push and
+ * the row say one thing. Before this the job reached `contentFor`, found no actor and no
+ * branch, and was dropped: every goal push since 20260829000200 was silently never sent.
+ */
+const GOAL_LABEL: Record<string, string> = { movies: 'Movies', tv_seasons: 'TV' };
+const GOAL_UNIT: Record<string, { one: string; many: string }> = {
+  movies: { one: 'movie', many: 'movies' },
+  tv_seasons: { one: 'TV season', many: 'TV seasons' },
+};
+
+function goalContent(job: PushJob): PushContent {
+  const year = Number(job.goal?.year) || null;
+  const label = GOAL_LABEL[job.goal?.category ?? ''] ?? null;
+  const unit = GOAL_UNIT[job.goal?.category ?? ''] ?? null;
+  const target = Number(job.goal?.target) || 0;
+
+  return {
+    title: year && label ? `You hit your ${year} ${label} goal 🎉` : 'You hit your goal 🎉',
+    body:
+      unit && target > 0
+        ? `Congrats on ${target} ${target === 1 ? unit.one : unit.many}`
+        : 'See your goals in bingd',
+    data: {
+      notificationId: job.notification_id,
+      kind: job.type,
+      actorUsername: null,
+      mediaItemId: null,
+      feedEventId: null,
+    },
+  };
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A `YYYY-MM-DD` as a calendar date, read in UTC so no timezone can move it a day. */
+function calendarDate(iso: string | null | undefined): Date | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const date = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * "Opens tomorrow." / "Opens next Friday." / "Opens Friday, Sep 26." — release-awareness.md
+ * §G1, exactly. The day, never the hour, and never where: a TMDB date says a film opens,
+ * not that any cinema is showing it.
+ */
+export function opensPhrase(opensOn: string | null | undefined, today: string | null | undefined): string | null {
+  const opens = calendarDate(opensOn);
+  const now = calendarDate(today);
+  if (!opens || !now) return null;
+  const days = Math.round((opens.getTime() - now.getTime()) / 86_400_000);
+  if (days < 1) return null;
+  const weekday = WEEKDAYS[opens.getUTCDay()];
+  if (days === 1) return 'Opens tomorrow.';
+  if (days === 7) return `Opens next ${weekday}.`;
+  return `Opens ${weekday}, ${MONTHS[opens.getUTCMonth()]} ${opens.getUTCDate()}.`;
+}
+
+/**
+ * Who watched it, at most two by name: "Ravi and Eric", "Ravi, Eric and 1 other",
+ * "Ravi, Eric and 4 others". Null below two, which the claim already refuses to send.
+ */
+export function watchersPhrase(names: readonly string[] | null | undefined, count: number | null | undefined): string | null {
+  const shown = (names ?? []).map((n) => n.trim()).filter(Boolean).slice(0, 2);
+  const total = Math.max(Number(count) || 0, shown.length);
+  if (shown.length < 2 || total < 2) return null;
+  if (total === 2) return `${shown[0]} and ${shown[1]}`;
+  const rest = total - 2;
+  return `${shown[0]}, ${shown[1]} and ${rest} ${rest === 1 ? 'other' : 'others'}`;
+}
+
+/**
+ * The proactive pushes (20261028000100). The title is the film's or season's name, as
+ * every title push's is; the body is one fact and why it is for this reader. No emoji, no
+ * em dash, no exclamation, no marketing voice (release-awareness.md §G1).
+ *
+ * `season_premiere` (20261031000100) is the one whose title is the **show**: "Severance" /
+ * "Season 3 is now available in the US." The season is the news, so it is the body, and
+ * the show is the name the reader saved or watched.
+ */
+function proactiveContent(job: PushJob): PushContent | null {
+  const facts = job.proactive;
+  if (!facts) return null;
+
+  let title = subjectName(job);
+  let body: string | null = null;
+  switch (facts.type) {
+    case 'theatrical_release': {
+      const opens = opensPhrase(facts.opens_on, facts.local_today);
+      body = opens ? `${opens} You saved it to your Watchlist.` : null;
+      break;
+    }
+    case 'watchlist_social': {
+      const who = watchersPhrase(facts.actor_names, facts.actor_count);
+      body = who ? `${who} watched it. It’s on your Watchlist.` : null;
+      break;
+    }
+    case 'watchlist_resurface':
+      body =
+        facts.reason === 'friends'
+          ? 'Friends have been watching it. It’s on your Watchlist.'
+          : facts.reason === 'trending'
+            ? 'It’s trending this week. It’s on your Watchlist.'
+            : facts.reason === 'recent'
+              ? 'It came out recently. It’s on your Watchlist.'
+              : 'Still meaning to watch it? It’s on your Watchlist.';
+      break;
+    case 'season_premiere': {
+      title = job.series_title?.trim() || title;
+      const n = facts.season_number;
+      const own = job.media_title?.trim() || null;
+      // No usable number means the season's own words are all there is ("Severance: The
+      // Final Chapter"), the same rule `subjectName` keeps rather than inventing a number.
+      const season = typeof n === 'number' && Number.isInteger(n) && n > 0 ? `Season ${n}` : own;
+      body = season ? `${season} is now available in the US.` : null;
+      break;
+    }
+  }
+  if (!title || !body) return null;
+
+  return {
+    title,
+    body,
+    data: {
+      notificationId: job.notification_id,
+      kind: job.type,
+      actorUsername: null,
+      mediaItemId: job.media_item_id,
+      feedEventId: null,
+    },
+  };
+}
+
 export function contentFor(job: PushJob): PushContent | null {
   const importPush = importContent(job);
   if (importPush) return importPush;
 
   if (job.type === 'award_earned') return awardContent(job);
+  if (job.type === 'goal_completed') return goalContent(job);
+  if (job.proactive) return proactiveContent(job);
 
   const name = job.actor_name?.trim() || job.actor_username?.trim() || null;
   if (!name && job.type !== 'invite_welcome') return null;

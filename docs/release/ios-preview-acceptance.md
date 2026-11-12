@@ -183,8 +183,9 @@ above default (not the accessibility sizes).
 
 ## Photos
 
-- [ ] Choosing an avatar prompts with **"Bingd uses your photos so you can choose a profile
-      picture."** — not a generic string.
+- [ ] Choosing an avatar prompts with **"bingd uses your photos so you can choose a profile
+      picture."** — not a generic string. (Lower-case `bingd`, no period, from #241; a
+      build made before #241 still shows "Bingd".)
 - [ ] **Nothing ever asks for the camera.** The permission is not in the build.
 - [ ] The limited-photo-access option ("Select Photos…") works and does not break the
       picker.

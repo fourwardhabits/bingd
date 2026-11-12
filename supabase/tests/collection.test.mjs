@@ -135,19 +135,28 @@ describe('collection writes', () => {
     });
 
     /**
-     * PRD §10 forbids ranking a whole series, and the collection is what feeds
-     * ranking. "I watched this series" is also ambiguous about which seasons, where
-     * "I want to watch it" is not, which is why the watchlist accepts one.
+     * A whole show is loggable since 20261114000200 (founder brief, 2026-11-11), and it
+     * is a title of its own: logging it never logs a season, and logging a season never
+     * logs the show. The two rows are independent, the way their rankings are.
      */
-    it('refuses a series but allows its season', async () => {
+    it('logs a whole show and its season as two separate titles', async () => {
       const series = await t.createSeries('Twin Peaks', 1006);
       const season = await t.createSeason(series, 1, 'Season 1');
 
-      const err = await t.errorFrom(`select log_watched($1, $2)`, [await uuid(), series]);
-      assert.equal(err?.code, '22023');
+      const show = await call(`log_watched($1, $2)`, [await uuid(), series]);
+      assert.equal(show.status, 'ok');
+      const rows = async () =>
+        (
+          await t.sql(
+            `select media_item_id from user_media where user_id = $1 and media_item_id = any($2)`,
+            [user, [series, season]],
+          )
+        ).rows.map((r) => r.media_item_id);
+      assert.deepEqual(await rows(), [series], 'the show alone, and no season with it');
 
       const ok = await call(`log_watched($1, $2)`, [await uuid(), season]);
       assert.equal(ok.status, 'ok');
+      assert.equal((await rows()).length, 2);
     });
   });
 

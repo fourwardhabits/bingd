@@ -3,7 +3,7 @@ import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { theme } from '../tokens';
 
-import { PosterGrid, PosterShelf, type PosterTile } from './PosterWall';
+import { PosterGrid, PosterShelf, seasonPillLabel, type PosterTile } from './PosterWall';
 
 const tiles: PosterTile[] = [
   { id: 'a', title: 'Inception', year: 2010, score: 9.4, bucket: 'loved' },
@@ -15,9 +15,7 @@ describe('PosterGrid', () => {
   it('names each tile, since the tile itself shows no text', async () => {
     // A grid of unlabelled images is the classic way to make a screen unusable
     // without sight. Everything the design leaves out has to be in the label.
-    const view = await render(
-      <PosterGrid tiles={tiles} onPressTile={() => {}} />,
-    );
+    const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
 
     expect(view.getByLabelText('Inception, 2010, scored 9.4 out of 10')).toBeTruthy();
     expect(view.getByLabelText('Dune, 2021')).toBeTruthy();
@@ -125,7 +123,11 @@ describe('the dismiss control on a tile (founder, 2026-08-27 §12)', () => {
     const onPressTile = jest.fn();
     const onDismissTile = jest.fn();
     const view = await render(
-      <PosterGrid tiles={suggestions} onPressTile={onPressTile} onDismissTile={onDismissTile} />,
+      <PosterGrid
+        tiles={suggestions}
+        onPressTile={onPressTile}
+        onDismissTile={onDismissTile}
+      />,
     );
 
     await fireEvent.press(view.getByLabelText('Not interested in Dune'));
@@ -143,7 +145,11 @@ describe('the dismiss control on a tile (founder, 2026-08-27 §12)', () => {
  */
 describe('the two corner actions together', () => {
   const tile: PosterTile = { id: 'a', title: 'Inception', year: 2010 };
-  const renderBoth = (handlers: Partial<Record<'onPressTile' | 'onToggleSave' | 'onDismissTile' | 'onLongPressTile', jest.Mock>> = {}) =>
+  const renderBoth = (
+    handlers: Partial<
+      Record<'onPressTile' | 'onToggleSave' | 'onDismissTile' | 'onLongPressTile', jest.Mock>
+    > = {},
+  ) =>
     render(
       <PosterGrid
         tiles={[tile]}
@@ -246,5 +252,87 @@ describe('PosterShelf', () => {
     );
     await fireEvent.press(linked.getByRole('button', { name: 'All' }));
     expect(onPressAll).toHaveBeenCalled();
+  });
+});
+
+/**
+ * **Candidate A's pills** (founder brief §4, 2026-11-14). A show keeps the filled Maroon
+ * number; a season reads its season and score on Parchment with a Maroon border and text,
+ * so the two can never be confused in one grid. Specials are `SP`, never a bare `S0`.
+ */
+describe('the season pill', () => {
+  it.each([
+    [1, 'S1'],
+    [2, 'S2'],
+    [10, 'S10'],
+    [0, 'SP'],
+  ])('names season %i as %s', (n, label) => {
+    expect(seasonPillLabel(n)).toBe(label);
+  });
+
+  it('reads "S1 9.8" for a season and the bare number for a show', async () => {
+    const view = await render(
+      <PosterGrid
+        tiles={[
+          { id: 's1', title: 'Shameless, S1', score: 9.8, bucket: 'loved', season: 1 },
+          { id: 's10', title: 'Shameless, S10', score: 9.4, bucket: 'loved', season: 10 },
+          {
+            id: 'sp',
+            title: 'Shameless, Specials',
+            score: 3.1,
+            bucket: 'not_for_me',
+            season: 0,
+          },
+          { id: 'show', title: 'Severance', score: 8.7, bucket: 'loved' },
+        ]}
+        onPressTile={() => {}}
+      />,
+    );
+
+    expect(view.getByText('S1 9.8', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S10 9.4', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('SP 3.1', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('8.7', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  it('draws a season on Parchment with a Maroon border, and a show in filled Maroon', async () => {
+    const view = await render(
+      <PosterGrid
+        tiles={[
+          { id: 's1', title: 'Shameless, S1', score: 9.8, bucket: 'loved', season: 1 },
+          { id: 'show', title: 'Severance', score: 8.7, bucket: 'loved' },
+        ]}
+        onPressTile={() => {}}
+      />,
+    );
+
+    const season = StyleSheet.flatten(
+      view.getAllByTestId('poster-season-pill', { includeHiddenElements: true })[0]!.props.style,
+    ) as ViewStyle;
+    expect(season.backgroundColor).toBe(theme.semantic.scoreInk);
+    expect(season.borderColor).toBe(theme.semantic.score);
+    expect(season.borderWidth).toBeGreaterThan(0);
+
+    const show = StyleSheet.flatten(
+      view.getAllByTestId('poster-score-pill', { includeHiddenElements: true })[0]!.props.style,
+    ) as ViewStyle;
+    expect(show.backgroundColor).toBe(theme.semantic.action);
+    expect(show.borderWidth ?? 0).toBe(0);
+  });
+
+  it('keeps the pill on one line inside a three-across tile', async () => {
+    const view = await render(
+      <PosterGrid
+        tiles={[
+          { id: 's10', title: 'Shameless, S10', score: 9.4, bucket: 'loved', season: 10 },
+        ]}
+        onPressTile={() => {}}
+      />,
+    );
+    const text = view.getByText('S10 9.4', { includeHiddenElements: true });
+    expect(text.props.numberOfLines).toBe(1);
+    // Fixed size, as every chip on a wall is: a pill that grew with text size would cover
+    // the poster it labels.
+    expect(text.props.allowFontScaling).toBe(false);
   });
 });

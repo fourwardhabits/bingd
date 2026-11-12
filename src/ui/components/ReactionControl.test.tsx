@@ -518,3 +518,49 @@ describe('the summary cluster', () => {
     expect(Number(summary.fontSize)).toBeLessThan(Number(slot.fontSize));
   });
 });
+
+/**
+ * **No reaction to yourself** (founder, 2026-11-10). The founder's own ranking drew an
+ * outline heart beside a friend's ❤️ and a bare 1 — an invitation to react to
+ * themselves. `canReact={false}` takes the action slot away and keeps the rest.
+ */
+describe('on the reader’s own content', () => {
+  it('draws no action slot at all, set or unset', async () => {
+    for (const active of [false, true]) {
+      const view = await draw({ canReact: false, active, mineGlyph: '❤️', glyphs: ['❤️'], count: 1 });
+      expect(view.queryByTestId('reaction-action')).toBeNull();
+      expect(view.queryByLabelText(LABEL_NONE)).toBeNull();
+      expect(view.queryByLabelText(LABEL_MINE)).toBeNull();
+    }
+  });
+
+  it('keeps everybody else’s reactions, and the way into them', async () => {
+    const onOpenDetail = jest.fn();
+    const view = await draw({ canReact: false, glyphs: ['❤️', '😂'], count: 2, onOpenDetail });
+    expect(glyphsIn(cluster(view), '❤️')).toHaveLength(1);
+    expect(glyphsIn(cluster(view), '😂')).toHaveLength(1);
+    fireEvent.press(cluster(view));
+    expect(onOpenDetail).toHaveBeenCalled();
+  });
+
+  it('draws nothing when nobody else has reacted', async () => {
+    const view = await draw({ canReact: false, count: 0 });
+    expect(view.toJSON()).toBeNull();
+  });
+});
+
+describe('the action slot’s box', () => {
+  /**
+   * The outline heart, the filled one and a chosen emoji used to be three sizes in one
+   * slot, so the row moved when you tapped it. One box now holds all three.
+   */
+  it('is the same box whatever it holds', async () => {
+    const box = async (props: Partial<Props>) =>
+      StyleSheet.flatten(
+        (await draw(props)).getByTestId('reaction-action').props.style as never,
+      );
+    const unset = await box({});
+    expect(await box({ active: true })).toEqual(unset);
+    expect(await box({ active: true, mineGlyph: '😂', glyphs: ['😂'], count: 1 })).toEqual(unset);
+  });
+});

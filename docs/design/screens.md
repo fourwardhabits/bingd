@@ -504,7 +504,7 @@ poster. The first action is the rank intent at whichever stage the title is in �
 (same watch, `mode: 'rerank'`) for a ranked title, **Rank** for an unranked one. Each glyph
 keeps a one-word caption, because a paper plane is Recommend here and Send everywhere else. A
 series gets Save alone (PRD §10). The rest of the ranking menu — the note, who I watched with,
-*Update your rating*, *Log another watch*, Remove — moved from the Ranked chip to the
+*Edit ranking* (labelled *Update your rating* until 2026-11-11), *Log another watch*, Remove — moved from the Ranked chip to the
 overflow `⋯` in the top bar, with the same reachability it had: present for a ranked title,
 absent otherwise.
 
@@ -678,10 +678,13 @@ was skipped, which is a mechanism, which is exactly what the rename above had de
 must stop exposing. The founder's menu is:
 
 > **RANKING**
-> ★ Update your rating
+> ★ Edit ranking
 > ↻ Log another watch
 
-**It is an entry-point consolidation, not a loss of capability.** *Update your rating* opens the
+(The first row read *Update your rating* until 2026-11-11, when it took Watch History's label,
+*Edit ranking*, so the one same-watch correction has one name everywhere. Same row, same flow.)
+
+**It is an entry-point consolidation, not a loss of capability.** *Edit ranking* opens the
 log sheet's band chooser, which has had three branches since 2026-08-15 and keeps all of them:
 a **different** band is `rank_rebucket`; the **same** band is `rankAgain(newWatch: false)` —
 precisely the call *Rank it again* used to make in one tap; and closing without choosing does

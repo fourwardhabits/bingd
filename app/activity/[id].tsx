@@ -12,10 +12,10 @@ import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { metadataFor, tailFor, verbFor, watchLabel } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
+import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
-  REACTION_GLYPH,
-  REACTION_LABEL,
+  reactionFailureAlert,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -166,9 +166,10 @@ export default function ActivityScreen() {
     if (!event) return;
     setPickerOpen(false);
     const result = await setReaction(event.id, kind);
-    if (!result.ok && result.message) {
-      Alert.alert('Could not save your reaction', result.message);
-    }
+    // One rule for every surface: a self-reaction is answered calmly on its own, anything
+    // else under the alert it always had (`reactionFailureAlert`).
+    const alert = reactionFailureAlert(result, 'Could not save your reaction');
+    if (alert) Alert.alert(...alert);
   };
 
   /**
@@ -263,7 +264,7 @@ export default function ActivityScreen() {
                 ? undefined
                 : () => router.push(`/u/${event.actorUsername}`)
             }
-            verb={verbFor(event.type)}
+            verb={verbFor(event.type, event)}
             tail={tailFor(event.type, event.title)}
             companions={event.companions}
             title={event.title}
@@ -335,14 +336,12 @@ export default function ActivityScreen() {
              */
             reaction={
               reactionsResolved
-                ? {
-                    count: summary?.total ?? 0,
-                    mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-                    mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
-                    glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-                    onPress: () => void toggleDefault(),
-                    onLongPress: () => setPickerOpen(true),
-                    onPressSummary: () => setDetailOpen(true),
+                ? activityReaction({
+                    summary,
+                    viewerId,
+                    onToggle: () => void toggleDefault(),
+                    onOpenPicker: () => setPickerOpen(true),
+                    onOpenDetail: () => setDetailOpen(true),
                     picker: pickerOpen ? (
                       <ReactionPill
                         current={summary?.mine ?? null}
@@ -350,7 +349,7 @@ export default function ActivityScreen() {
                         onDismiss={() => setPickerOpen(false)}
                       />
                     ) : null,
-                  }
+                  })
                 : undefined
             }
           />

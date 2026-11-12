@@ -30,6 +30,8 @@ let mockRpcError: unknown = null;
 let mockReadError: unknown = null;
 /** Held open to keep a write in flight while the sheet moves on. */
 let mockRpcGate: Promise<void> | null = null;
+/** How many times the thread was read, so a reconciling re-read is visible. */
+let mockThreadReads = 0;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -50,6 +52,7 @@ jest.mock('@/lib/supabase', () => ({
      */
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === 'activity_comments') {
+        mockThreadReads += 1;
         return { data: mockCommentRows, error: mockReadError };
       }
       // A read like the list above, kept out of the writer ledger for the same
@@ -1057,6 +1060,116 @@ describe('who reacted to a comment', () => {
     expect(
       mockRpcCalls.filter((call) => call.name === 'comment_reactors').map((call) => call.args),
     ).toEqual([{ p_comment_id: 'c1' }]);
+  });
+
+  /**
+   * **You can react to your own comment** (founder, 2026-11-11; 20261115000100), the same
+   * as a post: the heart is drawn, a tap saves through the ordinary writer with no
+   * alert, and other people's reactions still open the list.
+   */
+  it('offers the author a reaction on their own comment, and saves it with no alert', async () => {
+    mockCommentRows = [{ ...reacted(), author_id: VIEWER, username: 'sai', display_name: 'Sai' }];
+    mockReactorRows = reactors;
+    const view = await open();
+
+    const heart = await waitFor(() => view.getByLabelText(/^React to Sai's comment/));
+    await fireEvent.press(heart);
+
+    await waitFor(() =>
+      expect(
+        mockRpcCalls.find((call) => call.name === 'set_comment_reaction')?.args,
+      ).toMatchObject({ p_comment_id: 'c1', p_kind: 'love' }),
+    );
+    expect(alertTitles).toEqual([]);
+
+    await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
+    await waitFor(() =>
+      expect(view.getByLabelText('Abisola, Laugh. Open their profile.')).toBeTruthy(),
+    );
+  });
+
+  /**
+   * **A reaction to your own comment counts** (2026-11-11): the server's aggregate is used
+   * as it stands, and the reactor list names the author like anybody else.
+   */
+  it('counts the author’s own reaction, and lists them among the people', async () => {
+    mockCommentRows = [
+      {
+        ...comment({
+          reaction_count: 3,
+          reacted_by_me: true,
+          reaction_kinds: ['funny', 'love', 'wow'],
+          my_reaction: 'wow',
+        }),
+        author_id: VIEWER,
+        username: 'sai',
+        display_name: 'Sai',
+      },
+    ];
+    mockReactorRows = [
+      ...reactors,
+      { user_id: VIEWER, username: 'sai', display_name: 'Sai', avatar_path: null, kind: 'wow' },
+    ];
+    const view = await open();
+
+    const cluster = await waitFor(() => view.getByLabelText('3 reactions. See who reacted.'));
+    expect(view.getByLabelText(/^You reacted to Sai's comment/)).toBeTruthy();
+
+    await fireEvent.press(cluster);
+    await waitFor(() => expect(view.getByLabelText(/^Sai, Wow/)).toBeTruthy());
+    expect(view.getByLabelText('Abisola, Laugh. Open their profile.')).toBeTruthy();
+  });
+
+  it('draws a comment whose only reaction is its author’s own', async () => {
+    mockCommentRows = [
+      {
+        ...comment({
+          reaction_count: 1,
+          reacted_by_me: true,
+          reaction_kinds: ['love'],
+          my_reaction: 'love',
+        }),
+        author_id: VIEWER,
+        username: 'sai',
+        display_name: 'Sai',
+      },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/The ending recontextualises/)).toBeTruthy());
+    expect(view.getByLabelText(/^You reacted to Sai's comment/)).toBeTruthy();
+    expect(view.getByLabelText('1 reaction. See who reacted.')).toBeTruthy();
+  });
+
+  it('lists somebody else’s reaction to their own comment among the people', async () => {
+    mockCommentRows = [{ ...reacted(), reaction_count: 3 }];
+    mockReactorRows = [
+      ...reactors,
+      { user_id: AUTHOR, username: 'anna', display_name: 'Anna', avatar_path: null, kind: 'love' },
+    ];
+    const view = await open();
+
+    await fireEvent.press(view.getByLabelText('3 reactions. See who reacted.'));
+    await waitFor(() => expect(view.getByLabelText(/^Anna, Liked/)).toBeTruthy());
+  });
+
+  /**
+   * **The server's refusal, said calmly** (20261110000100). Dead-safe handling: a server
+   * with 20261115000100 never refuses a reaction to your own comment, but one with
+   * 20261110000100 alone answers `_set_comment_reaction`'s 42501; the reader is told
+   * plainly and the thread is read again, so it returns to what is stored.
+   */
+  it('says a refused self-reaction on a comment in its own words, and reads the thread again', async () => {
+    mockCommentRows = [comment()];
+    mockRpcError = { code: '42501', message: 'cannot react to your own comment' };
+    const view = await open();
+    const heart = await waitFor(() => view.getByLabelText(/^React to Anna's comment/));
+    const reads = mockThreadReads;
+
+    await fireEvent.press(heart);
+
+    await waitFor(() => expect(alertTitles).toContain('You can’t react to your own comment.'));
+    expect(alertTitles).not.toContain('Could not do that');
+    await waitFor(() => expect(mockThreadReads).toBeGreaterThan(reads));
   });
 
   it('opens on a plain tap too — a target this small does not demand the rarer gesture', async () => {

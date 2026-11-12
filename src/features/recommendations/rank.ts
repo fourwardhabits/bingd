@@ -265,6 +265,14 @@ export type RankedSignal = {
   score: number;
   genres: readonly string[];
   language: string | null;
+  /**
+   * This observation's share of its title's influence, 0–1; absent means 1 (TV show &
+   * season ranking, 2026-11-14). The rows of one series (its ranked seasons and its own
+   * show ranking) share one unit between them, so a show is not overweighted because many
+   * of its seasons are ranked. Every observation is kept; only their collective pull is
+   * bounded. A show's row is its own signal, never treated as a season.
+   */
+  weight?: number;
 };
 
 /**
@@ -287,7 +295,7 @@ export function tasteFrom(ranked: readonly RankedSignal[]): Taste {
   for (const entry of ranked) {
     // 0.1–1.0. Never zero: a title the viewer bothered to rank is evidence about
     // them even when the verdict was low.
-    const weight = Math.max(0.1, Math.min(1, entry.score / 10));
+    const weight = Math.max(0.1, Math.min(1, entry.score / 10)) * (entry.weight ?? 1);
     for (const genre of entry.genres) {
       genres.set(genre, (genres.get(genre) ?? 0) + weight);
     }

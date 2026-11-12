@@ -3,6 +3,19 @@
 **Status:** written 2026-09-06. Canonical. This is the source of truth for what bingd
 sends, what it will not send, and why.
 
+> **2026-10-28: proactive notifications v1 are built** (founder decisions, `decision-log.md`
+> §6) and specified in [`proactive-notifications.md`](./proactive-notifications.md), which
+> supersedes this document where they disagree. In the matrix below:
+> `friend_watched_your_watchlist` is built as **`watchlist_social`** (aggregated per title
+> over a fixed 7-day window, pushed at the second mutual friend); `theatrical_release` is
+> **live behind the kill switch** (no longer shadow-only); `watchlist_aging` is built as
+> **`watchlist_resurface`** (push only, at most once a week); §7's cap is built as the
+> shared ledger, with the founder's numbers (1 per local day, 2 per rolling 7 days, 72h per
+> type, 7 days per title). Season premieres, streaming availability, the streak reminder
+> and the other friend moments are unchanged: still shadow, removed or deferred. The
+> settings now have a fourth section, **Watching**, with one switch, and draw one switch
+> per category with no section masters (nine in all; the founder's limit is 5–10).
+
 **Companion documents:** [`PRD.md`](./PRD.md) §15 (the product requirement) ·
 [`analytics.md`](./analytics.md) §notifications (measurement) ·
 [`deferred-roadmap.md`](./deferred-roadmap.md) ·
@@ -344,7 +357,8 @@ compatible clients are live. Two specific hazards:
 - **A new preference category** must default in the direction the reader would expect,
   and `_notification_default` (20260828000100) is the mechanism: absence means the
   default, and an account with a row chose. No backfill — a backfill is exactly what
-  breaks that.
+  breaks that. Since `20261031000100` (founder, 2026-10-31) every category defaults on
+  except **Reactions**, which defaults off for every account without an explicit choice.
 
 The award celebration deep link added on 2026-09-06 follows this rule: the *in-app*
 inbox routes to it because the row already carries the identity, and **push taps are

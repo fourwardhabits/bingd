@@ -44,6 +44,16 @@ export type TitleTopBarProps = {
    */
   progress: Animated.AnimatedInterpolation<number>;
   /**
+   * The compact title's own fade, when it should not arrive with the ground.
+   *
+   * A title or a list names itself directly under the hero, so the bar's ground and its
+   * title can share one value. A person page names itself under a portrait that hangs
+   * below the band, and the ground has arrived well before the name has gone — so the
+   * person page passes a fade measured off its own identity block (2026-11-11). Absent
+   * means `progress`, which is every other caller.
+   */
+  titleProgress?: Animated.AnimatedInterpolation<number>;
+  /**
    * Whether the compact title is *readable* — for assistive technology, not for the eye.
    *
    * The fade is continuous and the accessibility tree is not: a title block held at
@@ -102,6 +112,7 @@ export type TitleTopBarProps = {
  */
 export function TitleTopBar({
   progress,
+  titleProgress,
   revealed,
   onBack,
   onMore,
@@ -141,7 +152,7 @@ export function TitleTopBar({
             its series above it, because "Season 2" alone in a bar answers nothing. */}
         <Animated.View
           pointerEvents="none"
-          style={[styles.titleBlock, { opacity: progress }]}
+          style={[styles.titleBlock, { opacity: titleProgress ?? progress }]}
           testID="title-top-bar-title"
           // Out of the tree entirely until it is readable. See `revealed`.
           accessibilityElementsHidden={!revealed}

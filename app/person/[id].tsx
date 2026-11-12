@@ -1,34 +1,54 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Fragment, useMemo, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  Pressable,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useRankedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import {
-  usePerson,
-  usePersonFetch,
-  type PersonCredit,
-} from '@/features/person/use-person';
+  INITIAL_FILMOGRAPHY_SORT,
+  filmographyAxes,
+  sortCoverage,
+  sortFilmography,
+  tailStart,
+  type CoverageGroup,
+  type FilmographySort,
+} from '@/features/person/filmography';
+import { shortened } from '@/features/person/biography';
+import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
+import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
+import { HERO_COLLAPSED_BAND } from '@/features/title/use-hero-reveal';
 import { track } from '@/lib/analytics';
 import { posterUri, profileUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import {
   Avatar,
-  DetailHeaderTitle,
+  ClampedText,
+  ContentToolbar,
   EmptyState,
-  LoadingScreen,
   Screen,
-  SectionHeader,
   SegmentedTabs,
+  SkeletonRow,
+  SortChip,
+  SortMenu,
   Text,
+  TitleHero,
   TitleRow,
   useDetailHeader,
 } from '@/ui/components';
+import { coerceSortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 type Filter = 'all' | 'movie' | 'series';
@@ -37,6 +57,12 @@ type Role = 'cast' | 'crew';
 const ROLE_TABS = [
   { id: 'cast' as const, label: 'Cast' },
   { id: 'crew' as const, label: 'Crew' },
+];
+
+const KIND_TABS = [
+  { id: 'all' as const, label: 'All' },
+  { id: 'movie' as const, label: 'Movies' },
+  { id: 'series' as const, label: 'TV' },
 ];
 
 /**
@@ -57,6 +83,23 @@ const ROLE_TABS = [
  * with each title travels with the row — Saved, Ranked, Watched — because the useful
  * next question after "what else" is "which of these have I already seen", and
  * answering it in the row is cheaper than making them open twelve pages to find out.
+ *
+ * ---------------------------------------------------------------------------
+ * THE 2026-11-11 REFRESH (founder-approved, focused rather than a redesign)
+ *
+ * - **The detail-page header** (design-system.md §11b). The navigator's opaque bar became
+ *   `TitleTopBar` over the collapsed Parchment band — what the title page and a list
+ *   without artwork already draw — with the portrait straddling the band, so a person
+ *   page is no longer the one pushed page with a different top. The compact name still
+ *   arrives only once the large one has gone (`useDetailHeader`'s measured rule).
+ * - **Left-aligned identity**, as on the title and list pages, which also gave the
+ *   biography back the vertical space a centred stack spent.
+ * - **"Filmography"** rather than "Known for": the list is everything kept, and it can now
+ *   be ordered — `filmography.ts` — with the shared sort control in the section's own
+ *   header row.
+ * - **Honest sorting.** A date or rating sort over a capped filmography says where it
+ *   stops being complete, at the row where it does (`sortCoverage`).
+ * - **The biography says when it was shortened**, once opened (`Biography`).
  *
  * The list opens at twelve and grows in twelves. TMDB's ordering is by popularity and
  * a prolific character actor's tail is single episodes of things nobody is looking
@@ -91,7 +134,10 @@ export default function PersonScreen() {
   // to spend a provider request — least of all while somebody else's claim may still
   // be live and simply unobservable from here.
   const needsFetch =
-    !person.isPending && !person.isError && !awaitingClaim && (!detail || state?.stale === true);
+    !person.isPending &&
+    !person.isError &&
+    !awaitingClaim &&
+    (!detail || state?.stale === true);
   const { fetching, retry } = usePersonFetch(id ?? null, needsFetch);
 
   const tryAgain = () => {
@@ -102,32 +148,42 @@ export default function PersonScreen() {
   const [filter, setFilter] = useState<Filter>('all');
   // Null until the reader chooses, so the page opens on whichever half they have work in.
   const [role, setRole] = useState<Role | null>(null);
+  const [sort, setSort] = useState<FilmographySort>(INITIAL_FILMOGRAPHY_SORT);
+  const [sortOpen, setSortOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const header = useDetailHeader();
-  // Read once, so the header's render callback closes over a value rather than over a
-  // query result that could be refetched to null between renders.
+  const top = usePersonTopBar();
+  // Read once, so the bar closes over a value rather than over a query result that could
+  // be refetched to null between renders.
   const name = detail?.name ?? null;
 
   /**
    * The reader's own state, from queries the rest of the app has already warmed.
    *
-   * Only the movie ranking is fetched. A credit is a film or a *series*, never a
-   * season — TMDB credits people on shows — and a series cannot be ranked (AD-1), so
-   * a "Ranked" flag against one would be a state it can never reach.
+   * A credit is a film or a *series*, never a season — TMDB credits people on shows —
+   * so the two rankings read are the films and the whole shows. Since 20261114000200 a
+   * show ranks in its own pool (`tv_shows`) and is logged like a film, so a ranked or
+   * logged show says so here exactly as its title page does (RC review, 2026-11-11).
+   * The season pool is not read: a season is never a credit row.
    */
   const watchlist = useWatchlist(viewer.id);
   const watched = useWatched(viewer.id);
   const rankedMovies = useRankedCollection(viewer.id, 'movies');
+  const rankedShows = useRankedCollection(viewer.id, 'tv_shows');
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
     [watchlist.data],
   );
   const ranked = useMemo(
-    () => new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId)),
-    [rankedMovies.data],
+    () =>
+      new Set(
+        [...(rankedMovies.data ?? []), ...(rankedShows.data ?? [])].map(
+          (entry) => entry.mediaItemId,
+        ),
+      ),
+    [rankedMovies.data, rankedShows.data],
   );
 
   /**
@@ -158,14 +214,41 @@ export default function PersonScreen() {
   const chosen = role === 'cast' ? hasCast : role === 'crew' ? hasCrew : false;
   const shownRole: Role = chosen && role ? role : hasCast || !hasCrew ? 'cast' : 'crew';
   const roleCredits = shownRole === 'cast' ? castCredits : crewCredits;
+  // Which of the cache's coverage records describes this list. A Cast half made of
+  // appearances is the fallback above, and its caps were the appearances' own.
+  const group: CoverageGroup =
+    shownRole === 'crew' ? 'crew' : performances.length ? 'cast' : 'self';
 
   const counts = {
     movie: roleCredits.filter((credit) => credit.kind === 'movie').length,
     series: roleCredits.filter((credit) => credit.kind === 'series').length,
   };
+  // Offered only where both kinds have something in them. A director with no
+  // television is not asked to choose between Movies and TV — a filter with one
+  // populated option is a control that can only ever narrow to what is already there.
+  const filterable = counts.movie > 0 && counts.series > 0;
+  // A filter left on a kind this half has none of (after a refresh, say) reads as All.
+  const activeFilter: Filter = filterable ? filter : 'all';
   const filtered =
-    filter === 'all' ? roleCredits : roleCredits.filter((credit) => credit.kind === filter);
-  const visible = filtered.slice(0, shown);
+    activeFilter === 'all'
+      ? roleCredits
+      : roleCredits.filter((credit) => credit.kind === activeFilter);
+
+  /**
+   * The order, and what it can promise.
+   *
+   * The axes are decided by the half, not the filter, so the rating axis does not come
+   * and go as Movies and TV are switched. A chosen axis this half cannot offer — the
+   * rating, on a half with no TMDB scores — falls back to Popular for as long as it is
+   * shown, without forgetting the reader's choice for the half that can.
+   */
+  // Recomputed per render, deliberately: a list is at most about a hundred and thirty
+  // credits, and memoising on arrays this component rebuilds every render would be a
+  // cache that never hits.
+  const axes = filmographyAxes(roleCredits);
+  const activeSort = coerceSortState(sort, axes);
+  const sorted = sortFilmography(filtered, activeSort);
+  const visible = sorted.slice(0, shown);
 
   // How many of this half TMDB had. A row cached before the halves were counted only knows
   // the combined figure, which is honest to show only when there is one half — and then
@@ -179,15 +262,22 @@ export default function PersonScreen() {
         ? 'acting credits'
         : 'crew credits';
 
-  // Offered only where both halves have something in them. A director with no
-  // television is not asked to choose between Movies and TV — a filter with one
-  // populated option is a control that can only ever narrow to what is already there.
-  const filterable = counts.movie > 0 && counts.series > 0;
-  const tabs = [
-    { id: 'all' as const, label: 'All' },
-    { id: 'movie' as const, label: 'Movies' },
-    { id: 'series' as const, label: 'TV' },
-  ];
+  const coverage = sortCoverage(
+    sorted,
+    activeSort,
+    detail?.coverage ?? null,
+    group,
+    activeFilter,
+  );
+  // A row cached before coverage existed is complete only if it says it kept everything.
+  // Not for a Cast half made of appearances: its count is of performances, which says
+  // nothing about how many appearances were kept.
+  const uncertain =
+    coverage.kind === 'unknown' &&
+    !(group !== 'self' && roleTotal !== null && roleTotal <= roleCredits.length);
+  const tailOnly = coverage.kind === 'partial' && coverage.tailOnly;
+  const boundary = coverage.kind === 'partial' ? coverage.from : null;
+  const tail = tailStart(sorted, activeSort);
 
   const toggleWatchlist = async (credit: PersonCredit) => {
     if (busyId) return;
@@ -221,193 +311,390 @@ export default function PersonScreen() {
     }
   };
 
+  // `claimed` counts as loading, and that is the point of carrying it up here: somebody
+  // else's request is in flight, `usePerson` is polling for its result, and showing
+  // "nothing here yet" in the meantime is what independent review 13 found two concurrent
+  // readers stuck on.
+  const loading = person.isPending || awaitingClaim || (fetching && !detail);
+
   return (
     <Screen includeBottomInset edges={[]}>
-      <Stack.Screen
-        options={{
-          // `title` still carries the name for the iOS back label and for screen
-          // readers announcing the route; `headerTitle` is what is drawn, and it is
-          // empty while the portrait and the name below it are on screen. See
-          // `useDetailHeader` for the shared rule both detail routes follow.
-          headerShown: true,
-          title: name ?? '',
-          headerTitle:
-            header.revealed && name ? () => <DetailHeaderTitle title={name} /> : '',
-          headerBackTitle: 'Back',
-        }}
+      {/* The route keeps the name for the iOS back label of whatever is pushed on top and
+          for screen readers announcing the route; the bar itself is drawn by the page,
+          exactly as on a title page or a list. */}
+      <Stack.Screen options={{ title: name ?? '', headerShown: false }} />
+      <TitleTopBar
+        progress={top.ground}
+        titleProgress={top.titleProgress}
+        revealed={top.revealed && Boolean(name)}
+        onBack={() => router.back()}
+        title={name ?? ''}
       />
 
-      {/* `claimed` counts as loading, and that is the point of carrying it up here:
-          somebody else's request is in flight, `usePerson` is polling for its result,
-          and showing "nothing here yet" in the meantime is what independent review 13
-          found two concurrent readers stuck on. */}
-      {person.isPending || awaitingClaim || (fetching && !detail) ? (
-        <LoadingScreen />
-      ) : person.isError ? (
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load this person"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: tryAgain }}
-        />
-      ) : !detail ? (
-        // Reached when the provider had nothing for this id, or the fetch failed, or
-        // somebody else's claim lapsed without an answer. Honest about which it
-        // cannot be: they look the same from here. `tryAgain` clears the one-attempt
-        // guard, so this control genuinely asks again rather than re-reading a cache
-        // that has not changed.
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing here yet"
-          body="We could not load this person's work. Try again in a moment."
-          action={{ label: 'Try again', onPress: tryAgain }}
-        />
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.content}
-          onScroll={header.onScroll}
-          scrollEventThrottle={header.scrollEventThrottle}
-        >
-          <View style={styles.identity} onLayout={header.onIdentityLayout}>
-            <Avatar
-              size="lg"
-              uri={profileUri(detail.profilePath)}
-              name={detail.name}
-            />
-            <Text variant="title1" style={styles.centred}>
-              {detail.name}
-            </Text>
-            {/* Known-for and the life dates, on one line, because each on its own is
-                a fragment and together they place somebody. Absent entirely rather
-                than shown as a dash: TMDB genuinely does not have a birthday for
-                everybody, and an em dash where a date goes reads as a failure. */}
-            {metaLine(detail) ? (
-              <Text variant="footnote" tone="secondary" style={styles.centred}>
-                {metaLine(detail)}
-              </Text>
-            ) : null}
+      <Animated.ScrollView
+        contentContainerStyle={styles.content}
+        onScroll={top.onScroll}
+        scrollEventThrottle={16}
+      >
+        <TitleHero collapsedHeight={top.collapsedHero} topInset={top.topInset} />
+
+        {loading ? (
+          // The loading language, under the page's own top rather than a blank screen
+          // (design-system.md §11b, "Every first load shows the loading language").
+          <View testID="person-loading">
+            <View style={[styles.identity, styles.identityPlaceholder]}>
+              <View style={styles.portrait}>
+                <View style={styles.portraitPlaceholder} />
+              </View>
+            </View>
+            <SkeletonRow count={6} />
           </View>
-
-          {detail.biography ? (
-            <Biography
-              text={detail.biography}
-              truncated={detail.biographyTruncated}
+        ) : person.isError ? (
+          <View style={styles.state}>
+            <EmptyState
+              kind="couldNotLoad"
+              title="Could not load this person"
+              body="Check your connection and try again."
+              action={{ label: 'Try again', onPress: tryAgain }}
             />
-          ) : null}
-
-          <View style={styles.section}>
-            <SectionHeader
-              // Not "In your catalogue". This is their work, all of it that TMDB
-              // knows about, and most of it will be new to the reader — which is the
-              // entire point of the page.
-              title="Known for"
+          </View>
+        ) : !detail ? (
+          // Reached when the provider had nothing for this id, or the fetch failed, or
+          // somebody else's claim lapsed without an answer. Honest about which it
+          // cannot be: they look the same from here. `tryAgain` clears the one-attempt
+          // guard, so this control genuinely asks again rather than re-reading a cache
+          // that has not changed.
+          <View style={styles.state}>
+            <EmptyState
+              kind="nothingYet"
+              title="Nothing here yet"
+              body="We could not load this person's work. Try again in a moment."
+              action={{ label: 'Try again', onPress: tryAgain }}
             />
-
-            {hasCast && hasCrew ? (
-              <View style={styles.tabs}>
-                <SegmentedTabs
-                  options={ROLE_TABS}
-                  value={shownRole}
-                  onChange={(next) => {
-                    setRole(next);
-                    // A different list: its first page, unfiltered. A Movies filter kept
-                    // across the switch could narrow the other half to nothing and read
-                    // as a person with no work there.
-                    setFilter('all');
-                    setShown(PAGE);
-                  }}
-                />
+          </View>
+        ) : (
+          <>
+            <View
+              style={styles.identity}
+              onLayout={top.onIdentityLayout}
+              testID="person-identity"
+            >
+              {/* The portrait straddles the band, as a poster does on a title page with
+                  no artwork, ringed in Paper so its edge reads against the band. */}
+              <View style={styles.portrait}>
+                <Avatar size="lg" uri={profileUri(detail.profilePath)} name={detail.name} />
               </View>
+              <Text variant="title1" accessibilityRole="header" testID="person-name">
+                {detail.name}
+              </Text>
+              {/* Known-for and the life dates, on one line, because each on its own is
+                  a fragment and together they place somebody. Absent entirely rather
+                  than shown as a dash: TMDB genuinely does not have a birthday for
+                  everybody, and an em dash where a date goes reads as a failure. */}
+              {metaLine(detail) ? (
+                <Text variant="footnote" tone="secondary" testID="person-meta">
+                  {metaLine(detail)}
+                </Text>
+              ) : null}
+            </View>
+
+            {detail.biography ? (
+              <Biography text={detail.biography} truncated={detail.biographyTruncated} />
             ) : null}
 
-            {filterable ? (
-              <View style={styles.tabs}>
-                <SegmentedTabs
-                  options={tabs}
-                  value={filter}
-                  onChange={(next) => {
-                    setFilter(next);
-                    // Back to the first page. Keeping the count across a filter
-                    // change means switching to TV on somebody with four TV credits
-                    // silently shows all four and hides the See more that explains
-                    // why the list is short.
-                    setShown(PAGE);
-                  }}
-                />
+            <View style={styles.section}>
+              {/* The content header row (design-system.md §8): the section's name on the
+                  left and the one control that acts on the list beneath it on the right.
+                  Not "In your catalogue", and since 2026-11-11 not "Known for" either:
+                  this is their work, all of it that was kept, in an order the reader can
+                  choose. */}
+              <ContentToolbar
+                edgeInset={0}
+                testID="filmography-header"
+                title={
+                  <Text
+                    variant="sectionHeader"
+                    tone="action"
+                    accessibilityRole="header"
+                    accessibilityLabel="Filmography"
+                  >
+                    Filmography
+                  </Text>
+                }
+              >
+                {roleCredits.length > 1 ? (
+                  <SortChip
+                    axes={axes}
+                    value={activeSort}
+                    onPress={() => setSortOpen((open) => !open)}
+                  />
+                ) : null}
+              </ContentToolbar>
+
+              {sortOpen && roleCredits.length > 1 ? (
+                <View testID="filmography-sort-menu">
+                  <SortMenu
+                    axes={axes}
+                    value={activeSort}
+                    onChange={(next) => {
+                      setSort(next);
+                      // A different order: its first page. Keeping the count would drop
+                      // the reader into the middle of an order they have not seen the start of.
+                      setShown(PAGE);
+                    }}
+                    onClose={() => setSortOpen(false)}
+                  />
+                </View>
+              ) : null}
+
+              {hasCast && hasCrew ? (
+                <View style={styles.tabs}>
+                  <SegmentedTabs
+                    options={ROLE_TABS}
+                    value={shownRole}
+                    accessibilityLabel="Cast or crew"
+                    onChange={(next) => {
+                      setRole(next);
+                      // A different list: its first page, unfiltered. A Movies filter kept
+                      // across the switch could narrow the other half to nothing and read
+                      // as a person with no work there. The order is kept: it is the
+                      // reader's question, and it means the same thing in either half.
+                      setFilter('all');
+                      setShown(PAGE);
+                    }}
+                  />
+                </View>
+              ) : null}
+
+              {filterable ? (
+                <View style={styles.tabs}>
+                  <SegmentedTabs
+                    options={KIND_TABS}
+                    value={activeFilter}
+                    accessibilityLabel="Movies or TV"
+                    onChange={(next) => {
+                      setFilter(next);
+                      // Back to the first page. Keeping the count across a filter
+                      // change means switching to TV on somebody with four TV credits
+                      // silently shows all four and hides the See more that explains
+                      // why the list is short.
+                      setShown(PAGE);
+                    }}
+                  />
+                </View>
+              ) : null}
+
+              {/* A row cached before coverage was recorded: the order is right for what
+                  is here, and the page says that what is here may not be everything. */}
+              {uncertain && activeSort.axis !== 'popular' ? (
+                <ListNote testID="sort-scope-note">
+                  {roleTotal !== null
+                    ? `Sorted within the ${roleCredits.length} ${totalNoun} kept here, of ${roleTotal} TMDB lists.`
+                    : 'Sorted within the credits kept here, which may not be all of their work.'}
+                </ListNote>
+              ) : null}
+
+              <View style={styles.list}>
+                {visible.length ? (
+                  visible.map((credit, index) => (
+                    <Fragment key={credit.mediaItemId}>
+                      {index === boundary ? (
+                        <ListNote testID="coverage-note">
+                          {boundaryNote(activeSort, true, tailOnly)}
+                        </ListNote>
+                      ) : null}
+                      {index === tail ? (
+                        <ListNote testID="tail-note" quiet>
+                          {activeSort.axis === 'released'
+                            ? 'No release date yet'
+                            : 'Too few TMDB ratings to rank'}
+                        </ListNote>
+                      ) : null}
+                      <TitleRow
+                        title={credit.title}
+                        year={credit.year}
+                        posterUri={posterUri(credit.posterPath)}
+                        // Their character on the Cast side and their jobs on the Crew side,
+                        // so a film they did both on never shows "Director" under Cast.
+                        secondary={shownRole === 'cast' ? credit.role : credit.crewRole}
+                        tertiary={stateLabel(credit, { saved, ranked, watched: watched.data })}
+                        divided={
+                          index < visible.length - 1 &&
+                          index + 1 !== boundary &&
+                          index + 1 !== tail
+                        }
+                        onPress={() => router.push(`/title/${credit.mediaItemId}`)}
+                        trailing={
+                          <SaveAction
+                            saved={saved.has(credit.mediaItemId)}
+                            title={credit.title}
+                            busy={busyId === credit.mediaItemId}
+                            onPress={() => void toggleWatchlist(credit)}
+                          />
+                        }
+                      />
+                    </Fragment>
+                  ))
+                ) : (
+                  <EmptyState
+                    kind="nothingYet"
+                    compact
+                    title="Nothing here"
+                    body="TMDB lists no credits of this kind for them."
+                  />
+                )}
+
+                {/* Everything kept is vouched for and only the tail is missing: said once
+                    the list has reached its end, which is where the missing credits go. */}
+                {boundary !== null &&
+                boundary === sorted.length &&
+                visible.length === sorted.length ? (
+                  <ListNote testID="coverage-note">
+                    {boundaryNote(activeSort, false, tailOnly)}
+                  </ListNote>
+                ) : null}
               </View>
-            ) : null}
 
-            {visible.length ? (
-              visible.map((credit) => (
-                <TitleRow
-                  key={credit.mediaItemId}
-                  title={credit.title}
-                  year={credit.year}
-                  posterUri={posterUri(credit.posterPath)}
-                  // Their character on the Cast side and their jobs on the Crew side, so
-                  // a film they did both on never shows "Director" under Cast.
-                  secondary={shownRole === 'cast' ? credit.role : credit.crewRole}
-                  tertiary={stateLabel(credit, { saved, ranked, watched: watched.data })}
-                  onPress={() => router.push(`/title/${credit.mediaItemId}`)}
-                  trailing={
-                    <SaveAction
-                      saved={saved.has(credit.mediaItemId)}
-                      title={credit.title}
-                      busy={busyId === credit.mediaItemId}
-                      onPress={() => void toggleWatchlist(credit)}
-                    />
-                  }
-                />
-              ))
-            ) : (
-              <EmptyState
-                kind="nothingYet"
-                compact
-                title="Nothing here"
-                body="TMDB lists no credits of this kind for them."
-              />
-            )}
-
-            {filtered.length > visible.length ? (
-              <View style={styles.more}>
+              {sorted.length > visible.length ? (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Show more of ${detail.name}'s work`}
                   onPress={() => setShown((count) => count + PAGE)}
-                  hitSlop={theme.space[2]}
+                  style={({ pressed }) => [styles.more, pressed && styles.pressed]}
                 >
                   <Text variant="callout" tone="action">
                     See more
                   </Text>
                 </Pressable>
-              </View>
-            ) : null}
+              ) : null}
 
-            {/* What is not being shown, said rather than implied. The adapter keeps
-                the most popular sixty acting and thirty crew credits; somebody with three
-                hundred should not be presented as somebody with sixty. */}
-            {roleTotal !== null && roleTotal > roleCredits.length ? (
-              <View style={styles.more}>
-                <Text variant="caption" tone="tertiary">
-                  {`Showing ${roleCredits.length} of ${roleTotal} ${totalNoun} TMDB lists.`}
-                </Text>
-              </View>
-            ) : null}
-          </View>
+              {/* What is not being shown, said rather than implied. The adapter keeps the
+                  most popular sixty acting and thirty crew credits, plus each half's
+                  newest, oldest and best rated; somebody with three hundred should not be
+                  presented as somebody with sixty. */}
+              {roleTotal !== null && roleTotal > roleCredits.length ? (
+                <View style={styles.caption}>
+                  <Text variant="caption" tone="tertiary">
+                    {`Showing ${roleCredits.length} of ${roleTotal} ${totalNoun} TMDB lists.`}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
 
-          <View style={styles.footer}>
-            <Text variant="caption" tone="tertiary">
-              Metadata from TMDB
-            </Text>
-          </View>
-        </ScrollView>
-      )}
+            <View style={styles.footer}>
+              <Text variant="caption" tone="tertiary">
+                Metadata from TMDB
+              </Text>
+            </View>
+          </>
+        )}
+      </Animated.ScrollView>
     </Screen>
   );
 }
 
 /** How many credits a page shows before "See more". */
 const PAGE = 12;
+
+/** How far the compact name takes to arrive once the large one reaches the bar. */
+const TITLE_FADE = 24;
+
+/**
+ * The person page's top bar arithmetic.
+ *
+ * Two values, because the page has two edges to cross. **The ground** arrives over the
+ * collapsed band, exactly as `useHeroReveal` does it for a title or a list without
+ * artwork, so the bar is Paper by the time the band has gone. **The name** arrives only
+ * once the large name has passed under the bar — measured off the identity block by
+ * `useDetailHeader`, the rule every detail page follows — because here the name sits under
+ * a portrait that hangs below the band, and fading it in with the ground would put it in
+ * the bar while the large one is still on screen.
+ */
+function usePersonTopBar() {
+  const insets = useSafeAreaInsets();
+  const header = useDetailHeader();
+  const [scrollY] = useState(() => new Animated.Value(0));
+  const [identityBottom, setIdentityBottom] = useState<number | null>(null);
+
+  const barHeight = insets.top + NAV_BAR_HEIGHT;
+  const ground = scrollY.interpolate({
+    inputRange: [0, HERO_COLLAPSED_BAND],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  // Until the identity has been measured there is no name to be past, so the fade sits
+  // out of reach rather than at zero, where any scroll would complete it.
+  const titleEnd = identityBottom === null ? 1e9 : Math.max(identityBottom - barHeight, 1);
+  // From the moment the large name has fully passed under the bar, never before it, so
+  // the two are never both readable at once.
+  const titleProgress = scrollY.interpolate({
+    inputRange: [titleEnd, titleEnd + TITLE_FADE],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const onScroll = Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+    useNativeDriver: true,
+    listener: header.onScroll,
+  });
+
+  const onIdentityLayout = (event: LayoutChangeEvent) => {
+    const { y, height } = event.nativeEvent.layout;
+    setIdentityBottom(y + height);
+    header.onIdentityLayout(event);
+  };
+
+  return {
+    ground,
+    titleProgress,
+    revealed: header.revealed,
+    onScroll,
+    onIdentityLayout,
+    collapsedHero: barHeight + HERO_COLLAPSED_BAND,
+    topInset: insets.top,
+  };
+}
+
+/**
+ * What a sorted list says at the row where it stops being complete.
+ *
+ * Phrased about the credits rather than about the cache: the reader's question is whether
+ * this is everything from here on, and the answer is that some of what TMDB lists of that
+ * kind is not here.
+ */
+function boundaryNote(sort: FilmographySort, inline: boolean, tailOnly: boolean) {
+  const what = tailOnly
+    ? sort.axis === 'rating'
+      ? 'credits with too few TMDB ratings'
+      : 'credits with no release date'
+    : sort.axis === 'rating'
+      ? 'lower-rated credits'
+      : sort.direction === 'desc'
+        ? 'older credits'
+        : 'later credits';
+  return inline
+    ? `From here on, not every one of their ${what} is listed.`
+    : `Not every one of their ${what} is listed.`;
+}
+
+/** A line of small print between rows of the list, at the gutter. */
+function ListNote({
+  children,
+  quiet = false,
+  testID,
+}: {
+  children: string;
+  quiet?: boolean;
+  testID?: string;
+}) {
+  return (
+    <View style={[styles.note, quiet && styles.noteQuiet]} testID={testID}>
+      <Text variant={quiet ? 'caption' : 'footnote'} tone={quiet ? 'tertiary' : 'secondary'}>
+        {children}
+      </Text>
+    </View>
+  );
+}
 
 /**
  * "Acting · born 1960 · Nairobi", assembled from whatever TMDB actually has.
@@ -430,35 +717,45 @@ function metaLine(person: {
   return [person.knownFor, years, person.placeOfBirth].filter(Boolean).join(' · ') || null;
 }
 
+/** Lines the biography takes before `more`. */
+const BIOGRAPHY_LINES = 3;
+
 /**
- * The biography, three lines until it is opened.
+ * The biography, three lines until it is opened, with `… more` on the third.
  *
- * Same treatment as a title's overview, deliberately: it is the same kind of block in
- * the same position doing the same job, and two different disclosure patterns for one
- * pattern of content is how a design stops being one design.
+ * `ClampedText`, the title page's synopsis treatment, because it is the same kind of block
+ * doing the same job — and because the previous hand-rolled version put `more` on a line
+ * of its own, which is the defect that component was built to fix.
+ *
+ * **What it promises when opened** (audit, 2026-11-11). The adapter keeps 1,200
+ * characters of TMDB's biography (`MAX_BIOGRAPHY_CHARS`), cut mid-word. Opening it used to
+ * show those characters and an ellipsis, under a control whose only word was `more` — so
+ * the reader was promised the rest and given a fragment. Now a shortened biography ends at
+ * its last whole sentence (or word, if a sentence would lose too much), and once it is
+ * fully on screen it says plainly that it was shortened and where the rest is.
  */
 function Biography({ text, truncated }: { text: string; truncated: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={expanded ? 'Collapse biography' : 'Expand biography'}
-      onPress={() => setExpanded((open) => !open)}
+    <ClampedText
+      text={truncated ? shortened(text) : text}
+      clamp={BIOGRAPHY_LINES}
+      testIDPrefix="biography"
+      expandLabel="Expand biography"
+      collapseLabel="Collapse biography"
+      completeFooter={
+        truncated ? (
+          <Text
+            variant="footnote"
+            tone="tertiary"
+            testID="biography-shortened"
+            style={styles.shortened}
+          >
+            Shortened. The full biography is on TMDB.
+          </Text>
+        ) : undefined
+      }
       style={styles.block}
-    >
-      <Text variant="body" numberOfLines={expanded ? undefined : 3}>
-        {text}
-        {expanded && truncated ? '…' : ''}
-      </Text>
-      {/* No "less", for the reason the title page has none: once it is open the whole
-          thing is visible and the control has nothing left to promise. */}
-      {expanded ? null : (
-        <Text variant="callout" tone="action">
-          more
-        </Text>
-      )}
-    </Pressable>
+    />
   );
 }
 
@@ -467,15 +764,15 @@ function Biography({ text, truncated }: { text: string; truncated: boolean }) {
  *
  * One word, not three: a row carrying "Saved · Ranked · Watched" is a row about the
  * reader rather than about the film. Ranked wins over watched because it is the
- * stronger statement and implies it, and neither is shown for a series, which cannot
- * be ranked and whose seasons are logged individually — "Watched" against a whole
- * show would be a claim the data does not make.
+ * stronger statement and implies it. A series says either only about the *show itself*
+ * (ranked in `tv_shows`, or logged as a show, 20261114000200): its `user_media` row is
+ * the show's own, so a reader who logged only seasons is not told they watched it.
  */
 function stateLabel(
   credit: PersonCredit,
   state: { saved: Set<string>; ranked: Set<string>; watched: Set<string> | undefined },
 ) {
-  if (credit.kind === 'movie') {
+  if (credit.kind === 'movie' || credit.kind === 'series') {
     if (state.ranked.has(credit.mediaItemId)) return 'Ranked';
     if (state.watched?.has(credit.mediaItemId)) return 'Watched';
   }
@@ -528,24 +825,69 @@ function SaveAction({
   );
 }
 
+/** The portrait's diameter, which is also how far it hangs into the band. */
+const PORTRAIT = theme.layout.avatar.lg;
+/** The Paper ring around it. */
+const RING = 3;
+
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
+  /**
+   * Who they are: portrait, name, one line of facts.
+   *
+   * Pulled up by half the portrait so it straddles the band. The seams inside are the
+   * compact-related interval (`space[1]`–`space[2]`): this is one statement, not three.
+   */
   identity: {
-    alignItems: 'center',
-    gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
-    paddingBottom: theme.space[3],
-  },
-  centred: { textAlign: 'center' },
-  block: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
+    marginTop: -(PORTRAIT / 2 + RING),
     gap: theme.space[1],
   },
-  section: { paddingTop: theme.space[5], gap: theme.space[1] },
-  tabs: { paddingBottom: theme.space[2] },
-  more: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  identityPlaceholder: { paddingBottom: theme.space[4] },
+  portrait: {
+    alignSelf: 'flex-start',
+    borderRadius: theme.radius.full,
+    borderWidth: RING,
+    borderColor: theme.surface.base,
+    backgroundColor: theme.surface.base,
+    marginBottom: theme.space[2],
+  },
+  portraitPlaceholder: {
+    width: PORTRAIT,
+    height: PORTRAIT,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.surface.sunken,
+  },
+  // The biography sits under the facts as part of the identity's answer: 12, not a section seam.
+  block: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
+  // Its own gutter: it sits after the biography's press target, not inside its padding.
+  shortened: { paddingTop: theme.space[2], paddingHorizontal: theme.layout.gutter },
+  // Identity → the work: a major section seam (design-system.md §5, `space[6]`).
+  section: { paddingTop: theme.space[6] },
+  // Header row → its controls: compact, related (`space[2]`); the last control → the list: 12.
+  tabs: { paddingTop: theme.space[2] },
+  list: { paddingTop: theme.space[2] },
+  note: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+    marginTop: theme.space[1],
+  },
+  noteQuiet: { borderTopWidth: 0, paddingTop: theme.space[2], paddingBottom: theme.space[1] },
+  more: {
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    paddingHorizontal: theme.layout.gutter,
+    marginTop: theme.space[1],
+    alignSelf: 'flex-start',
+  },
+  caption: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  state: { paddingTop: theme.space[6] },
   save: {
     minWidth: theme.layout.minTapTarget,
     minHeight: theme.layout.minTapTarget,

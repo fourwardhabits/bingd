@@ -163,7 +163,7 @@ export function movementSentence(movement: Movement, position: number): string |
 /**
  * **The score of each watch** — the founder's canonical rule (2026-09-21):
  *
- *   · the MOST RECENTLY LOGGED watch follows a pure Update your rating;
+ *   · the MOST RECENTLY LOGGED watch follows a pure Edit ranking;
  *   · every earlier watch is frozen at what it was when the next one was logged.
  *
  * Watch 1 → 3.4, Watch 2 → 3.5, pure rerank → 4.1 gives Watch 1 = 3.4, Watch 2 = 4.1; log

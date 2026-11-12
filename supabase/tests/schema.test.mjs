@@ -341,7 +341,7 @@ describe('the catalog', () => {
     );
   });
 
-  it('derives the rankable category and refuses series', async () => {
+  it('derives the rankable category, a whole show in its own pool', async () => {
     const { rows } = await t.sql(`
       select rankable_category('movie')  as movie,
              rankable_category('season') as season,
@@ -349,6 +349,6 @@ describe('the catalog', () => {
     `);
     assert.equal(rows[0].movie, 'movies');
     assert.equal(rows[0].season, 'tv_seasons');
-    assert.equal(rows[0].series, null, 'PRD §10 forbids ranking a whole series');
+    assert.equal(rows[0].series, 'tv_shows', 'a show is ranked among shows (20261114000200)');
   });
 });

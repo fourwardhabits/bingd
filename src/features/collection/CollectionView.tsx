@@ -1,7 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -23,11 +22,12 @@ import { CollectionFilterSheet } from './CollectionFilterSheet';
 import { TitleRowActions } from './TitleRowActions';
 import {
   activeFilterCount,
-  applyFilters,
   COLLECTION_SORT_AXES,
   emptyFilters,
+  nextShuffleSeed,
+  offersRuntime,
   sortAxesFor,
-  sortItems,
+  visibleItems,
   type CollectionFilters,
   type CollectionItem,
   type CollectionSegment,
@@ -56,7 +56,10 @@ export type CollectionViewState = {
    */
   sort: CollectionSortState;
   mode: CollectionViewMode;
-  /** Bumped by Shuffle. Nothing else changes the order. */
+  /**
+   * Moved by every press of Shuffle ({@link nextShuffleSeed}), and by nothing else — not a
+   * scroll, a re-render, a refetch, a filter or a switch between Poster and List.
+   */
   seed: number;
 };
 
@@ -120,6 +123,17 @@ export type CollectionViewProps = {
   title?: ReactNode;
   /** Cards between the toolbar and the count (the unranked and refine prompts). */
   lead?: ReactNode;
+  /**
+   * Drawn in place of the titles while the section has none to give yet: its skeleton
+   * while the read is on its way, its error when it failed. `items` is ignored meanwhile.
+   *
+   * **Here rather than in a screen of its own, so the toolbar is never remounted**
+   * (2026-11-11). Collection drew loading and failed sections with a toolbar of their own
+   * and swapped in this component's when the titles landed: two places in the tree, so a
+   * Watched ▾ menu opened before the list arrived closed by itself when it did. Every
+   * state is now drawn in the same list, under the same header.
+   */
+  placeholder?: ReactNode;
 };
 
 /**
@@ -146,10 +160,12 @@ export function CollectionView({
   countAccessory,
   title,
   lead,
+  placeholder,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const axes = sortAxesFor(segment);
+  // Runtime only where a row could carry one: not on a TV list made only of seasons.
+  const axes = sortAxesFor(segment, { runtime: offersRuntime(items) });
   // A sort the current segment does not offer — Rating on a watchlist — falls back
   // rather than silently ordering by a field that is null on every row. The fallback
   // lands in the replacement axis's own default direction, so the chip, the arrow and
@@ -160,21 +176,62 @@ export function CollectionView({
   // (app.config.ts `experiments.reactCompiler`), and it memoizes this itself —
   // a hand-written one here only gave it a dependency list it could not prove
   // stable, which it reports rather than silently ignoring.
-  const visible = sortItems(applyFilters(items, state.filters), sort, state.seed);
+  const visible = visibleItems(items, state.filters, sort, state.seed);
 
-  if (items.length === 0) {
-    return (
-      <>
-        {title ? <ContentToolbar title={title} testID="collection-toolbar" /> : null}
-        {lead}
-        {countAccessory ? <View style={styles.accessoryOnly}>{countAccessory}</View> : null}
-        {empty}
-      </>
-    );
-  }
+  /**
+   * What stands in for the titles, when something does: the section's own placeholder
+   * (loading, failed), the empty collection, or a filter that hides everything. It is
+   * drawn under the header inside the same list the titles use, so the toolbar keeps its
+   * place in the tree whatever the read is doing (see `placeholder`).
+   */
+  const hasTitles = placeholder == null && items.length > 0;
+  const standIn =
+    placeholder != null ? (
+      placeholder
+    ) : items.length === 0 ? (
+      <StateFill>{empty}</StateFill>
+    ) : visible.length === 0 ? (
+      <View style={styles.padded}>
+        <EmptyState
+          kind="nothingMatches"
+          compact
+          title="Nothing matches"
+          body="Try removing a filter."
+          action={{
+            label: 'Clear all',
+            onPress: () => onChange({ ...state, filters: emptyFilters() }),
+          }}
+        />
+      </View>
+    ) : null;
 
   const activeCount = activeFilterCount(state.filters);
-  const reshuffle = () => onChange({ ...state, seed: state.seed + 1 });
+
+  /**
+   * **Every press of Shuffle, from any axis or from Shuffle itself** (approved spec,
+   * 2026-11-10): a new seed whose order differs from the one on screen, applied at once,
+   * and the sheet closed so the new order is what the reader sees next.
+   *
+   * It does not wait for Apply and does not apply the filter drafts: those are the
+   * filters' own, and closing the sheet abandons them exactly as closing it any other way
+   * does. There is no reshuffle glyph in the toolbar any more — Shuffle lives in the sheet.
+   */
+  const shuffleNow = () => {
+    setFilterOpen(false);
+    // The sheet closes on the press, so nothing on screen says the order changed; a screen
+    // reader is told in words.
+    AccessibilityInfo.announceForAccessibility('Shuffled');
+    onChange({
+      ...state,
+      sort: { axis: COLLECTION_SORT_AXES.shuffle.axis, direction: 'desc' },
+      seed: nextShuffleSeed(
+        items,
+        state.filters,
+        state.seed,
+        visible.map((item) => item.mediaItemId),
+      ),
+    });
+  };
 
   /**
    * **The page's toolbar, then its cards, then the count — all at the head of the list**
@@ -192,76 +249,63 @@ export function CollectionView({
    */
   const header = (
     <View>
+      {/* First, in every state: the one position the marquee has (see `placeholder`). The
+          tools act on titles, so they are drawn only when there are some. */}
       <ContentToolbar
         title={title}
         // The last glyph's 44pt cell around its 20pt glyph, so the glyph lands on the gutter.
-        edgeInset={(theme.layout.minTapTarget - theme.layout.icon.sm) / 2}
+        edgeInset={hasTitles ? (theme.layout.minTapTarget - theme.layout.icon.sm) / 2 : undefined}
         testID="collection-toolbar"
       >
-        <FiltersAction
-          label="Filters & Sort"
-          activeCount={activeCount}
-          accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
-          accessibilityHint="Opens filters and the sort order"
-          onPress={() => setFilterOpen(true)}
-          testID="collection-filter-sort"
-        />
-        {/* Shuffle's reshuffle, one press from the toolbar rather than three. */}
-        {sort.axis === 'shuffle' ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Shuffle again"
-            onPress={reshuffle}
-            style={({ pressed }) => [styles.reshuffle, pressed && styles.pressed]}
-            testID="collection-reshuffle"
-          >
-            <Ionicons name="shuffle" size={theme.layout.icon.sm} color={theme.semantic.action} />
-          </Pressable>
+        {hasTitles ? (
+          <>
+            <FiltersAction
+              label="Filters & Sort"
+              activeCount={activeCount}
+              accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+              accessibilityHint="Opens filters and the sort order"
+              onPress={() => setFilterOpen(true)}
+              testID="collection-filter-sort"
+            />
+            {/* The view control, not a third collection state. **Poster first, list second**
+                (founder §11): the leftmost cell is the one a device with no stored preference
+                opens on, so the row and the state agree. */}
+            <IconToggle
+              label="View"
+              appearance="quiet"
+              value={state.mode}
+              onChange={(mode) => onChange({ ...state, mode })}
+              options={VIEW_MODES}
+            />
+          </>
         ) : null}
-        {/* The view control, not a third collection state. **Poster first, list second**
-            (founder §11): the leftmost cell is the one a device with no stored preference
-            opens on, so the row and the state agree. */}
-        <IconToggle
-          label="View"
-          appearance="quiet"
-          value={state.mode}
-          onChange={(mode) => onChange({ ...state, mode })}
-          options={VIEW_MODES}
-        />
       </ContentToolbar>
 
       {lead}
 
-      <View style={styles.countRow}>
-        <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
-          {visible.length === items.length
-            ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
-            : `${visible.length} of ${items.length}`}
-        </Text>
-        {countAccessory}
-      </View>
+      {hasTitles ? (
+        <View style={styles.countRow}>
+          <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
+            {visible.length === items.length
+              ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
+              : `${visible.length} of ${items.length}`}
+          </Text>
+          {countAccessory}
+        </View>
+      ) : countAccessory ? (
+        // The way to the lists never depends on there being titles.
+        <View style={styles.accessoryOnly}>{countAccessory}</View>
+      ) : null}
+
+      {standIn}
     </View>
   );
+  /** The titles the list draws: none while something stands in for them. */
+  const shown = standIn == null ? visible : [];
 
   return (
     <View style={styles.body}>
-      {visible.length === 0 ? (
-        <>
-          {header}
-          <View style={styles.padded}>
-            <EmptyState
-              kind="nothingMatches"
-              compact
-              title="Nothing matches"
-              body="Try removing a filter."
-              action={{
-                label: 'Clear all',
-                onPress: () => onChange({ ...state, filters: emptyFilters() }),
-              }}
-            />
-          </View>
-        </>
-      ) : state.mode === 'poster' ? (
+      {state.mode === 'poster' ? (
         /**
          * **Both modes are virtualised, and that is the 2026-09-16 fix.**
          *
@@ -276,7 +320,7 @@ export function CollectionView({
          * was, and only the drawing of it changed.
          */
         <PosterGridList
-          tiles={visible.map((item) => ({
+          tiles={shown.map((item) => ({
             id: item.mediaItemId,
             title: nameOf(item),
             year: item.year,
@@ -289,6 +333,8 @@ export function CollectionView({
             // numbers, which is what keeps it from looking like a scoreboard.
             score: item.score,
             bucket: item.bucket,
+            // A ranked season's pill names its season (Candidate A): `S4 9.1`.
+            season: item.kind === 'season' && item.score != null ? (item.seasonNumber ?? null) : null,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
           // The wall's top space follows the header now, rather than preceding it.
@@ -302,7 +348,7 @@ export function CollectionView({
         />
       ) : (
         <FlashList
-          data={visible}
+          data={shown}
           keyExtractor={(item) => item.mediaItemId}
           // See the note on the grid in `PosterGridList`: a re-sort keeps the offset
           // rather than chasing the row that happened to be on top.
@@ -356,13 +402,17 @@ export function CollectionView({
             onChange({ ...state, filters });
           }}
           onClose={() => setFilterOpen(false)}
-          // The sort choices this segment offers, applied on the press as they always were.
-          // Shuffle is the one axis with no direction, so choosing it again reseeds.
+          // The sort choices this segment offers, applied on the press as they always were;
+          // the sheet stays open so a second press reverses. Shuffle is the exception: any
+          // press of it deals a new order and closes the sheet (`shuffleNow`).
           sort={{
             axes,
             value: sort,
-            onChange: (next) => onChange({ ...state, sort: next }),
-            onRepeatUndirected: reshuffle,
+            onChange: (next) =>
+              next.axis === COLLECTION_SORT_AXES.shuffle.axis
+                ? shuffleNow()
+                : onChange({ ...state, sort: next }),
+            onRepeatUndirected: shuffleNow,
           }}
         />
       ) : null}
@@ -371,6 +421,32 @@ export function CollectionView({
 }
 
 const LIST_POSITION = { disabled: true } as const;
+
+/**
+ * A state that stands in for the whole list (an empty collection, a failed read), centred
+ * in roughly the room the list would have had.
+ *
+ * It is drawn inside the list's header now (see `placeholder`), and a header has no height
+ * to fill, so `EmptyState`'s own `flex: 1` collapses and the state would sit pinned under
+ * the toolbar with the screen blank below it (independent review, 2026-11-11). A minimum
+ * height from the window gives it the room it had when it filled the screen. The skeleton
+ * does not use this: a loading list starts at the top, as the titles will.
+ */
+export function StateFill({ children }: { children: ReactNode }) {
+  const { height } = useWindowDimensions();
+  return (
+    <View
+      style={[styles.fill, { minHeight: Math.round(height * STATE_FILL) }]}
+      testID="collection-state-fill"
+    >
+      {children}
+    </View>
+  );
+}
+
+/** The share of the window a whole-list state is centred in: below the app header,
+ * toolbar and tab bar on a phone. */
+const STATE_FILL = 0.55;
 
 /** The sentence a screen reader is given instead of the arrow. */
 function filterSortSpoken<Axis extends string>(
@@ -401,13 +477,6 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
-  reshuffle: {
-    width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.6 },
 
   /** `37 titles` on the left and the lists link on the right, one line under the toolbar. */
   countRow: {
@@ -429,4 +498,5 @@ const styles = StyleSheet.create({
   wall: { paddingBottom: theme.space[10] },
   wallTop: { height: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  fill: { justifyContent: 'center' },
 });

@@ -41,11 +41,12 @@ import {
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { batchMedium } from '@/features/ranking/RankedSummary';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
+import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
-  REACTION_GLYPH,
-  REACTION_LABEL,
+  reactionFailureAlert,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -470,9 +471,10 @@ export default function FeedScreen() {
   const choose = async (eventId: string, kind: ReactionKind | null) => {
     setPickerFor(null);
     const result = await setReaction(eventId, kind);
-    if (!result.ok && result.message) {
-      Alert.alert('Could not save your reaction', result.message);
-    }
+    // One rule for every surface: a self-reaction is answered calmly on its own, anything
+    // else under the alert it always had (`reactionFailureAlert`).
+    const alert = reactionFailureAlert(result, 'Could not save your reaction');
+    if (alert) Alert.alert(...alert);
   };
 
   /**
@@ -544,14 +546,11 @@ export default function FeedScreen() {
    * sheet sends to a named friend *and* ends in "Share off Bingd", so the off-platform
    * path survives one tap further in.
    *
-   * A series is not offered, for the same reason it cannot be ranked (PRD §10). That
-   * guard used to be theoretical — every feed event was a ranking or a log, and neither
-   * can name a series. `watchlist_added` can: `set_watchlist` is the one collection
-   * write that accepts a whole show, so "Suraj added Severance to their watchlist" is a
-   * real row and the guard is now load-bearing rather than defensive.
+   * A whole show is offered too since 2026-11-14: it is rankable in its own pool, and
+   * `recommend_title` resolves it the same way it resolves a film or a season.
    */
   const openRecommend = (event: FeedItem) => {
-    if (!event.mediaItemId || event.kind === 'series') return;
+    if (!event.mediaItemId) return;
     setRecommendedTo(null);
     setRecommending(event);
   };
@@ -718,7 +717,7 @@ export default function FeedScreen() {
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
          *     LEADERBOARD                     [Feed] [Trophy] [People]
-         *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
+         *     DISCOVER PEOPLE                 [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
          * across from it changes. That is what makes it read as a control over *this
@@ -727,8 +726,9 @@ export default function FeedScreen() {
          * The left side is the heading of whatever is immediately below — the shelf's
          * name in Feed mode, LEADERBOARD in Leaderboard mode (whose time range has been a
          * filter under its categories since 2026-11-06), and since
-         * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
-         * same treatment. In Feed mode it is drawn only when the shelf will actually
+         * 2026-09-08 (§A3) the People heading in People mode, in the same slot with the
+         * same treatment — `DISCOVER PEOPLE` since the UI consistency sprint (founder,
+         * 2026-11-10), `PEOPLE YOU MAY KNOW` before it. In Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
          * absent shelf would be a label for nothing. `useTrending` is called here purely
          * to know that, and costs no request — it is the same query key the shelf itself
@@ -749,8 +749,10 @@ export default function FeedScreen() {
               <SectionHeader title="Leaderboard" size="large" fit />
             ) : showingPeople ? (
               // The Feed's label size, as LEADERBOARD and TRENDING NOW (marquee cohesion
-              // sprint); it shrinks to fit beside the toggle on a narrow phone.
-              <SectionHeader title="People you may know" size="large" fit />
+              // sprint); it shrinks to fit beside the toggle on a narrow phone. DISCOVER
+              // PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint, 2026-11-10):
+              // the list is discovery, and most suggestions are not people the reader knows.
+              <SectionHeader title="Discover people" size="large" fit />
             ) : trendingHasItems ? (
               // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
               // heading keeps the standard 12pt, which is what fits beside the toggle.
@@ -946,7 +948,7 @@ export default function FeedScreen() {
                         ? undefined
                         : () => router.push(`/u/${event.actorUsername}`)
                     }
-                    verb={verbFor(event.type)}
+                    verb={verbFor(event.type, event)}
                     tail={tailFor(event.type, event.title)}
                     tailAction={
                       event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
@@ -956,7 +958,7 @@ export default function FeedScreen() {
                             onPress: () =>
                               setRankingBatchFor({
                                 id: event.id,
-                                medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                                medium: batchMedium(event.kind),
                               }),
                           }
                         : null
@@ -995,7 +997,7 @@ export default function FeedScreen() {
                         : undefined
                     }
                     saved={saved.has(event.mediaItemId!)}
-                    onPressShare={event.kind !== 'series' ? () => openRecommend(event) : undefined}
+                    onPressShare={() => openRecommend(event)}
                   />
                 ) : (
                 <ActivityRow
@@ -1009,7 +1011,7 @@ export default function FeedScreen() {
                       ? undefined
                       : () => router.push(`/u/${event.actorUsername}`)
                   }
-                  verb={verbFor(event.type)}
+                  verb={verbFor(event.type, event)}
                   tail={tailFor(event.type, event.title)}
                   /* A grouped sitting reads "ranked Sheroes and 2 more": the connector
                      is ordinary ink so the eye finds the break after the title, and the
@@ -1022,7 +1024,7 @@ export default function FeedScreen() {
                           onPress: () =>
                             setRankingBatchFor({
                               id: event.id,
-                              medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                              medium: batchMedium(event.kind),
                             }),
                         }
                       : null
@@ -1112,11 +1114,7 @@ export default function FeedScreen() {
                       : undefined
                   }
                   inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
-                  onPressRecommend={
-                    event.mediaItemId && event.kind !== 'series'
-                      ? () => openRecommend(event)
-                      : undefined
-                  }
+                  onPressRecommend={event.mediaItemId ? () => openRecommend(event) : undefined}
                   reaction={reactionFor(event.id)}
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
@@ -1240,14 +1238,12 @@ export default function FeedScreen() {
 
   function reactionFor(eventId: string) {
     const summary = reactions.data?.get(eventId);
-    return {
-      count: summary?.total ?? 0,
-      mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-      mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
-      glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-      onPress: () => void toggleDefault(eventId),
-      onLongPress: () => setPickerFor(eventId),
-      onPressSummary: () => setDetailFor(eventId),
+    return activityReaction({
+      summary,
+      viewerId: profile.id,
+      onToggle: () => void toggleDefault(eventId),
+      onOpenPicker: () => setPickerFor(eventId),
+      onOpenDetail: () => setDetailFor(eventId),
       picker:
         pickerFor === eventId ? (
           <ReactionPill
@@ -1256,7 +1252,7 @@ export default function FeedScreen() {
             onDismiss={() => setPickerFor(null)}
           />
         ) : null,
-    };
+    });
   }
 }
 

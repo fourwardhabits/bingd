@@ -7,9 +7,12 @@ import { useCurrentProfile } from '@/features/auth';
 import { AwardBadge } from '@/features/awards/AwardBadge';
 import { badgeFor } from '@/features/awards/badges';
 import { GOAL_LABEL, goalAchievement } from '@/features/goals/goals';
+import { recordNotificationOpen } from '@/features/notifications/open-telemetry';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
+  availablePhrase,
   canRankFromRow,
+  clusterPhrase,
   relationshipActionFor,
   sectionFor,
   sentenceFor,
@@ -424,13 +427,20 @@ export default function NotificationsScreen() {
 
     // Nothing survived. Say so rather than absorbing the tap: a press that does
     // nothing is indistinguishable from one the app missed, and the reader repeats it.
-    if (!href) {
+    if (!href || target.kind === 'unavailable') {
       Alert.alert(
         'No longer available',
         target.kind === 'unavailable' ? target.reason : 'This is no longer available.',
       );
       return;
     }
+    // The kind of screen, never the path: no id or username reaches the open record.
+    recordNotificationOpen({
+      notificationId: row.id,
+      kind: row.kind,
+      channel: 'inbox',
+      destination: target.kind,
+    });
     router.push(href);
   };
 
@@ -571,8 +581,26 @@ export default function NotificationsScreen() {
                               ? // The second actorless sentence. `verbFor` returns the
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
-                                verbFor(row.kind, row.mediaKind, row.goal)
-                              : `${row.actorName} ${spokenSentence(sentence)}`
+                                verbFor(
+                                  row.kind,
+                                  row.mediaKind,
+                                  row.goal,
+                                  undefined,
+                                  row.importProvider,
+                                )
+                              : row.kind === 'watchlist_social'
+                                ? // The people are the cluster, not an actor.
+                                  `${clusterPhrase(row.cluster) ?? 'Friends'} ${spokenSentence(sentence)}. On your Watchlist`
+                                : row.kind === 'theatrical_release'
+                                  ? `${spokenSentence(sentence)}. On your Watchlist`
+                                  : row.kind === 'season_premiere'
+                                    ? // Not "On your Watchlist": the reader may have
+                                      // only watched the season before it.
+                                      `${spokenSentence(sentence)}. ${
+                                        availablePhrase(row.availableOn) ??
+                                        'Now available in the US'
+                                      }`
+                                    : `${row.actorName} ${spokenSentence(sentence)}`
                         }${
                           /* Only when the title is *not* already inside the clause.
                              Appending it to "watched 100 Meters with you" is how a
@@ -633,6 +661,32 @@ export default function NotificationsScreen() {
                             earned
                             size={theme.layout.avatar.sm}
                           />
+                        ) : row.kind === 'watchlist_social' ? (
+                          // The first friend's face: the row is about people, and the one
+                          // who started it is who the reader most likely recognises.
+                          <Avatar
+                            size="sm"
+                            uri={row.cluster?.actors[0]?.avatarUri ?? null}
+                            name={row.cluster?.actors[0]?.name ?? ''}
+                          />
+                        ) : row.kind === 'theatrical_release' ? (
+                          // About a film, not a person: the film's mark, not an empty face.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name="film-outline"
+                              size={theme.layout.icon.md}
+                              color={theme.semantic.action}
+                            />
+                          </View>
+                        ) : row.kind === 'season_premiere' ? (
+                          // The same, for a season: the show's mark, not an empty face.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name="tv-outline"
+                              size={theme.layout.icon.md}
+                              color={theme.semantic.action}
+                            />
+                          </View>
                         ) : (
                           <Avatar
                             size="sm"
@@ -687,7 +741,13 @@ export default function NotificationsScreen() {
                           ) : IMPORT_KINDS.has(row.kind) ? (
                             /* The same headline the push and the import screen use. */
                             <Text variant="callout" numberOfLines={2}>
-                              {verbFor(row.kind)}
+                              {verbFor(
+                                row.kind,
+                                undefined,
+                                undefined,
+                                undefined,
+                                row.importProvider,
+                              )}
                             </Text>
                           ) : row.kind === 'goal_completed' ? (
                             /* "You hit your 2026 Movies goal 🎉" — the founder's copy.
@@ -708,6 +768,39 @@ export default function NotificationsScreen() {
                                 {' '}
                                 🎉
                               </Text>
+                            </Text>
+                          ) : row.kind === 'watchlist_social' ? (
+                            /* "Ravi, Eric and 4 others watched Dune", then "On your
+                             Watchlist" underneath. The people take the emphasis an actor
+                             gets, and the count is read now, so it grows with the row. */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout">{clusterPhrase(row.cluster) ?? 'Friends'}</Text>
+                              <Text
+                                variant="callout"
+                                tone="secondary"
+                              >{` ${sentence.lead}`}</Text>
+                              {sentence.subject ? (
+                                <Text variant="callout">{` ${sentence.subject}`}</Text>
+                              ) : null}
+                            </Text>
+                          ) : row.kind === 'theatrical_release' ? (
+                            /* "Dune: Part Three opens Fri, May 16". The date is rendered
+                             from the payload at read time, so a row opened after the day
+                             says "opened" rather than something untrue. */
+                            <Text variant="callout" numberOfLines={2}>
+                              {sentence.subject ? (
+                                <Text variant="callout">{sentence.subject}</Text>
+                              ) : null}
+                              <Text
+                                variant="callout"
+                                tone="secondary"
+                              >{` ${sentence.tail ?? ''}`}</Text>
+                            </Text>
+                          ) : row.kind === 'season_premiere' ? (
+                            /* "Severance, Season 3", the season alone on the line: the
+                             date it became available is the line under it, read now. */
+                            <Text variant="callout" numberOfLines={2}>
+                              {sentence.subject ?? sentence.lead}
                             </Text>
                           ) : row.kind === 'friendship' && row.mutual ? (
                             /* The mutual acceptance is the other sentence that does not
@@ -814,6 +907,19 @@ export default function NotificationsScreen() {
                           ) : row.kind === 'goal_completed' && row.goal ? (
                             <Text variant="caption" tone="secondary" numberOfLines={1}>
                               {goalAchievement(row.goal.category, row.goal.target)}
+                            </Text>
+                          ) : row.kind === 'watchlist_social' ||
+                            row.kind === 'theatrical_release' ? (
+                            // Why this is for them: they saved it.
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              On your Watchlist
+                            </Text>
+                          ) : row.kind === 'season_premiere' ? (
+                            // When, rather than why: a season premiere is for a reader
+                            // who saved the show or watched the season before, and the
+                            // row does not claim to know which.
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {availablePhrase(row.availableOn) ?? 'Now available in the US'}
                             </Text>
                           ) : null}
                           {row.preview ? (

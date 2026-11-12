@@ -98,7 +98,23 @@ Before the next **preview** binary:
 - [ ] On the next preview build: preview and the store app installed side by side show two
       different icons. **(Founder, on the device.)**
 
-## 3. Not for the binary (recorded so nobody bundles it in)
+## 3. iOS photo-permission text: restore the lowercase brand — REQUIRED, iOS
+
+#241 changed the `expo-image-picker` `photosPermission` string in `app.config.ts` from
+`Bingd uses your photos so you can choose a profile picture.` to
+`bingd uses your photos so you can choose a profile picture.` That string is native
+(`NSPhotoLibraryUsageDescription`), so it moves the runtime fingerprint and cannot ride an
+OTA. For the 2026-11-11 release candidate (#266) it was **temporarily reverted** to the
+`Bingd` text so the RC's JavaScript could ship over the air to the 1.1.0 binaries.
+
+- [ ] In the version-bump PR for the next store binary, set `photosPermission` back to
+      `'bingd uses your photos so you can choose a profile picture.'` (the #241 text).
+- [ ] On the installed build, change the profile picture and read the iOS photo prompt:
+      it says **bingd**.
+
+---
+
+## 4. Not for the binary (recorded so nobody bundles it in)
 
 - The Supabase Auth hourly email ceiling stays at **30/hour** until it is raised as its own
   decision: first the email provider's quota, then the dashboard, then

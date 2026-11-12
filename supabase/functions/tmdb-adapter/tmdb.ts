@@ -608,6 +608,12 @@ export type TmdbPersonCreditEntry = TmdbSearchResult & {
   job?: string | null;
   department?: string | null;
   episode_count?: number | null;
+  /**
+   * TMDB's audience rating for the title (0–10) and how many votes it rests on. Read by
+   * `personCredits` for the person page's TMDB-rating sort, and only ever through
+   * `tmdbScore`, which refuses a rating too thin to mean anything.
+   */
+  vote_average?: number | null;
   vote_count?: number | null;
 };
 

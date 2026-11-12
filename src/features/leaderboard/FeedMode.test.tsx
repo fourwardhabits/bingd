@@ -1313,7 +1313,7 @@ describe('the content header gutter', () => {
  */
 const toPeople = async (view: View) => {
   await fireEvent.press(view.getByLabelText('People'));
-  await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+  await waitFor(() => expect(view.getByLabelText('Discover people')).toBeTruthy());
 };
 
 describe('the People mode', () => {
@@ -1339,8 +1339,13 @@ describe('the People mode', () => {
     const view = await open();
     await toPeople(view);
 
-    expect(view.queryByLabelText('Showing People you may know')).toBeNull();
-    expect(view.getByLabelText('People you may know')).toBeTruthy();
+    expect(view.queryByLabelText('Showing Discover people')).toBeNull();
+    expect(view.getByLabelText('Discover people')).toBeTruthy();
+    // DISCOVER PEOPLE replaced PEOPLE YOU MAY KNOW (founder, UI consistency sprint,
+    // 2026-11-10): the same uppercase Maroon label as the other Feed modes' headings.
+    expect(view.getByText('DISCOVER PEOPLE')).toBeTruthy();
+    expect(view.queryByText('PEOPLE YOU MAY KNOW')).toBeNull();
+    expect(view.queryByLabelText('People you may know')).toBeNull();
   });
 
   it('replaces the content area, Trending and Activity included', async () => {
@@ -1358,7 +1363,7 @@ describe('the People mode', () => {
     await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText('People you may know')).toBeNull();
+    expect(view.queryByLabelText('Discover people')).toBeNull();
   });
 
   it('leaves the bell reachable, like every other mode', async () => {
@@ -1409,7 +1414,7 @@ describe('arriving to find people', () => {
     mockParams = { show: 'people', from: 'onboarding' };
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Discover people')).toBeTruthy());
     expect(mockSetParams).toHaveBeenCalledWith({ show: undefined, from: undefined });
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'people_suggestions_viewed',
@@ -1424,7 +1429,7 @@ describe('arriving to find people', () => {
     mockParams = { show: 'people', from: 'sparse_feed' };
     await view.rerender(<FeedScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Discover people')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'people_suggestions_viewed',
       props: { source: 'sparse_feed', mode: 'mutuals' },
@@ -1538,14 +1543,14 @@ describe('the Feed headings', () => {
     // TRENDING NOW and the others still wrap.
   });
 
-  it('draws the time filter at 14pt and PEOPLE YOU MAY KNOW at 15pt, fitted to its line', async () => {
+  it('draws the time filter at 14pt and DISCOVER PEOPLE at 15pt, fitted to its line', async () => {
     const view = await open();
     await toBoard(view);
     expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText('This month'))).toBe(14);
 
     await toPeople(view);
     // The Feed modes share one heading token (marquee cohesion sprint, 2026-11-07).
-    const people = view.getByText('PEOPLE YOU MAY KNOW');
+    const people = view.getByText('DISCOVER PEOPLE');
     expect(sizeOf(people)).toBe(15);
     expect(people.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
   });

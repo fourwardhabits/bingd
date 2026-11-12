@@ -932,7 +932,7 @@ async function handlePerson(db: Db, personId: number, userId: string) {
     ]),
   );
 
-  const { credits, total, castTotal, crewTotal } = personCredits(detail, genres);
+  const { credits, total, castTotal, crewTotal, coverage } = personCredits(detail, genres);
 
   // Paired by key rather than by index. `storeInOrder` filters out rows that failed
   // to store, so its output is shorter than its input exactly when something went
@@ -955,10 +955,19 @@ async function handlePerson(db: Db, personId: number, userId: string) {
       // Additive. A client that predates the Cast/Crew split reads none of these four.
       crew_role: credit.crewRole,
       self: credit.self,
+      // Additive, 2026-11-11: TMDB's confidence-weighted rating, or null below the vote
+      // threshold. An older client ignores it.
+      tmdb_score: credit.score,
     })),
     credit_total: total,
     cast_total: castTotal,
     crew_total: crewTotal,
+    // Where each sort stops being complete (`KindCoverage`). Its absence is how the
+    // client knows a row was cached before it existed, and says so rather than
+    // presenting a date sort over the popularity caps as the whole career. Omitted too
+    // when a credit failed to store: it is then in neither the list nor the record, and
+    // a record that cannot see a loss must not be the one to say there was none.
+    ...(rows.length === credits.length ? { coverage } : {}),
   });
 
   return { id: personId, written: rows.length, total };

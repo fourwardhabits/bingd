@@ -44,8 +44,16 @@ import { withGrace } from '@/lib/grace';
 import { supabase } from '@/lib/supabase';
 
 import { DEFAULT_LIMITS } from './archive';
+import type { AnyStagingRow } from './payload';
+import { asProvider, type ImportProvider } from './providers';
 import { readArchive, type ArchivePreview, type ReadFailure } from './read-archive';
-import type { StagingRow } from './payload';
+import { readImdbCsv, type ImdbPreview, type ImdbReadReason } from './read-imdb';
+
+/** Either provider's preview. An IMDb one says so; a Letterboxd one predates the field. */
+export type ImportPreview = ArchivePreview | ImdbPreview;
+
+export const isImdbPreview = (preview: ImportPreview): preview is ImdbPreview =>
+  'provider' in preview && preview.provider === 'imdb';
 
 /**
  * What the server says about a job, as `import_status` returns it.
@@ -62,6 +70,11 @@ export type ImportJobStatus = {
     'pending' | 'parsing' | 'matching' | 'preview' | 'applying' | 'done' | 'failed';
   readonly counts: ImportCounts;
   readonly completedAt: string | null;
+  /**
+   * Whose import this job is (20261113000100). Absent from a status the client made up
+   * for itself and from a server older than the column; both read as Letterboxd.
+   */
+  readonly provider?: ImportProvider;
 };
 
 /**
@@ -104,17 +117,36 @@ export type ImportCounts = {
    * it is the only one without a `created_at` test behind it.
    */
   readonly viewings?: number;
+  /**
+   * The IMDb-only buckets (20261113000100). A Letterboxd job never has them.
+   *
+   *   duplicate            two Consts that resolved to one title; counted once
+   *   unsupported          no collection destination (an episode, a game, a whole show)
+   *   unsupported_tv       of which, a whole TV show: matched, not added from IMDb this release
+   *   unsupported_episode  of which, a single episode
+   *   failed               matched, and the write failed
+   */
+  readonly duplicate?: number;
+  readonly unsupported?: number;
+  readonly unsupported_tv?: number;
+  readonly unsupported_episode?: number;
+  readonly failed?: number;
 };
 
 export type ImportFailure =
   /** The archive could not be read. Carries the reason the screen apologises with. */
-  | { readonly kind: 'archive'; readonly reason: ReadFailure['reason'] }
+  | { readonly kind: 'archive'; readonly reason: ReadFailure['reason'] | ImdbReadReason }
   /** A file was handed over and could not even be opened. */
   | { readonly kind: 'unreadable' }
   /** The server refused or the connection went. Recoverable: the job survives. */
   | { readonly kind: 'upload' }
   /** The worker gave up on the job. Not recoverable by retrying the same archive. */
-  | { readonly kind: 'server' }
+  /**
+   * The worker gave up. `status` is the job as it ended, kept so the screen can say whose
+   * import it was (independent review, 2026-11-11: a failed IMDb job reopened from its
+   * notification used to read as Letterboxd and offer the Letterboxd picker).
+   */
+  | { readonly kind: 'server'; readonly status?: ImportJobStatus }
   /**
    * An import for this account is already running, so this one cannot start.
    *
@@ -157,10 +189,10 @@ export type ImportFailure =
 export type ImportPhase =
   | { readonly phase: 'idle' }
   | { readonly phase: 'reading' }
-  | { readonly phase: 'previewing'; readonly preview: ArchivePreview }
+  | { readonly phase: 'previewing'; readonly preview: ImportPreview }
   | {
       readonly phase: 'uploading';
-      readonly preview: ArchivePreview;
+      readonly preview: ImportPreview;
       /** Pages sent so far, so the screen can show real progress rather than a spinner. */
       readonly sent: number;
       readonly total: number;
@@ -170,7 +202,7 @@ export type ImportPhase =
   | {
       readonly phase: 'failed';
       readonly failure: ImportFailure;
-      readonly preview?: ArchivePreview;
+      readonly preview?: ImportPreview;
     };
 
 /** How often the job is asked about while somebody is watching. */
@@ -192,7 +224,8 @@ const POLL_MS = 2_000;
  */
 const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-const failureOutcome = (reason: ReadFailure['reason']): ImportSelectOutcome => reason;
+const failureOutcome = (reason: ReadFailure['reason'] | ImdbReadReason): ImportSelectOutcome =>
+  reason;
 
 /**
  * How long one importer request may hold the screen before it is treated as lost.
@@ -252,12 +285,18 @@ async function stepOrThrow<R extends { error: unknown }>(work: PromiseLike<R>): 
   return outcome;
 }
 
-type JobRow = { status: string; counts: ImportCounts | null; completed_at: string | null };
+type JobRow = {
+  status: string;
+  counts: ImportCounts | null;
+  completed_at: string | null;
+  provider?: string | null;
+};
 
 const asStatus = (row: JobRow): ImportJobStatus => ({
   status: row.status as ImportJobStatus['status'],
   counts: row.counts ?? {},
   completedAt: row.completed_at,
+  ...(row.provider ? { provider: asProvider(row.provider) } : {}),
 });
 
 /**
@@ -333,7 +372,7 @@ async function findLiveJob(): Promise<
     const answer = await bounded(
       supabase
         .from('import_jobs')
-        .select('id, status, counts, completed_at')
+        .select('id, status, counts, completed_at, provider')
         // **Not `.is('completed_at', null)`, which is what this asked for and is why the
         // promise above was only half true.** `_import_settle` writes `status = 'done'` and
         // `completed_at = now()` in one statement, so a finished job never has a null
@@ -385,9 +424,18 @@ const completedRecently = (completedAt: string | null): boolean => {
  * somebody was away reopened under "Your Letterboxd history is in" with its empty counts.
  * That was invisible until a notification started sending people to exactly that job.
  */
+/** The provider of the job a phase is showing, when it shows one and the server said. */
+export const providerOfJob = (state: ImportPhase): ImportProvider | undefined =>
+  state.phase === 'working' || state.phase === 'done'
+    ? state.status.provider
+    : state.phase === 'failed' &&
+        (state.failure.kind === 'already_running' || state.failure.kind === 'server')
+      ? state.failure.status?.provider
+      : undefined;
+
 const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
   status.status === 'failed'
-    ? { phase: 'failed', failure: { kind: 'server' } }
+    ? { phase: 'failed', failure: { kind: 'server', status } }
     : { phase: 'done', status };
 
 /**
@@ -401,10 +449,30 @@ const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
 export function useImport(
   surface: ImportSurface,
   jobId?: string | null,
-  options?: { readonly countOpenOnRequest?: boolean },
+  options?: {
+    readonly countOpenOnRequest?: boolean;
+    /**
+     * Whose file `pick` reads and `start` sends (20261113000100). Letterboxd when absent,
+     * which is every caller that predates the choice. Only the reader and `import_create`
+     * differ; the job, the poll and the summary are the same machine.
+     */
+    readonly provider?: ImportProvider;
+  },
 ) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
+
+  /**
+   * Whose file `pick` reads and `start` sends: the caller's choice, else the provider of the
+   * job on screen (so a failed IMDb job reopened from its notification offers the IMDb file,
+   * independent review 2026-11-11), else Letterboxd.
+   */
+  const provider: ImportProvider = options?.provider ?? providerOfJob(state) ?? 'letterboxd';
+  /** The same, for the poll loop, which must not restart when it changes. */
+  const providerRef = useRef(provider);
+  useEffect(() => {
+    providerRef.current = provider;
+  }, [provider]);
   /** Bumped by `recheck`, so the restore effect asks about the named job again. */
   const [checks, setChecks] = useState(0);
   const jobRef = useRef<string | null>(null);
@@ -554,13 +622,17 @@ export function useImport(
    * the picker's own metadata, before anything is allocated.
    */
   const pickOnce = useCallback(async () => {
+    // Every import event names its provider (2026-11-11), so the funnel splits by service.
+    // Older builds sent it on IMDb's events only, which is why the type keeps it optional
+    // (see `ImportProviderName`).
+    const tagged = { provider } as const;
     settle({ phase: 'reading' });
 
     let bytes: Uint8Array;
     try {
       const picked = await File.pickFileAsync();
       if (picked.canceled) {
-        track({ name: 'import_archive_selected', props: { outcome: 'cancelled' } });
+        track({ name: 'import_archive_selected', props: { outcome: 'cancelled', ...tagged } });
         settle({ phase: 'idle' });
         return;
       }
@@ -571,7 +643,7 @@ export function useImport(
       // nothing, the likely mis-tap is a video out of Photos rather than an exotic attack.
       // `size` costs nothing: the picker has already stat'd the file.
       if (picked.result.size > DEFAULT_LIMITS.maxTotalBytes) {
-        track({ name: 'import_archive_selected', props: { outcome: 'too_large' } });
+        track({ name: 'import_archive_selected', props: { outcome: 'too_large', ...tagged } });
         settle({ phase: 'failed', failure: { kind: 'archive', reason: 'too_large' } });
         return;
       }
@@ -579,7 +651,7 @@ export function useImport(
       await yieldFrame();
       bytes = await picked.result.bytes();
     } catch {
-      track({ name: 'import_archive_selected', props: { outcome: 'unreadable' } });
+      track({ name: 'import_archive_selected', props: { outcome: 'unreadable', ...tagged } });
       settle({ phase: 'failed', failure: { kind: 'unreadable' } });
       return;
     }
@@ -589,7 +661,7 @@ export function useImport(
     // property of that function that a later edit could quietly take away.
     let result;
     try {
-      result = readArchive(bytes);
+      result = provider === 'imdb' ? readImdbCsv(bytes) : readArchive(bytes);
     } catch {
       result = { ok: false, reason: 'unexpected' } as const;
     }
@@ -597,15 +669,15 @@ export function useImport(
     if (!result.ok) {
       track({
         name: 'import_archive_selected',
-        props: { outcome: failureOutcome(result.reason) },
+        props: { outcome: failureOutcome(result.reason), ...tagged },
       });
       settle({ phase: 'failed', failure: { kind: 'archive', reason: result.reason } });
       return;
     }
 
-    track({ name: 'import_archive_selected', props: { outcome: 'ok' } });
+    track({ name: 'import_archive_selected', props: { outcome: 'ok', ...tagged } });
     settle({ phase: 'previewing', preview: result.preview });
-  }, [settle]);
+  }, [settle, provider]);
 
   /**
    * One picker at a time.
@@ -694,7 +766,7 @@ export function useImport(
    * on that index for no gain, and a serial loop is the only way to report honest progress.
    */
   const start = useCallback(
-    async (preview: ArchivePreview) => {
+    async (preview: ImportPreview) => {
       // **One upload at a time.** `Button` has no press guard, so two taps in a frame would
       // otherwise run two staging loops against the same job: their `settle` calls would
       // interleave and make progress jump backwards, and `import_started` would be counted
@@ -728,7 +800,14 @@ export function useImport(
         // Every request below is bounded (`IMPORT_STEP_DEADLINE_MS`): a stall throws, and
         // the `catch` turns it into the refusal that offers Try again, so the buttonless
         // `uploading` screen always ends.
-        const { data: jobId } = await stepOrThrow(supabase.rpc('import_create'));
+        // A Letterboxd import calls `import_create` exactly as it always has; the server's
+        // default is Letterboxd. Only IMDb names itself.
+        const imdb = isImdbPreview(preview);
+        const { data: jobId } = await stepOrThrow(
+          imdb
+            ? supabase.rpc('import_create', { p_provider: 'imdb' })
+            : supabase.rpc('import_create'),
+        );
         if (typeof jobId !== 'string') throw new Error('no job');
         jobRef.current = jobId;
         unconfirmed.current = null;
@@ -758,8 +837,15 @@ export function useImport(
         track({
           name: 'import_started',
           props: {
-            films: preview.rows.length,
-            viewings: preview.normalised.counts.watches,
+            // Movies only. An IMDb file's staged rows include its TV shows, which are
+            // matched to the show and not added to the collection, so `rows.length` would
+            // overcount what this import adds. The shows are counted on their own.
+            films: imdb
+              ? (preview as ImdbPreview).normalised.counts.movies
+              : preview.rows.length,
+            tv_shows: imdb ? (preview as ImdbPreview).normalised.counts.tvShows : 0,
+            viewings: imdb ? 0 : (preview as ArchivePreview).normalised.counts.watches,
+            provider: imdb ? 'imdb' : 'letterboxd',
           },
         });
 
@@ -767,7 +853,7 @@ export function useImport(
           // A lost page is safe to report as a failed upload: `import_rows_once` makes a page
           // that did land free to send again.
           await stepOrThrow(
-            supabase.rpc('import_stage', { p_job_id: jobId, p_rows: page as StagingRow[] }),
+            supabase.rpc('import_stage', { p_job_id: jobId, p_rows: page as AnyStagingRow[] }),
           );
           settle({ phase: 'uploading', preview, sent: index + 1, total: pages.length });
         }
@@ -872,6 +958,8 @@ export function useImport(
         track({
           name: 'import_completed',
           props: {
+            // The job's own provider when the server said, else the screen's.
+            provider: status.provider ?? providerRef.current,
             applied: status.counts.applied ?? 0,
             // `stragglers` counts as unresolved here for the same reason it does on the
             // summary screen: a row nobody placed is unresolved to the person, whatever the
@@ -893,7 +981,7 @@ export function useImport(
         nothingRunning.current = true;
         // Part of it may have landed before the job failed. See the failure copy.
         invalidateAfterImport(queryClient);
-        settle({ phase: 'failed', failure: { kind: 'server' } });
+        settle({ phase: 'failed', failure: { kind: 'server', status } });
         return;
       }
 
@@ -921,11 +1009,19 @@ export function useImport(
    * denominator into the step's impressions. See `import_opened` in `lib/analytics.ts`.
    */
   const openedRef = useRef(false);
-  const opened = useCallback(() => {
-    if (openedRef.current) return;
-    openedRef.current = true;
-    track({ name: 'import_opened', props: { surface } });
-  }, [surface]);
+  /**
+   * @param which The service just chosen, when the open is counted on the choice itself:
+   *   the chooser calls this in the same tap that sets the choice, before `provider` has
+   *   caught up with it.
+   */
+  const opened = useCallback(
+    (which?: ImportProvider) => {
+      if (openedRef.current) return;
+      openedRef.current = true;
+      track({ name: 'import_opened', props: { surface, provider: which ?? provider } });
+    },
+    [surface, provider],
+  );
   const countOpenOnRequest = options?.countOpenOnRequest === true;
   useEffect(() => {
     if (!countOpenOnRequest) opened();
@@ -966,5 +1062,15 @@ export function useImport(
   /** Whether an import may be running for this account. See `nothingRunning`. */
   const mayBeRunning = useCallback(() => !nothingRunning.current, []);
 
-  return { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } as const;
+  return {
+    state,
+    provider,
+    pick,
+    start,
+    reset,
+    watchRunning,
+    recheck,
+    opened,
+    mayBeRunning,
+  } as const;
 }

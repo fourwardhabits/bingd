@@ -18,6 +18,31 @@ const ICON_BOX = 32;
 /** The word `Ranked` in `headline` at the default text size, as rendered. */
 const RANKED_LABEL = 63;
 
+/**
+ * One character of `headline` at the default text size, from `Ranked`'s measured width.
+ * The labels this control now carries (TV show & season ranking, 2026-11-14) are longer
+ * than the two it was measured for, so the fit is estimated from the label rather than
+ * from the wider of `Rank` and `Ranked`.
+ */
+const HEADLINE_CHAR = RANKED_LABEL / 'Ranked'.length;
+
+/**
+ * **The label may grow with the reader's text size up to this, then fits itself to the
+ * row** (TV show & season ranking, 2026-11-14). `Rank Season` and `Log rewatch` are twice
+ * `Rank`, and the cluster is one row at every width now: beyond 1.5x the label is scaled
+ * down to fit rather than wrapping the icons under it or being cut. 1.5x of `headline` is
+ * still a 25pt word; the floor below keeps it at least 0.7 of that.
+ */
+export const RANK_LABEL_MAX_SCALE = 1.5;
+const RANK_LABEL_MIN_FIT = 0.7;
+
+/** The words this control can say, unranked, by kind (brief §8). */
+export const RANK_LABEL = {
+  movie: 'Rank Movie',
+  series: 'Rank Show',
+  season: 'Rank Season',
+} as const;
+
 /** What around the word does not scale: padding, the tick, its gap, the border, the margin. */
 const RANK_CHROME = theme.space[3] * 2 + theme.layout.icon.sm + theme.space[2] + 2 + theme.space[1];
 
@@ -26,18 +51,22 @@ const RANK_CHROME = theme.space[3] * 2 + theme.layout.icon.sm + theme.space[2] +
  *
  * Decided from the viewport and never from `flexWrap` (design-system.md §8). Left to wrap,
  * a 375pt phone orphaned the last glyph on a line of its own. Always measured against
- * `Ranked`, the wider of the two words, so a title does not change layout the moment it is
- * ranked. A series has no rank control and always fits.
+ * `Ranked`, or the label the control will actually say, so a title does not change layout
+ * the moment it is ranked. Every kind has a rank control since 2026-11-14: a film, a whole
+ * show and a season are each rankable in their own pool.
  */
 export function titleActionsFit(
   columnWidth: number,
   fontScale: number,
-  { rank, icons }: { rank: boolean; icons: number },
+  { rank, icons, label }: { rank: boolean; icons: number; label?: string },
 ): boolean {
   const glyphs = icons * (ICON_BOX + theme.space[1]);
-  // Only the word grows with the text size. Scaling the whole control would underestimate it
-  // below 100%, which is exactly where the last glyph used to get stranded.
-  return (rank ? RANK_CHROME + RANKED_LABEL * fontScale : 0) + glyphs <= columnWidth;
+  // Only the word grows with the text size, and only to the cap the label renders with.
+  // Scaling the whole control would underestimate it below 100%, which is exactly where
+  // the last glyph used to get stranded.
+  const word = label ? label.length * HEADLINE_CHAR : RANKED_LABEL;
+  const scale = Math.min(fontScale, RANK_LABEL_MAX_SCALE);
+  return (rank ? RANK_CHROME + word * scale : 0) + glyphs <= columnWidth;
 }
 
 export type RankAction = {
@@ -48,24 +77,25 @@ export type RankAction = {
   accessibilityHint?: string;
   /**
    * Unranked: the log sheet, where a band is chosen and a first ranking begins.
-   * Ranked: the ranking-options menu.
+   * Ranked: the ranking-options menu, or on the immersive page the rewatch sheet.
    *
    * **This control never chooses between the three ranking intents itself.** Adjusting a
    * placement and declaring a rewatch are different things with different consequences,
-   * and the menu is where a reader says which they mean (PRD §10, `20260826000500`). A
-   * control that guessed would be the founder's Terrace House bug rebuilt.
+   * and the reader says which they mean — in the menu, or by a label that names exactly
+   * one of them (PRD §10, `20260826000500`). A control that guessed would be the founder's
+   * Terrace House bug rebuilt.
    */
   onPress: () => void;
   /**
-   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Edit
-   * ranking* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
+   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Log
+   * rewatch* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
    * exactly as it always has.
    */
   label?: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   /**
-   * The smaller, secondary form — the immersive page's *Edit ranking*, where the reader's
-   * score is the emphasis and this is only the way back into the sheet (Cinematic
+   * The smaller, secondary form — the immersive page's *Log rewatch*, where the reader's
+   * score is the emphasis and this is the way into another viewing (Cinematic
    * Editorial brief, §2). Visually 36pt with a quieter label; the touch target stays 44pt
    * through its slop. Absent everywhere else, so every other Rank is unchanged.
    */
@@ -87,7 +117,7 @@ export type IconAction = {
 };
 
 export type TitleActionsProps = {
-  /** Absent for a series, which cannot be ranked (PRD §10). */
+  /** Present for every kind since 2026-11-14 (a whole show is rankable in its own pool). */
   rank: RankAction | null;
   /** The watchlist bookmark. Every kind of title has one. */
   save: IconAction;
@@ -97,7 +127,7 @@ export type TitleActionsProps = {
    * rather than sitting behind the page's ⋯.
    */
   list?: IconAction | null;
-  /** Absent for a series, which cannot be recommended (PRD §10). */
+  /** Present for every kind since 2026-11-14, the same capabilities as a film's. */
   recommend: IconAction | null;
   /**
    * `paper`, the default, is the original page: Ink glyphs on Paper. `artwork` is the
@@ -176,7 +206,7 @@ export function TitleActions({
   return (
     <View testID="title-actions" style={styles.cluster}>
       {rank ? (
-        <Animated.View style={rankPress.pressStyle}>
+        <Animated.View style={[styles.rankWrap, rankPress.pressStyle]}>
           <Pressable
             testID={rank.ranked ? 'title-action-ranked' : 'title-action-rank'}
             accessibilityRole="button"
@@ -207,13 +237,18 @@ export function TitleActions({
                   : theme.semantic.actionText
               }
             />
-            {/* One line, always. The button is content-sized with a ceiling, so the only
-              way the label could break is at a text size where it meets that ceiling —
-              and a two-line `Ranked` is a control that has changed shape rather than a
-              label that has grown. */}
+            {/* One line, always, and never cut: past `RANK_LABEL_MAX_SCALE` the word fits
+              itself to the row instead (2026-11-14). A two-line `Rank Season` is a control
+              that has changed shape rather than a label that has grown, and a wrapped
+              cluster is two rows where the founder asked for one. */}
             <Text
               variant={rank.compact ? 'subhead' : 'headline'}
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={RANK_LABEL_MIN_FIT}
+              maxFontSizeMultiplier={RANK_LABEL_MAX_SCALE}
+              style={styles.rankLabel}
+              testID="title-action-rank-label"
               tone={rank.ranked && !onArtwork ? 'action' : 'inverse'}
             >
               {rank.label ?? (rank.ranked ? 'Ranked' : 'Rank')}
@@ -346,12 +381,17 @@ const styles = StyleSheet.create({
    * `align-items: center` rather than `stretch`, so the two 44pt icon boxes and the
    * label-sized button share a centre line whatever the label does at large type.
    */
+  /**
+   * **One row, at every width and text size** (TV show & season ranking, 2026-11-14):
+   * Rank / Log rewatch · Watchlist · Add to List · Recommend. The icons keep their fixed
+   * boxes, so their targets never shrink; the labelled control is the one that gives,
+   * by fitting its word (above), never by pushing a glyph onto a second line.
+   */
   cluster: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: theme.space[1],
-    rowGap: theme.space[2],
   },
   rank: {
     flexDirection: 'row',
@@ -399,14 +439,19 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.semantic.action,
   },
-  /** Edit ranking on the artwork: a quiet outline, so Rank stays the only filled control. */
+  /** Log rewatch on the artwork: a quiet outline, so Rank stays the only filled control. */
   rankedOnArtwork: {
     backgroundColor: paperAlpha(0.08),
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: paperAlpha(0.5),
   },
   badgeOnArtwork: { backgroundColor: brand.ink },
-  rankOnArtwork: { flexShrink: 0, maxWidth: '100%' },
+  // On the artwork card the control may take the whole row, but it still gives width back
+  // to the icons beside it: they stay on this line (2026-11-14).
+  rankOnArtwork: { flexShrink: 1, maxWidth: '100%' },
+  rankLabel: { flexShrink: 1 },
+  /** The press-scale wrapper gives width back with the control inside it. */
+  rankWrap: { flexShrink: 1, minWidth: 0 },
   rankCompact: {
     minHeight: theme.layout.minTapTarget - 8,
     paddingHorizontal: theme.space[2] + 2,

@@ -83,7 +83,7 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, back: jest.fn() }),
   useLocalSearchParams: () => ({ id: mockPersonId }),
   Stack: { Screen: () => null },
 }));
@@ -194,7 +194,7 @@ describe('a person as a discovery surface', () => {
     const view = await open();
 
     expect(view.queryByText(/in your catalogue/i)).toBeNull();
-    expect(view.getByLabelText('Known for')).toBeTruthy();
+    expect(view.getByLabelText('Filmography')).toBeTruthy();
   });
 
   it('says who they are before it says what they did', async () => {
@@ -449,14 +449,38 @@ describe('the reader’s own state on somebody else’s work', () => {
     await waitFor(() => expect(view.getByText('Watched')).toBeTruthy());
   });
 
-  it('claims nothing about a series, which is logged one season at a time', async () => {
-    // "Watched" against a whole show would be a claim the data does not make: a
-    // user_media row is per media item, and a series is never one of them.
+  // Since 20261114000200 a whole show ranks in its own pool and is logged like a film, so
+  // its credit row says what the show's title page says (RC review, 2026-11-11). Before,
+  // this asserted "nothing about a series", which a ranked show made a contradiction.
+  it('marks a show they have ranked as a show', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'loved',
+        media_items: items[2],
+      },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
+  });
+
+  it('marks a show they have logged as a show but not ranked', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'series-1' }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Watched')).toBeTruthy());
+  });
+
+  it('claims nothing about a show they have not logged', async () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Growing Pains (1985)')).toBeTruthy());
     expect(view.queryByText('Watched')).toBeNull();
+    expect(view.queryByText('Ranked')).toBeNull();
   });
 
   it('saves a title to the watchlist from the row', async () => {

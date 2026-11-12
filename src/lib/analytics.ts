@@ -4,6 +4,8 @@ import { Platform } from 'react-native';
 import { env } from './env';
 import { releaseContext } from './release';
 
+import type { NotificationKind } from '@/features/notifications/use-notifications';
+
 /**
  * Product analytics, against a first-party event schema (decision log §24).
  *
@@ -50,8 +52,16 @@ import { releaseContext } from './release';
 // Common property vocabularies
 // ---------------------------------------------------------------------------
 
-/** A film or one season of a show. A series is neither — it is not loggable (AD-1). */
-export type MediaKind = 'movie' | 'tv_season';
+/**
+ * A film, one season of a show, or a whole show. `tv_series` joined on 2026-11-14, when a
+ * whole show became rankable in its own pool (20261114000200); it is the word the list
+ * events already used for a whole series, so the two vocabularies agree.
+ */
+export type MediaKind = 'movie' | 'tv_season' | 'tv_series';
+
+/** The analytics word for a catalogue kind. */
+export const mediaKindFor = (kind: 'movie' | 'season' | 'series'): MediaKind =>
+  kind === 'season' ? 'tv_season' : kind === 'series' ? 'tv_series' : 'movie';
 
 /**
  * Where in the app the action was taken.
@@ -859,6 +869,24 @@ export type AnalyticsEvent =
    */
   | { name: 'profile_social_link_opened'; props: { network: SocialLinkNetwork } }
 
+  // --- Notifications ----------------------------------------------------------
+  /**
+   * A notification was opened: a push tapped from the lock screen or notification centre,
+   * or a row tapped in the inbox (2026-10-28, proactive notifications).
+   *
+   * The kind and the channel, and whether it was one of the proactive kinds — nothing
+   * about who or which title. The per-notification record (which candidate, where it
+   * led, and what the reader did with the title afterwards) is server-side in
+   * `notification_opens`, where it can be joined to the ledger without any of it ever
+   * reaching a vendor.
+   */
+  | {
+      name: 'notification_opened';
+      // `kind` is the closed NotificationKind vocabulary, validated before `track`: a
+      // payload's free text can never reach the vendor under it.
+      props: { kind: NotificationKind; channel: 'push' | 'inbox'; proactive: boolean };
+    }
+
   // --- Weekly streak --------------------------------------------------------
   /**
    * The streak section was drawn on the reader's own profile, with what it said.
@@ -900,8 +928,13 @@ export type AnalyticsEvent =
    * step's impressions and the two surfaces incomparable. It fires when somebody presses
    * *Import from Letterboxd* or asks how to get the file; the step's own exposure is
    * `onboarding_step_completed` with `step: 'letterboxd'`.
+   *
+   * **On the choice of service, too** (2026-11-11). Settings ▸ Import from opens on the
+   * choice between Letterboxd and IMDb, and an open counted before the choice could only
+   * guess the provider. It is counted when a service is chosen, or when the screen shows
+   * an import that is already running (whose provider is the job's).
    */
-  | { name: 'import_opened'; props: { surface: ImportSurface } }
+  | { name: 'import_opened'; props: { surface: ImportSurface; provider?: ImportProviderName } }
   /**
    * The "how to export from Letterboxd" instructions were opened.
    *
@@ -910,7 +943,10 @@ export type AnalyticsEvent =
    * with a file is invisible to us, so the ratio of this to `import_archive_selected` is
    * the only read available on whether the hand-off works.
    */
-  | { name: 'import_instructions_opened'; props: { surface: ImportSurface } }
+  | {
+      name: 'import_instructions_opened';
+      props: { surface: ImportSurface; provider?: ImportProviderName };
+    }
   /**
    * A file came back from the picker and was read — or could not be.
    *
@@ -924,7 +960,10 @@ export type AnalyticsEvent =
    * **No filename, no path, no size.** A filename is somebody's own words and often their
    * username; the archive is named after their account.
    */
-  | { name: 'import_archive_selected'; props: { outcome: ImportSelectOutcome } }
+  | {
+      name: 'import_archive_selected';
+      props: { outcome: ImportSelectOutcome; provider?: ImportProviderName };
+    }
   /**
    * The preview was accepted and the upload began.
    *
@@ -932,8 +971,20 @@ export type AnalyticsEvent =
    * the diary entries attached to them — two numbers that say how big a real import is,
    * which is the thing nobody currently knows and which every bound in the pipeline was
    * guessed against.
+   *
+   * **`films` is movies only** (2026-11-11). An IMDb file also stages its TV shows, which
+   * are matched to the show and not added, so they are counted apart as `tv_shows`
+   * (always 0 for Letterboxd, whose archive holds films only).
    */
-  | { name: 'import_started'; props: { films: number; viewings: number } }
+  | {
+      name: 'import_started';
+      props: {
+        films: number;
+        tv_shows: number;
+        viewings: number;
+        provider?: ImportProviderName;
+      };
+    }
   /**
    * The job reached `done` while somebody was still watching.
    *
@@ -947,7 +998,10 @@ export type AnalyticsEvent =
    * place — because a completion rate that ignores it would call an import that matched
    * nothing a success.
    */
-  | { name: 'import_completed'; props: { applied: number; unresolved: number } }
+  | {
+      name: 'import_completed';
+      props: { applied: number; unresolved: number; provider?: ImportProviderName };
+    }
 
   // --- Lists ---------------------------------------------------------------
   /**
@@ -1160,7 +1214,23 @@ export type ImportSelectOutcome =
    * what one job may hold. A non-zero count here is either a library nobody anticipated or
    * a client producing rows it should not.
    */
-  | 'too_many_films';
+  | 'too_many_films'
+  /**
+   * The IMDb reader's refusals (20261113000100): a ZIP picked on the IMDb screen, a CSV that
+   * is not an IMDb ratings export, an IMDb list or watchlist export, and a ratings export
+   * holding only types bingd has no destination for (episodes, games).
+   */
+  | 'is_zip'
+  | 'not_imdb'
+  | 'imdb_list'
+  | 'nothing_supported';
+
+/**
+ * Whose export an import event is about. Sent on every import event since 2026-11-11;
+ * optional on the events so an event from a build that predates it (Letterboxd's sent
+ * none, IMDb's sent it on some) still reads as what it was.
+ */
+export type ImportProviderName = 'letterboxd' | 'imdb';
 
 /** Which People list. The server's own two, so the event and the chip are one vocabulary. */
 export type PeopleSuggestionMode = 'mutuals' | 'match';
@@ -1247,6 +1317,8 @@ export const ANALYTICS_EVENTS = [
   // 2026-09-15, the five optional links on a profile header. One name for the whole
   // feature, because the count is the whole question.
   'profile_social_link_opened',
+  // 2026-10-28, proactive notifications: a push or an inbox row opened.
+  'notification_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -1405,6 +1477,16 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'applied',
   'unresolved',
   /**
+   * The IMDb import (2026-11-11). `provider` is one of two words, `letterboxd` or `imdb`
+   * (`ImportProviderName`): whose export, never whose account. `tv_shows` is a count of
+   * the shows an IMDb file held, beside `films`, never a title.
+   *
+   * **`provider` was declared on the IMDb events and never allowed**, so `sanitize` had
+   * been dropping it: until this line no import event could be split by service.
+   */
+  'provider',
+  'tv_shows',
+  /**
    * Which profile link was opened (2026-09-15, `profile_social_link_opened`).
    *
    * Five words and nothing else. The handle and the URL are deliberately *not* here and
@@ -1414,6 +1496,9 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
    * a record of who looked at whom.
    */
   'network',
+  // `notification_opened` (2026-10-28): push or inbox, and whether the kind is proactive.
+  'channel',
+  'proactive',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

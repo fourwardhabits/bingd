@@ -490,16 +490,16 @@ titles as A, so do that early: it is what makes Match calculable at all.
 
 - [ ] Open a title you have ranked and tap the **Ranked** chip. The menu reads:
       `YOUR LOG` — write/edit review, add/edit private note, who I watched with ·
-      `RANKING` — **★ Update your rating**, **↻ Log another watch** ·
+      `RANKING` — **★ Edit ranking** (labelled *Update your rating* before 2026-11-11), **↻ Log another watch** ·
       `COLLECTION` — Remove from collection.
 - [ ] ⚠ **There is no *Rank it again* row and no *Change your rating* row** (consolidated
       2026-09-08). Two rows in `RANKING`, not three.
 - [ ] **No row has a grey sentence beside its label.** This is the finding: every one of
       them truncated at phone width. If any row shows clipped grey text, it has come back.
 
-### Update your rating keeps your score
+### Edit ranking keeps your score
 
-- [ ] Note the score and the position of a ranked film. Tap **Update your rating**, then
+- [ ] Note the score and the position of a ranked film. Tap **Edit ranking**, then
       choose **the band it is already in** — this is the same-watch correction, and it is
       the path the retired *Rank it again* row used to take in one tap.
 - [ ] ⚠ **The score must still be there.** Before this pass it disappeared the moment the
@@ -515,7 +515,7 @@ titles as A, so do that early: it is what makes Match calculable at all.
 ### One activity per watch
 
 - [ ] Open **Feed** on B (who follows A). Count A's `ranked` entries for one film.
-- [ ] On A, **Update your rating** on that film — pick the same band, finish the
+- [ ] On A, **Edit ranking** on that film — pick the same band, finish the
       comparisons. Refresh B's feed. ⚠ **No new entry.** Repeat twice more: still none.
 - [ ] On A, change it to a *different* band and finish. Still **no new entry**.
 - [ ] On A, use **Log another watch** and finish. ⚠ **Exactly one** new entry, and only
@@ -666,13 +666,13 @@ the next iOS candidate. Nothing here touches the backend.
 
 ### The Ranked menu is two rows
 
-Covered in *The Ranked menu* above; the short version is **★ Update your rating** and
+Covered in *The Ranked menu* above; the short version is **★ Edit ranking** and
 **↻ Log another watch**, and nothing else in `RANKING`.
 
-- [ ] **Update your rating → the same band → finish.** ⚠ The position may move; **no new
+- [ ] **Edit ranking → the same band → finish.** ⚠ The position may move; **no new
       feed entry** appears on a follower's device. This is the same-watch correction, and
       it is the capability the removed *Rank it again* row used to reach in one tap.
-- [ ] **Update your rating → a different band → finish.** Still ⚠ **no new feed entry**.
+- [ ] **Edit ranking → a different band → finish.** Still ⚠ **no new feed entry**.
 - [ ] **Log another watch → finish.** ⚠ **Exactly one** new entry.
 
 ### For You's header and controls

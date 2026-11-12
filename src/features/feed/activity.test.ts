@@ -219,7 +219,12 @@ describe('the standardised subheading', () => {
     ).toBe('PG-13 · Science Fiction');
 
     expect(
-      activityMetadata({ kind: 'movie', certification: 'PG-13', runtimeMinutes: null, genres: [] }),
+      activityMetadata({
+        kind: 'movie',
+        certification: 'PG-13',
+        runtimeMinutes: null,
+        genres: [],
+      }),
     ).toBe('PG-13');
   });
 
@@ -241,7 +246,12 @@ describe('the standardised subheading', () => {
 
   it('renders nothing at all rather than an empty line', () => {
     expect(
-      activityMetadata({ kind: 'movie', certification: null, runtimeMinutes: null, genres: [] }),
+      activityMetadata({
+        kind: 'movie',
+        certification: null,
+        runtimeMinutes: null,
+        genres: [],
+      }),
     ).toBeNull();
     expect(activityMetadata({ kind: null })).toBeNull();
   });
@@ -267,5 +277,25 @@ describe('watchLabel', () => {
     expect(watchLabel(11)).toBe('11th watch');
     expect(watchLabel(21)).toBe('21st watch');
     expect(watchLabel(112)).toBe('112th watch');
+  });
+});
+
+/**
+ * **A TV ranking update** (20261114000300): a standalone re-ranking of a show or a season
+ * that moved it posts a `title_ranked` marked `update`, and reads as an update rather than
+ * as a second first ranking. Nothing else changes its verb.
+ */
+describe('a TV ranking update', () => {
+  it('reads "updated their ranking of" on an update, and "ranked" otherwise', () => {
+    expect(verbFor('title_ranked', { update: true })).toBe('updated their ranking of');
+    expect(verbFor('title_ranked', { update: false })).toBe('ranked');
+    expect(verbFor('title_ranked')).toBe('ranked');
+  });
+
+  it('never changes another type’s verb', () => {
+    for (const type of ACTIVITY_TYPES) {
+      if (type === 'title_ranked') continue;
+      expect(verbFor(type, { update: true })).toBe(verbFor(type));
+    }
   });
 });

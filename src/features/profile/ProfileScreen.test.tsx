@@ -20,6 +20,8 @@ const mockTables: Record<string, unknown[]> = {};
 const mockFailing = new Set<string>();
 /** Reads served per table, so a retry can be shown to have re-issued a real request. */
 const mockReads: Record<string, number> = {};
+/** Every other RPC the screen made, in order — a reaction, for one. */
+const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 // Recorded, because where the gear leads is a decision this screen makes.
 const mockPush = jest.fn();
 
@@ -33,7 +35,10 @@ jest.mock('@/lib/supabase', () => ({
      * reader, and the fallback tests below are about that request.
      */
     rpc: (name: string, args: { p_user?: string } = {}) => {
-      if (name !== 'profile_title_counts') return Promise.resolve({ data: null, error: null });
+      if (name !== 'profile_title_counts') {
+        mockRpcCalls.push({ name, args });
+        return Promise.resolve({ data: null, error: null });
+      }
       mockReads[name] = (mockReads[name] ?? 0) + 1;
       if (mockFailing.has('rankings') || mockFailing.has(name)) {
         return Promise.resolve({ data: null, error: { message: 'offline' } });
@@ -601,6 +606,55 @@ describe('recent activity', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText(/That’s the end of the list/)).toBeTruthy());
+  });
+
+  /**
+   * **You can react to yourself, here too** (founder, 2026-11-11). Every row on your own
+   * profile is yours, and each offers the heart as the Feed does; your reaction is
+   * counted and named with everybody else's (`use-reactions.ts`, the one rule the Feed
+   * uses), and a tap saves it through `set_reaction`.
+   */
+  it('offers a reaction on your own rows, and counts yours with other people’s', async () => {
+    mockTables.feed_events = [activity('e1', 'user-1', 'Sai')];
+    const reactor = (id: string, name: string) => ({
+      feed_event_id: 'e1',
+      user_id: id,
+      kind: 'love',
+      created_at: '2026-08-16T00:00:00Z',
+      profiles: { id, display_name: name, username: name.toLowerCase(), avatar_path: null },
+    });
+    mockTables.reactions = [reactor('user-1', 'Sai'), reactor('priya', 'Priya')];
+
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('You and Priya like this. See who reacted.')).toBeTruthy(),
+    );
+    const mine = view.getByLabelText(/You reacted to/);
+    mockRpcCalls.length = 0;
+    fireEvent.press(mine);
+    // Pressed while reacted, so the toggle takes it back: the ordinary writer, no refusal.
+    await waitFor(() =>
+      expect(mockRpcCalls.find((call) => call.name === 'set_reaction')?.args).toMatchObject({
+        p_feed_event_id: 'e1',
+        p_kind: null,
+      }),
+    );
+  });
+
+  it('offers the heart on your own row nobody has reacted to', async () => {
+    mockTables.feed_events = [activity('e1', 'user-1', 'Sai')];
+    mockTables.reactions = [];
+    const view = await open();
+    const heart = await waitFor(() => view.getByLabelText(/^React to/));
+    mockRpcCalls.length = 0;
+    fireEvent.press(heart);
+    await waitFor(() =>
+      expect(mockRpcCalls.find((call) => call.name === 'set_reaction')?.args).toMatchObject({
+        p_feed_event_id: 'e1',
+        p_kind: 'love',
+      }),
+    );
   });
 
   it('says so when there is none, rather than leaving a bare heading', async () => {

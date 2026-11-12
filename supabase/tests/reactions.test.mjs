@@ -226,6 +226,7 @@ describe('the row belongs to whoever wrote it', () => {
     // There is no user parameter, which is the point: the only identity the
     // function will write is auth.uid(). A caller cannot react as someone else
     // because there is nowhere to say who.
+    // Alice's own event: her reaction to it is an ordinary one (20261115000100).
     const event = await eventOf(alice, await movie('react_ownership'));
     await t.actAs(alice);
     await react(event, 'funny');
@@ -301,10 +302,17 @@ describe('what the activity owner is told', () => {
     assert.equal(rows[0].n, 1);
   });
 
-  it('says nothing about reacting to your own activity', async () => {
-    const event = await eventOf(bob, await movie('react_own'));
-    await react(event, 'love');
+  it('says nothing about reacting to your own activity, which is saved', async () => {
+    // Alice, because she opted into reaction notifications above: for anybody else the
+    // preference trigger would drop the row, and a zero would prove the fixture rather
+    // than the rule (20260816000200: an author is never notified of their own reaction).
+    const event = await eventOf(alice, await movie('react_own'));
+    await t.actAs(alice);
+    const result = await react(event, 'love');
+    await t.actAs(bob);
 
+    assert.equal(result.kind, 'love');
+    assert.deepEqual(await reactionsOn(event), [{ user_id: alice, kind: 'love' }]);
     const { rows } = await t.sql(`select count(*)::int as n from notifications where subject_id = $1`, [
       event,
     ]);

@@ -1265,10 +1265,10 @@ const LIST_BODY = `        <div id="list" class="list" hidden>
  */
 const SHOWCASE = `      <div class="showcase" aria-hidden="false">
         <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1430"
-             alt="A bingd. collection of ranked series, each with a score out of ten." />
+             alt="A bingd collection of ranked series, each with a score out of ten." />
         <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="989"
              loading="lazy"
-             alt="Two films side by side in bingd., under the question which did you like more." />
+             alt="Two films side by side in bingd, under the question which did you like more." />
       </div>`;
 
 /**
@@ -2844,7 +2844,7 @@ const LANDING_STYLES = `
         /* The reservation has to carry the safe-area inset, because the bar does.
            5.5rem flat left the bar overlapping the last 22px of the footer on any
            phone with a home indicator, and more than that when a two-line label
-           ("Get bingd. on Google Play" at 320pt) makes the button taller. */
+           ("Get bingd on Google Play" at 320pt) makes the button taller. */
         body:has(.sticky a.button:not([hidden])) {
           padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
         }
@@ -2883,49 +2883,49 @@ const SHOT = {
     src: '/shot-compare.webp',
     w: 640,
     h: 1269,
-    alt: 'The bingd. ranking sheet asking which did you like more, You Can See Everything or Inception',
+    alt: 'The bingd ranking sheet asking which did you like more, You Can See Everything or Inception',
   },
   score: {
     src: '/shot-score.webp',
     w: 640,
     h: 1269,
-    alt: 'The score a bingd. ranking lands on, 9.8 for You Can See Everything, in the sheet shown after ranking',
+    alt: 'The score a bingd ranking lands on, 9.8 for You Can See Everything, sixth in Movies and just below Inglourious Basterds',
   },
   comments: {
     src: '/shot-comments.webp',
     w: 640,
     h: 1285,
-    alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
+    alt: 'A bingd comment thread under a ranking of The Witcher, season one, with names and faces blurred',
   },
   movies: {
     src: '/shot-movies.webp',
     w: 640,
     h: 1270,
-    alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
+    alt: 'A ranked bingd movie collection as a grid of posters, each one carrying its own score out of ten',
   },
   tv: {
     src: '/shot-tv.webp',
     w: 640,
     h: 1271,
-    alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
+    alt: 'A ranked bingd TV collection as a grid of posters, each season carrying its own score out of ten',
   },
   feed: {
     src: '/shot-feed.webp',
     w: 640,
     h: 1271,
-    alt: 'The bingd. feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
+    alt: 'The bingd feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
   },
   recommended: {
     src: '/shot-recommended.webp',
     w: 640,
     h: 1271,
-    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
+    alt: 'The bingd For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to You, Find for a Group and Filters',
   },
   grouppicks: {
     src: '/shot-grouppicks.webp',
     w: 640,
     h: 1285,
-    alt: 'The bingd. Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
+    alt: 'The bingd Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
   },
 };
 
@@ -3092,8 +3092,8 @@ const AVAILABILITY = [
  * which is how the front page came to advertise one store on the day there were two.
  */
 const PUBLIC_STORES = [
-  ['iOS', distribution.ios?.storeUrl, 'Get bingd. on the App Store'],
-  ['Android', distribution.android?.storeUrl, 'Get bingd. on Google Play'],
+  ['iOS', distribution.ios?.storeUrl, 'Get bingd on the App Store'],
+  ['Android', distribution.android?.storeUrl, 'Get bingd on Google Play'],
 ].filter(([, url]) => url);
 
 /**

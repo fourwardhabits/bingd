@@ -305,7 +305,10 @@ describe('the push', () => {
 
     assert.ok(byType.import_started, 'the actorless start survives the claim');
     assert.equal(byType.import_started.import_job_id, jobId);
-    assert.equal(byType.import_started.import_counts, null);
+    // 20261113000100: every import push carries its payload now, so the sender can name
+    // the provider ("IMDb import started"). A start has no summary in it, only the job.
+    assert.equal(byType.import_started.import_counts.provider, 'letterboxd');
+    assert.equal(byType.import_started.import_counts.watched, undefined);
 
     assert.ok(byType.import_completed, 'the actorless completion survives the claim');
     assert.equal(byType.import_completed.import_job_id, jobId);

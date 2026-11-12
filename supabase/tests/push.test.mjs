@@ -137,9 +137,12 @@ describe('register_device_token', () => {
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'public' and p.proname = 'register_device_token'
     `);
+    // 20261028000100 added a fourth argument, and it is a build's capability version, not
+    // an identity: the owner is still auth.uid() and nothing else. Exactly one signature
+    // remains — the three-argument form was dropped, not left beside it.
     assert.deepEqual(
       rows.map((r) => r.signature.replace(/^public\./, '').replace(/,\s+/g, ',')),
-      ['register_device_token(uuid,text,text)'],
+      ['register_device_token(uuid,text,text,integer)'],
     );
   });
 
@@ -415,6 +418,8 @@ describe('the outbox is filled by notifications and by nothing else', () => {
   });
 
   it('queues every push-eligible kind', async () => {
+    // Reactions default off since 20261031000100: this reader has chosen them.
+    await t.asUser(reader, () => t.sql(`select set_notification_preference('reactions', true)`));
     for (const type of [
       'follow',
       'follow_request',
@@ -478,7 +483,9 @@ describe('the outbox is filled by notifications and by nothing else', () => {
     const { rows } = await t.sql(`select count(*)::int as n from push_outbox`);
     assert.equal(rows[0].n, 0, 'a suppressed notification was queued for push');
 
-    // The control, in the same shape, for an account that changed nothing.
+    // The control, in the same shape, for an account that chose them on (reactions
+    // default off since 20261031000100, so an untouched account would prove nothing).
+    await t.asUser(control, () => t.sql(`select set_notification_preference('reactions', true)`));
     const delivered = await notify(control, 'reaction');
     assert.ok(delivered, 'the control account did not receive one either -- fixture is wrong');
     assert.ok(await outboxFor(delivered), 'the control account was not queued');
@@ -1060,6 +1067,7 @@ describe('deleting an account takes its push state with it', () => {
 describe('claim_push_batch carries the comment, when it may', () => {
   let movie;
   let event;
+  let nextTmdb = 70000;
 
   const eventOf = async (who, mediaItemId) => {
     const { rows } = await t.sql(
@@ -1086,7 +1094,7 @@ describe('claim_push_batch carries the comment, when it may', () => {
     await clearTokens();
     await t.sql(`delete from notifications`);
     await register(reader, TOKEN(70), 'ios');
-    movie = await t.createMovie(`Excerpted ${Date.now()}`, 70000 + Math.floor(Math.random() * 1000));
+    movie = await t.createMovie(`Excerpted ${Date.now()}`, nextTmdb++);
     event = await eventOf(reader, movie);
   });
 

@@ -86,7 +86,10 @@ jest.mock('@/lib/supabase', () => ({
           error: mockScoreError,
         });
       }
-      return Promise.resolve({ data: mockNoteError ? null : mockNoteRows, error: mockNoteError });
+      return Promise.resolve({
+        data: mockNoteError ? null : mockNoteRows,
+        error: mockNoteError,
+      });
     },
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
@@ -541,7 +544,12 @@ describe('the note attached to an activity', () => {
     // that belongs to neither event. Matching on both halves is what stops one
     // person's note appearing under another person's activity.
     mockNoteRows = [
-      { user_id: 'user-1', media_item_id: 'film-2', note: 'wrong pairing', has_spoilers: false },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-2',
+        note: 'wrong pairing',
+        has_spoilers: false,
+      },
       { user_id: 'friend', media_item_id: 'film-2', note: 'the right one', has_spoilers: true },
     ];
 
@@ -590,7 +598,12 @@ describe('a watchlist add in the feed', () => {
       event({ id: 'watch-2', type: 'watchlist_added', payload: {} }),
     ];
     mockNoteRows = [
-      { user_id: 'user-1', media_item_id: 'film-1', note: 'Best of the year.', has_spoilers: false },
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        note: 'Best of the year.',
+        has_spoilers: false,
+      },
     ];
 
     const [ranked, saved] = await load();
@@ -855,8 +868,7 @@ const nth = (n: number, over: Record<string, unknown> = {}) =>
   });
 
 /** A full page of distinct rows, which is what tells the reader there may be more. */
-const fullPage = (from = 0) =>
-  Array.from({ length: FEED_PAGE_SIZE }, (_, i) => nth(from + i));
+const fullPage = (from = 0) => Array.from({ length: FEED_PAGE_SIZE }, (_, i) => nth(from + i));
 
 const feedRead = (n: number) => {
   const read = mockFeedReads[n];
@@ -1173,7 +1185,9 @@ describe('a page that fails', () => {
     const { feed, items } = await open();
 
     await act(async () => {
-      await feed().fetchNextPage().catch(() => {});
+      await feed()
+        .fetchNextPage()
+        .catch(() => {});
     });
     await waitFor(() => expect(feed().isError).toBe(true));
 
@@ -1185,7 +1199,9 @@ describe('a page that fails', () => {
     mockFeedQueue = [{ rows: fullPage() }, { error: { message: 'network' } }];
     const { feed, items } = await open();
     await act(async () => {
-      await feed().fetchNextPage().catch(() => {});
+      await feed()
+        .fetchNextPage()
+        .catch(() => {});
     });
     await waitFor(() => expect(feed().isError).toBe(true));
 
@@ -1497,7 +1513,7 @@ describe('a rewatch keeps each post at its own viewing', () => {
         ...(watch ? { again: true, watch_event_id: watch } : {}),
       },
     });
-  // The current opinion, after a later Update your rating.
+  // The current opinion, after a later Edit ranking.
   const current = {
     user_id: 'user-1',
     media_item_id: 'film-1',
@@ -1532,7 +1548,44 @@ describe('a rewatch keeps each post at its own viewing', () => {
 
   it('does not duplicate posts', async () => {
     mockFeedRows = [posted('post-2', 8.3, 'loved', 'w2'), posted('post-1', 9.0, 'loved')];
-    mockWatchScoreRows = [{ event_id: 'post-2', score: '8.3', bucket: 'loved', watch_number: 2 }];
+    mockWatchScoreRows = [
+      { event_id: 'post-2', score: '8.3', bucket: 'loved', watch_number: 2 },
+    ];
     expect(await load()).toHaveLength(2);
+  });
+});
+
+/**
+ * **Shows and TV updates in the feed** (TV show & season ranking, 2026-11-14). A show's
+ * ranking is an ordinary `title_ranked` in category `tv_shows`; a standalone TV re-ranking
+ * that moved the title carries `update: true`. Neither changes anything else about a row.
+ */
+describe('a show, and a TV ranking update, in the feed', () => {
+  it('carries a show ranking and its category through unchanged', async () => {
+    mockFeedRows = [
+      event({
+        media_item_id: 'show-1',
+        payload: { position: 2, category: 'tv_shows', bucket: 'loved', score: 9.1 },
+        media_items: { ...media, kind: 'series', title: 'Shameless', runtime_minutes: null },
+      }),
+    ];
+    const item = await only();
+    expect(item).toMatchObject({ kind: 'series', category: 'tv_shows', update: false });
+  });
+
+  it('marks an update post, and only a title_ranked one', async () => {
+    mockFeedRows = [
+      event({
+        payload: {
+          position: 4,
+          category: 'tv_seasons',
+          bucket: 'fine',
+          score: 5.2,
+          update: true,
+        },
+        media_items: { ...media, kind: 'season', title: 'Season 4' },
+      }),
+    ];
+    expect((await only()).update).toBe(true);
   });
 });

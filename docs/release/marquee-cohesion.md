@@ -52,6 +52,8 @@ for, and what is left before production.
   the same sheet as Filter & Sort did, sort first. `Rating ↓` is no longer printed beside it; the
   sheet marks the sort in force and the spoken label says it ("Sorted by Rating, highest
   first"). Shuffle's reshuffle glyph still appears beside it while Shuffle is the sort.
+  *(Superseded 2026-11-10: the reshuffle glyph is removed; pressing Shuffle in the sheet
+  reshuffles and closes it. See PRD, the Collection sort table.)*
 - **It scrolls.** The toolbar, the unranked or refine card and the count row (`25 titles` with
   `My lists ›`) are the head of the list now (FlashList's header, and `PosterGridList`'s new
   full-width header), so the posters get the screen back. The app header and the tab bar stay
@@ -219,7 +221,8 @@ Relaunch once after the update. Cinematic title page: Labs → Cinematic.
    view, filters and sort.
 3. **Filters:** opens the sheet with the sort first and the current sort marked. Choose a
    genre and Apply: the button reads `Filters · 1` in Maroon. Shuffle: the reshuffle glyph
-   appears beside Filters.
+   appears beside Filters. *(Superseded 2026-11-10: no glyph; Shuffle in the sheet reshuffles
+   and closes it.)*
 4. **For You:** Recommended ▾ the same size and colour as Watched ▾, Filters opposite; Sent to
    You and Find for a Group smaller and quieter; both still work. Top Rated hides them. The
    toolbar scrolls away with the wall.

@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { BackHandler, StyleSheet, type TextStyle } from 'react-native';
+import { Alert, BackHandler, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -33,6 +33,8 @@ let mockWatched: { media_item_id: string }[] = [];
 let mockReactions: unknown[] = [];
 type MockFn = (input: unknown) => unknown;
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
+const mockFromLog: string[] = [];
+const mockFromCalls = (table: string) => mockFromLog.filter((name) => name === table).length;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -45,6 +47,7 @@ jest.mock('@/lib/supabase', () => ({
       return Promise.resolve({ data, error: null });
     },
     from: (table: string) => {
+      mockFromLog.push(table);
       const chain: Record<string, unknown> = {};
       const result = () => {
         if (table === 'follows') {
@@ -362,6 +365,33 @@ describe('comments on the card', () => {
 });
 
 describe('the actions', () => {
+  /**
+   * **The server's refusal of a self-reaction, through the real writer** (20261110000100).
+   * Dead-safe handling: self-reactions are allowed (founder, 2026-11-11) and a server with
+   * 20261115000100 never refuses one, but one that has 20261110000100 alone does. The
+   * reader is told plainly, nothing crashes, and the reactions are read again.
+   */
+  it('says a refused self-reaction calmly, and reads the reactions again', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockRpc.set_reaction = Object.assign(new Error('cannot react to your own activity'), {
+      code: '42501',
+    });
+    const view = await renderWithProviders(<FeedScreen />);
+    const like = await waitFor(() => view.getByTestId('feed-card-like'));
+    const reads = mockFromCalls('reactions');
+
+    fireEvent.press(like);
+
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'));
+    expect(alert).not.toHaveBeenCalledWith('Could not save your reaction', expect.anything());
+    await waitFor(() => expect(mockFromCalls('reactions')).toBeGreaterThan(reads));
+    // Still a Like to press, and nothing claims a reaction that was never stored.
+    expect(view.getByTestId('feed-card-like')).toBeTruthy();
+    expect(within(view.getByTestId('feed-card-like')).getByText('Like')).toBeTruthy();
+    alert.mockRestore();
+  });
+
   it('likes on a tap, and opens the six on a long press', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     const view = await renderWithProviders(<FeedScreen />);
@@ -419,7 +449,11 @@ describe('the actions', () => {
       { feed_event_id: 'e1', user_id: 'priya', kind: 'funny', profiles: { id: 'priya', username: 'priyan', display_name: 'Priya', avatar_path: null } },
     ];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByLabelText('2 reactions. See who reacted.')).toBeTruthy());
+    // Mixed kinds, so "reacted" rather than "like this"; with nothing to rank them by,
+    // the tie falls to the id, which is stable.
+    await waitFor(() =>
+      expect(view.getByLabelText('Priya and 1 other reacted. See who reacted.')).toBeTruthy(),
+    );
   });
 
   /**
@@ -442,14 +476,14 @@ describe('the actions', () => {
     expect(view.getByText('Like')).toBeTruthy();
   });
 
-  it('says 1 reaction, in the singular, with its glyph and no line under it', async () => {
+  it('names the one person who reacted, with their glyph and no line under it', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'wow')];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
-    expect(within(summary).getByText('1 reaction')).toBeTruthy();
+    expect(within(summary).getByText('THEO reacted')).toBeTruthy();
     expect(within(summary).getByText('😮', { includeHiddenElements: true })).toBeTruthy();
-    expect(summary.props.accessibilityLabel).toBe('1 reaction. See who reacted.');
+    expect(summary.props.accessibilityLabel).toBe('THEO reacted. See who reacted.');
     // The summary and the actions are one group: nothing is drawn between them.
     expect(view.queryByTestId('feed-card-social-divider')).toBeNull();
   });
@@ -465,7 +499,7 @@ describe('the actions', () => {
     ];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
-    expect(within(summary).getByText('5 reactions')).toBeTruthy();
+    expect(within(summary).getByText('ANA and 4 others reacted')).toBeTruthy();
     const glyphs = within(summary)
       .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
       .map((node) => node.props.children);
@@ -483,7 +517,7 @@ describe('the actions', () => {
       .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
       .map((node) => node.props.children);
     expect(glyphs[0]).toBe('😮');
-    expect(within(summary).getByText('3 reactions')).toBeTruthy();
+    expect(within(summary).getByText('You, PRIYA and 1 other reacted')).toBeTruthy();
 
     const like = view.getByTestId('feed-card-like');
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
@@ -539,7 +573,7 @@ describe('the actions', () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
-    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions-line'));
     const gutter = theme.layout.gutter;
     expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
     for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-save', 'feed-card-share']) {
@@ -575,8 +609,118 @@ describe('the actions', () => {
   it('offers no Save on the reader’s own activity', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' })];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByTestId('feed-card-like')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('feed-card-comment')).toBeTruthy());
     expect(view.queryByTestId('feed-card-save')).toBeNull();
+  });
+
+  /**
+   * **You can react to your own post** (founder, 2026-11-11; 20261115000100). On the
+   * reader's own post the Like is drawn as on any other, a reaction saves through the
+   * ordinary writer with no alert, and it is counted and named the ordinary way.
+   */
+  describe('on the reader’s own post', () => {
+    const own = () =>
+      event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' });
+
+    it('offers the Like, and draws no summary when nobody has reacted', async () => {
+      mockRows = [own()];
+      const view = await renderWithProviders(<FeedScreen />);
+      const like = await waitFor(() => view.getByTestId('feed-card-like'));
+      expect(within(like).getByText('Like')).toBeTruthy();
+      expect(view.queryByTestId('feed-card-reactions')).toBeNull();
+    });
+
+    it('saves the reader’s reaction, with no alert, and counts and names it', async () => {
+      const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      mockRows = [own()];
+      mockReactions = [reactor('priya', 'love')];
+      const view = await renderWithProviders(<FeedScreen />);
+      await waitFor(() =>
+        expect(view.getByLabelText('PRIYA likes this. See who reacted.')).toBeTruthy(),
+      );
+
+      // The server's answer to the next read; `useSetReaction` invalidates, so it is read.
+      mockReactions = [reactor('priya', 'love'), reactor('user-1', 'love')];
+      fireEvent.press(view.getByTestId('feed-card-like'));
+
+      await waitFor(() =>
+        expect(view.getByLabelText('You and PRIYA like this. See who reacted.')).toBeTruthy(),
+      );
+      expect(mockRpcCalls.find((call) => call.name === 'set_reaction')?.args).toMatchObject({
+        p_feed_event_id: 'e1',
+        p_kind: 'love',
+      });
+      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      expect(alert).not.toHaveBeenCalled();
+      alert.mockRestore();
+    });
+
+    it('offers the picker on a long press', async () => {
+      mockRows = [own()];
+      const view = await renderWithProviders(<FeedScreen />);
+      const like = await waitFor(() => view.getByTestId('feed-card-like'));
+      expect(view.queryByLabelText(/Wow/)).toBeNull();
+      fireEvent(like, 'longPress');
+      await waitFor(() => expect(view.getByLabelText(/Wow/)).toBeTruthy());
+    });
+
+    it('counts and names a self-reaction from before the rule, and lists it', async () => {
+      mockRows = [own()];
+      mockReactions = [reactor('user-1', 'love'), reactor('priya', 'love')];
+      const view = await renderWithProviders(<FeedScreen />);
+      const summary = await waitFor(() =>
+        view.getByLabelText('You and PRIYA like this. See who reacted.'),
+      );
+      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      fireEvent.press(summary);
+      await waitFor(() =>
+        expect(view.getByLabelText('PRIYA, Liked. Open their profile.')).toBeTruthy(),
+      );
+    });
+  });
+
+  it('says "like this" only when every reaction is a like', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love'), reactor('priya', 'love'), reactor('ana', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() =>
+      expect(view.getByLabelText('ANA and 2 others like this. See who reacted.')).toBeTruthy(),
+    );
+  });
+
+  it('draws the Like the same size whether it is set or not', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER), event('e2', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('user-1', 'wow')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const [set, unset] = await waitFor(() => {
+      const likes = view.getAllByTestId('feed-card-like');
+      expect(within(likes[0]!).getByText('Wow')).toBeTruthy();
+      expect(within(likes[1]!).getByText('Like')).toBeTruthy();
+      return likes;
+    });
+    const slot = (like: typeof set) =>
+      StyleSheet.flatten(within(like!).getByTestId('reaction-slot').props.style);
+
+    expect(slot(set)).toEqual(slot(unset));
+    expect(slot(unset).width).toBe(theme.layout.icon.sm);
+  });
+
+  it('names the reader once their reaction is saved and the read comes back', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
+
+    // The server's answer to the next read; `useSetReaction` invalidates, so it is read.
+    mockReactions = [reactor('theo', 'love'), reactor('user-1', 'love')];
+    fireEvent.press(view.getByTestId('feed-card-like'));
+    await waitFor(() =>
+      expect(view.getByLabelText('You and THEO like this. See who reacted.')).toBeTruthy(),
+    );
+
+    mockReactions = [reactor('theo', 'love')];
+    fireEvent.press(view.getByTestId('feed-card-like'));
+    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
   });
 
   it('opens the title from the artwork', async () => {

@@ -243,6 +243,122 @@ describe('read is something the reader does', () => {
     expect(view.getByLabelText(/^Unread./)).toBeTruthy();
   });
 });
+
+/**
+ * The proactive rows (20261028000100). Both are actorless on the server, so neither may
+ * be dropped for having no actor, and neither may draw a blank face.
+ */
+describe('proactive rows', () => {
+  const proactiveRow = (overrides: Record<string, unknown>) =>
+    follow({
+      id: 'p1',
+      actor_id: null,
+      actor_username: null,
+      actor_display_name: null,
+      media_item_id: 'dune',
+      media_title: 'Dune',
+      media_kind: 'movie',
+      subject_type: 'media_item',
+      subject_id: 'dune',
+      ...overrides,
+    });
+
+  it('names the friends in a cluster, counts the rest, and says why it is for the reader', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        kind: 'watchlist_social',
+        type: 'watchlist_social',
+        cluster_count: 6,
+        cluster_actors: [
+          { username: 'ravi', display_name: 'Ravi', avatar_path: null },
+          { username: 'eric', display_name: 'Eric', avatar_path: null },
+          { username: 'mo', display_name: 'Mo', avatar_path: null },
+        ],
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Ravi, Eric and 4 others')).toBeTruthy());
+    expect(view.getByText('On your Watchlist')).toBeTruthy();
+    const label = /Ravi, Eric and 4 others watched Dune\. On your Watchlist/;
+    expect(view.getByLabelText(label)).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText(label));
+    expect(mockPush).toHaveBeenCalledWith('/title/dune');
+  });
+
+  it('draws a film opening with its date, read now', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        kind: 'theatrical_release',
+        type: 'theatrical_release',
+        payload: { opens_on: '2099-05-15' },
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/opens Fri, May 15/)).toBeTruthy());
+    expect(view.getByText('On your Watchlist')).toBeTruthy();
+  });
+
+  /**
+   * 20261031000100. The season's own row: the show and the season spelled out, the US date
+   * under it, and a tap that opens the season rather than the show.
+   */
+  const premiereRow = (payload: Record<string, unknown>, overrides: Record<string, unknown> = {}) =>
+    proactiveRow({
+      kind: 'season_premiere',
+      type: 'season_premiere',
+      media_item_id: 'severance-s3',
+      media_title: 'Season 3',
+      media_kind: 'season',
+      series_title: 'Severance',
+      subject_id: 'severance-s3',
+      payload: { candidate_id: 'c1', region: 'US', ...payload },
+      ...overrides,
+    });
+
+  it('draws a new season with the date it became available, and opens that season', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(premiereRow({ available_on: '2026-05-15', season_number: 3 }));
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Severance, Season 3')).toBeTruthy());
+    expect(view.getByText('Available in the US from May 15')).toBeTruthy();
+    // Not claimed as saved: the reader may only have watched the season before.
+    expect(view.queryByText('On your Watchlist')).toBeNull();
+    const label = /Severance, Season 3\. Available in the US from May 15/;
+    expect(view.getByLabelText(label)).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText(label));
+    expect(mockPush).toHaveBeenCalledWith('/title/severance-s3');
+  });
+
+  it('names a season by its own title when the payload has no number', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      premiereRow({ available_on: '2026-05-15' }, { media_title: 'The Final Chapter' }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Severance, The Final Chapter')).toBeTruthy());
+    expect(view.getByText('Available in the US from May 15')).toBeTruthy();
+  });
+
+  it('never draws a social row with nobody left in it, or a resurfacing row at all', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        id: 'gone',
+        kind: 'watchlist_social',
+        type: 'watchlist_social',
+        cluster_count: 0,
+        cluster_actors: [],
+      }),
+      proactiveRow({ id: 'hidden', kind: 'watchlist_resurface', type: 'watchlist_resurface' }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Nothing yet')).toBeTruthy());
+  });
+});
 /**
  * **The row a brand-new account opens Bingd to.**
  *
@@ -1069,6 +1185,21 @@ describe('a Letterboxd import', () => {
     // Spoken as the headline alone: an actorless row has no name to template in.
     expect(view.getByLabelText(new RegExp(`^Unread\. ${headline}$`))).toBeTruthy();
     expect(view.queryByText(/null|match/i)).toBeNull();
+  });
+
+  it.each([
+    ['import_started', 'IMDb import started'],
+    ['import_completed', 'Your IMDb history is ready'],
+    ['import_failed', 'We couldn’t finish your IMDb import'],
+  ])('names IMDb on %s when the payload says so (20261113000100)', async (kind, headline) => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      importRow(kind, { id: `${kind}-imdb`, payload: { job_id: 'job-9', provider: 'imdb' } }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(headline)).toBeTruthy());
+    expect(view.queryByText(/Letterboxd/)).toBeNull();
   });
 
   it('opens the exact job it is about when tapped with the app open', async () => {

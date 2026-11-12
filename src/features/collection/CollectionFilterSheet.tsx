@@ -40,13 +40,15 @@ export type CollectionFilterSheetProps<Axis extends string = string> = {
    *
    * It applies as it always did: on the press, with no Apply. The sheet stays open so the
    * reader sees the order change and can press the same axis again to reverse it; only the
-   * filters below wait for Apply, because only they ever did.
+   * filters below wait for Apply, because only they ever did. **Shuffle is the exception**
+   * (approved spec, 2026-11-10): it has nothing to reverse, so the caller closes the sheet
+   * from `onChange` / `onRepeatUndirected` and the reader sees the new order at once.
    */
   sort?: {
     axes: readonly SortAxisSpec<Axis>[];
     value: SortState<Axis>;
     onChange: (next: SortState<Axis>) => void;
-    /** Pressing Shuffle while on it reshuffles. */
+    /** Pressing Shuffle while on it reshuffles; it stays enabled, with a hint saying so. */
     onRepeatUndirected?: () => void;
   };
 };

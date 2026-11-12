@@ -1,4 +1,4 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -25,6 +25,8 @@ const mockTables: Record<string, unknown[]> = {};
 /** Tables whose read fails, and a counter proving a retry re-issued the request. */
 const mockFailing = new Set<string>();
 const mockReads: Record<string, number> = {};
+/** How long a table's read takes to answer, in ms: a slow server, for the open-menu race. */
+const mockDelayMs: Record<string, number> = {};
 /**
  * RPC answers by function name. Unset answers null, which the backlog and Refine reads
  * parse as `disabled` — the flags-off world every test before the unified design assumes.
@@ -48,10 +50,15 @@ jest.mock('@/lib/supabase', () => ({
         limit: () => chain,
         then: (resolve: (value: unknown) => unknown) => {
           mockReads[table] = (mockReads[table] ?? 0) + 1;
-          return Promise.resolve(
+          const answer = () =>
             mockFailing.has(table)
               ? { data: null, error: { code: '08006', message: 'connection failure' } }
-              : { data: mockTables[table] ?? [], error: null },
+              : { data: mockTables[table] ?? [], error: null };
+          const delay = mockDelayMs[table] ?? 0;
+          return (
+            delay > 0
+              ? new Promise((done) => setTimeout(() => done(answer()), delay))
+              : Promise.resolve(answer())
           ).then(resolve);
         },
       };
@@ -182,6 +189,7 @@ beforeEach(() => {
   mockTables.watchlist = [];
   mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
+  for (const key of Object.keys(mockDelayMs)) delete mockDelayMs[key];
 });
 
 type View = Awaited<ReturnType<typeof renderWithProviders>>;
@@ -768,6 +776,61 @@ describe('the unranked card', () => {
 });
 
 /**
+ * **The marquee's menu stays open when the section under it finishes loading** (2026-11-11).
+ *
+ * Loading and failed sections used to draw a toolbar of their own, and the list drew
+ * another once the titles landed: a Watched ▾ menu opened while Watchlist was still on its
+ * way closed by itself when it arrived. Every state is drawn in the one list now
+ * (`CollectionView`'s `placeholder`). The watchlist answers 400ms after it is asked.
+ */
+describe('a section that lands under an open menu', () => {
+  // Hidden from assistive tech on purpose (`SkeletonRow`), so asked for explicitly.
+  const skeletons = (view: View) =>
+    view.queryAllByTestId('skeleton', { includeHiddenElements: true });
+
+  it('leaves the menu open, on the same marquee', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockTables.watchlist = [
+      { media_item_id: 'w1', created_at: '2026-11-01T00:00:00Z', media_items: watched('w1', 'movie').media_items },
+    ];
+    mockDelayMs.watchlist = 400;
+    const view = await open();
+    await waitFor(() => expect(skeletons(view)).toHaveLength(0));
+
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(skeletons(view).length).toBeGreaterThan(0));
+    expect(shown(view)).toBe('Watchlist');
+
+    await fireEvent.press(menu(view));
+    await view.findByRole('menuitem', { name: 'Watched' });
+    expect(skeletons(view).length).toBeGreaterThan(0);
+
+    // The watchlist arrives while the menu is open.
+    await waitFor(() => expect(skeletons(view)).toHaveLength(0), {
+      timeout: 3000,
+    });
+    expect(view.getByTestId('collection-count')).toBeTruthy();
+    expect(view.getByRole('menuitem', { name: 'Watched' })).toBeTruthy();
+    expect(menu(view).props.accessibilityState).toMatchObject({ expanded: true });
+
+    // And the choice still lands.
+    await fireEvent.press(view.getByRole('menuitem', { name: 'Watched' }));
+    await waitFor(() => expect(shown(view)).toBe('Watched'));
+  });
+
+  it('keeps the marquee and the way to the lists while a section loads', async () => {
+    mockDelayMs.watchlist = 400;
+    const view = await open();
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(skeletons(view).length).toBeGreaterThan(0));
+    expect(view.getByTestId('collection-toolbar')).toBeTruthy();
+    expect(view.getByTestId('collection-my-lists')).toBeTruthy();
+    // The tools act on titles, so they wait for some.
+    expect(view.queryByTestId('collection-filter-sort')).toBeNull();
+  });
+});
+
+/**
  * **A Collection that failed to load could not be asked again.**
  *
  * The three panes each render `EmptyState kind="couldNotLoad"` on error, which is the
@@ -805,6 +868,22 @@ describe('when a collection read fails', () => {
    * The distinction the fix must not blur: an empty collection is a fact about the
    * account and is still drawn as one.
    */
+  /**
+   * **Centred in the room the list would have had** (independent review, 2026-11-11). The
+   * state is drawn in the list's header now, where `EmptyState`'s `flex: 1` has nothing to
+   * fill, so it is given a minimum height from the window instead of sitting pinned under
+   * the toolbar.
+   */
+  it('centres a failed or empty section in the page, not pinned under the toolbar', async () => {
+    mockFailing.add('rankings');
+    const view = await renderWithProviders(<CollectionScreen />);
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+    const fill = StyleSheet.flatten(view.getByTestId('collection-state-fill').props.style);
+    expect(fill.justifyContent).toBe('center');
+    expect(fill.minHeight).toBeGreaterThan(300);
+    expect(within(view.getByTestId('collection-state-fill')).getByText('Could not load')).toBeTruthy();
+  });
+
   it('still tells an empty collection apart from a broken one', async () => {
     const view = await renderWithProviders(<CollectionScreen />);
 

@@ -555,8 +555,13 @@ export type PersonCreditEntry = {
    * out of the Cast half unless it is all the person has.
    */
   self: boolean;
-  /** The provider's own relevance signal, and the only ordering this list has. */
+  /** The provider's own relevance signal, and the order the list is stored in. */
   popularity: number;
+  /**
+   * TMDB's audience rating, confidence-weighted (`tmdbScore`), or null where it rests on
+   * too few votes to rank. What the person page's TMDB-rating sort orders by.
+   */
+  score: number | null;
 };
 
 /**
@@ -586,6 +591,131 @@ export type PersonCreditEntry = {
 const MAX_CAST_CREDITS = 60;
 const MAX_CREW_CREDITS = 30;
 const MAX_SELF_CREDITS = 10;
+
+/**
+ * **The ends of each half, kept whatever their popularity** (person page sorting,
+ * 2026-11-11).
+ *
+ * The popularity caps above answer "what are they known for", and they are why a sort by
+ * date over what was kept could not be trusted: an actor's newest film is rarely yet
+ * among their sixty most popular, and their first bit part never is. So each half also
+ * keeps its newest, its oldest and its best-rated credits, a handful of each, on top of
+ * the popularity slots — most of the time they are already in them, and the cost is a
+ * few extra catalogue rows on a prolific career, never a second provider request.
+ *
+ * What these slots do not do is make a sort over a capped half complete. `coverage`
+ * does the honest part: it records where each sort stops being able to promise every
+ * credit, and the page says so at exactly that point.
+ */
+const CAST_EDGES = { newest: 10, oldest: 5, rated: 5 } as const;
+const CREW_EDGES = { newest: 5, oldest: 3, rated: 3 } as const;
+
+/**
+ * Below this many votes a TMDB rating does not rank (person page, 2026-11-11).
+ *
+ * Per kind, because the two are rated by different audiences in different numbers: a
+ * well-known series collects far fewer votes than a well-known film. A title under its
+ * threshold is not given a low score — it is given none, and sorts after every rated
+ * credit, in popularity order. That is what keeps a film with two votes of 10 from
+ * heading the list above somebody's established work.
+ */
+const MIN_VOTES = { movie: 100, series: 50 } as const;
+
+/**
+ * The prior each kind's rating is pulled towards, roughly TMDB's mean for well-voted
+ * titles of that kind. Television's audience rates higher, and a shared prior would
+ * hand every thinly voted series a lift over a film with the same evidence.
+ */
+const RATING_PRIOR = { movie: 6.5, series: 7.0 } as const;
+
+/**
+ * TMDB's rating, weighted by how much evidence it rests on, or null.
+ *
+ * The standard Bayesian average — `(v·R + m·C) / (v + m)` with `m` the kind's
+ * `MIN_VOTES` and `C` its `RATING_PRIOR` — so a title that only just clears the
+ * threshold sits halfway between its own rating and the prior, and one with thousands
+ * of votes is its own rating. Rounded to three places: it is stored in the cache, and
+ * the client compares it with `coverage`'s cut-off, which must be the same number.
+ */
+export function tmdbScore(
+  kind: 'movie' | 'series',
+  average: number | null | undefined,
+  votes: number | null | undefined,
+): number | null {
+  if (typeof average !== 'number' || !Number.isFinite(average)) return null;
+  if (typeof votes !== 'number' || !Number.isFinite(votes) || votes < MIN_VOTES[kind]) return null;
+  const m = MIN_VOTES[kind];
+  const weighted = (votes * average + m * RATING_PRIOR[kind]) / (votes + m);
+  return Math.round(weighted * 1000) / 1000;
+}
+
+/**
+ * Where one kind of credit in one half stops being complete, per sort.
+ *
+ * Every field describes the credits that were **not** kept. `newest` is the date of the
+ * newest dropped credit, so every credit dated after it is in the cache and a
+ * newest-first list is complete down to that date; `oldest` mirrors it; `rated` is the
+ * best score among dropped credits. `undated` and `unrated` say whether the tail a sort
+ * puts last — credits with no date, or no score — lost anything. All null and false
+ * means nothing of this kind was dropped, and every sort over it is the whole list.
+ */
+export type KindCoverage = {
+  newest: string | null;
+  oldest: string | null;
+  undated: boolean;
+  rated: number | null;
+  unrated: boolean;
+};
+
+/** Per half, as the client draws them: performances, appearances, crew work. */
+export type PersonCoverage = Record<
+  'cast' | 'self' | 'crew',
+  Record<'movie' | 'series', KindCoverage>
+>;
+
+/** A half's newest, oldest and best-rated credits, by its own counts. */
+function edgesOf(
+  entries: PersonCreditEntry[],
+  counts: { newest: number; oldest: number; rated: number },
+): PersonCreditEntry[] {
+  // `sort` is stable and `entries` arrive in popularity order, so a tie on date or score
+  // is broken towards the better-known credit.
+  const dated = entries.filter((entry) => entry.row.release_date);
+  const byDate = (a: PersonCreditEntry, b: PersonCreditEntry) =>
+    (a.row.release_date as string).localeCompare(b.row.release_date as string);
+  const newest = [...dated].sort((a, b) => byDate(b, a)).slice(0, counts.newest);
+  const oldest = [...dated].sort(byDate).slice(0, counts.oldest);
+  const rated = entries
+    .filter((entry) => entry.score !== null)
+    .sort((a, b) => (b.score as number) - (a.score as number))
+    .slice(0, counts.rated);
+  return [...newest, ...oldest, ...rated];
+}
+
+/** What a half lost, per kind. See `KindCoverage`. */
+function coverageOf(
+  entries: PersonCreditEntry[],
+  kept: Set<PersonCreditEntry>,
+): Record<'movie' | 'series', KindCoverage> {
+  const of = (kind: 'movie' | 'series'): KindCoverage => {
+    const dropped = entries.filter((entry) => entry.row.kind === kind && !kept.has(entry));
+    const dates = dropped
+      .map((entry) => entry.row.release_date)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const scores = dropped
+      .map((entry) => entry.score)
+      .filter((score): score is number => score !== null);
+    return {
+      newest: dates.length ? dates[dates.length - 1] : null,
+      oldest: dates.length ? dates[0] : null,
+      undated: dropped.some((entry) => !entry.row.release_date),
+      rated: scores.length ? Math.max(...scores) : null,
+      unrated: dropped.some((entry) => entry.score === null),
+    };
+  };
+  return { movie: of('movie'), series: of('series') };
+}
 
 /** How many distinct crew jobs one title's `crewRole` names before it stops. */
 const MAX_CREW_JOBS = 3;
@@ -656,14 +786,21 @@ const precedence = (entry: { as: 'cast' | 'crew'; self: boolean }) =>
  * for a list that deliberately mixes both, so a missing one drops the row. Nothing else:
  * a self-appearance is flagged, not dropped.
  *
- * CAPS. Applied to each half separately, after the merge — see `MAX_CAST_CREDITS`. What
+ * CAPS. Applied to each half separately, after the merge — see `MAX_CAST_CREDITS` — with
+ * each half's newest, oldest and best-rated credits kept on top (`CAST_EDGES`). What
  * survives is returned in one list in popularity order, one entry per title, which is
- * the shape every client already reads.
+ * the shape every client already reads; `coverage` says what each sort lost to the caps.
  */
 export function personCredits(
   detail: TmdbPersonDetail,
   genreNames: Map<number, string>,
-): { credits: PersonCreditEntry[]; total: number; castTotal: number; crewTotal: number } {
+): {
+  credits: PersonCreditEntry[];
+  total: number;
+  castTotal: number;
+  crewTotal: number;
+  coverage: PersonCoverage;
+} {
   const cast = detail.combined_credits?.cast ?? [];
   const crew = detail.combined_credits?.crew ?? [];
 
@@ -696,6 +833,9 @@ export function personCredits(
       crewRole: null,
       self: as === 'cast' && isSelfAppearance(entry),
       popularity: entry.popularity ?? 0,
+      // A property of the title, not of the pairing — every entry for one title carries
+      // the same rating — so whichever entry wins the title brings the right one.
+      score: tmdbScore(row.kind, entry.vote_average, entry.vote_count),
     };
 
     const held = best.get(key);
@@ -738,11 +878,15 @@ export function personCredits(
 
   const kept = new Set([
     ...performances.slice(0, MAX_CAST_CREDITS),
+    ...edgesOf(performances, CAST_EDGES),
     ...appearances.slice(0, MAX_SELF_CREDITS),
     ...crewKept,
+    ...edgesOf(crewWork, CREW_EDGES),
   ]);
 
   return {
+    // Still one list in popularity order: an edge slot is stored where its popularity
+    // puts it, so the default order a client draws is the one it always drew.
     credits: ordered.filter((entry) => kept.has(entry)),
     total: ordered.length,
     // Performances only: the number the Cast half's caption states.
@@ -750,6 +894,11 @@ export function personCredits(
     // Titles with any crew job, including the ones an acting credit won — the same set
     // the Crew half of the page draws from.
     crewTotal: crewWork.length,
+    coverage: {
+      cast: coverageOf(performances, kept),
+      self: coverageOf(appearances, kept),
+      crew: coverageOf(crewWork, kept),
+    },
   };
 }
 
