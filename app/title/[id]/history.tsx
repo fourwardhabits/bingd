@@ -27,6 +27,7 @@ import { formatWatchDate } from '@/features/collection/dates';
 import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
 import {
   groupByYear,
+  historySpan,
   labelFor,
   scoresByWatch,
   type WatchEvent,
@@ -336,12 +337,15 @@ export default function WatchHistoryScreen() {
     );
 
   const count = events.length;
-  const dated = ordered.filter((event) => event.watchedOn).map((event) => event.watchedOn!);
-  /** `First Mar 4, 2024 · Latest Oct 12, 2026`, for two or more dated watches. */
-  const span =
-    count >= 2 && dated.length >= 2
-      ? `First ${formatWatchDate(dated[dated.length - 1]!)} · Latest ${formatWatchDate(dated[0]!)}`
-      : null;
+  /**
+   * `First Mar 4, 2024 · Latest Oct 12, 2026`, only when it says something: two or more
+   * dated watches on two different days. One dated watch, or two on the same day, would
+   * print the same date twice (founder QA, 2026-11-12). `historySpan` owns the rule.
+   */
+  const spanDates = historySpan(ordered.map((event) => event.watchedOn));
+  const span = spanDates
+    ? `First ${formatWatchDate(spanDates.first)} · Latest ${formatWatchDate(spanDates.latest)}`
+    : null;
 
   if (count === 0) {
     return (

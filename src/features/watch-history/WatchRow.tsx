@@ -64,7 +64,7 @@ export type WatchRowProps = {
 /**
  * One watch, as a line in this title's own historical feed (founder QA, 2026-09-21).
  *
- * **Left:** the date as the label — *(First watch)* on the earliest dated one only — then who
+ * **Left:** the date as the label — no *(First watch)* suffix (founder QA, 2026-11-12) — then who
  * it was watched with and the watch's note, with More for a long one. **Right:** the
  * reader's score AT this watch, in the app's one score circle. Not the current score: a
  * later Edit ranking moves the title page, never this row (`scoresByWatch`). No
@@ -104,8 +104,10 @@ export function WatchRow({
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
   const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
-  // "First watch" only when it is first *and* dated (§D.2).
-  const primary = label === 'first' ? `${dateLabel} (First watch)` : dateLabel;
+  // The date alone (founder QA, 2026-11-12). The row's place in the list already says which
+  // watch came first; *(First watch)* on one entry read as a tag on a single row. The order
+  // and the *Earlier* group are unchanged — only the suffix is gone.
+  const primary = dateLabel;
   const source = isFromDiary(event) ? 'From Letterboxd' : null;
   const withLine = companions.length
     ? `With ${companions.map((person) => person.name).join(', ')}`
@@ -419,7 +421,9 @@ function WatchEditor({
         {onEditRanking ? (
           <View testID={`watch-edit-ranking-${event.id}`}>
             <SheetRow
-              icon="swap-vertical-outline"
+              // The title page's own Edit ranking icon, so the one act reads the same in
+              // both places (founder QA, 2026-11-12).
+              icon="star-outline"
               label="Edit ranking"
               onPress={locked ? undefined : () => editRanking(onEditRanking)}
               disabledReason={locked ? 'Saving' : undefined}
