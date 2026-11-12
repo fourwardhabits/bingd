@@ -18,6 +18,16 @@ This file covers what the IMDb import adds and what it changed in shared code.
 > "Not supported" (the title is supported; the destination is not). The section below is the
 > escalation as it was written, kept for the reasoning and for the switch if this changes.
 
+> **Updated with TV Rankings (#265, founder copy 2026-11-11 6:35 PM CST).** Since
+> `20261114000200` a whole show is rankable in its own pool (`tv_shows`) and can be logged,
+> so "bingd tracks TV by season" is no longer the reason and is no longer said. The behaviour
+> is unchanged: IMDb movies import; whole shows are matched and reported but not added;
+> episodes are unsupported; importing never ranks or logs a show or a season. The preview
+> note and the summary line now end with exactly: *"bingd lets you rank entire TV shows or
+> individual seasons. TV shows from IMDb imports aren’t added yet."* The escalation below
+> describes the code base **before** #265 (series refused by `_assert_loggable`); the switch
+> it names is still the one switch.
+
 **What the spec asks:** TV Series and TV Mini Series rows go to "the bingd TV show", join
 the collection unranked, and TV is in the first release "wherever a canonical destination
 exists".
@@ -37,8 +47,9 @@ redesign is out of scope.
 **matched to the canonical bingd show** (IMDb id → TMDB `/find` → the `series` media item,
 created through the trusted catalogue upsert if missing), and **reported, not added**: the
 row settles `unsupported` with its media item kept so the summary can say *"139 TV shows
-weren't added. bingd tracks TV by season, so find a show in Search and log the seasons
-you've watched."* The preview says the same before anything is sent. Nothing is written
+were matched but not added. bingd lets you rank entire TV shows or individual seasons. TV
+shows from IMDb imports aren’t added yet."* (the wording since #265; it first gave a
+season-only reason). The preview says the same before anything is sent. Nothing is written
 to `user_media`, `rankings` or any season.
 
 **The one switch:** `_import_imdb_destination_supported(media_kind)` returns `kind = 'movie'`.
@@ -63,7 +74,7 @@ when TMDB's `/find` says so: that is a canonical destination, not a reclassifica
 | 4 | Letterboxd-specific DB fields | `imported_titles.letterboxd_uri`, `imported_titles.rating numeric(2,1)` with `imported_titles_rating_is_a_letterboxd_star` (0.5–5.0 halves), `imported_watches.diary_uri`. None can hold IMDb data honestly. |
 | 5 | Job tracking / resume | `import_jobs` (one live per account, `pending → matching → applying → done/failed`), `import_rows_once` makes re-posting a page free, `findLiveJob` restores a running or recently finished job, notifications deep-link `/settings/import?job=`. Unchanged and shared. |
 | 6 | TMDB / IMDb ids in the catalogue | `media_items.tmdb_id`, unique per `(kind, tmdb_id)` for movie/series. **No IMDb id anywhere** before this branch. |
-| 7 | Movie vs TV collection | Movie: one `user_media` row. TV: per **season** (`kind = 'season'`, `parent_id` → series); a series is watchlist/list-only (§0). |
+| 7 | Movie vs TV collection | Movie: one `user_media` row. TV: per **season** (`kind = 'season'`, `parent_id` → series); a series is watchlist/list-only (§0). Before #265; a whole show is rankable since `20261114000200`, and IMDb still does not add one. |
 | 8 | Cross-source dedupe | `user_media` PK `(user_id, media_item_id)`: canonical id is the dedupe key, so two providers resolving to one title cannot produce two rows. Provenance needed widening (§3). |
 | 9 | On-device parsing and privacy | Kept: the CSV is read on the phone (`read-imdb.ts`), only projected fields cross the wire, the server projects again, staging rows are deleted or redacted on settle. |
 | 10 | Settings + onboarding | One row "Import from" + both marks → the choice; onboarding asks *Already tracking movies somewhere else?* with Letterboxd / IMDb / Not now. Same importer machine in both. |

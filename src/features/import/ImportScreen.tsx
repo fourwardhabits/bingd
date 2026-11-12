@@ -1125,10 +1125,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  *
  * Movies and TV shows are counted separately because they will not be treated alike: a movie
  * joins the collection, and a whole show is matched and reported but **not added in this
- * release** (founder decision, 2026-11-11, provisional): bingd collects TV by season, an IMDb
- * rating of a show says nothing about which seasons were watched, and there is no show-level
- * collection model. The preview labels that limitation on the count itself, so neither the
- * summary nor the collection is the first place somebody learns it.
+ * release** (founder decision, 2026-11-11). Since 20261114000200 a whole show is rankable in
+ * its own pool, so the old season-only reason no longer holds: an IMDb rating of a
+ * show is not a bingd ranking, and importing never ranks or logs a show or a season. The
+ * copy says exactly that (founder, 2026-11-11 6:35 PM CST). The preview labels the
+ * limitation on the count itself, so neither the summary nor the collection is the first
+ * place somebody learns it.
  */
 function ImdbPreviewView({
   preview,
@@ -1163,7 +1165,7 @@ function ImdbPreviewView({
 
       {counts.tvShows > 0 ? (
         <Note>
-          {`Whole TV shows can’t be added yet. We’ll look for the ${plural(counts.tvShows, 'show', 'shows')} you rated and count the ones we find in your summary, but they won’t join your collection: bingd tracks TV by season.`}
+          {`We’ll look for the ${plural(counts.tvShows, 'show', 'shows')} you rated and count the ones we find in your summary. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.`}
         </Note>
       ) : null}
       {counts.episodes > 0 ? (
@@ -1242,8 +1244,8 @@ function ImdbSummary({
     (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
   const unsupported = counts.unsupported ?? 0;
   const failed = counts.failed ?? 0;
-  // Whole shows the import MATCHED to bingd's show and did not add (provisional founder
-  // decision, 2026-11-11: no show-level collection model this release). They are reported on
+  // Whole shows the import MATCHED to bingd's show and did not add (founder decision,
+  // 2026-11-11: IMDb shows are not imported this release, although a show is rankable). They are reported on
   // their own line, not as "Not supported": the title is supported, the destination is not.
   const shows = counts.unsupported_tv ?? 0;
   const episodes = counts.unsupported_episode ?? 0;
@@ -1278,7 +1280,7 @@ function ImdbSummary({
 
       {shows > 0 ? (
         <Text variant="footnote" tone="tertiary">
-          {`${plural(shows, 'TV show was', 'TV shows were')} matched but not added: whole shows can’t be imported yet, because bingd tracks TV by season. Find ${shows === 1 ? 'the show' : 'a show'} in Search to log the seasons you’ve watched.`}
+          {`${plural(shows, 'TV show was', 'TV shows were')} matched but not added. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.`}
         </Text>
       ) : null}
       {episodes > 0 ? (

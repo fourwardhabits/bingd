@@ -227,15 +227,17 @@ describe('the IMDb preview', () => {
     const view = await preview();
     expect(view.getByText('Here’s what we found in your IMDb file.')).toBeTruthy();
     expect(view.getByText('Movies')).toBeTruthy();
-    // Provisional founder decision (2026-11-11): whole shows are matched and reported, not
-    // added, and the preview labels that on the count itself.
+    // Founder decision (2026-11-11): whole shows are matched and reported, not added, and
+    // the preview labels that on the count itself. The old season-only reason is gone: a
+    // whole show is rankable since 20261114000200 (founder copy, 2026-11-11 6:35 PM CST).
     expect(view.getByText('TV shows, not added')).toBeTruthy();
     expect(view.getByText('Not supported')).toBeTruthy();
     expect(
       view.getByText(
-        /Whole TV shows can’t be added yet\. We’ll look for the 3 shows you rated and count the ones we find in your summary, but they won’t join your collection/,
+        'We’ll look for the 3 shows you rated and count the ones we find in your summary. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.',
       ),
     ).toBeTruthy();
+    expect(view.queryByText(/by season/)).toBeNull();
     expect(view.getByText(/1 TV episode won’t come in/)).toBeTruthy();
     expect(view.getByText(/3 rows couldn’t be read/)).toBeTruthy();
     expect(view.getByText(/They don’t become bingd scores/)).toBeTruthy();
@@ -389,9 +391,10 @@ describe('the IMDb summary', () => {
     expect(view.getByLabelText('1 Couldn’t import')).toBeTruthy();
     expect(
       view.getByText(
-        /139 TV shows were matched but not added: whole shows can’t be imported yet, because bingd tracks TV by season/,
+        '139 TV shows were matched but not added. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.',
       ),
     ).toBeTruthy();
+    expect(view.queryByText(/by season|log the seasons/)).toBeNull();
     expect(view.getByText(/7 TV episodes weren’t added/)).toBeTruthy();
     // 9 - 7: every "Not supported" has a sentence.
     expect(

@@ -122,7 +122,7 @@ export type ImportCounts = {
    *
    *   duplicate            two Consts that resolved to one title; counted once
    *   unsupported          no collection destination (an episode, a game, a whole show)
-   *   unsupported_tv       of which, a whole TV show: bingd collects TV by season
+   *   unsupported_tv       of which, a whole TV show: matched, not added from IMDb this release
    *   unsupported_episode  of which, a single episode
    *   failed               matched, and the write failed
    */
