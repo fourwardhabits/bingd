@@ -273,11 +273,12 @@ describe('the reactions on the post above the conversation', () => {
   });
 
   /**
-   * The founder's report of 2026-11-10, as it was reached: their own ranking of Logan,
-   * opened from a notification, with one friend's heart on it. It drew an outline heart
-   * to react with, the friend's heart, and a bare "1".
+   * The founder's own ranking of Logan, opened from a notification, with one friend's
+   * heart on it. Since the founder's decision of 2026-11-11 the author may react to it:
+   * the control is drawn, a tap saves with no alert, and the friend is still named.
    */
-  it('offers no reaction on the viewer’s own post, and names who reacted', async () => {
+  it('offers a reaction on the viewer’s own post, saves it, and names who reacted', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai', title: 'Logan', year: 2017 });
     mockReactions.summary = summary({
       total: 1,
@@ -289,21 +290,39 @@ describe('the reactions on the post above the conversation', () => {
     });
     const view = await renderWithProviders(<ActivityScreen />);
 
-    const summaryLine = await waitFor(() =>
-      view.getByLabelText('Priya Raman likes this. See who reacted.'),
-    );
-    expect(view.queryByLabelText(/React to|You reacted to/)).toBeNull();
-    expect(view.queryByTestId('reaction-action')).toBeNull();
-    expect(view.queryByText('1')).toBeNull();
+    await waitFor(() => view.getByLabelText('Priya Raman likes this. See who reacted.'));
+    const react = view.getByLabelText(/^React to Sai's activity/);
+    fireEvent.press(react as never);
 
-    fireEvent.press(summaryLine as never);
-    await waitFor(() => expect(view.getByText('Priya Raman')).toBeTruthy());
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
+    expect(alert).not.toHaveBeenCalled();
+    alert.mockRestore();
+  });
+
+  it('counts and names the viewer’s own reaction to their own post', async () => {
+    mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai', title: 'Logan', year: 2017 });
+    mockReactions.summary = summary({
+      total: 2,
+      mine: 'love',
+      kinds: ['love'],
+      byKind: { love: 2 },
+      people: [
+        { userId: 'viewer-1', username: 'sai', name: 'Sai', avatarUri: null, kind: 'love' },
+        { userId: 'priya', username: 'priya', name: 'Priya Raman', avatarUri: null, kind: 'love' },
+      ],
+    });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() =>
+      expect(view.getByLabelText('You and Priya Raman like this. See who reacted.')).toBeTruthy(),
+    );
+    expect(view.getByLabelText(/^Liked\. You reacted to Logan/)).toBeTruthy();
   });
 
   /**
-   * **An older server answer, said calmly** (20261110000100). A heart drawn against a
-   * stale idea of whose post this is reaches the server's refusal; the reader is told
-   * plainly, not "Could not save your reaction".
+   * **An older server answer, said calmly** (20261110000100). Dead-safe handling: a
+   * server with 20261115000100 never refuses a self-reaction, but one with 20261110000100
+   * alone does; the reader is told plainly, not "Could not save your reaction".
    */
   it('says a refused self-reaction in its own words, not as a failure', async () => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});

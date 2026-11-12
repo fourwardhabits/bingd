@@ -146,9 +146,11 @@ describe('one operation id per reaction', () => {
 });
 
 /**
- * **A reaction to your own post is refused calmly** (20261110000100, founder 2026-11-10).
+ * **A reaction to your own post is refused calmly, by a server that still refuses one**
+ * (20261110000100 without 20261115000100). Dead-safe handling: self-reactions are allowed
+ * (founder, 2026-11-11) and a current server never raises this.
  *
- * The server raises 42501 "cannot react to your own activity". 42501 is also the
+ * Such a server raises 42501 "cannot react to your own activity". 42501 is also the
  * suspension refusal, so the message decides which sentence the reader gets; the codes
  * and the RPC are the migration's and are not changed by the client.
  */
@@ -219,7 +221,7 @@ describe('a refused self-reaction', () => {
   });
 
   it('still sends a removal, which the server allows on your own post', async () => {
-    // Taking an old self-reaction back is a null kind, and nothing here refuses it first.
+    // Taking a self-reaction back is a null kind, and nothing here refuses it first.
     const react = await mount();
     const result = await react(null);
     expect(result).toEqual({ ok: true, message: null });
@@ -330,29 +332,33 @@ describe('useReactions', () => {
 });
 
 /**
- * **A reaction comes from somebody else** (20261110000100). Rows written before the
- * server refused self-reactions are not deleted; the read leaves them out, so the count,
- * the glyphs and the names never include the author reacting to themselves.
+ * **A reaction to your own post counts** (founder, 2026-11-11; 20261115000100). Rows the
+ * author wrote on their own activity — before 20261110000100 or after its reversal — are
+ * counted, named and drawn like anybody else's.
  */
-describe('a self-reaction from before the rule', () => {
-  it('is left out of the count, the kinds, mine and the people', async () => {
+describe('an author’s reaction to their own post', () => {
+  it('is in the count, the kinds, mine and the people', async () => {
     mockRows = [
-      row({ user_id: 'me', kind: 'wow', event: { actor_id: 'me' }, profiles: null }),
-      row({ user_id: 'jerry', kind: 'love', event: { actor_id: 'me' } }),
+      row({
+        user_id: 'me',
+        kind: 'wow',
+        profiles: { id: 'me', display_name: 'Sai', username: 'sai', avatar_path: null },
+      }),
+      row({ user_id: 'jerry', kind: 'love' }),
     ];
     const summary = (await summaries('me'))?.get('event-1');
-    expect(summary?.total).toBe(1);
-    expect(summary?.mine).toBeNull();
-    expect(summary?.kinds).toEqual(['love']);
-    expect(summary?.people.map((person) => person.userId)).toEqual(['jerry']);
+    expect(summary?.total).toBe(2);
+    expect(summary?.mine).toBe('wow');
+    expect([...(summary?.kinds ?? [])].sort()).toEqual(['love', 'wow']);
+    expect(summary?.people.map((person) => person.userId)).toEqual(['me', 'jerry']);
   });
 
-  it('is left out for every reader, not only the author', async () => {
+  it('is counted for every reader, not only the author', async () => {
     mockRows = [
-      row({ user_id: 'anna', kind: 'love', event: [{ actor_id: 'anna' }] }),
-      row({ user_id: 'jerry', kind: 'love', event: { actor_id: 'anna' } }),
+      row({ user_id: 'anna', kind: 'love' }),
+      row({ user_id: 'jerry', kind: 'love' }),
     ];
-    expect((await summaries('someone-else'))?.get('event-1')?.total).toBe(1);
+    expect((await summaries('someone-else'))?.get('event-1')?.total).toBe(2);
   });
 
   it('carries when each person reacted, for the summary’s tie-break', async () => {
@@ -361,10 +367,6 @@ describe('a self-reaction from before the rule', () => {
     expect(summary?.people[0]?.reactedAt).toBe('2026-11-09T10:00:00Z');
   });
 
-  it('still counts a row whose event did not embed', async () => {
-    mockRows = [row({ event: null })];
-    expect((await summaries('me'))?.get('event-1')?.total).toBe(1);
-  });
 });
 
 describe('the reaction set', () => {

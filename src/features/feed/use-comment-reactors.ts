@@ -33,19 +33,9 @@ type Row = {
 const isKind = (value: string): value is ReactionKind =>
   REACTIONS.some((reaction) => reaction.kind === value);
 
-/**
- * @param authorId The comment's author. Their reaction to their own comment is left out of
- *   the list, as `use-reactions.ts` leaves an author's reaction to their own post out of
- *   everything (founder, 2026-11-10; no row is deleted). Null when the thread has not
- *   said who wrote it, which lists everybody, the safe direction for a list of names.
- */
-export function useCommentReactors(
-  commentId: string | null,
-  viewerId: string,
-  authorId: string | null = null,
-) {
+export function useCommentReactors(commentId: string | null, viewerId: string) {
   return useQuery({
-    queryKey: ['comment-reactors', viewerId, commentId, authorId],
+    queryKey: ['comment-reactors', viewerId, commentId],
     enabled: Boolean(commentId),
     staleTime: 30_000,
     queryFn: async (): Promise<ReactionSummary> => {
@@ -62,7 +52,6 @@ export function useCommentReactors(
         // A seventh kind can only mean a newer server than this bundle. Skipped, not
         // crashed on — the same narrowing `use-comments` applies to the aggregate.
         if (!isKind(row.kind)) continue;
-        if (authorId !== null && row.user_id === authorId) continue;
         byKind[row.kind] = (byKind[row.kind] ?? 0) + 1;
         if (row.user_id === viewerId) mine = row.kind;
         people.push({

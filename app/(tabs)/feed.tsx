@@ -988,7 +988,7 @@ export default function FeedScreen() {
                         : null
                     }
                     onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
-                    reaction={reactionFor(event.id, event.actorId)}
+                    reaction={reactionFor(event.id)}
                     onPressComments={() => setCommentsFor(event.id)}
                     commentCount={commentCounts.data?.get(event.id) ?? 0}
                     onPressSave={
@@ -1115,7 +1115,7 @@ export default function FeedScreen() {
                   }
                   inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
                   onPressRecommend={event.mediaItemId ? () => openRecommend(event) : undefined}
-                  reaction={reactionFor(event.id, event.actorId)}
+                  reaction={reactionFor(event.id)}
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
@@ -1236,12 +1236,11 @@ export default function FeedScreen() {
     </Screen>
   );
 
-  function reactionFor(eventId: string, actorId: string) {
+  function reactionFor(eventId: string) {
     const summary = reactions.data?.get(eventId);
     return activityReaction({
       summary,
       viewerId: profile.id,
-      isOwn: actorId === profile.id,
       onToggle: () => void toggleDefault(eventId),
       onOpenPicker: () => setPickerFor(eventId),
       onOpenDetail: () => setDetailFor(eventId),

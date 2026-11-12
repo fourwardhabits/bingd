@@ -339,9 +339,6 @@ export default function ActivityScreen() {
                 ? activityReaction({
                     summary,
                     viewerId,
-                    // The founder's own Logan ranking, opened from a notification, is
-                    // where an author was offered a heart on their own post (2026-11-10).
-                    isOwn: event.actorId === viewerId,
                     onToggle: () => void toggleDefault(),
                     onOpenPicker: () => setPickerOpen(true),
                     onOpenDetail: () => setDetailOpen(true),

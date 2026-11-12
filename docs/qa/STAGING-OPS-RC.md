@@ -14,6 +14,7 @@
     git diff --stat 460a980 HEAD -- . ':!docs'
     ```
     It must print nothing.
+  - **On the OTA release branch (`release/2026-11-11-rc266-ota`, #267):** two later commits change source: `d6cd6e9` (the photo-permission string, `app.config.ts`) and the self-reaction reversal (`20261115000100`, reaction client code and tests). Migration 12 in step 2 comes from the reversal; run steps 2–3 from a checkout that contains it.
   - **Moving from `47eef0c`:** the earlier head changed only by `460a980`, which touches `src/features/import/*` (copy, a comment and tests) and `docs/product/imdb-import.md`. No migration, Edge Function or `supabase/config.toml` changed. `git diff 47eef0c 460a980 -- supabase` is empty.
 
 ## Step 0: gate (read-only)
@@ -36,7 +37,7 @@
    ```
 
 **Expected**
-- `migration list`: the remote's latest applied version is `20261024000500`, and nothing newer is applied remotely. If anything newer is applied (for example an Engine V2 `20261111…` file), **stop**: the push would need `--include-all` or a repair, and that is a separate decision (`claim-push-batch-reconciliation.md` §3).
+- `migration list`: everything applied remotely is a **prefix of the 12 files in step 2**, in order. A target with none of them (production) has `20261024000500` as its latest. Staging already has the first 11 (#267: applied 2026-11-11), so its latest is `20261114000400` and step 2 must show `20261115000100` alone. If anything else newer is applied (for example an Engine V2 `20261111…` file), **stop**: the push would need `--include-all` or a repair, and that is a separate decision (`claim-push-batch-reconciliation.md` §3).
 - `secrets list`, **names only**: `TMDB_ACCESS_TOKEN` or `TMDB_API_KEY` is present (`tmdb-adapter` and `letterboxd-import` read either). If neither is, step 4c applies. The platform's `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present.
 - `functions list`: note each function's current version so it can be rolled back.
 - Flag read: `push.delivery_enabled` and `release.push_enabled` as they are today. No `proactive.*` rows exist yet, because they arrive with `20261028000100`.
@@ -70,7 +71,7 @@ npx supabase functions deploy letterboxd-import --project-ref fjxhcbowoxuzulwirz
 npx supabase db push --linked --dry-run
 ```
 
-**Expected: exactly these 11 files, in this order, and nothing else.** `--include-all` must not be needed.
+**Expected: exactly these 12 files, in this order, and nothing else** — or, where step 0 found the first N already applied (staging), exactly files N+1 to 12. On staging with the first 11 applied, that is **`20261115000100` alone**. `--include-all` must not be needed.
 
 | # | File | From | Purpose |
 |---|---|---|---|
@@ -78,21 +79,22 @@ npx supabase db push --linked --dry-run
 | 2 | `20261028000200_a_watchlist_worth_hearing_about.sql` | #254 | Watchlist-social and resurfacing candidates, gated by the generation switch (off). |
 | 3 | `20261031000100_a_season_worth_waiting_for.sql` | #254 | Season-premiere awareness, gated by its own switch (off). Rebuilds the claim. |
 | 4 | `20261101000100_the_excerpt_rule_on_this_branch.sql` | #254 | Puts remediation's comment-excerpt rule onto the two-argument claim. |
-| 5 | `20261110000100_a_reaction_comes_from_somebody_else.sql` | #249 | Refuses a reaction to your own post or comment. Historical rows are kept. |
+| 5 | `20261110000100_a_reaction_comes_from_somebody_else.sql` | #249 | Refuses a reaction to your own post or comment. **Reversed by 12**; already applied on staging, and applied as is everywhere (it is never edited). |
 | 6 | `20261112000100_affinity_ends_at_a_block.sql` | #254 | A block ends proactive affinity. |
 | 7 | `20261113000100_an_import_from_more_than_one_place.sql` | #261 | IMDb import (provider column, IMDb matcher and applier); claim carries the provider. Whole TV shows stay *unsupported*. |
 | 8 | `20261114000100_a_show_is_a_category_of_its_own.sql` | #265 | Adds `tv_shows` to `ranking_category`, in a file of its own. |
 | 9 | `20261114000200_a_show_ranked_on_its_own.sql` | #265 | Series rank in `tv_shows`; series no longer refused by `_assert_loggable`; same-pool comparison guard; profile counts (Candidate A); no show goals. |
 | 10 | `20261114000300_an_update_that_knows_where_it_came_from.sql` | #265 | Update Show provenance (`linked_placement_id`); re-signed `rank_again` / `rank_rebucket` / internals; TV update posts. |
 | 11 | `20261114000400_a_show_counted_once.sql` | #265 | `taste_match`, `people_taste_matches` and `group_picks` count one series once. |
+| 12 | `20261115000100_a_reaction_from_anyone.sql` | founder decision 2026-11-11 | **Reverses 5:** an author can react to their own post and comment again. Removes only the 42501 refusal from `set_reaction` and `_set_comment_reaction`; an author is still never notified of their own reaction. Grants unchanged. |
 
 **Stop if** the list differs in any way: count, names, order, or an `--include-all` prompt.
 
 **Rollback:** nothing to roll back; this step only reads.
 
-## Step 3: apply the 11 migrations
+## Step 3: apply the 12 migrations (on staging, whichever of them remain)
 
-**Do:** one push, after a fresh dry-run shows the same 11 files.
+**Do:** one push, after a fresh dry-run shows the same files as step 2 (production: all 12; staging with 1–11 applied: `20261115000100` only).
 ```bash
 npx supabase db push --linked
 ```
@@ -101,8 +103,8 @@ npx supabase db push --linked
 
 **Verify (read-only), straight after:**
 ```sql
--- 1. Applied: the remote head is 20261114000400
---    (npx supabase migration list --linked shows all 11 as applied)
+-- 1. Applied: the remote head is 20261115000100
+--    (npx supabase migration list --linked shows all 12 as applied)
 
 -- 2. Exactly one row: claim_push_batch(integer,timestamp with time zone)
 select oid::regprocedure from pg_proc where proname = 'claim_push_batch';
@@ -128,6 +130,16 @@ select oid::regprocedure from pg_proc where proname in ('rank_again', 'rank_rebu
 select has_function_privilege('authenticated', 'rank_again(uuid,taste_bucket,uuid,boolean,uuid,uuid)', 'execute'),
        has_function_privilege('authenticated', '_assert_linked_show_update(uuid,uuid,uuid)', 'execute');
 -- true, false
+
+-- 6. Self-reactions are accepted again (20261115000100), with the grants as they were
+select proname, prosrc like '%cannot react to your own%' as refuses
+  from pg_proc where proname in ('set_reaction', '_set_comment_reaction');
+-- set_reaction false, _set_comment_reaction false
+select has_function_privilege('authenticated', 'set_reaction(uuid,uuid,text)', 'execute'),
+       has_function_privilege('anon',          'set_reaction(uuid,uuid,text)', 'execute'),
+       has_function_privilege('authenticated', '_set_comment_reaction(uuid,text)', 'execute'),
+       has_function_privilege('authenticated', 'set_comment_reaction(uuid,uuid,text)', 'execute');
+-- true, false, false, true
 ```
 
 **Lock and backfill notes:** these are small at staging's size; for production they are listed in the PR body.
@@ -136,9 +148,9 @@ select has_function_privilege('authenticated', 'rank_again(uuid,taste_bucket,uui
 - Column adds are nullable or use constant defaults, so they are metadata-only.
 - The only backfills are the defaults `import_jobs.provider = 'letterboxd'` and `imported_titles.providers = '{letterboxd}'`. There are no other updates of existing rows.
 
-**Rollback:** forward migrations only. Nothing in the 11 files deletes user data.
+**Rollback:** forward migrations only. Nothing in the 12 files deletes user data.
 - **Proactive (1–4, 6):** every switch is already off. That is the rollback.
-- **#249 (5):** a forward migration restoring the previous `set_reaction` / `_set_comment_reaction` bodies.
+- **#249 (5) and its reversal (12):** together they leave `set_reaction` / `_set_comment_reaction` as they were before #249. Refusing self-reactions again would be a new forward migration and a new founder decision; it is not a rollback of this release.
 - **#261 (7):** the import entry switch in `letterboxd-production-promotion.md`, or `unschedule_import_drain()`.
 - **#265 (8–11):** `tv_shows` cannot be removed from the enum. A forward migration restores the previous `rankable_category` / `_assert_loggable` (series refused again) and the previous `_rank_*` / `rank_again` / `rank_rebucket` / `_correction_follows_latest_watch` / `taste_match` / `people_taste_matches` / `group_picks` definitions. Before that, decide whether to `rank_unrank` any `tv_shows` rows written meanwhile.
 - **If a second `claim_push_batch` overload ever appears:** confirm the two-argument form exists, then an operator runs `drop function claim_push_batch(integer);` and follows it with a forward migration.

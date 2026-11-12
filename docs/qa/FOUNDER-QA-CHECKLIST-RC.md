@@ -10,7 +10,7 @@
 **Build:** the internal Preview from `STAGING-OPS-RC.md` step 5.
 - Source is the RC's **build-source commit** named there. Every later commit changes `docs/` only.
 - It installs as "bingd preview", and Settings should show the staging backend `…rzyr`.
-- Keep the old **58c2de7 Preview** installed on one phone, only for 8.6 (the old-client check).
+- The old **58c2de7 Preview** is no longer needed for section 8: the old-client self-reaction refusal check is gone (founder decision, 2026-11-11).
 
 ## How to record
 - Each section is a table with **A** (Android) and **i** (iPhone) columns. Write ✅, ❌ or – (not checked) in each, and anything worth saying under **Notes**.
@@ -24,8 +24,8 @@ Each item's **Needs** column names the step it depends on. Without it, the item 
 |---|---|---|
 | `S0` | Gate: CI green on the RC head; names-only secrets check | everything |
 | `S1` | `letterboxd-import` deployed. **Being run separately by the founder's operator**, from `47eef0c`; its source is identical at the build-source commit. | 7 (imports) |
-| `S3` | The 11 migrations applied | 2, 3, 7, 8, 9, 10.7, 11, 12 |
-| `S4a` | `push-sender` deployed | 7 (pushes), 8.2, 9 |
+| `S3` | The 12 migrations applied (the 11 plus `20261115000100`, which lets you react to your own posts and comments) | 2, 3, 7, 8, 9, 10.7, 11, 12 |
+| `S4a` | `push-sender` deployed | 7 (pushes), 8.3, 8.5, 9 |
 | `S4b` | `tmdb-adapter` deployed | 10.6 (full actor sorting) |
 | `S4c` | TMDB key set, **only if S0 found it missing** | 7.8 (matching) |
 | `S5` | The new internal Preview installed on both phones | everything |
@@ -121,16 +121,17 @@ Before starting:
 | 7.13 | Onboarding after *Your First Five*: "Already tracking movies somewhere else?" Then kill and relaunch mid-import. | Letterboxd / IMDb / Not now are offered. After the relaunch it lands correctly. | S1 S3 | | | |
 | 7.14 | *(Note only, not on device)* PostHog analytics. | Covered by tests: `provider` is on every import event (it used to be stripped); `import_started.films` counts movies only, plus `tv_shows`; Settings counts `import_opened` when a service is picked, so that number drops from today. | | – | – | |
 
-## 8. Reactions: self-reaction restrictions, reaction summaries
+## 8. Reactions: self-reactions allowed, reaction summaries
+**Founder decision (2026-11-11):** you can react to your own posts and comments. This reverses #249's restriction (`20261115000100`). The reaction summary, the picker, the heart and emoji sizing and the responsive layout from #249 are unchanged.
+
 | # | Step | Expected | Needs | A | i | Notes |
 |---|---|---|---|---|---|---|
-| 8.1 | Look at your **own** post (Feed, the Activity page from a notification, Profile) and your own comment. | No heart or Like, and no long-press picker. Others' reactions and the summary line still show and open the reactor list. | S3 | | | |
-| 8.2 | As the friend, react to the reader's post and comment, then change and remove the reaction. | React, change and remove all work, and the author gets one notification. | S3 S4a | | | |
-| 8.3 | Check staging's existing reactions. | Historical self-reactions are hidden from counts and names. Staging's 5 existing reactions are all self-reactions, so **every staging reaction count drops to 0, as expected.** Nothing is deleted. | S3 | | | |
-| 8.4 | Remove an old self-reaction. | It still works. | S3 | | | |
-| 8.5 | As the friend, react to and comment on a **TV update post** (made in 12.2). | It works like any post. The reader has no heart on their own update post. | S3 | | | |
-| 8.6 | **Old client:** on the 58c2de7 Preview (same staging), tap the heart on your own post and on your own comment. | Refused: the existing alert shows the server message, the heart returns, and nothing crashes. | S3 | | | |
-| 8.7 | *(Covered by tests; hard to trigger on a device)* If a refusal ever reaches the new client. | It says **"You can’t react to your own post."** / "…comment.", and the screen re-reads. | | – | – | |
+| 8.1 | Look at your **own** post (Feed, the Activity page from a notification, Profile) and your own comment. | The heart / Like is there, and a long press opens the picker, exactly as on a friend's post. Others' reactions and the summary line still show and open the reactor list. | S3 | | | |
+| 8.2 | React to your **own** post and your own comment, then change and remove the reaction. | Each saves with **no alert**. The count goes up by one and the summary includes you ("You reacted", "You and Alex like this"). Change and remove work. **You get no notification** for your own reaction. | S3 | | | |
+| 8.3 | As the friend, react to the reader's post and comment, then change and remove the reaction. | React, change and remove all work, and the author gets one notification. | S3 S4a | | | |
+| 8.4 | Check staging's existing reactions. | Historical self-reactions **count normally** again: in counts, names, glyphs and the reactor list. Staging's 5 existing reactions are all self-reactions, so they are back in their posts' counts. Nothing was deleted. | S3 | | | |
+| 8.5 | As the friend, react to and comment on a **TV update post** (made in 12.2); then, as the reader, react to it too. | It works like any post, for both. | S3 S4a | | | |
+| 8.6 | *(Covered by tests; hard to trigger on a device)* A server that still refuses self-reactions (`20261110000100` without `20261115000100`). | The new client says **"You can’t react to your own post."** / "…comment." and the screen re-reads. Once S3 is complete this never happens. | | – | – | |
 
 ## 9. Notification settings, reactive pushes, proactive behaviour disabled
 | # | Step | Expected | Needs | A | i | Notes |
@@ -218,7 +219,7 @@ Use a long show the reader has not ranked; Shameless is the example. Do 11.1–1
 ---
 
 ## Known limitations for this sitting
-- Applying the staging ops changes what the installed 58c2de7 Preview sees: the Reactions default turns off and self-reactions are refused. Use the old build only for 8.6.
+- Applying the staging ops changes what the installed 58c2de7 Preview sees: the Reactions default turns off. Self-reactions work there as they always did.
 - The invite push needs `push-sender` (S4a). The sign-in email subject needs `check-auth-config --apply`, which is not planned.
 - Proactive notifications are not tested with flags on; that needs separate approvals.
 - **Update Show** is offered only from title-page flows: the season page and a show page's season rows.
@@ -228,8 +229,8 @@ Use a long show the reader has not ranked; Shameless is the example. Do 11.1–1
 - The original title layout, a per-device saved choice, keeps its Ranked pill. The immersive default shows Log rewatch.
 - The For You / Collection toolbar move needs your visual sign-off (4.6, 5.3).
 
-## Tracked pre-production issues (not resolved)
-1. **A historical self-reaction on another person's comment** may give an inconsistent count for other readers: "2 reactions" opening a list of one. This needs your decision. There is no unapproved migration; fixing it needs one on `activity_comments`. Staging has 0 such rows.
+## Tracked pre-production issues (1 resolved, the rest not)
+1. ~~**A historical self-reaction on another person's comment** may give an inconsistent count for other readers.~~ **Resolved by the founder's decision of 2026-11-11** (`20261115000100`): self-reactions are allowed and count normally everywhere, so the count and the reactor list agree again. No `activity_comments` migration is needed.
 2. **TV ranking-update posts must not become false watch signals** before proactive notifications are enabled. Today the watchlist-social trigger and resurfacing count any `title_ranked`, including `"update": true`. This must be fixed or decided before `proactive.generation_enabled` is turned on.
 3. **Season-premiere eligibility for show-only rankers** is deferred while `proactive.season_enabled` is off: a reader who ranked only the whole show would not be told about its next season.
 4. **Actor-page decisions and visual sign-off** happen in this sitting (section 10).

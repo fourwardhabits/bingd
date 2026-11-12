@@ -367,9 +367,9 @@ describe('comments on the card', () => {
 describe('the actions', () => {
   /**
    * **The server's refusal of a self-reaction, through the real writer** (20261110000100).
-   * This client draws no Like on the reader's own post, so the refusal is reached only
-   * when what the card was told about the post is out of date. The reader is told
-   * plainly, nothing crashes, and the reactions are read again.
+   * Dead-safe handling: self-reactions are allowed (founder, 2026-11-11) and a server with
+   * 20261115000100 never refuses one, but one that has 20261110000100 alone does. The
+   * reader is told plainly, nothing crashes, and the reactions are read again.
    */
   it('says a refused self-reaction calmly, and reads the reactions again', async () => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -614,46 +614,67 @@ describe('the actions', () => {
   });
 
   /**
-   * **Nobody reacts to themselves** (founder, 2026-11-10). On the reader's own post the
-   * Like is gone and nothing takes its place; other people's reactions are still named
-   * and still open the list.
+   * **You can react to your own post** (founder, 2026-11-11; 20261115000100). On the
+   * reader's own post the Like is drawn as on any other, a reaction saves through the
+   * ordinary writer with no alert, and it is counted and named the ordinary way.
    */
   describe('on the reader’s own post', () => {
     const own = () =>
       event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' });
 
-    it('offers no Like, and draws no summary when nobody has reacted', async () => {
+    it('offers the Like, and draws no summary when nobody has reacted', async () => {
       mockRows = [own()];
       const view = await renderWithProviders(<FeedScreen />);
-      await waitFor(() => expect(view.getByTestId('feed-card-comment')).toBeTruthy());
-      expect(view.queryByTestId('feed-card-like')).toBeNull();
-      expect(view.queryByText('Like')).toBeNull();
+      const like = await waitFor(() => view.getByTestId('feed-card-like'));
+      expect(within(like).getByText('Like')).toBeTruthy();
       expect(view.queryByTestId('feed-card-reactions')).toBeNull();
     });
 
-    it('still names who reacted, and still opens the list', async () => {
+    it('saves the reader’s reaction, with no alert, and counts and names it', async () => {
+      const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
       mockRows = [own()];
-      mockReactions = [reactor('priya', 'love'), reactor('theo', 'love')];
-      const view = await renderWithProviders(<FeedScreen />);
-      const summary = await waitFor(() =>
-        view.getByLabelText('PRIYA and 1 other like this. See who reacted.'),
-      );
-      expect(view.queryByTestId('feed-card-like')).toBeNull();
-      fireEvent.press(summary);
-      await waitFor(() =>
-        expect(view.getByLabelText('THEO, Liked. Open their profile.')).toBeTruthy(),
-      );
-    });
-
-    it('leaves a self-reaction from before the rule out of the count and the names', async () => {
-      mockRows = [own()];
-      mockReactions = [
-        { ...reactor('user-1', 'love'), event: { actor_id: 'user-1' } },
-        { ...reactor('priya', 'love'), event: { actor_id: 'user-1' } },
-      ];
+      mockReactions = [reactor('priya', 'love')];
       const view = await renderWithProviders(<FeedScreen />);
       await waitFor(() =>
         expect(view.getByLabelText('PRIYA likes this. See who reacted.')).toBeTruthy(),
+      );
+
+      // The server's answer to the next read; `useSetReaction` invalidates, so it is read.
+      mockReactions = [reactor('priya', 'love'), reactor('user-1', 'love')];
+      fireEvent.press(view.getByTestId('feed-card-like'));
+
+      await waitFor(() =>
+        expect(view.getByLabelText('You and PRIYA like this. See who reacted.')).toBeTruthy(),
+      );
+      expect(mockRpcCalls.find((call) => call.name === 'set_reaction')?.args).toMatchObject({
+        p_feed_event_id: 'e1',
+        p_kind: 'love',
+      });
+      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      expect(alert).not.toHaveBeenCalled();
+      alert.mockRestore();
+    });
+
+    it('offers the picker on a long press', async () => {
+      mockRows = [own()];
+      const view = await renderWithProviders(<FeedScreen />);
+      const like = await waitFor(() => view.getByTestId('feed-card-like'));
+      expect(view.queryByLabelText(/Wow/)).toBeNull();
+      fireEvent(like, 'longPress');
+      await waitFor(() => expect(view.getByLabelText(/Wow/)).toBeTruthy());
+    });
+
+    it('counts and names a self-reaction from before the rule, and lists it', async () => {
+      mockRows = [own()];
+      mockReactions = [reactor('user-1', 'love'), reactor('priya', 'love')];
+      const view = await renderWithProviders(<FeedScreen />);
+      const summary = await waitFor(() =>
+        view.getByLabelText('You and PRIYA like this. See who reacted.'),
+      );
+      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      fireEvent.press(summary);
+      await waitFor(() =>
+        expect(view.getByLabelText('PRIYA, Liked. Open their profile.')).toBeTruthy(),
       );
     });
   });

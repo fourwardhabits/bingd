@@ -159,16 +159,15 @@ export function clusterKinds(kinds: readonly ReactionKind[], mine: ReactionKind 
 /**
  * The reaction props for one post, built the same way on every surface that draws one
  * — the Feed card, the conversation page a notification opens, and the profile — so the
- * three cannot disagree about who is named, what the sentence says, or whether a heart
- * is offered.
+ * three cannot disagree about who is named or what the sentence says.
  *
- * `isOwn` is the post's actor being the viewer. It removes the heart and the picker and
- * nothing else: everyone else's reactions are still summarised and still open the list.
+ * The heart and the picker are offered on every post, the reader's own included
+ * (founder, 2026-11-11): reacting to yourself is an ordinary reaction, and it is
+ * summarised the ordinary way ("You and Alex like this").
  */
 export function activityReaction({
   summary,
   viewerId,
-  isOwn,
   affinity,
   onToggle,
   onOpenPicker,
@@ -177,7 +176,6 @@ export function activityReaction({
 }: {
   summary: ReactionSummary | null | undefined;
   viewerId: string;
-  isOwn: boolean;
   affinity?: AffinityLookup;
   onToggle: () => void;
   onOpenPicker?: () => void;
@@ -185,11 +183,10 @@ export function activityReaction({
   picker?: ReactNode;
 }): ActivityReaction {
   const total = summary?.total ?? 0;
-  const mine = isOwn ? null : (summary?.mine ?? null);
+  const mine = summary?.mine ?? null;
   const kinds = summary?.kinds ?? [];
   return {
     count: total,
-    canReact: !isOwn,
     mineGlyph: mine ? REACTION_GLYPH[mine] : null,
     mineLabel: mine ? REACTION_LABEL[mine] : null,
     glyphs: kinds.map((kind) => REACTION_GLYPH[kind]),
@@ -198,8 +195,8 @@ export function activityReaction({
       ? summaryForms({ ...summary, mine }, viewerId, affinity)
       : [],
     onPress: onToggle,
-    onLongPress: isOwn ? undefined : onOpenPicker,
+    onLongPress: onOpenPicker,
     onPressSummary: onOpenDetail,
-    picker: isOwn ? null : picker,
+    picker,
   };
 }

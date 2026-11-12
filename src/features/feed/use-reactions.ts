@@ -90,7 +90,6 @@ type ReactionRow = {
   user_id: string;
   kind: ReactionKind;
   created_at?: string | null;
-  event?: { actor_id: string } | { actor_id: string }[] | null;
   profiles:
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }
     | { id: string; display_name: string | null; username: string; avatar_path: string | null }[]
@@ -128,7 +127,7 @@ async function readReactions(
   const { data, error } = await supabase
     .from('reactions')
     .select(
-      'feed_event_id, user_id, kind, created_at, event:feed_event_id(actor_id), profiles:user_id(id, display_name, username, avatar_path)',
+      'feed_event_id, user_id, kind, created_at, profiles:user_id(id, display_name, username, avatar_path)',
     )
     .in('feed_event_id', eventIds);
   if (error) throw error;
@@ -136,19 +135,8 @@ async function readReactions(
   const byEvent = new Map<string, ReactionSummary>();
 
   for (const row of (data ?? []) as unknown as ReactionRow[]) {
-    /**
-     * **A reaction to your own activity is not shown** (founder, 2026-11-10).
-     *
-     * The control that made them is gone from your own posts and `set_reaction` refuses
-     * new ones once 20261110000100 is applied, but rows written before either are still
-     * in the table and are not deleted. They are left out of every count, glyph and name
-     * here instead — a self-like is not engagement, and counting it would leave the
-     * author a reaction on their own post they can no longer see a way to take back.
-     * The embed is the event's own actor, which `reactions_read` already required this
-     * viewer to be able to see.
-     */
-    if (one(row.event ?? null)?.actor_id === row.user_id) continue;
-
+    // An author's reaction to their own activity counts like anybody else's (founder,
+    // 2026-11-11; 20261115000100), in the total, the glyphs, the names and the list.
     const summary =
       byEvent.get(row.feed_event_id) ?? { ...EMPTY, kinds: [], byKind: {}, people: [] };
     summary.total += 1;
@@ -195,10 +183,13 @@ export const emptyReactionSummary = () => EMPTY;
 export type ReactionTarget = 'post' | 'comment';
 
 /**
- * The calm sentence for a reaction to your own post or comment (founder, 2026-11-10).
+ * The calm sentence for a server that still refuses a reaction to your own post or
+ * comment (20261110000100 applied, 20261115000100 not yet).
  *
- * Said as the alert's title on its own, rather than under "Could not save your reaction",
- * because nothing failed: the server declined something it never allows.
+ * **Dead-safe handling only.** Reacting to yourself is allowed (founder, 2026-11-11) and
+ * this client offers it everywhere; a database with 20261115000100 never sends the
+ * refusal. It stays for the window in which a database has the older migration alone,
+ * so a tap there reads as a calm sentence rather than as a failure.
  */
 export const SELF_REACTION_MESSAGE: Record<ReactionTarget, string> = {
   post: 'You can’t react to your own post.',
@@ -206,10 +197,11 @@ export const SELF_REACTION_MESSAGE: Record<ReactionTarget, string> = {
 };
 
 /**
- * Whether a reaction write was refused for being the author's own (20261110000100).
+ * Whether a reaction write was refused for being the author's own (20261110000100, which
+ * 20261115000100 reverses: see `SELF_REACTION_MESSAGE`).
  *
- * `set_reaction` and `_set_comment_reaction` raise **42501** "cannot react to your own
- * activity" / "…comment" for a non-null kind on the caller's own post or comment. 42501
+ * There, `set_reaction` and `_set_comment_reaction` raise **42501** "cannot react to your
+ * own activity" / "…comment" for a non-null kind on the caller's own post or comment. 42501
  * is also `assert_can_write`'s suspension refusal, so the message is part of the test:
  * a suspended account keeps the generic alert and its own wording. The codes and the
  * messages are the migration's and are not changed here, so an older client, which does
@@ -290,7 +282,8 @@ export function useSetReaction(viewerId: string) {
     // tap sends the *opposite* intent against a row that already moved
     // (`lib/write-outcome.ts`). Independent review 21e's invariant, in a fifth place.
     /**
-     * **A refused self-reaction is reconciled too** (2026-11-11). Nothing was written, but
+     * **A refused self-reaction is reconciled too** (2026-11-11), on a server that still
+     * refuses one (`SELF_REACTION_MESSAGE`). Nothing was written, but
      * whatever drew a heart on the reader's own post was holding a state the server does
      * not have, so the cache is read again and the surface returns to what is stored.
      * There is no optimistic state to undo in this hook; this is its rollback.

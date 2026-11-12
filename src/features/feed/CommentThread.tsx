@@ -128,11 +128,7 @@ export function CommentThread({
    * deliberately carries only aggregates.
    */
   const [reactorsFor, setReactorsFor] = useState<string | null>(null);
-  // The comment's author, so a reaction they left on it themselves is not listed: the one
-  // rule `use-reactions.ts` applies to a post, applied to the people behind a comment.
-  const reactorsAuthor =
-    comments.data?.find((comment) => comment.id === reactorsFor)?.authorId ?? null;
-  const reactors = useCommentReactors(reactorsFor, viewerId, reactorsAuthor);
+  const reactors = useCommentReactors(reactorsFor, viewerId);
 
   /**
    * ---------------------------------------------------------------------------
@@ -832,9 +828,6 @@ function CommentRow({
             onToggle={onReact}
             onOpenPicker={onOpenPicker}
             onOpenDetail={onOpenReactors}
-            // Your own comment gets no heart, as your own post does not (2026-11-10);
-            // other people's reactions to it are still shown and still open the list.
-            canReact={!mine}
           />
 
           {/* Offered on a reply as well as on a root. Tapping it there is an ordinary

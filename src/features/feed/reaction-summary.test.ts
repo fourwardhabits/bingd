@@ -193,11 +193,10 @@ describe('one post’s reaction props', () => {
     const props = activityReaction({
       summary: summary([person('me', 'Sai', 'wow')], { mine: 'wow' }),
       viewerId: 'me',
-      isOwn: false,
       picker: 'PICKER',
       ...handlers,
     });
-    expect(props.canReact).toBe(true);
+    expect(props.canReact).not.toBe(false);
     expect(props.mineGlyph).toBe('😮');
     expect(props.mineLabel).toBe('Wow');
     expect(props.onLongPress).toBe(handlers.onOpenPicker);
@@ -205,35 +204,43 @@ describe('one post’s reaction props', () => {
     expect(props.summaryForms?.[0]).toBe('You reacted');
   });
 
-  it('offers none on the viewer’s own post, and still says who reacted', () => {
+  /**
+   * Founder, 2026-11-11: an author can react to their own post. The builder no longer
+   * knows whose post it is — there is nothing to tell apart — so the viewer's own post
+   * gets the heart, the picker and the ordinary "You and …" sentence.
+   */
+  it('offers the heart and the picker on the viewer’s own post as well', () => {
     const props = activityReaction({
       summary: summary([person('priya', 'Priya')]),
       viewerId: 'me',
-      isOwn: true,
       picker: 'PICKER',
       ...handlers,
     });
-    expect(props.canReact).toBe(false);
+    expect(props.canReact).not.toBe(false);
     expect(props.mineGlyph).toBeNull();
-    expect(props.onLongPress).toBeUndefined();
-    expect(props.picker).toBeNull();
+    expect(props.onPress).toBe(handlers.onToggle);
+    expect(props.onLongPress).toBe(handlers.onOpenPicker);
+    expect(props.picker).toBe('PICKER');
     expect(props.count).toBe(1);
     expect(props.summaryForms?.[0]).toBe('Priya likes this');
     expect(props.onPressSummary).toBe(handlers.onOpenDetail);
   });
 
-  it('never says "You" on the viewer’s own post, whatever the summary claims', () => {
+  it('says "You and …" when the viewer reacted to their own post, counting them', () => {
     const props = activityReaction({
-      summary: summary([person('priya', 'Priya')], { mine: 'love', total: 1 }),
+      summary: summary([person('me', 'Sai'), person('alex', 'Alex')], { mine: 'love' }),
       viewerId: 'me',
-      isOwn: true,
       ...handlers,
     });
-    expect(props.summaryForms?.some((form) => form.startsWith('You'))).toBe(false);
+    expect(props.count).toBe(2);
+    expect(props.mineGlyph).toBe('❤️');
+    expect(props.mineLabel).toBe('Liked');
+    expect(props.summaryGlyphs).toEqual(['❤️']);
+    expect(props.summaryForms?.[0]).toBe('You and Alex like this');
   });
 
   it('draws nothing for a post nobody has reacted to', () => {
-    const props = activityReaction({ summary: undefined, viewerId: 'me', isOwn: false, ...handlers });
+    const props = activityReaction({ summary: undefined, viewerId: 'me', ...handlers });
     expect(props.count).toBe(0);
     expect(props.summaryForms).toEqual([]);
   });

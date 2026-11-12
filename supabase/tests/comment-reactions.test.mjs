@@ -72,8 +72,9 @@ describe('comment reactions carry the six', () => {
     alice = await t.createUser({ username: 'alice' });
     bob = await t.createUser({ username: 'bob' });
     carol = await t.createUser({ username: 'carol' });
-    // The comment's author, who never reacts: since 20261110000100 an author's
-    // reaction to their own comment is refused, and every reactor below is somebody else.
+    // The comment's author, who never reacts here, so every reactor below is somebody
+    // else. An author's reaction to their own comment is allowed (20261115000100,
+    // `self-reactions.test.mjs`); this suite is about the six kinds, not about that.
     wren = await t.createUser({ username: 'wren' });
 
     const movie = await t.createMovie('Stalker', 920001);

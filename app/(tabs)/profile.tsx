@@ -573,12 +573,11 @@ export default function ProfileScreen() {
                 }
                 // The same interactions the Feed offers, because it is the same event.
                 // Reading what people said about your own ranking is the point of
-                // having the row here at all — and, every row here being yours, that
-                // is all the reaction line does: no heart (founder, 2026-11-10).
+                // having the row here at all. Every row here is yours, and the heart is
+                // offered on it as anywhere else (founder, 2026-11-11).
                 reaction={activityReaction({
                   summary,
                   viewerId: profile.id,
-                  isOwn: event.actorId === profile.id,
                   onToggle: () => void setReaction(event.id, summary?.mine ? null : 'love'),
                   onOpenDetail: () => setDetailFor(event.id),
                 })}
