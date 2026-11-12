@@ -55,6 +55,11 @@ let mockRpcErrors: Record<string, unknown> = {};
 const mockReads: Record<string, number> = {};
 /** Every `select`, by table and column list, so one read of a table can be told from another. */
 const mockSelects: [string, string][] = [];
+/**
+ * What a series' season-list read fails with, when a test asks it to: the one read of
+ * `media_items` filtered to `kind = 'season'` by `parent_id` (`useSeasons`).
+ */
+let mockSeasonListError: unknown = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -104,6 +109,18 @@ jest.mock('@/lib/supabase', () => ({
         // the call, which is exactly why a page that only misbehaves during a fetch had
         // no test until now.
         then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          if (
+            mockSeasonListError &&
+            table === 'media_items' &&
+            filters.kind === 'season' &&
+            'parent_id' in filters
+          ) {
+            void Promise.resolve({ data: null, error: mockSeasonListError }).then(
+              resolve,
+              reject,
+            );
+            return;
+          }
           void held(table, () => ({ data: rows(), error: null, count: rows().length })).then(
             resolve,
             reject,
@@ -322,6 +339,7 @@ beforeEach(() => {
   mockHeld.clear();
   mockRpcResults = {};
   mockRpcErrors = {};
+  mockSeasonListError = null;
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   mockSelects.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
@@ -5189,5 +5207,220 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
       expect(within(view.getByTestId('cast-sheet-list')).getByText('Actor 6')).toBeTruthy();
     });
+  });
+});
+
+/**
+ * **A whole show's length is its count of seasons** (visual refine, 2026-11-12).
+ *
+ * `YEAR · CERT · N seasons` on both layouts: the Cinematic module line says it in one,
+ * and the Original page keeps its two lines, the year alone over `CERT · N seasons ·
+ * Creator`, with the count in the length slot a film's runtime fills. The count is read
+ * from the series page's own season list, excludes Specials, and is absent, never
+ * `0 seasons` and never a stray separator, until that list has answered with a real
+ * season. A season's page and a film's are unchanged.
+ */
+describe("a series' count of seasons", () => {
+  const show = {
+    ...film,
+    id: 'series-1',
+    kind: 'series',
+    title: 'Fleabag',
+    release_date: '2019-03-04',
+    runtime_minutes: null,
+    certification: 'TV-MA',
+    backdrop_path: null,
+  };
+  const season = (n: number) => ({
+    id: `season-${n}`,
+    parent_id: 'series-1',
+    kind: 'season',
+    season_number: n,
+    title: n === 0 ? 'Specials' : `Season ${n}`,
+    release_date: '2019-03-04',
+    poster_path: null,
+    fetched_at: new Date().toISOString(),
+  });
+
+  const openShow = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getAllByText(/Fleabag/).length).toBeGreaterThan(0));
+    return view;
+  };
+  /** The season list has been read, so whatever the line says now is its final word. */
+  const seasonsRead = () =>
+    waitFor(() =>
+      expect(
+        mockSelects.some(
+          ([table, columns]) => table === 'media_items' && columns.includes('season_number'),
+        ),
+      ).toBe(true),
+    );
+
+  beforeEach(() => {
+    mockOpenId = 'series-1';
+  });
+
+  describe.each([
+    [
+      'Original',
+      'original',
+      (count: string) => ({ subtitle: '2019', meta: `TV-MA · ${count}` }),
+    ],
+    [
+      'Cinematic',
+      'immersive',
+      (count: string) => ({ subtitle: null, meta: `2019 · TV-MA · ${count}` }),
+    ],
+  ] as const)('on the %s page', (_name, layout, expected) => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout(layout);
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+    });
+
+    const expectLine = async (
+      view: Awaited<ReturnType<typeof openShow>>,
+      count: string | null,
+    ) => {
+      if (count == null) {
+        // The segment is gone, and so is any separator it would have needed.
+        const meta = layout === 'original' ? 'TV-MA' : '2019 · TV-MA';
+        await waitFor(() =>
+          expect(view.getByTestId('title-meta')).toHaveTextContent(new RegExp(`^${meta}$`)),
+        );
+        expect(view.getByTestId('title-meta')).not.toHaveTextContent(/season/);
+        expect(view.getByTestId('title-meta')).not.toHaveTextContent(/·\s*$|·\s*·/);
+        return;
+      }
+      const line = expected(count);
+      await waitFor(() =>
+        expect(view.getByTestId('title-meta')).toHaveTextContent(new RegExp(`^${line.meta}$`)),
+      );
+      if (line.subtitle) {
+        expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+          new RegExp(`^${line.subtitle}$`),
+        );
+      }
+    };
+
+    it('reads 1 season, singular', async () => {
+      tableRows.media_items = [show, season(1)];
+      const view = await openShow();
+      await expectLine(view, '1 season');
+    });
+
+    it('reads 3 seasons, plural', async () => {
+      tableRows.media_items = [show, season(1), season(2), season(3)];
+      const view = await openShow();
+      await expectLine(view, '3 seasons');
+    });
+
+    it('does not count Specials: Season 0, 1 and 2 are 2 seasons', async () => {
+      tableRows.media_items = [show, season(0), season(1), season(2)];
+      const view = await openShow();
+      await expectLine(view, '2 seasons');
+    });
+
+    it('says nothing for a show with only Specials', async () => {
+      tableRows.media_items = [show, season(0)];
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+    });
+
+    it('says nothing, never 0 seasons, while the list is empty', async () => {
+      tableRows.media_items = [show];
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+      expect(view.queryByText(/0 seasons/)).toBeNull();
+    });
+
+    it('says nothing when the list fails to load', async () => {
+      tableRows.media_items = [show, season(1), season(2)];
+      mockSeasonListError = { message: 'season list unavailable' };
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+    });
+
+    it('says nothing while the list is still loading, then the count once it lands', async () => {
+      tableRows.media_items = [show, season(1), season(2)];
+      // The series row answers; the season list read that follows it is parked.
+      holdReadsOf('media_items');
+      const view = await renderWithProviders(<TitleScreen />);
+      releaseReadsOf('media_items');
+      holdReadsOf('media_items');
+      await waitFor(() => expect(view.getByTestId('title-meta')).toBeTruthy());
+      await expectLine(view, null);
+      // Discriminating: the hold, and nothing else, is what kept it out.
+      releaseReadsOf('media_items');
+      await expectLine(view, '2 seasons');
+    });
+  });
+
+  it('leaves a season page as it was: Season 2 · 7 episodes · 2025', async () => {
+    mockOpenId = 'season-2';
+    tableRows.media_items = [
+      {
+        ...season(2),
+        release_date: '2025-04-13',
+        episode_count: 7,
+        certification: null,
+        overview: null,
+        parent: { id: 'series-1', title: 'Fleabag', certification: 'TV-MA' },
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() =>
+      expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+        /^Season 2 · 7 episodes · 2025$/,
+      ),
+    );
+    expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/);
+
+    view.unmount();
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+    try {
+      const cinematic = await renderWithProviders(<TitleScreen />);
+      await waitFor(() =>
+        expect(cinematic.getByTestId('title-meta')).toHaveTextContent(
+          /^Season 2 · 7 episodes · 2025 · TV-MA$/,
+        ),
+      );
+      expect(cinematic.getByTestId('title-meta')).not.toHaveTextContent(/seasons?\b(?! 2)/);
+    } finally {
+      await setTitleLayout('original');
+    }
+  });
+
+  it('leaves a film as it was on both layouts', async () => {
+    mockOpenId = 'film-1';
+    tableRows.media_items = [{ ...film, certification: 'PG-13' }];
+    tableRows.media_cache = [credits];
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent(
+        /^PG-13 · 148 min · Christopher Nolan$/,
+      ),
+    );
+
+    view.unmount();
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+    try {
+      const cinematic = await open();
+      await waitFor(() =>
+        expect(cinematic.getByTestId('title-meta')).toHaveTextContent(
+          /^2010 · PG-13 · 148 min$/,
+        ),
+      );
+    } finally {
+      await setTitleLayout('original');
+    }
   });
 });
