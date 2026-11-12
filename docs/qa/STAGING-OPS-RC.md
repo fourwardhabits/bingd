@@ -7,13 +7,20 @@
 - **Staging only:** project `fjxhcbowoxuzulwirzyr` (`STAGING_REF` in `config/backends.cjs`). Never production. Check the ref on every command.
 - **Flags stay off throughout.** No step sets any `proactive.*` key, `push.delivery_enabled`, `release.push_enabled` or any other `app_config` value. Turning one on is a separate decision after QA.
 - **Secrets: names only.** Never print, copy, paste or set a secret value. Setting one is its own approval (step 4c).
-- Everything runs from a clean checkout of the RC head named in the PR's `HANDOFF-COMPLETE` comment.
+- **Source commit.** Everything runs from a clean checkout of the RC.
+  - **Build-source commit:** `460a9809d9ec5658a1328fd7aae9339e039d1de0` (`460a980`, the IMDb copy fix of 2026-11-11). It is the last commit that changes app, database or function source.
+  - **Docs only after it:** every later commit on the branch changes `docs/` only. The branch head named in the latest `HANDOFF-COMPLETE` comment on #266 is therefore equivalent for every step here. Check with:
+    ```bash
+    git diff --stat 460a980 HEAD -- . ':!docs'
+    ```
+    It must print nothing.
+  - **Moving from `47eef0c`:** the earlier head changed only by `460a980`, which touches `src/features/import/*` (copy, a comment and tests) and `docs/product/imdb-import.md`. No migration, Edge Function or `supabase/config.toml` changed. `git diff 47eef0c 460a980 -- supabase` is empty.
 
 ## Step 0: gate (read-only)
 
 **Do**
 1. CI on the RC head is green on #266: **Typecheck, lint, test, database**, and **Concurrency suite (real PostgreSQL)**. Cloudflare Pages is a preview only.
-2. Check out the RC head and confirm `git rev-parse HEAD` equals the SHA in `HANDOFF-COMPLETE`, and `git status` is clean.
+2. Check out the RC head and confirm `git rev-parse HEAD` equals the SHA in the latest `HANDOFF-COMPLETE`, that `git status` is clean, and that the docs-only check above prints nothing.
 3. Link the staging project, then read its state:
    ```bash
    npx supabase link --project-ref fjxhcbowoxuzulwirzyr
@@ -37,6 +44,10 @@
 **Rollback:** nothing to roll back; this step only reads.
 
 ## Step 1: deploy `letterboxd-import`
+
+> **Status (2026-11-11):** being run separately by the founder's operator, **from `47eef0c`**.
+> - **No redeploy is needed:** the function's source at `47eef0c` and at `460a980` (and the RC head) is **identical**. `supabase/functions/letterboxd-import` is the same git tree, `be6b5299fbcdd39acc23dc3db5749669664346e5`, at both, and `supabase/config.toml` is unchanged.
+> - Record the deployed version from `functions list` for rollback.
 
 **Why first:** against the old schema it behaves exactly as today. A claim without `provider` takes the Letterboxd path, and resolve is called with the old arguments. Deploying it *after* the migrations would leave one window where IMDb TV rows are title-searched as movies and settle unmatched (`docs/product/imdb-import.md` §4).
 
@@ -179,11 +190,11 @@ npx supabase secrets set TMDB_ACCESS_TOKEN --project-ref fjxhcbowoxuzulwirzyr   
 ## Step 5 (final): internal Preview build, Android and iOS
 
 **Why a build and not an OTA:** #241's photo-permission string changes the native fingerprint.
-- At the RC head: Android `0e89d290…` and iOS `464f06a5…`, the same as #263 and #265.
+- At `460a980` (and so at the RC head): Android `0e89d2907c2d…` and iOS `464f06a54d7d…`, the same as at `47eef0c`, #263 and #265. The copy fix is JS only.
 - Against `58c2de7`, the only differing fingerprint source is `expoConfig`, and that is the permission string.
 - An OTA to the existing Preview binary would be refused on runtime.
 
-**Do:** from the RC head, clean tree, one build per platform, internal distribution.
+**Do:** from the RC head (equivalent to `460a980`; see Rules), clean tree, one build per platform, internal distribution.
 ```bash
 npm run build:preview -- --platform android
 ```
