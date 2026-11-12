@@ -198,40 +198,43 @@ describe('a biography the cache shortened', () => {
 });
 
 describe('sorting a filmography', () => {
-  it('opens on Popular, in the cache’s order', async () => {
+  /**
+   * **Release date, newest first, is the default and the only sort** (founder QA,
+   * 2026-11-12). Popular and Highest rated (TMDB) are no longer offered.
+   */
+  it('opens on Release date, newest first', async () => {
     const view = await open();
-    expect(view.getByLabelText('Sort. Popular')).toBeTruthy();
-    expect(rowTitles(view).slice(0, 3)).toEqual([
-      'Fight Club',
-      'Once Upon a Time… in Hollywood',
-      'Se7en',
-    ]);
-  });
-
-  it('offers Popular, Release date and the TMDB rating, with the current one selected', async () => {
-    const view = await open();
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
-    const menu = within(view.getByTestId('filmography-sort-menu'));
-    const options = menu.getAllByRole('radio').map((node) => node.props.accessibilityLabel);
-    expect(options).toEqual(['Popular', 'Release date', 'Highest rated (TMDB)']);
-    expect(menu.getByLabelText('Popular').props.accessibilityState).toEqual({ selected: true });
-  });
-
-  it('sorts newest first, and flips to oldest first on a second press', async () => {
-    const view = await open();
-    await chooseSort(view, 'Release date');
     expect(view.getByLabelText('Sort. Release date, newest first')).toBeTruthy();
     expect(rowTitles(view).slice(0, 4)).toEqual(['F1', 'Wolfs', 'Bullet Train', 'Babylon']);
+  });
 
+  it('offers Release date alone — no Popular, no Highest rated (TMDB) — selected', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByLabelText('Sort. Release date, newest first'));
+    const menu = within(view.getByTestId('filmography-sort-menu'));
+    const options = menu.getAllByRole('radio').map((node) => node.props.accessibilityLabel);
+    expect(options).toEqual(['Release date, newest first']);
+    expect(menu.queryByLabelText(/^Popular/)).toBeNull();
+    expect(menu.queryByLabelText(/^Highest rated/)).toBeNull();
+    expect(menu.getByLabelText(/^Release date/).props.accessibilityState).toEqual({
+      selected: true,
+    });
+  });
+
+  it('flips to oldest first on a press, and back to newest on the next', async () => {
+    const view = await open();
     await chooseSort(view, 'Release date');
     expect(view.getByLabelText('Sort. Release date, oldest first')).toBeTruthy();
     expect(rowTitles(view).slice(0, 3)).toEqual(['Dallas', 'Cutting Class', 'Thelma & Louise']);
+
+    await chooseSort(view, 'Release date');
+    expect(view.getByLabelText('Sort. Release date, newest first')).toBeTruthy();
+    expect(rowTitles(view).slice(0, 4)).toEqual(['F1', 'Wolfs', 'Bullet Train', 'Babylon']);
   });
 
   it('says where a newest-first list over a capped career stops being complete', async () => {
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
-    await chooseSort(view, 'Release date');
     expect(view.getByTestId('coverage-note')).toHaveTextContent(
       'From here on, not every one of their older credits is listed.',
     );
@@ -251,34 +254,18 @@ describe('sorting a filmography', () => {
   it('puts undated credits last in both directions, under their own label', async () => {
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
-    await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByLabelText(/^Show more of/));
     expect(rowTitles(view).at(-1)).toBe('Untitled Brad Pitt Project');
     expect(view.getByTestId('tail-note')).toHaveTextContent('No release date yet');
 
+    // Oldest first.
     await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByLabelText(/^Show more of/));
     expect(rowTitles(view).at(-1)).toBe('Untitled Brad Pitt Project');
   });
 
-  it('orders by the TMDB rating with the thinly voted last', async () => {
-    const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
-    await chooseSort(view, 'Highest rated (TMDB)');
-    expect(view.getByLabelText('Sort. Highest rated (TMDB)')).toBeTruthy();
-    expect(rowTitles(view).slice(0, 3)).toEqual([
-      'Fight Club',
-      'Se7en',
-      'Inglourious Basterds',
-    ]);
-    await fireEvent.press(view.getByLabelText(/^Show more of/));
-    expect(rowTitles(view).slice(-1)).toEqual(['Cutting Class']);
-    expect(view.getByTestId('tail-note')).toHaveTextContent('Too few TMDB ratings to rank');
-  });
-
   it('keeps the order across Movies and TV, and sorts within the filter', async () => {
     const view = await open();
-    await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByRole('tab', { name: 'TV' }));
     expect(view.getByLabelText('Sort. Release date, newest first')).toBeTruthy();
     expect(rowTitles(view)).toEqual(['Friends', 'Dallas']);
@@ -286,7 +273,6 @@ describe('sorting a filmography', () => {
 
   it('keeps the order across Cast and Crew, and sorts the crew half by its own dates', async () => {
     const view = await open();
-    await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByRole('tab', { name: 'Crew' }));
     expect(rowTitles(view)).toEqual([
       '12 Years a Slave',
@@ -308,16 +294,17 @@ describe('sorting a filmography', () => {
     expect(rowTitles(view)).toHaveLength(12);
   });
 
-  it('opens the title behind a row in any order', async () => {
+  it('opens the title behind a row in either order', async () => {
     const view = await open();
-    await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByLabelText(/^F1, 2025/));
     expect(mockPush).toHaveBeenCalledWith('/title/bp-f1');
+    await chooseSort(view, 'Release date');
+    await fireEvent.press(view.getByLabelText(/^Dallas, 1978/));
+    expect(mockPush).toHaveBeenLastCalledWith('/title/bp-dallas');
   });
 
   it('saves from a sorted row, and changes nothing about rankings', async () => {
     const view = await open();
-    await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByLabelText('Add F1 to your watchlist'));
     expect(mockSetWatchlist).toHaveBeenCalledWith({
       operationId: 'op-1',
@@ -330,8 +317,7 @@ describe('sorting a filmography', () => {
   it('writes nothing just by sorting', async () => {
     const view = await open();
     await chooseSort(view, 'Release date');
-    await chooseSort(view, 'Highest rated (TMDB)');
-    await chooseSort(view, 'Popular');
+    await chooseSort(view, 'Release date');
     expect(mockSetWatchlist).not.toHaveBeenCalled();
   });
 
@@ -344,7 +330,6 @@ describe('sorting a filmography', () => {
       },
     ];
     const view = await open();
-    await chooseSort(view, 'Release date');
     await waitFor(() =>
       expect(view.getByLabelText('Remove F1 from your watchlist')).toBeTruthy(),
     );
@@ -354,27 +339,27 @@ describe('sorting a filmography', () => {
 describe('a row cached before scores and coverage were stored', () => {
   beforeEach(() => use(legacy(BRAD_PITT)));
 
-  it('offers no TMDB rating it does not have', async () => {
+  it('offers Release date alone, as every row does', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
+    await fireEvent.press(view.getByLabelText('Sort. Release date, newest first'));
     const options = within(view.getByTestId('filmography-sort-menu'))
       .getAllByRole('radio')
       .map((node) => node.props.accessibilityLabel);
-    expect(options).toEqual(['Popular', 'Release date']);
+    expect(options).toEqual(['Release date, newest first']);
   });
 
   it('says a date sort is within what was kept, not the whole career', async () => {
+    // From the first render: the page now opens on the date sort.
     const view = await open();
-    await chooseSort(view, 'Release date');
     expect(view.getByTestId('sort-scope-note')).toHaveTextContent(
       /^Sorted within the \d+ acting credits kept here, of 89 TMDB lists\.$/,
     );
     expect(view.queryByTestId('coverage-note')).toBeNull();
   });
 
-  it('says nothing extra under Popular, which the count already describes', async () => {
+  it('keeps the count line alongside the date caveat', async () => {
     const view = await open();
-    expect(view.queryByTestId('sort-scope-note')).toBeNull();
+    expect(view.getByTestId('sort-scope-note')).toBeTruthy();
     expect(view.getByText(/^Showing \d+ of 89 acting credits TMDB lists\.$/)).toBeTruthy();
   });
 });
@@ -387,7 +372,6 @@ describe('review fixes on the page', () => {
     ).cast.movie.newest = null;
     use(broken);
     const view = await open();
-    await chooseSort(view, 'Release date');
     // Read as a row with no coverage at all: the cautious caption, not a silent "complete".
     expect(view.getByTestId('sort-scope-note')).toBeTruthy();
   });
@@ -395,7 +379,6 @@ describe('review fixes on the page', () => {
   it('does not trust coverage once a credit’s catalogue row has gone', async () => {
     use({ ...BRAD_PITT, items: BRAD_PITT.items.filter((item) => item.id !== 'bp-wolfs') });
     const view = await open();
-    await chooseSort(view, 'Release date');
     expect(view.getByTestId('sort-scope-note')).toBeTruthy();
     expect(view.queryByTestId('coverage-note')).toBeNull();
   });
@@ -410,7 +393,6 @@ describe('review fixes on the page', () => {
     payload.cast_total = 0;
     use(presenter);
     const view = await open('Bryan Cranston');
-    await chooseSort(view, 'Release date');
     expect(view.getByTestId('sort-scope-note')).toBeTruthy();
   });
 
@@ -428,7 +410,6 @@ describe('the other three kinds of person', () => {
   it('a television actor: sorted by first air date, and complete', async () => {
     use(BRYAN_CRANSTON);
     const view = await open('Bryan Cranston');
-    await chooseSort(view, 'Release date');
     expect(rowTitles(view)).toEqual([
       'Your Honor',
       'Argo',
@@ -444,7 +425,6 @@ describe('the other three kinds of person', () => {
     use(CHRISTOPHER_NOLAN);
     const view = await open('Christopher Nolan');
     expect(view.queryByRole('tab', { name: 'Cast' })).toBeNull();
-    await chooseSort(view, 'Release date');
     expect(rowTitles(view).slice(0, 2)).toEqual(['The Odyssey', 'Oppenheimer']);
     expect(view.getByText('Director, Writer, Producer')).toBeTruthy();
   });
@@ -454,15 +434,13 @@ describe('the other three kinds of person', () => {
     const view = await open('Ada Okafor');
     expect(view.queryByTestId('person-meta')).toBeNull();
     expect(view.queryByLabelText('Expand biography')).toBeNull();
-    // Two credits are still worth ordering; no rating axis without any scores.
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
+    // Two credits are still worth ordering, by date and nothing else.
+    await fireEvent.press(view.getByLabelText('Sort. Release date, newest first'));
     expect(
-      within(view.getByTestId('filmography-sort-menu')).queryByLabelText(
-        'Highest rated (TMDB)',
-      ),
+      within(view.getByTestId('filmography-sort-menu')).queryByLabelText(/^Highest rated/),
     ).toBeNull();
     await fireEvent.press(
-      within(view.getByTestId('filmography-sort-menu')).getByLabelText('Release date'),
+      within(view.getByTestId('filmography-sort-menu')).getByLabelText(/^Release date/),
     );
     expect(rowTitles(view)).toEqual(['Harbour', 'First Light']);
     expect(view.queryByText(/^Showing/)).toBeNull();
