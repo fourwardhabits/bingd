@@ -270,7 +270,7 @@ describe('the season pill', () => {
     expect(seasonPillLabel(n)).toBe(label);
   });
 
-  it('reads "S1 9.8" for a season and the bare number for a show', async () => {
+  it('reads "S1: 9.8" for a season and the bare number for a show', async () => {
     const view = await render(
       <PosterGrid
         tiles={[
@@ -289,9 +289,12 @@ describe('the season pill', () => {
       />,
     );
 
-    expect(view.getByText('S1 9.8', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('S10 9.4', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('SP 3.1', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S1: 9.8', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S10: 9.4', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('SP: 3.1', { includeHiddenElements: true })).toBeTruthy();
+    // The old space-only form is gone everywhere.
+    expect(view.queryByText('S1 9.8', { includeHiddenElements: true })).toBeNull();
+    // A show keeps the bare number: an exact match, so no prefix and no colon.
     expect(view.getByText('8.7', { includeHiddenElements: true })).toBeTruthy();
   });
 
@@ -329,10 +332,34 @@ describe('the season pill', () => {
         onPressTile={() => {}}
       />,
     );
-    const text = view.getByText('S10 9.4', { includeHiddenElements: true });
+    const text = view.getByText('S10: 9.4', { includeHiddenElements: true });
     expect(text.props.numberOfLines).toBe(1);
     // Fixed size, as every chip on a wall is: a pill that grew with text size would cover
     // the poster it labels.
     expect(text.props.allowFontScaling).toBe(false);
+  });
+
+  /**
+   * The colon costs one glyph and the pill is **not** widened for it (2026-11-12). Measured
+   * in Inter Medium 12pt with the caption's 0.2 tracking, the widest realistic pill,
+   * `S12: 10.0`, is 47.8pt of text, so 57.8pt of pill with its padding and border; a
+   * three-across tile at 320pt is 92pt wide with 84pt left of the 4pt inset. The pill sits
+   * in the bottom corner and the bookmark in the top one, so they cannot meet.
+   */
+  it('keeps the pill box as it was, with the colon inside it', async () => {
+    const view = await render(
+      <PosterGrid
+        tiles={[{ id: 's12', title: 'Shameless, S12', score: 10, bucket: 'loved', season: 12 }]}
+        onPressTile={() => {}}
+      />,
+    );
+    expect(view.getByText('S12: 10.0', { includeHiddenElements: true })).toBeTruthy();
+    const pill = StyleSheet.flatten(
+      view.getByTestId('poster-season-pill', { includeHiddenElements: true }).props.style,
+    ) as ViewStyle;
+    expect(pill.minWidth).toBe(34);
+    expect(pill.paddingHorizontal).toBe(theme.space[1]);
+    expect(pill.position).toBe('absolute');
+    expect(pill.bottom).toBe(theme.space[1]);
   });
 });
