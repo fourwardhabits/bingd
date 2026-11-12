@@ -94,6 +94,25 @@ export function watchCountLabel(count: number): string | null {
 }
 
 /**
+ * The first and latest dated watch, for the screen's `First … · Latest …` line, or null when
+ * that line would say nothing.
+ *
+ * **Null for one dated watch, or for dated watches that all fall on one day** (founder QA,
+ * 2026-11-12). Either way the line would print the same date twice. Undated viewings never
+ * count: they are the ones nobody can place, so they are not a first or a latest date.
+ * `YYYY-MM-DD` strings sort the same as the dates, so the comparison is a string one.
+ */
+export function historySpan(
+  dates: readonly (string | null)[],
+): { first: string; latest: string } | null {
+  const dated = dates.filter((date): date is string => date !== null).sort();
+  if (dated.length < 2) return null;
+  const first = dated[0]!;
+  const latest = dated[dated.length - 1]!;
+  return first === latest ? null : { first, latest };
+}
+
+/**
  * Whether the title line is tappable.
  *
  * **Any seen title**, because a single dated watch still has a date to edit and a past

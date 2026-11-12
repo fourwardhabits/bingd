@@ -18,7 +18,7 @@ import { useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import {
   INITIAL_FILMOGRAPHY_SORT,
-  filmographyAxes,
+  FILMOGRAPHY_AXES,
   sortCoverage,
   sortFilmography,
   tailStart,
@@ -97,7 +97,7 @@ const KIND_TABS = [
  * - **"Filmography"** rather than "Known for": the list is everything kept, and it can now
  *   be ordered — `filmography.ts` — with the shared sort control in the section's own
  *   header row.
- * - **Honest sorting.** A date or rating sort over a capped filmography says where it
+ * - **Honest sorting.** A date sort over a capped filmography says where it
  *   stops being complete, at the row where it does (`sortCoverage`).
  * - **The biography says when it was shortened**, once opened (`Biography`).
  *
@@ -237,15 +237,13 @@ export default function PersonScreen() {
   /**
    * The order, and what it can promise.
    *
-   * The axes are decided by the half, not the filter, so the rating axis does not come
-   * and go as Movies and TV are switched. A chosen axis this half cannot offer — the
-   * rating, on a half with no TMDB scores — falls back to Popular for as long as it is
-   * shown, without forgetting the reader's choice for the half that can.
+   * Release date is the one axis (founder QA, 2026-11-12: Popular and Highest rated
+   * (TMDB) are no longer offered), newest first until the reader flips it.
    */
   // Recomputed per render, deliberately: a list is at most about a hundred and thirty
   // credits, and memoising on arrays this component rebuilds every render would be a
   // cache that never hits.
-  const axes = filmographyAxes(roleCredits);
+  const axes = FILMOGRAPHY_AXES;
   const activeSort = coerceSortState(sort, axes);
   const sorted = sortFilmography(filtered, activeSort);
   const visible = sorted.slice(0, shown);
@@ -277,7 +275,7 @@ export default function PersonScreen() {
     !(group !== 'self' && roleTotal !== null && roleTotal <= roleCredits.length);
   const tailOnly = coverage.kind === 'partial' && coverage.tailOnly;
   const boundary = coverage.kind === 'partial' ? coverage.from : null;
-  const tail = tailStart(sorted, activeSort);
+  const tail = tailStart(sorted);
 
   const toggleWatchlist = async (credit: PersonCredit) => {
     if (busyId) return;
@@ -486,7 +484,7 @@ export default function PersonScreen() {
 
               {/* A row cached before coverage was recorded: the order is right for what
                   is here, and the page says that what is here may not be everything. */}
-              {uncertain && activeSort.axis !== 'popular' ? (
+              {uncertain ? (
                 <ListNote testID="sort-scope-note">
                   {roleTotal !== null
                     ? `Sorted within the ${roleCredits.length} ${totalNoun} kept here, of ${roleTotal} TMDB lists.`
@@ -505,9 +503,7 @@ export default function PersonScreen() {
                       ) : null}
                       {index === tail ? (
                         <ListNote testID="tail-note" quiet>
-                          {activeSort.axis === 'released'
-                            ? 'No release date yet'
-                            : 'Too few TMDB ratings to rank'}
+                          No release date yet
                         </ListNote>
                       ) : null}
                       <TitleRow
@@ -664,14 +660,10 @@ function usePersonTopBar() {
  */
 function boundaryNote(sort: FilmographySort, inline: boolean, tailOnly: boolean) {
   const what = tailOnly
-    ? sort.axis === 'rating'
-      ? 'credits with too few TMDB ratings'
-      : 'credits with no release date'
-    : sort.axis === 'rating'
-      ? 'lower-rated credits'
-      : sort.direction === 'desc'
-        ? 'older credits'
-        : 'later credits';
+    ? 'credits with no release date'
+    : sort.direction === 'desc'
+      ? 'older credits'
+      : 'later credits';
   return inline
     ? `From here on, not every one of their ${what} is listed.`
     : `Not every one of their ${what} is listed.`;

@@ -8,8 +8,8 @@ import {
   type PersonFixture,
 } from './__fixtures__/people';
 import {
+  FILMOGRAPHY_AXES,
   INITIAL_FILMOGRAPHY_SORT,
-  filmographyAxes,
   sortCoverage,
   sortFilmography,
   tailStart,
@@ -56,34 +56,36 @@ const pittMovies = pittCast.filter((credit) => credit.kind === 'movie');
 
 const NEWEST: FilmographySort = { axis: 'released', direction: 'desc' };
 const OLDEST: FilmographySort = { axis: 'released', direction: 'asc' };
-const RATED: FilmographySort = { axis: 'rating', direction: 'desc' };
 
 const titles = (credits: PersonCredit[]) => credits.map((credit) => credit.title);
 
-describe('Popular, the default', () => {
-  it('opens on Popular', () => {
-    expect(INITIAL_FILMOGRAPHY_SORT).toEqual({ axis: 'popular', direction: 'desc' });
+/**
+ * **Release date, newest first, is the only sort** (founder QA, 2026-11-12). Popular and
+ * Highest rated (TMDB) are no longer offered, whatever the credits carry.
+ */
+describe('the sorts offered', () => {
+  it('opens on Release date, newest first', () => {
+    expect(INITIAL_FILMOGRAPHY_SORT).toEqual({ axis: 'released', direction: 'desc' });
   });
 
-  it('is exactly the cache’s own order', () => {
-    expect(titles(sortFilmography(pittCast, INITIAL_FILMOGRAPHY_SORT))).toEqual(
-      titles(pittCast),
-    );
+  it('offers Release date and nothing else — no Popular, no Highest rated (TMDB)', () => {
+    expect(FILMOGRAPHY_AXES.map((axis) => axis.label)).toEqual(['Release date']);
+    // Not even for a filmography that carries TMDB scores, which used to add the rating.
+    expect(pittCast.some((credit) => credit.score !== null)).toBe(true);
+    expect(FILMOGRAPHY_AXES.map((axis) => axis.axis)).toEqual(['released']);
   });
 
-  it('restores the cache order from any other order', () => {
-    const shuffled = sortFilmography(pittCast, NEWEST);
-    expect(titles(sortFilmography(shuffled, INITIAL_FILMOGRAPHY_SORT))).toEqual(
-      titles(pittCast),
-    );
-  });
-
-  it('never claims more or less than the stated count', () => {
-    expect(
-      sortCoverage(pittCast, INITIAL_FILMOGRAPHY_SORT, coverageOf(BRAD_PITT), 'cast', 'all'),
-    ).toEqual({
-      kind: 'complete',
+  it('keeps both directions: newest and oldest', () => {
+    expect(FILMOGRAPHY_AXES[0]?.directions).toEqual({
+      desc: 'newest first',
+      asc: 'oldest first',
     });
+  });
+
+  it('draws the opening order newest first, with the undated tail last', () => {
+    const sorted = sortFilmography(pittMovies, INITIAL_FILMOGRAPHY_SORT);
+    expect(titles(sorted).slice(0, 2)).toEqual(['F1', 'Wolfs']);
+    expect(sorted.at(-1)?.title).toBe('Untitled Brad Pitt Project');
   });
 });
 
@@ -117,13 +119,13 @@ describe('Release date', () => {
 
   it('labels where the undated tail begins', () => {
     const sorted = sortFilmography(pittMovies, NEWEST);
-    expect(tailStart(sorted, NEWEST)).toBe(sorted.length - 1);
+    expect(tailStart(sorted)).toBe(sorted.length - 1);
     // A list that is all tail has nothing to set it apart from.
     const undated = sortFilmography(
       pittMovies.filter((credit) => !credit.releaseDate),
       NEWEST,
     );
-    expect(tailStart(undated, NEWEST)).toBeNull();
+    expect(tailStart(undated)).toBeNull();
   });
 
   it('is stable: the same input sorts the same way every time, whatever order it arrives in', () => {
@@ -139,11 +141,12 @@ describe('Release date', () => {
   });
 
   it('flips between newest and oldest on the shared control', () => {
-    const axes = filmographyAxes(pittCast);
-    const chosen = nextSortState(INITIAL_FILMOGRAPHY_SORT, 'released', axes);
-    expect(chosen).toEqual(NEWEST);
-    expect(nextSortState(chosen, 'released', axes)).toEqual(OLDEST);
-    expect(spokenSortLabel(chosen, axes)).toBe('Sort. Release date, newest first');
+    const axes = FILMOGRAPHY_AXES;
+    // It opens on newest first, so the first press flips it to oldest, and the next back.
+    const flipped = nextSortState(INITIAL_FILMOGRAPHY_SORT, 'released', axes);
+    expect(flipped).toEqual(OLDEST);
+    expect(nextSortState(flipped, 'released', axes)).toEqual(NEWEST);
+    expect(spokenSortLabel(NEWEST, axes)).toBe('Sort. Release date, newest first');
     expect(spokenSortLabel(OLDEST, axes)).toBe('Sort. Release date, oldest first');
   });
 });
@@ -179,7 +182,7 @@ describe('where a sort over a capped filmography stops being complete', () => {
 
   it('is complete for somebody nothing was dropped for', () => {
     const nolan = creditsOf(CHRISTOPHER_NOLAN);
-    for (const sort of [NEWEST, OLDEST, RATED]) {
+    for (const sort of [NEWEST, OLDEST]) {
       expect(
         sortCoverage(
           sortFilmography(nolan, sort),
@@ -243,56 +246,6 @@ describe('review fixes: what a partial record may and may not claim', () => {
     const result = sortCoverage(sorted, NEWEST, only({ undated: true }), 'cast', 'movie');
     expect(result).toEqual({ kind: 'partial', from: sorted.length - 1, tailOnly: true });
   });
-
-  it('names the unrated tail when that is all that was lost', () => {
-    const sorted = sortFilmography(pittMovies, RATED);
-    const result = sortCoverage(sorted, RATED, only({ unrated: true }), 'cast', 'movie');
-    expect(result).toEqual({ kind: 'partial', from: sorted.length - 2, tailOnly: true });
-  });
-});
-
-describe('Highest rated (TMDB)', () => {
-  it('is offered only where something has a TMDB score', () => {
-    expect(filmographyAxes(pittCast).map((axis) => axis.axis)).toEqual([
-      'popular',
-      'released',
-      'rating',
-    ]);
-    expect(filmographyAxes(creditsOf(NEWCOMER)).map((axis) => axis.axis)).toEqual([
-      'popular',
-      'released',
-    ]);
-  });
-
-  it('names whose rating it is', () => {
-    const axes = filmographyAxes(pittCast);
-    expect(spokenSortLabel(RATED, axes)).toBe('Sort. Highest rated (TMDB)');
-  });
-
-  it('orders by score, with ties to the better-known title', () => {
-    const sorted = titles(sortFilmography(pittMovies, RATED));
-    expect(sorted.slice(0, 4)).toEqual(['Fight Club', 'Se7en', 'Inglourious Basterds', 'F1']);
-    // Once Upon a Time and Ocean's Eleven and Thelma & Louise share 7.4, in popularity order.
-    expect(sorted.slice(5, 8)).toEqual([
-      'Once Upon a Time… in Hollywood',
-      "Ocean's Eleven",
-      'Thelma & Louise',
-    ]);
-  });
-
-  it('sends a credit with too few votes to the end rather than the top', () => {
-    const sorted = sortFilmography(pittMovies, RATED);
-    expect(titles(sorted).slice(-2)).toEqual(['Untitled Brad Pitt Project', 'Cutting Class']);
-    expect(tailStart(sorted, RATED)).toBe(sorted.length - 2);
-  });
-
-  it('says where it stops vouching for what is above', () => {
-    const sorted = sortFilmography(pittMovies, RATED);
-    const result = sortCoverage(sorted, RATED, coverageOf(BRAD_PITT), 'cast', 'movie');
-    // A dropped film scored 7.0, so Babylon's 7.0 is the first row it cannot vouch for.
-    expect(result.kind).toBe('partial');
-    expect(result.kind === 'partial' && sorted[result.from]?.title).toBe('Babylon');
-  });
 });
 
 describe('the four kinds of person', () => {
@@ -309,9 +262,6 @@ describe('the four kinds of person', () => {
   it('a director’s work, newest first, includes the film not yet rated', () => {
     const sorted = sortFilmography(creditsOf(CHRISTOPHER_NOLAN), NEWEST);
     expect(sorted[0]?.title).toBe('The Odyssey');
-    expect(sortFilmography(creditsOf(CHRISTOPHER_NOLAN), RATED).at(-1)?.title).toBe(
-      'The Odyssey',
-    );
   });
 
   it('somebody with two credits and one date', () => {
