@@ -1,0 +1,606 @@
+{
+  "reproduction": [
+    {
+      "id": "01-movies-tv",
+      "maxDiff": 1,
+      "differingSamples": 41,
+      "samples": 9486396
+    },
+    {
+      "id": "03-friends",
+      "maxDiff": 1,
+      "differingSamples": 22,
+      "samples": 9486396
+    },
+    {
+      "id": "04-watchlist",
+      "maxDiff": 1,
+      "differingSamples": 32,
+      "samples": 9486396
+    },
+    {
+      "id": "05-your-year",
+      "maxDiff": 1,
+      "differingSamples": 8,
+      "samples": 9486396
+    },
+    {
+      "id": "06-for-you",
+      "maxDiff": 1,
+      "differingSamples": 51,
+      "samples": 9486396
+    },
+    {
+      "id": "02-head-to-head",
+      "maxDiff": 1,
+      "differingSamples": 17,
+      "samples": 9486396
+    }
+  ],
+  "cards": [
+    {
+      "id": "01-movies-tv",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 3046617,
+      "gap": {
+        "before": 231,
+        "after": 119,
+        "reduction": 0.485
+      },
+      "widths": {
+        "before": {
+          "primary": 1011,
+          "secondary": 541,
+          "ratio": 0.535
+        },
+        "after": {
+          "primary": 1011,
+          "secondary": 611,
+          "ratio": 0.604
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2747,
+        "mainCrop": null,
+        "secX": 545,
+        "secW": 615,
+        "secTop": 1529,
+        "secBottom": 2734,
+        "secScreenBottom": 2726,
+        "secTabBarPx": 92
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": true,
+        "secondaryTabBarBelowEdge": true,
+        "mainScreenIdenticalToApproved": true,
+        "secondaryContentMatchesApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryContentVsApproved": {
+        "mean": 0.915,
+        "comparedRows": 893
+      }
+    },
+    {
+      "id": "02-head-to-head",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 2038413,
+      "gap": {
+        "before": 231,
+        "after": 119,
+        "reduction": 0.485
+      },
+      "widths": {
+        "before": {
+          "primary": 1011
+        },
+        "after": {
+          "primary": 1011
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2745,
+        "mainCrop": {
+          "top": 59,
+          "bottom": 1465,
+          "sourceHeight": 1536
+        }
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": null,
+        "secondaryTabBarBelowEdge": null,
+        "mainScreenIdenticalToApproved": true
+      },
+      "chromeCrop": {
+        "top": 59,
+        "bottom": 1465,
+        "sourceHeight": 1536
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      }
+    },
+    {
+      "id": "03-friends",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 1392852,
+      "gap": {
+        "before": 233,
+        "after": 121,
+        "reduction": 0.481
+      },
+      "widths": {
+        "before": {
+          "primary": 1011,
+          "secondary": 541,
+          "ratio": 0.535
+        },
+        "after": {
+          "primary": 1011,
+          "secondary": 611,
+          "ratio": 0.604
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 551,
+          "phoneTop": 785,
+          "gap": 233,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 663,
+          "phoneTop": 785,
+          "gap": 121,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 663,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2747,
+        "mainCrop": null,
+        "secX": 545,
+        "secW": 615,
+        "secTop": 1529,
+        "secBottom": 2734,
+        "secScreenBottom": 2726,
+        "secTabBarPx": 92
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": true,
+        "secondaryTabBarBelowEdge": true,
+        "mainScreenIdenticalToApproved": true,
+        "secondaryContentMatchesApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryContentVsApproved": {
+        "mean": 1.123,
+        "comparedRows": 893
+      }
+    },
+    {
+      "id": "04-watchlist",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 2023670,
+      "gap": {
+        "before": 230,
+        "after": 118,
+        "reduction": 0.487
+      },
+      "widths": {
+        "before": {
+          "primary": 1011,
+          "secondary": 541,
+          "ratio": 0.535
+        },
+        "after": {
+          "primary": 1011,
+          "secondary": 611,
+          "ratio": 0.604
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 554,
+          "phoneTop": 785,
+          "gap": 230,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 338,
+          "subtitleBottom": 666,
+          "phoneTop": 785,
+          "gap": 118,
+          "topMargin": 338
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 666,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2748,
+        "mainCrop": null,
+        "secX": 545,
+        "secW": 615,
+        "secTop": 1529,
+        "secBottom": 2734,
+        "secScreenBottom": 2726,
+        "secTabBarPx": 92
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": true,
+        "secondaryTabBarBelowEdge": true,
+        "mainScreenIdenticalToApproved": true,
+        "secondaryContentMatchesApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryContentVsApproved": {
+        "mean": 0.546,
+        "comparedRows": 893
+      }
+    },
+    {
+      "id": "05-your-year",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 745395,
+      "gap": {
+        "before": 231,
+        "after": 119,
+        "reduction": 0.485
+      },
+      "widths": {
+        "before": {
+          "primary": 1011,
+          "secondary": 541,
+          "ratio": 0.535
+        },
+        "after": {
+          "primary": 1011,
+          "secondary": 611,
+          "ratio": 0.604
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2747,
+        "mainCrop": null,
+        "secX": 545,
+        "secW": 615,
+        "secTop": 1529,
+        "secBottom": 2734,
+        "secScreenBottom": 2726,
+        "secTabBarPx": 92
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": true,
+        "secondaryTabBarBelowEdge": true,
+        "mainScreenIdenticalToApproved": true,
+        "secondaryContentMatchesApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      },
+      "secondaryContentVsApproved": {
+        "mean": 0.354,
+        "comparedRows": 893
+      }
+    },
+    {
+      "id": "06-for-you",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 3003783,
+      "gap": {
+        "before": 231,
+        "after": 119,
+        "reduction": 0.485
+      },
+      "widths": {
+        "before": {
+          "primary": 1011
+        },
+        "after": {
+          "primary": 1011
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2748,
+        "mainCrop": null
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": null,
+        "secondaryTabBarBelowEdge": null,
+        "mainScreenIdenticalToApproved": true
+      },
+      "mainScreenUnchanged": {
+        "mean": 0,
+        "max": 1
+      }
+    },
+    {
+      "id": "07-ranked-CANDIDATE",
+      "layout": "revision",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 1387452,
+      "gap": {
+        "before": null,
+        "after": 119,
+        "reduction": null
+      },
+      "widths": {
+        "before": null,
+        "after": {
+          "primary": 1011
+        }
+      },
+      "measured": {
+        "before": null,
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 1015,
+        "mainTop": 783,
+        "mainScreenBottom": 2745,
+        "mainCrop": {
+          "top": 59,
+          "bottom": 1465,
+          "sourceHeight": 1536
+        }
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": null,
+        "secondaryWidth60to70": null,
+        "secondaryTabBarBelowEdge": null
+      },
+      "chromeCrop": {
+        "top": 59,
+        "bottom": 1465,
+        "sourceHeight": 1536
+      }
+    },
+    {
+      "id": "05-your-year_ALT-balanced",
+      "layout": "balanced",
+      "width": 1206,
+      "height": 2622,
+      "channels": 3,
+      "hasAlpha": false,
+      "space": "srgb",
+      "bytes": 765772,
+      "gap": {
+        "before": 231,
+        "after": 119,
+        "reduction": 0.485
+      },
+      "widths": {
+        "before": {
+          "primary": 1011,
+          "secondary": 541,
+          "ratio": 0.535
+        },
+        "after": {
+          "primary": 956,
+          "secondary": 620,
+          "ratio": 0.649
+        }
+      },
+      "measured": {
+        "before": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 153,
+          "subtitleBottom": 553,
+          "phoneTop": 785,
+          "gap": 231,
+          "topMargin": 153
+        },
+        "after": {
+          "width": 1206,
+          "height": 2622,
+          "topInk": 337,
+          "subtitleBottom": 665,
+          "phoneTop": 785,
+          "gap": 119,
+          "topMargin": 337
+        }
+      },
+      "geometry": {
+        "headlineCapTop": 337,
+        "subtitleInkBottom": 665,
+        "mainW": 960,
+        "mainTop": 783,
+        "mainScreenBottom": 2641,
+        "mainCrop": null,
+        "secX": 542,
+        "secW": 624,
+        "secTop": 1513,
+        "secBottom": 2736,
+        "secScreenBottom": 2728,
+        "secTabBarPx": 94
+      },
+      "checks": {
+        "format": true,
+        "gapReduced45to55": true,
+        "secondaryWidth60to70": true,
+        "secondaryTabBarBelowEdge": true
+      }
+    }
+  ]
+}
