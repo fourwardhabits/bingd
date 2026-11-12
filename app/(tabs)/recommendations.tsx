@@ -55,6 +55,7 @@ import {
   titleRecommendationsKey,
 } from '@/features/recommendations/use-title-recommendations';
 import { mediaKindFor, track } from '@/lib/analytics';
+import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { useTabReset } from '@/ui/use-tab-reset';
@@ -125,23 +126,40 @@ export default function RecommendationsScreen() {
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
 
-  /** Which side of the *personalised* wall the reader is on. See `mode` below. */
-  const [medium, setMedium] = useState<Medium>('movies');
   /**
-   * Which side of **Top Rated** the reader is on, or null when they are not on it.
+   * **Where the reader is**: `medium`, the side of the *personalised* wall, and
+   * `topMedium`, the side of **Top Rated** or null when they are not on it.
    *
-   * Two pieces of state rather than one four-valued `mode`, and the reason is the same
-   * one that used to hold People apart from `medium` (§A16, since removed): a glance at
-   * Top Rated must not move the personalised slate's query or throw away the page depth
-   * somebody scrolled. Holding the two separately means Movies → Top Rated Movies →
-   * Movies costs the personalised wall nothing at all, and the selector's value is
-   * derived from both so the control cannot disagree with either.
+   * Two fields rather than one four-valued `mode`, and the reason is the same one that
+   * used to hold People apart from `medium` (§A16, since removed): a glance at Top Rated
+   * must not move the personalised slate's query or throw away the page depth somebody
+   * scrolled. Holding the two separately means Movies → Top Rated Movies → Movies costs
+   * the personalised wall nothing at all, and the selector's value is derived from both
+   * so the control cannot disagree with either.
    *
-   * Deliberately not persisted, for the reason this screen already gives about People:
-   * For You is a question asked fresh each visit, and reopening on Top Rated because
-   * somebody once looked there would be answering a question nobody asked twice.
+   * **Remembered per account, across launches** (founder, 2026-11-12). This replaces the
+   * earlier decision that For You is a question asked fresh each visit: For You reopens
+   * where the reader left it, the way Collection reopens on its side. Both fields are
+   * kept, so Top Rated TV over a Movies personalised wall comes back as exactly that, and a
+   * re-press of the tab afterwards lands on the Movies wall it was opened from. A new
+   * account opens on Movies / Recommended. See `FOR_YOU_SELECTION_PREF_KEY`.
+   *
+   * Tagged with the account it was set for, as Collection's `mediumPref` is, so an
+   * account switch is correct during the render that switches: a selection that does not
+   * name the current reader is not theirs, and the default stands until their own read
+   * lands — never the previous account's Top Rated, not even for a frame.
    */
-  const [topMedium, setTopMedium] = useState<Medium | null>(null);
+  const [selection, setSelection] = useState<{ profileId: string } & ForYouSelection>(() => ({
+    profileId: profile.id,
+    ...DEFAULT_FOR_YOU_SELECTION,
+  }));
+  const { medium, topMedium } =
+    selection.profileId === profile.id ? selection : DEFAULT_FOR_YOU_SELECTION;
+  /**
+   * Whether this reader has acted on the selection since their stored one was read. The
+   * guard Collection uses: a tap is newer intent than a slow read, so the read stands down.
+   */
+  const chosenSelection = useRef(false);
   /**
    * How many pages a *filtered* Top Rated wall may pull in on its own, and why it is
    * state rather than the constant it started as.
@@ -207,9 +225,9 @@ export default function RecommendationsScreen() {
    * actually showing instead of being a third thing free to disagree with either.
    */
   const changeMode = (next: ForYouMode) => {
+    chosenSelection.current = true;
     if (next === 'movies' || next === 'tv') {
-      setTopMedium(null);
-      setMedium(next);
+      commitSelection({ medium: next, topMedium: null });
       return;
     }
     /**
@@ -230,8 +248,64 @@ export default function RecommendationsScreen() {
      */
     setGroupPicking(false);
     setTopRatedBudget(TOP_RATED_FILTER_PAGES);
-    setTopMedium(next === 'topMovies' ? 'movies' : 'tv');
+    commitSelection({ medium, topMedium: next === 'topMovies' ? 'movies' : 'tv' });
   };
+
+  /**
+   * The selection the reader is now on, drawn and remembered.
+   *
+   * Only a choice comes through here — `changeMode` and a re-press of the tab — so the
+   * default is never saved on mount and a new account's store stays empty until they pick.
+   * Fire-and-forget, as Collection's writes are: a store that refuses costs the reader
+   * nothing more than opening on Movies / Recommended next time.
+   */
+  const commitSelection = (next: ForYouSelection) => {
+    setSelection({ profileId: profile.id, ...next });
+    void writePref(`${profile.id}.${FOR_YOU_SELECTION_PREF_KEY}`, next).catch(() => {});
+  };
+
+  /**
+   * The remembered selection, applied when it arrives.
+   *
+   * Collection's shape: `cancelled`, the ref reset per account, validated rather than
+   * trusted, and resolved in both directions, so a miss or a failed read lands on the
+   * default for *this* account rather than leaving whatever was in state.
+   *
+   * **Restoring Top Rated is `changeMode`'s Top Rated, minus the write**: Sent to you off,
+   * Group Picks closed, the filtered-page budget back to its default. It never turns
+   * anything on and never opens a sheet. Those two are only reachable before the read
+   * lands if the reader opened them, and opening either marks the selection chosen (see
+   * the shortcuts below), so in practice a restore finds both already off.
+   *
+   * Not gated on: the store is local and the walls are network reads, so the stored mode
+   * lands while the wall is still a skeleton.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    chosenSelection.current = false;
+    const settle = (stored: unknown) => {
+      if (cancelled || chosenSelection.current) return;
+      const restored = parseForYouSelection(stored);
+      if (restored.topMedium !== null) {
+        setSentOnly(false);
+        setGroupPicking(false);
+        setTopRatedBudget(TOP_RATED_FILTER_PAGES);
+      }
+      setSelection((current) =>
+        current.profileId === profile.id &&
+        current.medium === restored.medium &&
+        current.topMedium === restored.topMedium
+          ? current
+          : { profileId: profile.id, ...restored },
+      );
+    };
+    readPref<unknown>(`${profile.id}.${FOR_YOU_SELECTION_PREF_KEY}`)
+      .then(settle)
+      .catch(() => settle(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
 
   /**
    * **Re-tapping the For You tab** (founder, physical iOS 1.0.1 build 8).
@@ -251,20 +325,28 @@ export default function RecommendationsScreen() {
    * Already at the root, so the habit's other half applies: back to the top of the wall.
    * No refetch. Pull-to-refresh is the gesture that means "ask again", and spending a
    * round trip to animate a tab press is how a habit becomes expensive.
+   *
+   * **What it lands on is remembered** (2026-11-12), the same as Collection's re-press:
+   * the personalised wall on the reader's medium is what they see afterwards, so it is
+   * what a restart shows, rather than a Top Rated they just pressed their way out of. It
+   * is a choice, so it also outranks a stored selection still being read.
    */
   const wallScroller = useRef<ScrollView>(null);
 
   useTabReset(
     useCallback(() => {
+      chosenSelection.current = true;
+      const root: ForYouSelection = { medium, topMedium: null };
+      setSelection({ profileId: profile.id, ...root });
+      void writePref(`${profile.id}.${FOR_YOU_SELECTION_PREF_KEY}`, root).catch(() => {});
       if (sentOnly || topMedium !== null || groupPicking || reviewingRequests) {
         setSentOnly(false);
-        setTopMedium(null);
         setGroupPicking(false);
         setReviewingRequests(false);
         return;
       }
       wallScroller.current?.scrollTo({ y: 0, animated: true });
-    }, [sentOnly, topMedium, groupPicking, reviewingRequests]),
+    }, [profile.id, medium, sentOnly, topMedium, groupPicking, reviewingRequests]),
   );
 
   /** Whether the wall is the community's order rather than this reader's slate. */
@@ -757,7 +839,11 @@ export default function RecommendationsScreen() {
                   ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
                   : 'Sent to You',
               selected: sentOnly,
-              onPress: () => setSentOnly((on) => !on),
+              onPress: () => {
+                // A late stored Top Rated would switch this straight back off.
+                chosenSelection.current = true;
+                setSentOnly((on) => !on);
+              },
             },
             {
               key: 'group',
@@ -766,6 +852,8 @@ export default function RecommendationsScreen() {
               // The analytics name stays the feature's original one.
               onPress: () => {
                 track({ name: 'group_picks_opened' });
+                // As Sent to you: a late stored Top Rated would close the sheet under them.
+                chosenSelection.current = true;
                 setGroupPicking(true);
               },
             },
@@ -1135,6 +1223,42 @@ export default function RecommendationsScreen() {
  * lineage — it is titles, which is what this screen exclusively is.
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
+
+/** Where the reader is on this screen, as remembered: see `selection` in the screen. */
+type ForYouSelection = { medium: Medium; topMedium: Medium | null };
+
+/** A new account, or one whose stored selection could not be read: Movies / Recommended. */
+const DEFAULT_FOR_YOU_SELECTION: ForYouSelection = { medium: 'movies', topMedium: null };
+
+/**
+ * `${profile.id}.for-you.selection`, holding `{ medium, topMedium }` (founder, 2026-11-12).
+ *
+ * Device-local, beside Collection's keys and separate from them: Collection on TV does not
+ * move For You to TV. Sent to you, Group Picks, the requests sheet, the filters and the
+ * page depth are not part of it and are not remembered.
+ */
+const FOR_YOU_SELECTION_PREF_KEY = 'for-you.selection';
+
+const isForYouMedium = (value: unknown): value is Medium => value === 'movies' || value === 'tv';
+
+/**
+ * A stored selection, validated rather than trusted, one field at a time.
+ *
+ * Anything this screen cannot draw — a string from some other build, a number, a
+ * Collection side such as `tv_seasons`, an array, an object of the wrong shape, a key that
+ * failed to parse (which `readPref` already reads as null) — falls back to the default
+ * field by field, so a good `medium` is kept beside a bad `topMedium` and the reverse.
+ */
+function parseForYouSelection(stored: unknown): ForYouSelection {
+  const record =
+    stored !== null && typeof stored === 'object' && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  return {
+    medium: isForYouMedium(record.medium) ? record.medium : DEFAULT_FOR_YOU_SELECTION.medium,
+    topMedium: isForYouMedium(record.topMedium) ? record.topMedium : null,
+  };
+}
 
 /** The medium, in the compact switch. "TV", not "TV Shows", at this size (2026-11-04). */
 const FOR_YOU_MEDIA: readonly CompactSwitchOption<Medium>[] = [
