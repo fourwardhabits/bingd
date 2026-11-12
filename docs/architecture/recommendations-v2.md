@@ -49,8 +49,8 @@ popularity, excluding what the caller logged (and, on TV, shows with a logged se
 answers empty while the caller is on V1. Each window is the first rows of one ordered index
 range: `media_items_catalogue_language (kind, original_language, popularity)` and
 `media_items_catalogue_decade (kind, decade(release_date), popularity)`, so its cost does
-not grow with the size of a language or a decade (measured in A3's scale benchmark, PR #253,
-`recommendations-v2-scale-benchmark.md` once that PR lands).
+not grow with the size of a language or a decade (measured: 3.3 ms p50 over a 302,000-row
+catalogue, [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md)).
 
 The client asks for the reader's source languages (affinity ≥ 0.45, strongest first, equal
 quotas — volume-proportional quotas would be the English bias again) and positive-lift
@@ -116,8 +116,11 @@ needed in either direction. Telemetry: `for_you_slate_shown.engine`, `.wall_lang
   titles enter the pool and are selected for a reader whose evidence is Japanese, following
   has no effect, the switch defaults off and rolls back, inputs are bounded, anon is refused.
 - **Hypothesis, not evidence:** that V2 orders titles better for real readers. The weights
-  are V1's proportions plus a small era term chosen so a difference can be attributed; A3
-  compares engines on held-out data, and only staging/production telemetry can say more.
+  are V1's proportions plus a small era term chosen so a difference can be attributed. A3
+  ([`recommendations-v2-evaluation.md`](./recommendations-v2-evaluation.md)) compares the
+  engines on labelled-synthetic held-out data: language and era coverage rise as designed,
+  following is inert, and pool recall and cold start get worse. Only staging/production
+  telemetry can say what that trade is worth.
 
 ## 2. A2 — collaborative evidence from taste-compatible people
 
@@ -177,8 +180,13 @@ compares a reader with every account. The refresh happens inside the first stale
 concurrent stale reads by one reader refresh once (a per-reader advisory lock plus a
 re-check, observed with real sessions in `concurrency/races/taste-neighbours.mjs`), and
 different readers do not contend. Capacity is **measured**, not asserted, on real
-PostgreSQL with up to 1M synthetic accounts, in A3's scale benchmark (PR #253, which adds
-`recommendations-v2-scale-benchmark.md`; land it with this PR).
+PostgreSQL with up to 1M synthetic accounts and 16M rankings
+([`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md)): a cold
+refresh p50 279 ms / p95 620 ms, a warm read p50 147 ms, about 15 refreshes/s on 4 CPUs, and
+no ranking write waiting on a refresh (by construction: a refresh locks only its reader's own
+cache). The warm read is uncached and is most of the hybrid's database time at scale, so it
+needs a per-reader cache before `v2_hybrid` goes beyond the allowlist. Light readers find fewer neighbours at that scale (median 6 against
+24 at 100k accounts): the price of the rater cap, recorded there.
 
 **Sampling trade-off:** a rotating sample means a reader may not find their single best
 neighbour on a given day if a probe title has thousands of raters. Rotation finds different
@@ -261,4 +269,6 @@ release is needed.
   binds; TV rolls up per show; anon and internals are refused; the engine switch gates it;
   concurrent refreshes deduplicate.
 - **Hypothesis:** that taste neighbours' loves are good recommendations for real readers, and
-  every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only.
+  every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only: the source added
+  pool recall over V2 metadata (+0.019 ± 0.007 in the 2026-11-11 re-run) and reached 139 of
+  400 test readers; V2 hybrid is classed experimental.
