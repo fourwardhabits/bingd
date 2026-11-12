@@ -421,7 +421,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-image-picker',
       {
-        photosPermission: 'bingd uses your photos so you can choose a profile picture.',
+        photosPermission: 'Bingd uses your photos so you can choose a profile picture.',
         // Drops NSCameraUsageDescription and the Android CAMERA permission
         // outright, rather than shipping a permission the app never asks for
         // and a reviewer has to ask about.
