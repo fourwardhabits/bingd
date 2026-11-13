@@ -167,6 +167,25 @@ async function main() {
       );
     }
 
+    // group_picks('tv') reads community_score laterally for every candidate series (up to
+    // 200), so time that shape too: the 200 fixture shows other than the big one (each with
+    // a handful of raters), in one statement.
+    {
+      const times = [];
+      for (let r = 0; r < Math.min(RUNS, 5); r += 1) {
+        const t0 = performance.now();
+        await session.client.query(
+          `select count(cs.score) from unnest($1::uuid[]) s(id)
+             cross join lateral community_score(s.id) cs`,
+          [shows.slice(1, 201)],
+        );
+        times.push(performance.now() - t0);
+      }
+      console.log(
+        `200 small series, one statement (group_picks shape) median ${ms(median(times))}`,
+      );
+    }
+
     if (PLANS) {
       const admin = await db.session('planner');
       const notices = [];

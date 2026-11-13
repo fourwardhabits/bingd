@@ -133,7 +133,8 @@ returns table (
   user_id      uuid,
   score        numeric,
   source       text,
-  season_count integer
+  season_count integer,
+  tv_rankings  integer
 )
 language sql
 stable
@@ -147,7 +148,9 @@ as $$
   --   3. else no row.
   -- Each season counts once (the rankings primary key guarantees it). Unranked seasons,
   -- watch events and placement snapshots are never read. season_count is the number of
-  -- ranked seasons in both cases (informational for an explicit score).
+  -- ranked seasons in both cases (informational for an explicit score). tv_rankings is the
+  -- user's total TV rankings (seasons + shows), their contributor-eligibility count, read
+  -- off the same scan so community_score need not count a show's raters a second time.
   with targets as (
     select p_show as id, 'tv_shows'::ranking_category as category
     union all
@@ -167,7 +170,8 @@ as $$
            c.position,
            (count(*) filter (where c.bucket = 'loved')      over w)::integer as loved,
            (count(*) filter (where c.bucket = 'fine')       over w)::integer as fine,
-           (count(*) filter (where c.bucket = 'not_for_me') over w)::integer as nfm
+           (count(*) filter (where c.bucket = 'not_for_me') over w)::integer as nfm,
+           (count(*) over (partition by c.user_id))::integer                as total
       from rankings c
      where c.user_id = any (p_users)
        and c.category in ('tv_seasons', 'tv_shows')
@@ -176,6 +180,7 @@ as $$
   scored as (
     select x.user_id,
            x.category,
+           x.total,
            score_for(
              x.bucket,
              (x.position - (case x.bucket when 'loved' then 1
@@ -194,13 +199,14 @@ as $$
          coalesce(max(sc.s) filter (where sc.category = 'tv_shows'),
                   avg(sc.s) filter (where sc.category = 'tv_seasons')),
          case when bool_or(sc.category = 'tv_shows') then 'explicit' else 'average' end,
-         (count(*) filter (where sc.category = 'tv_seasons'))::integer
+         (count(*) filter (where sc.category = 'tv_seasons'))::integer,
+         max(sc.total)
     from scored sc
    group by sc.user_id;
 $$;
 
 comment on function _effective_show_scores(uuid, uuid[]) is
-  'For each of a set of users, their effective score for one show: their explicit tv_shows ranking''s canonical score (source explicit), else the unrounded mean of their ranked seasons'' canonical scores (source average); users with neither get no row. season_count is the number of ranked seasons. The server half of the WS-COMM/WS-TVC contract, read by community_score for a series. Internal.';
+  'For each of a set of users, their effective score for one show: their explicit tv_shows ranking''s canonical score (source explicit), else the unrounded mean of their ranked seasons'' canonical scores (source average); users with neither get no row. season_count is the number of ranked seasons; tv_rankings is the user''s total TV rankings (the eligibility count). The server half of the WS-COMM/WS-TVC contract, read by community_score for a series. Internal.';
 
 revoke execute on function _effective_show_scores(uuid, uuid[]) from public, anon, authenticated;
 
@@ -306,6 +312,8 @@ as $$
       join rankings c
         on c.user_id = u.user_id
        and c.category = any (item.cats)
+     -- A whole show counts its raters inside _effective_show_scores instead (below).
+     where item.kind in ('movie', 'season')
      group by c.user_id, c.category
   ),
   -- 20261119000100: only raters with score.contributor_min_rankings in the category
@@ -338,15 +346,19 @@ as $$
      where e.item_position is not null
        and item.kind in ('movie', 'season')
   ),
-  -- 20261119000100: a whole show. One effective score per eligible rater (§4F).
+  -- 20261119000100: a whole show. One effective score per rater who is TV-eligible
+  -- (§4F); the helper reads each rater's TV pools once and returns both the effective
+  -- score and the eligibility count, so a show's raters are never scanned twice.
   show_scores as (
     select x.score as s
       from item
+     cross join contributor km
      cross join lateral _effective_show_scores(
              p_media_item_id,
-             (select array_agg(distinct eligible.user_id) from eligible)
+             (select array_agg(raters.user_id) from raters)
            ) x
      where item.kind = 'series'
+       and x.tv_rankings >= km.k
   ),
   rated as (
     -- 20261119000100: over the contributions above. Each value is one person, equal
