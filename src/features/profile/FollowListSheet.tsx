@@ -3,7 +3,16 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, EmptyState, SearchField, Sheet, SkeletonRow, Text } from '@/ui/components';
+import {
+  Avatar,
+  DismissFooter,
+  EmptyState,
+  SearchField,
+  Sheet,
+  SheetHeader,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { FollowControl } from './FollowControl';
@@ -111,16 +120,18 @@ export function FollowListSheet({
   if (!kind) return null;
 
   return (
-    <Sheet visible onClose={close} label={TITLE[kind]}>
-      <View style={styles.head}>
-        <Text variant="headline">{TITLE[kind]}</Text>
-        {/* Full size rather than `sm`, which is 36pt — under the 44pt floor `layout.ts`
-            sets. Every other sheet in the app closes with a default-sized button, and a
-            close control is the one thing on a sheet somebody presses without looking. */}
-        <Button label="Close" kind="tertiary" onPress={close} />
-      </View>
-
-      <View style={styles.field}>
+    <Sheet
+      visible
+      onClose={close}
+      label={TITLE[kind]}
+      /**
+       * **One way out, at the foot** (founder spec §2B/§4, 2026-11-13). The header's
+       * tertiary Close is gone: a dismiss-only sheet closes from the standard quiet footer,
+       * which stays put while the list scrolls above it and never covers its last row.
+       */
+      footer={<DismissFooter onPress={close} />}
+    >
+      <SheetHeader title={TITLE[kind]}>
         <SearchField
           accessibilityLabel={
             kind === 'followers' ? 'Search followers' : 'Search people they follow'
@@ -133,7 +144,7 @@ export function FollowListSheet({
           autoCapitalize="none"
           returnKeyType="search"
         />
-      </View>
+      </SheetHeader>
 
       {list.isPending ? (
         <SkeletonRow count={5} />
@@ -178,7 +189,8 @@ export function FollowListSheet({
            *
            * `onEndReached` belongs to `FlatList`; this is a `ScrollView` because the
            * sheet's height is content-driven and a virtualised list inside a
-           * `maxHeight: 90%` container measures to zero. Fifty rows of avatar and two
+           * `maxHeight: 90%` container measures to zero. It shrinks to the room the
+           * sheet leaves above its footer rather than to a fixed cap (it was 420). Fifty rows of avatar and two
            * lines is well inside what a `ScrollView` renders comfortably, and the
            * accounts with enough followers for that to stop being true are not in this
            * beta.
@@ -295,16 +307,9 @@ function PersonRow({
 }
 
 const styles = StyleSheet.create({
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[2],
-  },
-  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[4] },
-  list: { maxHeight: 420 },
+  // Shrinks to the room left above the footer: a long list scrolls to its last row.
+  list: { flexShrink: 1 },
   listContent: { paddingBottom: theme.space[4] },
   row: {
     flexDirection: 'row',

@@ -1,20 +1,33 @@
 import { useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
+import {
+  activeFilterCount,
+  applyFilters,
+  compareItems,
+  emptyFilters,
+  isFiltered,
+  offersRuntime,
+  titleFactSortAxes,
+  type CollectionFilters,
+  type CollectionItem,
+} from '@/features/collection/filters';
 import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
-import { useRankedCollection } from '@/features/collection/use-collection';
+import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
 import { standaloneShows } from '@/features/collection/watched-rows';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
-  Button,
+  DismissFooter,
   EmptyState,
+  FilterChip,
+  FiltersAction,
   ScoreBadge,
   SegmentedTabs,
   Sheet,
+  SheetHeader,
   SkeletonRow,
-  SortChip,
-  SortMenu,
   Text,
   TitleRow,
 } from '@/ui/components';
@@ -74,11 +87,14 @@ const VISIBLE_CAP = 200;
  * Unchanged: the wall above this sheet shows the best six, and the question a reader has
  * after seeing it is what comes seventh.
  */
-export type CollectionSortAxis = 'rank' | 'ranked';
+export type CollectionSortAxis = 'rank' | 'ranked' | 'year' | 'runtime' | 'title';
 
 export type CollectionSort = SortState<CollectionSortAxis>;
 
-export const SORT_AXES: readonly SortAxisSpec<CollectionSortAxis>[] = [
+/**
+ * The two axes that are this sheet's own: its owner's order, and when each title entered it.
+ */
+const RANKING_AXES: readonly SortAxisSpec<CollectionSortAxis>[] = [
   {
     axis: 'rank',
     label: 'Rank',
@@ -92,6 +108,25 @@ export const SORT_AXES: readonly SortAxisSpec<CollectionSortAxis>[] = [
     defaultDirection: 'desc',
   },
 ];
+
+/**
+ * **Every order this sheet offers** (founder spec §4, 2026-11-13: "reuse applicable
+ * filter/sort definitions from the main Collection").
+ *
+ * The two ranking axes above, then the main Collection's own definitions of the orders
+ * that are facts about the titles — Release year, Runtime, Title — taken from
+ * `titleFactSortAxes` rather than restated. Still no watch-date order and no Shuffle:
+ * a watch date is private (above), and Shuffle is a way of choosing what to watch from
+ * one's own list rather than of reading somebody's ranking.
+ */
+export const sortAxesForRanked = ({
+  runtime = true,
+}: { runtime?: boolean } = {}): readonly SortAxisSpec<CollectionSortAxis>[] => [
+  ...RANKING_AXES,
+  ...titleFactSortAxes({ runtime }),
+];
+
+export const SORT_AXES: readonly SortAxisSpec<CollectionSortAxis>[] = sortAxesForRanked();
 
 /** Where the sheet opens: the best of the list, which is the question the wall leaves. */
 export const INITIAL_SORT: CollectionSort = { axis: 'rank', direction: 'desc' };
@@ -124,6 +159,8 @@ export function compareBySort(sort: CollectionSort) {
         tiebreak
       );
     }
+
+    if (sort.axis !== 'ranked') return tiebreak;
 
     if (!a.rankedAt && !b.rankedAt) return tiebreak;
     if (!a.rankedAt) return 1;
@@ -240,10 +277,19 @@ export function RankedTitlesSheet({
   const list = category === 'tv_seasons' ? seasons : movies;
 
   const [sort, setSort] = useState<CollectionSort>(INITIAL_SORT);
-  const [sortOpen, setSortOpen] = useState(false);
+  /**
+   * **The main Collection's filters, over somebody's ranking** (founder spec §4).
+   *
+   * Genre, language, decade and rating — the same facets, drawn by the same
+   * `CollectionFilterSheet`, over the same `CollectionItem` shape. They narrow what is
+   * drawn and nothing else: the scores beside each row are still computed against the
+   * owner's whole band, never against the filtered slice.
+   */
+  const [filters, setFilters] = useState<CollectionFilters>(emptyFilters);
+  const [filtering, setFiltering] = useState(false);
   const scroll = useRef<ScrollView>(null);
 
-  const rows = useMemo(() => {
+  const pooled = useMemo(() => {
     const own = list.data ?? [];
     const showRows = category === 'tv_seasons' ? standaloneShows(own, shows.data ?? []) : [];
     // **The band is measured over the whole category, the slice is what gets drawn.**
@@ -252,33 +298,60 @@ export function RankedTitlesSheet({
     // applied afterwards. Each pool against its own bands: a show among shows.
     const sizes = bandSizes(own);
     const showSizes = bandSizes(shows.data ?? []);
-    const pooled = [
+    return [
       ...own.map((entry) => ({ entry, sizes, pool: 0 })),
       ...showRows.map((entry) => ({ entry, sizes: showSizes, pool: 1 })),
     ].map((item) => ({
       ...item,
       projected: projectedScore(item.entry.bucket, item.entry.position, item.sizes),
+      score: scoreFor(item.entry.bucket, item.entry.position, item.sizes),
     }));
+  }, [category, list.data, shows.data]);
+
+  /** Each row as the main Collection's item, for its filters and its title-fact orders. */
+  const items = useMemo(
+    () => pooled.map(({ entry, score }) => asCollectionItem(entry, score)),
+    [pooled],
+  );
+  const axes = useMemo(() => sortAxesForRanked({ runtime: offersRuntime(items) }), [items]);
+
+  const { rows, matching } = useMemo(() => {
+    const kept = isFiltered(filters)
+      ? new Set(applyFilters(items, filters).map((item) => item.mediaItemId))
+      : null;
+    const filtered = kept ? pooled.filter((item) => kept.has(item.entry.mediaItemId)) : pooled;
+    const byItem = new Map(items.map((item) => [item.mediaItemId, item]));
+
     // **Two pools are ordered by score, never by ordinal.** A show's #2 and a season's #2
     // are different lists, so the rank order of a mixed TV list is the score each row
     // prints (unrounded, so each pool keeps its own order), then a fixed pool order, then
     // the id. One pool keeps `compareBySort` exactly as before.
     const bySort = compareBySort(sort);
-    const mixed = showRows.length > 0;
-    const compare = (a: (typeof pooled)[number], b: (typeof pooled)[number]) =>
-      mixed && sort.axis === 'rank'
+    const byFact =
+      sort.axis === 'year' || sort.axis === 'runtime' || sort.axis === 'title'
+        ? compareItems({ axis: sort.axis, direction: sort.direction })
+        : null;
+    const mixed = filtered.some((item) => item.pool === 1);
+    const compare = (a: (typeof pooled)[number], b: (typeof pooled)[number]) => {
+      if (byFact) {
+        const left = byItem.get(a.entry.mediaItemId);
+        const right = byItem.get(b.entry.mediaItemId);
+        return left && right ? byFact(left, right) : 0;
+      }
+      return mixed && sort.axis === 'rank'
         ? (sort.direction === 'desc' ? b.projected - a.projected : a.projected - b.projected) ||
-          a.pool - b.pool ||
-          a.entry.mediaItemId.localeCompare(b.entry.mediaItemId)
+            a.pool - b.pool ||
+            a.entry.mediaItemId.localeCompare(b.entry.mediaItemId)
         : bySort(a.entry, b.entry);
+    };
     // **Sorted before the cap, never after.** A cap applied first would make each order a
     // re-arrangement of the same two hundred titles rather than the first two hundred of
     // that order — so "Oldest first" would silently mean "oldest of their most recent
     // two hundred", which is a different and wrong claim.
-    return pooled
+    const drawn = [...filtered]
       .sort(compare)
       .slice(0, VISIBLE_CAP)
-      .map(({ entry, sizes: poolSizes }) => ({
+      .map(({ entry, score }) => ({
         mediaItemId: entry.mediaItemId,
         // The canonical compact form, so a season reads "The Bear, S2" here exactly as it
         // does on the wall, in the feed and in search.
@@ -294,76 +367,99 @@ export function RankedTitlesSheet({
         position: entry.position,
         /** A whole show's ordinal counts among shows, and its row says so. */
         isShow: entry.kind === 'series',
-        score: scoreFor(entry.bucket, entry.position, poolSizes),
+        score,
         bucket: entry.bucket,
       }));
-  }, [category, list.data, shows.data, sort]);
+    return { rows: drawn, matching: filtered.length };
+  }, [filters, items, pooled, sort]);
 
-  /** How many the category actually holds, for the disclosure under a capped list. */
-  const total =
-    (list.data?.length ?? 0) +
-    (category === 'tv_seasons' ? standaloneShows(list.data ?? [], shows.data ?? []).length : 0);
+  /** How many the category actually holds, for the count and the cap's disclosure. */
+  const total = pooled.length;
 
   if (!category) return null;
 
   const whose = isSelf ? 'Your collection' : `${name}'s collection`;
+  const pending = list.isPending || (category === 'tv_seasons' && shows.isPending);
+  const failed = list.isError || (category === 'tv_seasons' && shows.isError);
+  const activeCount = activeFilterCount(filters);
+  const backToTop = () => scroll.current?.scrollTo({ y: 0, animated: false });
 
   return (
-    <Sheet visible onClose={onClose} label={whose}>
-      <View style={styles.head}>
-        <Text variant="title2">{whose}</Text>
-      </View>
-
-      {/* Movies and TV are separate rankings and a position only means anything inside
-          its own category (PRD §11), so this switches between two lists rather than
-          filtering one. Same control and same words as the wall above it. */}
-      <View style={styles.tabs}>
+    <Sheet
+      visible
+      onClose={onClose}
+      label={whose}
+      // The densest list in the app's sheets: it gets the whole 90%, and keeps it while
+      // its tabs, sorts and filters change what is in it.
+      density="dense"
+      footer={<DismissFooter onPress={onClose} />}
+    >
+      <SheetHeader title={whose}>
+        {/* Movies and TV are separate rankings and a position only means anything inside
+            its own category (PRD §11), so this switches between two lists rather than
+            filtering one. Same control and same words as the wall above it. */}
         <SegmentedTabs
           options={[
             { id: 'movies' as const, label: 'Movies' },
             { id: 'tv_seasons' as const, label: 'TV Shows' },
           ]}
           value={category}
-          onChange={onChangeCategory}
+          onChange={(next) => {
+            // A filter chosen over films is not a filter over seasons: a genre or a
+            // decade may not exist in the other list at all.
+            setFilters(emptyFilters());
+            onChangeCategory(next);
+          }}
         />
-      </View>
+      </SheetHeader>
 
       {/**
-       * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
+       * **Filters & Sort, the main Collection's one entry** (founder spec §4, 2026-11-13).
        *
-       * A subtitle stating the order is a subtitle nobody can act on. This is the same
-       * chip-and-menu the Collection tab has used since it had sorting — `FilterChip`
-       * naming the current order, a radio list under it — rather than a second grammar
-       * for the same idea on a second screen. Four options, no filters, no third axis:
-       * the founder scoped this pass to exactly these.
-       *
-       * The chip says the whole order ("Rank · Highest first") and not just the axis,
-       * because the direction is half the answer and a control that hides half of what
-       * it is doing is the subtitle again with a chevron on it.
+       * It replaced a sort chip with an inline menu, which was this sheet's own grammar for
+       * an idea the Collection tab already draws: one action opening one sheet that holds
+       * the order and the filters. The count beside it says how much of the list the
+       * filters leave, as the Collection tab's does.
        */}
-      <View style={styles.sortRow}>
-        <SortChip axes={SORT_AXES} value={sort} onPress={() => setSortOpen((open) => !open)} />
-      </View>
+      {pending || failed || total === 0 ? null : (
+        <View style={styles.toolbar} testID="ranked-toolbar">
+          <Text variant="footnote" tone="secondary" style={styles.count} testID="ranked-count">
+            {matching === total
+              ? `${total} ${total === 1 ? 'title' : 'titles'}`
+              : `${matching} of ${total}`}
+          </Text>
+          {isFiltered(filters) ? (
+            <FilterChip
+              icon="close"
+              label="Clear all"
+              onPress={() => {
+                setFilters(emptyFilters());
+                backToTop();
+              }}
+            />
+          ) : null}
+          <FiltersAction
+            label="Filters & Sort"
+            activeCount={activeCount}
+            accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+            accessibilityHint="Opens filters and the sort order"
+            onPress={() => setFiltering(true)}
+            testID="ranked-filter-sort"
+          />
+        </View>
+      )}
 
-      {sortOpen ? (
-        <SortMenu
-          axes={SORT_AXES}
-          value={sort}
-          onChange={(next) => {
-            setSort(next);
-            // **Back to the top on every change.** A `ScrollView` keeps its offset when
-            // its children are replaced, so a reader two hundred rows down would be
-            // dropped into the middle of an order they have not seen the start of.
-            scroll.current?.scrollTo({ y: 0, animated: false });
-          }}
-          onClose={() => setSortOpen(false)}
-        />
-      ) : null}
-
-      <ScrollView ref={scroll} style={styles.list} contentContainerStyle={styles.listContent}>
-        {list.isPending || (category === 'tv_seasons' && shows.isPending) ? (
+      <ScrollView
+        ref={scroll}
+        testID="ranked-list"
+        // Flexes to the room the sheet has left, so the last row scrolls into view above
+        // the Close footer. A fixed cap here (it was 380) is what left this list cramped.
+        style={styles.list}
+        contentContainerStyle={styles.listContent}
+      >
+        {pending ? (
           <SkeletonRow count={4} />
-        ) : list.isError || (category === 'tv_seasons' && shows.isError) ? (
+        ) : failed ? (
           <View style={styles.empty}>
             <EmptyState
               kind="couldNotLoad"
@@ -379,7 +475,7 @@ export function RankedTitlesSheet({
               }}
             />
           </View>
-        ) : rows.length === 0 ? (
+        ) : total === 0 ? (
           <View style={styles.empty}>
             <EmptyState
               kind="nothingYet"
@@ -391,6 +487,16 @@ export function RankedTitlesSheet({
                   ? 'Log and rank a title and it will appear here.'
                   : 'Nothing ranked in this category so far.'
               }
+            />
+          </View>
+        ) : rows.length === 0 ? (
+          <View style={styles.empty}>
+            <EmptyState
+              kind="nothingMatches"
+              compact
+              title="Nothing matches your filters"
+              body="Try removing one, or clear them and start again."
+              action={{ label: 'Clear all', onPress: () => setFilters(emptyFilters()) }}
             />
           </View>
         ) : (
@@ -427,61 +533,111 @@ export function RankedTitlesSheet({
               />
             ))}
             {/* **The cap is said rather than left to be discovered by counting.**
-                This is a `ScrollView` and every row it holds is mounted at once —
-                `FollowListSheet` records why a virtualised list cannot be used here: a
-                `FlatList` inside a `maxHeight: 90%` container measures to zero. So the
+                This is a `ScrollView` and every row it holds is mounted at once, so the
                 render is bounded, as the 200-row server page this replaced already
                 bounded it, and a reader with more than that is told so instead of
                 silently shown a prefix. Their whole collection is still what the band
                 and the scores were computed from. */}
-            {total > VISIBLE_CAP ? (
+            {matching > VISIBLE_CAP ? (
               <Text variant="footnote" tone="secondary" style={styles.truncation}>
                 {/* "Their top 200" was true while rank was the only order and is a wrong
                     claim under "Oldest first". The bound is what has to be said; which
                     end of which order it cuts is on screen already. */}
-                {`Showing ${VISIBLE_CAP} of ${total}.`}
+                {`Showing ${VISIBLE_CAP} of ${matching}.`}
               </Text>
             ) : null}
           </>
         )}
       </ScrollView>
 
-      <View style={styles.actions}>
-        <Button label="Close" kind="secondary" onPress={onClose} />
-      </View>
+      {/* Mounted only while open: the filter sheet seeds its draft once, on mount. */}
+      {filtering ? (
+        <CollectionFilterSheet
+          items={items}
+          value={filters}
+          showBuckets
+          onApply={(next) => {
+            setFilters(next);
+            setFiltering(false);
+            backToTop();
+          }}
+          onClose={() => setFiltering(false)}
+          sort={{
+            axes,
+            value: sort,
+            onChange: (next) => {
+              setSort(next);
+              // **Back to the top on every change.** A `ScrollView` keeps its offset when
+              // its children are replaced, so a reader two hundred rows down would be
+              // dropped into the middle of an order they have not seen the start of.
+              backToTop();
+            },
+          }}
+        />
+      ) : null}
     </Sheet>
   );
 }
 
+/** One ranked entry in the main Collection's shape, so its filters and orders apply as-is. */
+function asCollectionItem(entry: RankedEntry, score: number): CollectionItem {
+  return {
+    mediaItemId: entry.mediaItemId,
+    title: entry.title,
+    seriesTitle: entry.seriesTitle,
+    seasonNumber: entry.seasonNumber ?? null,
+    kind: entry.kind,
+    year: entry.year,
+    posterPath: entry.posterPath,
+    genres: entry.genres ?? [],
+    language: entry.language ?? null,
+    runtimeMinutes: entry.runtimeMinutes ?? null,
+    score,
+    position: entry.position,
+    category: entry.category,
+    bucket: entry.bucket,
+    // Private on anybody's profile (PRD §22), and never read here.
+    watchedOn: null,
+    addedAt: null,
+  };
+}
+
+/** The sentence a screen reader is given for the Filters & Sort action — the Collection tab's. */
+function filterSortSpoken(
+  axes: readonly SortAxisSpec<CollectionSortAxis>[],
+  sort: CollectionSort,
+  activeFilters: number,
+): string {
+  const spec = axes.find((option) => option.axis === sort.axis);
+  const order = spec
+    ? spec.directions
+      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
+      : `Sorted by ${spec.label}`
+    : null;
+  const filters = activeFilters
+    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
+    : 'No filters';
+  return ['Filter and sort', order, filters].filter(Boolean).join('. ');
+}
+
 const styles = StyleSheet.create({
-  head: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-    paddingBottom: theme.space[3],
-    gap: theme.space[1],
-  },
-  tabs: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
-  sortRow: {
+  toolbar: {
     flexDirection: 'row',
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[3],
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[2],
+    paddingLeft: theme.layout.gutter,
+    // The Filters action's own 44pt cell carries its glyph to the gutter.
+    paddingRight: theme.layout.gutter - theme.space[2],
+    paddingBottom: theme.space[1],
   },
-  // The menu's own styles left with the menu, which is `ui/components/SortControl`
-  // now — this sheet and the Collection tab draw the identical control.
+  count: { flex: 1 },
   // Wide enough for "#100" so the posters keep an unbroken left edge however deep the
   // list goes — a column that resizes per row is the ragged one.
   ordinal: { minWidth: 34 },
-  // Bounded so a large collection does not push Close off a sheet already capped at
-  // 90% of the screen (GoalTitlesSheet's arrangement, for the same reason).
-  list: { maxHeight: 380 },
-  listContent: { paddingBottom: theme.space[2] },
+  // Fills the dense sheet's content area: no cap, so the list takes the room it is given.
+  list: { flex: 1 },
+  listContent: { paddingBottom: theme.space[3] },
   truncation: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   empty: { paddingHorizontal: theme.layout.gutter },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
 });
