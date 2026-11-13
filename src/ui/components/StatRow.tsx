@@ -111,9 +111,21 @@ export function StatRow({ stats, centered = false }: StatRowProps) {
  * whole height of the tap target.
  */
 const styles = StyleSheet.create({
+  /**
+   * **A subtle rounded outline around the four** (founder spec §7, 2026-11-13: "a clean
+   * outline rather than a heavy coloured background"). The hairline is the dividers' own
+   * colour and weight, so the frame and the rules read as one drawing; the radius is the
+   * card's. The cells keep their 44pt targets — the padding is inside the frame, around
+   * them, never taken out of them.
+   */
   row: {
     flexDirection: 'row',
     marginHorizontal: theme.layout.gutter,
+    paddingHorizontal: theme.space[2],
+    paddingVertical: theme.space[1],
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    borderRadius: theme.radius.card,
   },
   item: {
     flex: 1,
@@ -124,6 +136,8 @@ const styles = StyleSheet.create({
     // stated because half of these tiles are now buttons, and the 44pt floor should be a
     // property of the cell rather than a coincidence of the type scale inside it.
     minHeight: theme.layout.minTapTarget,
+    // A little air between a rule and the words beside it, now that the row is framed.
+    paddingHorizontal: theme.space[1],
     gap: 2,
   },
   centered: { alignItems: 'center' },

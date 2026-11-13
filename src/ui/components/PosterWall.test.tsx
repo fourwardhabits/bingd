@@ -3,7 +3,13 @@ import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { theme } from '../tokens';
 
-import { PosterGrid, PosterShelf, seasonPillLabel, type PosterTile } from './PosterWall';
+import {
+  PosterGrid,
+  PosterShelf,
+  seasonPillLabel,
+  seasonPillText,
+  type PosterTile,
+} from './PosterWall';
 
 const tiles: PosterTile[] = [
   { id: 'a', title: 'Inception', year: 2010, score: 9.4, bucket: 'loved' },
@@ -270,7 +276,15 @@ describe('the season pill', () => {
     expect(seasonPillLabel(n)).toBe(label);
   });
 
-  it('reads "S1: 9.8" for a season and the bare number for a show', async () => {
+  it('writes one space either side of a hyphen-minus, and nothing else', () => {
+    expect(seasonPillText(1, 9.8)).toBe('S1 - 9.8');
+    expect(seasonPillText(0, 3.1)).toBe('SP - 3.1');
+    expect(seasonPillText(12, 10)).toBe('S12 - 10.0');
+    // A hyphen-minus, not an en dash or a minus sign, with exactly one space each side.
+    expect(seasonPillText(2, 7.5)).toMatch(/^S2 \u002D 7\.5$/);
+  });
+
+  it('reads "S1 - 9.8" for a season and the bare number for a show', async () => {
     const view = await render(
       <PosterGrid
         tiles={[
@@ -289,12 +303,13 @@ describe('the season pill', () => {
       />,
     );
 
-    expect(view.getByText('S1: 9.8', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('S10: 9.4', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('SP: 3.1', { includeHiddenElements: true })).toBeTruthy();
-    // The old space-only form is gone everywhere.
+    expect(view.getByText('S1 - 9.8', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S10 - 9.4', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('SP - 3.1', { includeHiddenElements: true })).toBeTruthy();
+    // The two older forms are gone everywhere: the space-only one and the colon.
     expect(view.queryByText('S1 9.8', { includeHiddenElements: true })).toBeNull();
-    // A show keeps the bare number: an exact match, so no prefix and no colon.
+    expect(view.queryByText('S1: 9.8', { includeHiddenElements: true })).toBeNull();
+    // A show keeps the bare number: an exact match, so no prefix and no separator.
     expect(view.getByText('8.7', { includeHiddenElements: true })).toBeTruthy();
   });
 
@@ -332,7 +347,7 @@ describe('the season pill', () => {
         onPressTile={() => {}}
       />,
     );
-    const text = view.getByText('S10: 9.4', { includeHiddenElements: true });
+    const text = view.getByText('S10 - 9.4', { includeHiddenElements: true });
     expect(text.props.numberOfLines).toBe(1);
     // Fixed size, as every chip on a wall is: a pill that grew with text size would cover
     // the poster it labels.
@@ -340,20 +355,21 @@ describe('the season pill', () => {
   });
 
   /**
-   * The colon costs one glyph and the pill is **not** widened for it (2026-11-12). Measured
-   * in Inter Medium 12pt with the caption's 0.2 tracking, the widest realistic pill,
-   * `S12: 10.0`, is 47.8pt of text, so 57.8pt of pill with its padding and border; a
-   * three-across tile at 320pt is 92pt wide with 84pt left of the 4pt inset. The pill sits
-   * in the bottom corner and the bookmark in the top one, so they cannot meet.
+   * The separator costs two glyphs more than the bare pair and the pill is **not** widened
+   * for it (2026-11-12, re-measured 2026-11-13). In Inter Medium 12pt with the caption's
+   * 0.2 tracking, the widest realistic pill, `S12 - 10.0`, is about 54pt of text, so about
+   * 64pt of pill with its padding and border; a three-across tile at 320pt is 92pt wide
+   * with 84pt left of the 4pt inset. The pill sits in the bottom corner and the bookmark
+   * in the top one, so they cannot meet.
    */
-  it('keeps the pill box as it was, with the colon inside it', async () => {
+  it('keeps the pill box as it was, with the separator inside it', async () => {
     const view = await render(
       <PosterGrid
         tiles={[{ id: 's12', title: 'Shameless, S12', score: 10, bucket: 'loved', season: 12 }]}
         onPressTile={() => {}}
       />,
     );
-    expect(view.getByText('S12: 10.0', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S12 - 10.0', { includeHiddenElements: true })).toBeTruthy();
     const pill = StyleSheet.flatten(
       view.getByTestId('poster-season-pill', { includeHiddenElements: true }).props.style,
     ) as ViewStyle;

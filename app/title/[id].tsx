@@ -59,6 +59,7 @@ import {
   type UpdateShowLink,
 } from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
+import { RERANK_ICON, RERANK_LABEL } from '@/features/watch-history/rerank';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { AddToListSheet } from '@/features/lists/AddToListSheet';
@@ -3405,13 +3406,14 @@ export default function TitleScreen() {
                  * `value` on a `SheetRow` sets beside the label and truncates at phone width,
                  * which is a founder decision this menu already carries.
                  */}
-                {/* The star is kept from the row this replaces, and so is its behaviour:
-                    straight into the log sheet, where the band chooser is. Leads the group
-                    because correcting a rating is the common act and logging a second
-                    viewing is the rare one. */}
+                {/* **Rerank** (founder spec §5, 2026-11-13; it was *Edit ranking*), with the
+                    left/right arrows — the star is the initial Rank's alone. Behaviour kept:
+                    straight into the log sheet, where the band chooser is, and no watch is
+                    recorded. Leads the group because correcting a rating is the common act
+                    and logging a second viewing is the rare one. */}
                 <SheetRow
-                  icon="star-outline"
-                  label="Edit ranking"
+                  icon={RERANK_ICON}
+                  label={RERANK_LABEL}
                   onPress={() => {
                     setManaging(false);
                     openLog();

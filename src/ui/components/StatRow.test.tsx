@@ -145,3 +145,31 @@ describe('the four cells, unchanged', () => {
     expect(view.getAllByTestId('stat-rule')).toHaveLength(1);
   });
 });
+
+/**
+ * **A subtle rounded outline** (founder spec §7, 2026-11-13): a clean hairline frame in the
+ * dividers' own colour, the card's radius, and no fill — the dividers kept as they were.
+ */
+describe('the frame', () => {
+  it('is a hairline outline with the card radius and no background', async () => {
+    const view = await draw();
+    const row = StyleSheet.flatten(first(view.getAllByTestId('stat-rule')).parent?.props.style);
+
+    expect(row.borderWidth).toBe(StyleSheet.hairlineWidth * 2);
+    expect(row.borderColor).toBe(theme.border.hairline);
+    expect(row.borderRadius).toBe(theme.radius.card);
+    expect(row.backgroundColor).toBeUndefined();
+  });
+
+  it('keeps the rules and every cell’s 44pt target inside it', async () => {
+    const view = await draw();
+    expect(view.getAllByTestId('stat-rule')).toHaveLength(3);
+    for (const name of ['Followers: 12', 'Following: 34', 'Movies: 210', 'TV Shows: 18']) {
+      const cell = view.getByLabelText(name);
+      const style = StyleSheet.flatten(
+        typeof cell.props.style === 'function' ? cell.props.style({ pressed: false }) : cell.props.style,
+      );
+      expect(style.minHeight).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    }
+  });
+});

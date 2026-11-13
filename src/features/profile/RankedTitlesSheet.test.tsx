@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -402,8 +403,13 @@ it('names whose collection it is', async () => {
  * from being able to drift away from the order beside it.
  */
 describe('the sort control', () => {
+  /**
+   * The order lives in Filters & Sort since 2026-11-13 — the main Collection's one entry.
+   * It applies on the press, as the Collection tab's does; `choose` then applies the sheet
+   * so the list underneath is back in front of the reader.
+   */
   const openSort = async (view: Awaited<ReturnType<typeof open>>) => {
-    await fireEvent.press(view.getByLabelText(/^Sort\./));
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
   };
 
   /** The titles in draw order, read off the ordinal-and-title rows. */
@@ -414,6 +420,7 @@ describe('the sort control', () => {
   const choose = async (view: Awaited<ReturnType<typeof open>>, label: RegExp) => {
     await openSort(view);
     await fireEvent.press(view.getByLabelText(label));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
   };
 
   const three = [
@@ -441,7 +448,7 @@ describe('the sort control', () => {
     mockMovies = three;
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('Sort. Rank, highest first')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Rank, highest first\./)).toBeTruthy());
     // Position 1 is the top of the band, so highest first is ascending position.
     expect(drawn(view)[0]).toMatch(/Second ranked/);
     expect(drawn(view)[2]).toMatch(/First ranked/);
@@ -455,7 +462,7 @@ describe('the sort control', () => {
     await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
     expect(drawn(view)[2]).toMatch(/Second ranked/);
     // Rule 4: the label is the axis and does not move with the direction.
-    expect(view.getByLabelText('Sort. Rank, lowest first')).toBeTruthy();
+    expect(view.getByLabelText(/Sorted by Rank, lowest first\./)).toBeTruthy();
   });
 
   it('orders by when the title entered the ranking, newest first', async () => {
@@ -465,7 +472,7 @@ describe('the sort control', () => {
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/Third ranked/));
     expect(drawn(view)[2]).toMatch(/First ranked/);
-    expect(view.getByLabelText('Sort. Recently ranked, newest first')).toBeTruthy();
+    expect(view.getByLabelText(/Sorted by Recently ranked, newest first\./)).toBeTruthy();
   });
 
   it('and oldest first, on a second press of the same row', async () => {
@@ -476,7 +483,7 @@ describe('the sort control', () => {
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
     expect(drawn(view)[2]).toMatch(/Third ranked/);
-    expect(view.getByLabelText('Sort. Recently ranked, oldest first')).toBeTruthy();
+    expect(view.getByLabelText(/Sorted by Recently ranked, oldest first\./)).toBeTruthy();
   });
 
   it('starts a new axis in its own direction rather than inheriting the last one', async () => {
@@ -485,11 +492,11 @@ describe('the sort control', () => {
     mockMovies = three;
     const view = await open();
     await choose(view, /^Rank,/);
-    await waitFor(() => expect(view.getByLabelText('Sort. Rank, lowest first')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Rank, lowest first\./)).toBeTruthy());
 
     await choose(view, /^Recently ranked$/);
     await waitFor(() =>
-      expect(view.getByLabelText('Sort. Recently ranked, newest first')).toBeTruthy(),
+      expect(view.getByLabelText(/Sorted by Recently ranked, newest first\./)).toBeTruthy(),
     );
     expect(drawn(view)[0]).toMatch(/Third ranked/);
   });
@@ -578,5 +585,198 @@ describe('the sort control', () => {
     await waitFor(() => expect(view.getByText('#3')).toBeTruthy());
     expect(view.getByText('#1')).toBeTruthy();
     expect(view.getByText('#2')).toBeTruthy();
+  });
+});
+
+/**
+ * **The shared sheet structure** (founder spec §4, 2026-11-13): Your Collection in the
+ * header, the toggle beside it, Filters & Sort near the top, a list that fills the sheet
+ * and scrolls to its last row, and the standard Close footer in its own bar.
+ */
+describe('the sheet around the list', () => {
+  const many = Array.from({ length: 60 }, (_, n) =>
+    entry({ mediaItemId: `m${n}`, title: `Film ${n}`, position: n + 1, year: 2000 + (n % 20) }),
+  );
+
+  it('takes the whole dense height, with no fixed cap on the list', async () => {
+    mockMovies = many;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+
+    const body = StyleSheet.flatten(view.getByTestId('sheet-body').props.style);
+    const list = StyleSheet.flatten(view.getByTestId('ranked-list').props.style);
+    expect(body.height).toBe('90%');
+    expect(list.maxHeight).toBeUndefined();
+    expect(list.flex).toBe(1);
+  });
+
+  it('keeps the last row inside the scroll region and the footer outside it', async () => {
+    mockMovies = many;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/Film 59/)).toBeTruthy());
+
+    const list = view.getByTestId('ranked-list');
+    let node = view.getByText(/Film 59/).parent;
+    while (node && node !== list) node = node.parent;
+    expect(node).toBe(list);
+
+    let up = view.getByTestId('dismiss-footer').parent;
+    while (up) {
+      expect(up).not.toBe(list);
+      up = up.parent;
+    }
+  });
+
+  it('closes from the quiet Close footer, and has no other Close', async () => {
+    const onClose = jest.fn();
+    mockMovies = many;
+    const view = await open({ onClose });
+    await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+
+    expect(view.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('says how many titles the list holds', async () => {
+    mockMovies = many;
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('ranked-count')).toBeTruthy());
+    expect(view.getByText('60 titles')).toBeTruthy();
+  });
+});
+
+describe('the main Collection’s filters, over somebody’s ranking', () => {
+  const mixed = [
+    entry({ mediaItemId: 'a', title: 'A Comedy', position: 1, genres: ['Comedy'], year: 2021 }),
+    entry({ mediaItemId: 'b', title: 'A Horror', position: 2, genres: ['Horror'], year: 1994 }),
+    entry({ mediaItemId: 'c', title: 'Another Comedy', position: 3, genres: ['Comedy'], year: 2012 }),
+  ];
+
+  it('narrows the list by genre, keeping each row’s ordinal and score', async () => {
+    mockMovies = mixed;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Comedy/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(view.queryByText(/A Horror/)).toBeNull());
+    expect(view.getByText(/A Comedy/)).toBeTruthy();
+    expect(view.getByText(/Another Comedy/)).toBeTruthy();
+    // The ordinal is the owner's position, which a filter does not renumber.
+    expect(view.getByText('#3')).toBeTruthy();
+    expect(view.getByText('2 of 3')).toBeTruthy();
+    expect(view.getByLabelText(/1 filter on/)).toBeTruthy();
+  });
+
+  it('clears back to the whole list', async () => {
+    mockMovies = mixed;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Horror/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(view.queryByText(/A Comedy/)).toBeNull());
+
+    await fireEvent.press(view.getByText('Clear all'));
+    await waitFor(() => expect(view.getByText(/A Comedy/)).toBeTruthy());
+    expect(view.getByText('3 titles')).toBeTruthy();
+  });
+
+  it('offers the main Collection’s title-fact orders, and sorts by release year', async () => {
+    mockMovies = mixed;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    expect(view.getByLabelText(/^Title/)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText(/^Release year/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+
+    const order = view
+      .getAllByLabelText(/, (19|20)\d\d/)
+      .map((node) => String(node.props.accessibilityLabel));
+    expect(order[0]).toMatch(/A Comedy/); // 2021
+    expect(order[2]).toMatch(/A Horror/); // 1994
+  });
+});
+
+/** Independent review, 2026-11-13: what must not carry over, and what must fall back. */
+describe('state that follows the list on screen', () => {
+  const films = [
+    entry({ mediaItemId: 'a', title: 'A Comedy', position: 1, genres: ['Comedy'] }),
+    entry({ mediaItemId: 'b', title: 'A Horror', position: 2, genres: ['Horror'] }),
+  ];
+
+  it('clears filters when the sheet is closed and opened on another list', async () => {
+    mockMovies = films;
+    mockSeasons = [
+      entry({
+        mediaItemId: 's1',
+        title: 'Season 1',
+        kind: 'season',
+        seriesTitle: 'The Bear',
+        seasonNumber: 1,
+        category: 'tv_seasons',
+        genres: ['Drama'],
+      }),
+    ];
+    const props = {
+      onChangeCategory: jest.fn(),
+      userId: 'anna-id',
+      name: 'Anna',
+      isSelf: false,
+      onPressTitle: jest.fn(),
+      onClose: jest.fn(),
+    };
+    const view = await renderWithProviders(<RankedTitlesSheet category="movies" {...props} />);
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Comedy/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(view.queryByText(/A Horror/)).toBeNull());
+
+    // Closed (the profile keeps it mounted), then opened on TV from the wall.
+    await view.rerender(<RankedTitlesSheet category={null} {...props} />);
+    await view.rerender(<RankedTitlesSheet category="tv_seasons" {...props} />);
+
+    await waitFor(() => expect(view.getByText(/The Bear/)).toBeTruthy());
+    expect(view.queryByText('Nothing matches your filters')).toBeNull();
+    expect(view.getByLabelText(/No filters/)).toBeTruthy();
+  });
+
+  it('falls back to Rank when a seasons-only list cannot offer Runtime', async () => {
+    mockMovies = films.map((film) => ({ ...film, runtimeMinutes: 100 }));
+    mockSeasons = [
+      entry({ mediaItemId: 's1', title: 'Season 1', kind: 'season', seriesTitle: 'The Bear', seasonNumber: 1, category: 'tv_seasons' }),
+    ];
+    const props = {
+      onChangeCategory: jest.fn(),
+      userId: 'anna-id',
+      name: 'Anna',
+      isSelf: false,
+      onPressTitle: jest.fn(),
+      onClose: jest.fn(),
+    };
+    const view = await renderWithProviders(<RankedTitlesSheet category="movies" {...props} />);
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Runtime/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Runtime/)).toBeTruthy());
+
+    await view.rerender(<RankedTitlesSheet category="tv_seasons" {...props} />);
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Rank, highest first\./)).toBeTruthy());
+  });
+
+  it('names somebody else’s collection on the filter sheet', async () => {
+    mockMovies = films;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    expect(view.getByLabelText("Filter and sort Anna's collection")).toBeTruthy();
   });
 });

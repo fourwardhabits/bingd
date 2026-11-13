@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
@@ -5,10 +6,11 @@ import { formatWatchDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { fontFamily, theme } from '@/ui/tokens';
-import { Button, ScoreBadge, SheetRow, Text } from '@/ui/components';
+import { Button, SaveButton, ScoreBadge, Text } from '@/ui/components';
 
 import { useTitleNote } from '@/features/collection/use-title-note';
 
+import { RERANK_ICON, RERANK_LABEL } from './rerank';
 import { WatchDetailsRows } from './WatchDetailsRows';
 import {
   isFromDiary,
@@ -52,35 +54,39 @@ export type WatchRowProps = {
   onSave: (edit: WatchEdit) => Promise<boolean>;
   onRemove: () => void;
   /**
-   * **Edit ranking**, offered inside the editor when the title is ranked (UI consistency
-   * sprint, 2026-11-10). It opens the title's existing correction flow — *Update your
-   * rating*'s band chooser and comparisons — and records no watch. Absent for a title with
-   * no ranking to correct, and the row is not drawn.
+   * **Rerank** (founder spec §5, 2026-11-13; it was *Edit ranking*). It opens the title's
+   * existing correction flow — *Update your rating*'s band chooser and comparisons, in
+   * `rerank` / `rebucket` mode — and records no watch. Absent for a title with no ranking
+   * to correct, or while another card's editor is open, and then it is not drawn.
    */
   onEditRanking?: () => void;
   busy?: boolean;
 };
 
 /**
- * One watch, as a line in this title's own historical feed (founder QA, 2026-09-21).
+ * One watch, as a card in this title's own historical feed (founder QA, 2026-09-21; card
+ * refinement, founder spec §5, 2026-11-13).
  *
- * **Left:** the date as the label — no *(First watch)* suffix (founder QA, 2026-11-12) — then who
- * it was watched with and the watch's note, with More for a long one. **Right:** the
- * reader's score AT this watch, in the app's one score circle. Not the current score: a
- * later Edit ranking moves the title page, never this row (`scoresByWatch`). No
- * poster (the reader is inside the title) and no `#X of Y` (the ledger keeps it; it is not
- * a historical opinion).
+ *     Mar 4, 2024                      (9.0)     ← the date is the anchor; the score is
+ *     From Letterboxd                              centred on the date block
+ *     With Alex
+ *     Better the second time.
+ *     ✎ Edit watch    ⇄ Rerank                   ← the two acts, with the watch's facts
  *
- * **Edit** is a small text action directly under the date, and editing reuses the log
- * sheet's own rows (`WatchDetailsRows`) inline — no modal, so the ranking flow's sheets can
- * still stack. Editing a watch never touches the current ranking; that changes through
- * **Edit ranking**, a separate action in the editor that opens *Edit ranking*'s
- * existing flow.
+ * The score is the reader's score AT this watch, never the current one: a later Rerank
+ * moves the title page, never this card (`scoresByWatch`). No poster (the reader is inside
+ * the title) and no `#X of Y`.
+ *
+ * **Editing opens inside the card**, in place of the action line, behind one hairline:
+ * a header with Rerank on the left and Cancel · Save on the right — the standard
+ * `SaveButton`, top right of the editor — then the log sheet's own rows
+ * (`WatchDetailsRows`), then Remove, the destructive act, last and apart. So Rerank sits
+ * at the same height in both states, and never under Remove again.
  *
  * The three acts stay three (UI consistency sprint, 2026-11-10):
  *   Log another watch   a new viewing — the title page's, not this screen's.
- *   Edit (this watch)   this viewing's date, who with, and the title's note.
- *   Edit ranking        the *current* ranking, through comparisons. No watch is created,
+ *   Edit watch          this viewing's date, who with, and the title's note.
+ *   Rerank              the *current* ranking, through comparisons. No watch is created,
  *                       none is removed, and the scores frozen on earlier watches stay
  *                       frozen (`scoresByWatch`).
  */
@@ -105,54 +111,42 @@ export function WatchRow({
   const [expanded, setExpanded] = useState(false);
   const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
   // The date alone (founder QA, 2026-11-12). The row's place in the list already says which
-  // watch came first; *(First watch)* on one entry read as a tag on a single row. The order
-  // and the *Earlier* group are unchanged — only the suffix is gone.
+  // watch came first; *(First watch)* on one entry read as a tag on a single row.
   const primary = dateLabel;
   const source = isFromDiary(event) ? 'From Letterboxd' : null;
   const withLine = companions.length
     ? `With ${companions.map((person) => person.name).join(', ')}`
     : null;
   const longNote = Boolean(note && note.length > NOTE_PREVIEW);
-  // The quiet facts about where the date came from, on one line so an imported or undated
-  // watch costs a card one line, not two.
+  // The quiet facts about where the date came from, on one line under the date, so an
+  // imported or undated watch costs a card one line, not two.
   const provenance = [label === 'earlier' ? 'Date not recorded' : null, source]
     .filter(Boolean)
     .join(' · ');
 
   return (
     /**
-     * **Each watch is a card** (UI wave, 2026-11-12): the house card treatment —
-     * `surface.raised` on Paper, `radius.card`, the hairline border `FeaturedCard` draws —
-     * in place of a full-width row and a rule between rows. The list spaces the cards.
-     * Everything inside is unchanged, the inline editor included: it opens inside the
-     * card, under the facts, so the watch being edited stays one object on the page.
+     * **Each watch is a card** (UI wave, 2026-11-12): `surface.raised` on Paper,
+     * `radius.card`, the hairline border `FeaturedCard` draws. The list spaces the cards.
      */
     <View style={styles.row} testID={`watch-row-${event.id}`}>
       {/**
-       * **The date and Edit on the left, the score on the right** (founder, UI consistency
-       * sprint, 2026-11-10). Edit sits directly under the date it edits, so the score
-       * circle is the only thing in the right column, level with the date — it no longer
-       * moves down when Edit is drawn beside it, or up when the editor replaces Edit. Edit keeps the full 44pt
-       * target the 2026-11-07 pass gave it, with the word centred in it.
+       * **The date block and the score, centred on each other** (founder spec §5). The date
+       * is the card's anchor in `headline`, with its provenance under it; the score circle
+       * is centred on that block, so it lines up with the date whatever the provenance
+       * line does — and nothing in this row changes when the editor opens, so it never
+       * moves.
        */}
       <View style={styles.main} testID={`watch-main-${event.id}`}>
-        <View style={styles.lead}>
-          <Text variant="headline" testID={`watch-date-${event.id}`}>
+        <View style={styles.lead} testID={`watch-lead-${event.id}`}>
+          <Text variant="headline" style={styles.date} testID={`watch-date-${event.id}`}>
             {primary}
           </Text>
-          {editing ? null : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Edit this watch, ${dateLabel}`}
-              onPress={onEdit}
-              style={({ pressed }) => [styles.edit, pressed && styles.editPressed]}
-              testID={`watch-edit-${event.id}`}
-            >
-              <Text variant="footnote" tone="action" style={styles.editLabel}>
-                Edit
-              </Text>
-            </Pressable>
-          )}
+          {provenance ? (
+            <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
+              {provenance}
+            </Text>
+          ) : null}
         </View>
 
         {score ? (
@@ -162,14 +156,9 @@ export function WatchRow({
         ) : null}
       </View>
 
-      {/* The watch's facts, the full width of the row so a long note reads as prose. */}
-      {provenance || withLine || note ? (
+      {/* The watch's facts, the full width of the card so a long note reads as prose. */}
+      {withLine || note ? (
         <View style={styles.facts}>
-          {provenance ? (
-            <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
-              {provenance}
-            </Text>
-          ) : null}
           {withLine ? (
             <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
               {withLine}
@@ -215,8 +204,78 @@ export function WatchRow({
           onRemove={onRemove}
           onEditRanking={onEditRanking}
         />
-      ) : null}
+      ) : (
+        /**
+         * **Edit watch and Rerank, with the watch they belong to** (founder spec §5). Both
+         * are quiet Maroon text actions with their glyphs, each a full 44pt target, on one
+         * line that wraps at large text rather than running past the card.
+         */
+        <View style={styles.actionLine} testID={`watch-actions-${event.id}`}>
+          <CardAction
+            testID={`watch-edit-${event.id}`}
+            icon="create-outline"
+            label="Edit watch"
+            accessibilityLabel={`Edit this watch, ${dateLabel}`}
+            onPress={onEdit}
+          />
+          {onEditRanking ? (
+            <CardAction
+              testID={`watch-rerank-${event.id}`}
+              icon={RERANK_ICON}
+              label={RERANK_LABEL}
+              accessibilityHint="Compares this title again. Records no new watch."
+              onPress={onEditRanking}
+              // A save from the editor that just closed may still be writing this watch:
+              // the ranking does not open over it (independent review).
+              disabledReason={busy ? 'Saving' : undefined}
+            />
+          ) : null}
+        </View>
+      )}
     </View>
+  );
+}
+
+/** A quiet text action with its glyph, at a full 44pt target: the card's two acts. */
+function CardAction({
+  icon,
+  label,
+  accessibilityLabel,
+  accessibilityHint,
+  onPress,
+  disabledReason,
+  testID,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  onPress?: () => void;
+  /** Present while the act cannot be taken; drawn inert and said aloud. */
+  disabledReason?: string;
+  testID?: string;
+}) {
+  const disabled = Boolean(disabledReason) || !onPress;
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={disabledReason ?? accessibilityHint}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.cardAction,
+        pressed && styles.editPressed,
+        disabled && styles.inert,
+      ]}
+    >
+      <Ionicons name={icon} size={theme.layout.icon.sm - 2} color={theme.semantic.action} />
+      <Text variant="footnote" tone="action" style={styles.editLabel}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -286,15 +345,25 @@ function WatchEditor({
    */
   const inFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
-  const begin = () => {
+  /**
+   * Whether what is in flight writes this watch, which is when Save may say "Saving…". A
+   * Rerank that only flushes the note before opening the ranking holds the controls
+   * just the same, but it is not a save, and Save keeps its word (independent review).
+   */
+  const [writing, setWriting] = useState(false);
+  const begin = (writes = true) => {
     if (inFlight.current) return false;
     inFlight.current = true;
     setSubmitting(true);
+    setWriting(writes);
     return true;
   };
   const end = () => {
     inFlight.current = false;
-    if (mounted.current) setSubmitting(false);
+    if (mounted.current) {
+      setSubmitting(false);
+      setWriting(false);
+    }
   };
   const locked = busy || submitting;
 
@@ -331,7 +400,7 @@ function WatchEditor({
     if (inFlight.current) return;
     const edit = pendingEdit();
     const goToRanking = async () => {
-      if (!begin()) return;
+      if (!begin(false)) return;
       try {
         await titleNote.flush();
       } finally {
@@ -369,8 +438,50 @@ function WatchEditor({
   };
 
   return (
+    /**
+     * **The editor, contained in its card behind one hairline** (founder spec §5). Its
+     * header holds the editor's own acts — Rerank on the left, where the action line had
+     * it; Cancel, secondary, and the standard `SaveButton` at the top right — so Save
+     * never sits below the form or out of sight of the date it saves, and nothing here
+     * covers the date or the score above.
+     */
     <View style={styles.editor} testID={`watch-editor-${event.id}`}>
+      <View style={styles.editorHeader} testID={`watch-editor-header-${event.id}`}>
+        <View style={styles.editorLead}>
+          {onEditRanking ? (
+            <CardAction
+              testID={`watch-rerank-${event.id}`}
+              icon={RERANK_ICON}
+              label={RERANK_LABEL}
+              accessibilityHint="Compares this title again. Records no new watch."
+              onPress={() => editRanking(onEditRanking)}
+              disabledReason={locked ? 'Saving' : undefined}
+            />
+          ) : null}
+        </View>
+        <View style={styles.editorActions}>
+          <Button
+            label="Cancel"
+            kind="secondary"
+            size="sm"
+            hitSlop={COMPACT_SLOP}
+            disabled={submitting}
+            disabledReason={submitting ? 'Saving' : undefined}
+            onPress={onCancel}
+          />
+          <SaveButton
+            testID={`watch-save-${event.id}`}
+            accessibilityLabel="Save"
+            saving={writing}
+            disabled={busy || submitting}
+            disabledReason={busy || submitting ? 'Saving' : undefined}
+            onPress={() => void save()}
+          />
+        </View>
+      </View>
+
       <WatchDetailsRows
+        ruled={false}
         date={date}
         onDate={setDate}
         people={taggableWith(people, companions)}
@@ -384,128 +495,110 @@ function WatchEditor({
         titleNote={titleNote}
       />
 
-      <View style={styles.actions}>
-        <Button
-          label="Cancel"
-          kind="secondary"
-          size="sm"
-          disabled={submitting}
-          disabledReason={submitting ? 'Saving' : undefined}
-          onPress={onCancel}
-        />
-        <Button
-          label="Save"
-          size="sm"
-          disabled={locked}
-          disabledReason={locked ? 'Saving' : undefined}
-          onPress={() => void save()}
-        />
-      </View>
-
       {/**
        * The only watch says something different, because the server refuses deleting it
        * (`P0001 last_watch`): a title in the collection has at least one watch, so what
-       * the reader means is that the title should leave the collection.
-       *
-       * **And now it does that** (founder, 2026-09-25). The words were already
-       * "Remove from collection…" and pressing them produced an error telling the reader
-       * to go and remove it from their collection — which is what they had just pressed.
-       * The ellipsis is gone with the contradiction: this is the act, not a doorway to
-       * somewhere else that performs it.
+       * the reader means is that the title should leave the collection — and it does that
+       * (founder, 2026-09-25). Last and apart: the destructive act, behind Edit watch.
        */}
-      {/**
-       * **The two acts that are not this watch's details** (founder, UI consistency
-       * sprint, 2026-11-10), below the form and its Save so neither reads as a field.
-       *
-       * *Edit ranking* changes the title's current ranking through the existing flow and
-       * leaves this watch alone. A note typed above is flushed first, as Save does, so the
-       * rating sheet opens on it; a changed date or companions are never dropped silently
-       * — the reader chooses Save, Discard or Cancel first (`editRanking`).
-       *
-       * *Remove* is unchanged: the destructive act, behind Edit, exactly as before.
-       */}
-      <View style={styles.otherActions}>
-        {onEditRanking ? (
-          <View testID={`watch-edit-ranking-${event.id}`}>
-            <SheetRow
-              // The title page's own Edit ranking icon, so the one act reads the same in
-              // both places (founder QA, 2026-11-12).
-              icon="star-outline"
-              label="Edit ranking"
-              onPress={locked ? undefined : () => editRanking(onEditRanking)}
-              disabledReason={locked ? 'Saving' : undefined}
-            />
-          </View>
-        ) : null}
-        <Pressable
-          accessibilityRole="button"
-          disabled={locked}
-          onPress={onRemove}
-          style={({ pressed }) => [styles.remove, pressed && styles.editPressed]}
-          testID={`watch-remove-${event.id}`}
-        >
-          <Text variant="footnote" tone="action">
-            {onlyWatch ? 'Remove from collection' : 'Remove this watch'}
-          </Text>
-        </Pressable>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={locked}
+        onPress={onRemove}
+        style={({ pressed }) => [styles.remove, pressed && styles.editPressed]}
+        testID={`watch-remove-${event.id}`}
+      >
+        <Text variant="footnote" tone="action">
+          {onlyWatch ? 'Remove from collection' : 'Remove this watch'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
 
+/**
+ * Cancel is drawn at `Button`'s small size — the compact action height, Save's own — and
+ * this slop returns it to a 44pt target, inside the header row's padding.
+ */
+const COMPACT_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
 const styles = StyleSheet.create({
   /**
    * The card. Its inner gutters live on its parts rather than on the card, so the inline
-   * editor can be the full width of the card — the log sheet's rows draw their own gutters,
-   * which is the design system's 16pt card padding — without a negative margin pulling it
-   * back out over padding it should never have been inside.
+   * editor can be the full width of the card without a negative margin.
    *
    * No height, no `overflow: hidden`: at the largest text sizes, on a 320pt screen, the
    * date wraps and the card grows with it rather than clipping anything.
    */
   row: {
     marginHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
+    paddingTop: theme.space[3],
     backgroundColor: theme.surface.raised,
     borderRadius: theme.radius.card,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.border.hairline,
   },
-  // Top-aligned: the score sits level with the date's line and never moves when Edit is
-  // drawn under the date or gives way to the editor (independent review).
+  // The date block and the score, centred on each other.
   main: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
   },
-  // The date, then Edit under it. Takes what the score leaves, so a long date wraps here.
-  lead: { flex: 1, alignItems: 'flex-start' },
-  // The word centred in a full 44pt target, flush with the date's left edge.
-  edit: {
+  // Takes what the score leaves, so a long date wraps here rather than under the circle.
+  lead: { flex: 1, gap: 2 },
+  // The anchor: the card's one line in display weight.
+  date: { fontFamily: fontFamily.sansSemibold },
+  facts: { gap: theme.space[1], paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  more: { alignSelf: 'flex-start' },
+  // Edit watch and Rerank. Wraps at large text; the card's bottom air is the row's own.
+  actionLine: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: theme.space[4],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[1],
+    paddingBottom: theme.space[1],
+  },
+  // Glyph and word, the word centred in a full 44pt target.
+  cardAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
     minHeight: theme.layout.minTapTarget,
     minWidth: theme.layout.minTapTarget,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
   },
   editLabel: { fontFamily: fontFamily.sansMedium },
   editPressed: { opacity: 0.6 },
-  facts: { gap: theme.space[1], paddingHorizontal: theme.layout.gutter },
-  more: { alignSelf: 'flex-start' },
-  editor: { marginTop: theme.space[3], gap: theme.space[3] },
-  // Wraps rather than overflowing the card when large text makes the two buttons wider
-  // than a narrow card.
-  actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.space[3],
-    justifyContent: 'flex-end',
-    paddingHorizontal: theme.layout.gutter,
-  },
-  // A hairline, as above the detail rows, so the two acts read as apart from the form.
-  otherActions: {
+  inert: { opacity: 0.4 },
+  // One hairline: the boundary between the watch and the editing of it.
+  editor: {
+    marginTop: theme.space[2],
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
+    paddingTop: theme.space[1],
+    gap: theme.space[1],
+  },
+  // Rerank on the left, Cancel · Save at the top right; wraps rather than overflowing.
+  editorHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    rowGap: theme.space[1],
+    paddingHorizontal: theme.layout.gutter,
+  },
+  editorLead: { flexShrink: 1 },
+  editorActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: theme.space[2],
+    marginLeft: 'auto',
   },
   // A full 44pt target for the destructive act, the word on the gutter.
   remove: {
@@ -513,5 +606,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'flex-start',
     paddingHorizontal: theme.layout.gutter,
+    marginBottom: theme.space[1],
   },
 });

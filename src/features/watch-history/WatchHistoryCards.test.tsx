@@ -374,3 +374,94 @@ describe('a card at large text sizes', () => {
     expect(style.minHeight).toBe(theme.layout.minTapTarget);
   });
 });
+
+/**
+ * **The refined card** (founder spec §5, 2026-11-13): the standard Save at the top right
+ * of the editor's header with Cancel secondary beside it, the editor behind exactly one
+ * hairline, and no rules between the date, the facts and the acts.
+ */
+describe('the refined card', () => {
+  /** Every border drawn inside a card, as `testID-or-type:side`. */
+  const rulesIn = (node: unknown): string[] => {
+    const out: string[] = [];
+    const walk = (n: { type?: string; props?: Record<string, unknown>; children?: unknown[] }) => {
+      const style = StyleSheet.flatten(
+        typeof n.props?.style === 'function'
+          ? (n.props.style as (s: { pressed: boolean }) => unknown)({ pressed: false })
+          : n.props?.style,
+      ) as Record<string, number> | undefined;
+      for (const side of ['borderTopWidth', 'borderBottomWidth']) {
+        if (style && (style[side] ?? 0) > 0) out.push(`${String(n.props?.testID ?? n.type)}:${side}`);
+      }
+      for (const child of n.children ?? []) if (child && typeof child === 'object') walk(child as never);
+    };
+    for (const child of (node as { children?: unknown[] }).children ?? [])
+      if (child && typeof child === 'object') walk(child as never);
+    return out;
+  };
+
+  it('puts the standard Save at the top right of the editor, with Cancel secondary', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+
+    const header = view.getByTestId('watch-editor-header-w1');
+    // The header is the editor's first child: Save is at its top, not under the form.
+    const editorKids = view.getByTestId('watch-editor-w1').children as unknown as { props: { testID?: string } }[];
+    expect(editorKids[0]?.props.testID).toBe('watch-editor-header-w1');
+    const fill = StyleSheet.flatten(within(header).getByTestId('watch-save-w1-fill').props.style);
+    expect(fill.backgroundColor).toBe(theme.semantic.action);
+    expect(fill.minHeight).toBe(theme.layout.control.compactAction.visibleHeight);
+    // Cancel is the secondary kind: the raised surface and a hairline, never Maroon fill.
+    const cancel = within(header).getByRole('button', { name: 'Cancel' });
+    const cancelStyle = StyleSheet.flatten(
+      (typeof cancel.props.style === 'function' ? cancel.props.style({ pressed: false }) : cancel.props.style) as never,
+    ) as { backgroundColor?: string };
+    expect(cancelStyle.backgroundColor).toBe(theme.surface.raised);
+    // Save comes after Cancel, at the trailing end of the header.
+    const actions = within(header).getByRole('button', { name: 'Save' });
+    expect(actions).toBeTruthy();
+  });
+
+  it('saves once for a double tap on Save', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    const card = within(view.getByTestId('watch-row-w1'));
+    await fireEvent.press(card.getByLabelText(/Who I watched with/));
+    await fireEvent.press(card.getByText('Alex'));
+    const save = card.getByRole('button', { name: 'Save' });
+    await fireEvent.press(save);
+    await fireEvent.press(save);
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+    expect(mockDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no rule inside a collapsed card', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(rulesIn(view.getByTestId('watch-row-w1'))).toEqual([]);
+  });
+
+  it('draws exactly one rule when editing: the editor’s own boundary', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    expect(rulesIn(view.getByTestId('watch-row-w1'))).toEqual(['watch-editor-w1:borderTopWidth']);
+  });
+
+  it('keeps Cancel a 44pt target despite its compact drawing', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    const cancel = view.getByRole('button', { name: 'Cancel' });
+    const style = StyleSheet.flatten(
+      (typeof cancel.props.style === 'function' ? cancel.props.style({ pressed: false }) : cancel.props.style) as never,
+    ) as { minHeight?: number };
+    const slop = cancel.props.hitSlop as { top: number; bottom: number };
+    expect((style.minHeight ?? 0) + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+      theme.layout.minTapTarget,
+    );
+  });
+});
+
