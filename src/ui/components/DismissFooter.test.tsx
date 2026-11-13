@@ -1,5 +1,5 @@
 import { fireEvent, screen } from '@testing-library/react-native';
-import { ScrollView, StyleSheet, Text as RNText } from 'react-native';
+import { Dimensions, ScrollView, StyleSheet, Text as RNText } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -136,11 +136,13 @@ describe('in a sheet, under a long list', () => {
     expect(content.maxHeight).toBeUndefined();
   });
 
-  it('gives a dense list the full sheet height, and the list all of it', async () => {
+  it('gives a dense list the standard sheet height, and the list all of it', async () => {
     await draw('dense');
     const body = StyleSheet.flatten(screen.getByTestId('sheet-body').props.style);
     const content = StyleSheet.flatten(screen.getByTestId('sheet-content').props.style);
-    expect(body.height).toBe('90%');
+    // `dense` is an alias of `size="standard"` since FU1113-B: 80% of the window below the
+    // top inset (47, `renderWithProviders`' iPhone), in points rather than 90%.
+    expect(body.height).toBe(Math.round(0.8 * (Dimensions.get('window').height - 47)));
     expect(content.flex).toBe(1);
   });
 });

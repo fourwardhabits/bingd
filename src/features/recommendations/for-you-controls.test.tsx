@@ -221,11 +221,11 @@ describe('the controls', () => {
       expect(label.fontSize).toBe(13);
     }
 
+    // Icon-only since FU1113-B: no outline, no printed word, the glyph in secondary ink.
     const filters = view.getByTestId('for-you-filters');
     expect(flatten(filters.props.style).borderWidth).toBeUndefined();
-    expect(flatten(within(filters).getByText('Filters').props.style).color).toBe(
-      theme.text.secondary,
-    );
+    expect(within(filters).queryByText('Filters')).toBeNull();
+    expect(view.getByRole('button', { name: 'Filters' })).toBeTruthy();
   });
 
   it('gives every control a 44pt target', async () => {
@@ -238,9 +238,9 @@ describe('the controls', () => {
         theme.layout.minTapTarget,
       );
     }
-    expect(flatten(view.getByTestId('for-you-filters').props.style).minHeight).toBe(
-      theme.layout.minTapTarget,
-    );
+    const filters = flatten(view.getByTestId('for-you-filters').props.style);
+    expect(filters.width).toBe(theme.layout.minTapTarget);
+    expect(filters.height).toBe(theme.layout.minTapTarget);
   });
 
   it('puts a deliberate seam between the features and the first posters', async () => {

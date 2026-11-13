@@ -381,6 +381,16 @@ export function MediumSelector<T extends string = Medium>({
 }
 
 /** How long an open waits for the control's position before using the fallback. */
+/**
+ * **The selected option's treatment, named once** (FU1113-B): a sunken ground and Maroon
+ * ink. `ViewModeToggle` reads these rather than copying them, so its selected cell and a
+ * selected menu option here cannot drift apart.
+ */
+export const MEDIUM_SELECTED = {
+  background: theme.surface.sunken,
+  ink: theme.semantic.action,
+} as const;
+
 const MEASURE_TIMEOUT_MS = 120;
 const CHEVRON_HEADING = 18;
 const CHEVRON_FILTER = 16;
@@ -481,7 +491,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
   },
-  optionSelected: { backgroundColor: theme.surface.sunken },
+  optionSelected: { backgroundColor: MEDIUM_SELECTED.background },
   menu: {
     position: 'absolute',
     overflow: 'hidden',

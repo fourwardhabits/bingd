@@ -16,7 +16,7 @@ import { ProviderLogos } from '@/features/import/ProviderLogo';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
-import { Screen, SectionHeader, Text } from '@/ui/components';
+import { EDIT_ICON_NAME, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -124,7 +124,8 @@ export default function SettingsScreen() {
           <SectionHeader title="Account" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
-              icon="person-outline"
+              // The shared Edit glyph for a genuine edit (FU1113-B).
+              icon={EDIT_ICON_NAME}
               label="Edit Profile"
               detail={`@${profile.username}`}
               onPress={() => router.push('/settings/profile')}

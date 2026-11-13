@@ -147,6 +147,8 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
         visible
         onClose={onClose}
         label="Group Recommendations"
+        // The standard browsing sheet (FU1113-B): the picker and the picks share one height.
+        size="standard"
         /**
          * **The CTA stays pinned, and Close sits quietly under it** (founder spec §4,
          * 2026-11-13). The picker scrolls above both; the CTA's behaviour is unchanged,
@@ -301,6 +303,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
       visible
       onClose={onClose}
       label="Group Recommendations"
+      size="standard"
       // Dismiss-only from here: the picks are the content, and each row leads somewhere.
       footer={<DismissFooter onPress={onClose} />}
     >

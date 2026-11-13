@@ -89,6 +89,8 @@ export function AwardsSheet({
       visible
       onClose={onClose}
       label="bingd Awards"
+      // The standard browsing sheet (FU1113-B).
+      size="standard"
       // Low-emphasis and pinned below the list (founder spec §2B, 2026-11-13): this sheet is
       // a statement, and the only thing to do with it is stop reading it.
       footer={<DismissFooter onPress={onClose} />}

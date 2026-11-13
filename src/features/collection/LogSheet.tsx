@@ -18,6 +18,7 @@ import {
 import { theme } from '@/ui/tokens';
 import {
   BucketChoices,
+  EDIT_ICON_NAME,
   Button,
   Poster,
   ScoreBadge,
@@ -1868,7 +1869,8 @@ function Body({
           {/* **One row.** See `noteValue` above for what happened to the Review /
               Private note pair. */}
           <SheetRow
-            icon="create-outline"
+            // The shared Edit glyph: the note is the reader's own words (FU1113-B).
+            icon={EDIT_ICON_NAME}
             label="Note"
             value={noteValue}
             expanded={expanded === 'notes'}
