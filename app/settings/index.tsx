@@ -83,7 +83,11 @@ export default function SettingsScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Back"
                     hitSlop={theme.space[2]}
-                    onPress={() => router.back()}
+                    // A cold deep link to Settings has nothing behind it: go to the
+                    // profile it is normally opened from instead of doing nothing.
+                    onPress={() =>
+                      router.canGoBack() ? router.back() : router.replace('/(tabs)/profile')
+                    }
                     style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
                   >
                     <Ionicons

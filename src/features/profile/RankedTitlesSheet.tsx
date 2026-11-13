@@ -331,7 +331,7 @@ export function RankedTitlesSheet({
   // A list made only of seasons offers no Runtime; an order chosen over films falls back to
   // the first axis rather than silently sorting by a field every row lacks (the Collection
   // tab's own rule, `CollectionView`).
-  const order = coerceSortState(sort, axes);
+  const order = useMemo(() => coerceSortState(sort, axes), [sort, axes]);
 
   const { rows, matching } = useMemo(() => {
     const kept = isFiltered(filters)
