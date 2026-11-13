@@ -24,6 +24,8 @@
  *   which is itself the point of V2 (following has no effect).
  * - **Titles.** `--titles` films plus a sixth as many series with two seasons each, in 14
  *   languages (English 55%), released 1930–2026 and skewed recent, TMDB-like popularity.
+ *   Films, seasons and whole shows are all rankable (`movies`, `tv_seasons`, `tv_shows`); an
+ *   account can rank a show whole and by season (reconcile, 2026-11-13).
  * - **Skew.** Each pick is log-uniform over popularity rank (Zipf, s ≈ 1), so the most
  *   popular film is ranked by a large share of active accounts — the case the rater cap in
  *   `_refresh_taste_neighbours` exists for. Buckets follow eight taste clusters, so Matches
@@ -42,7 +44,8 @@
  *    (the write-blocking window if built inside the migration) and `concurrently`.
  * 2. Per reader, single connection: `recommendation_engine()`, `catalogue_candidates`, a
  *    **cold** `collaborative_candidates` (its cache cleared, so the call includes
- *    `_refresh_taste_neighbours`) and the **warm** call after it. And the existing
+ *    `_refresh_taste_neighbours`) and the **warm** call after it, for the film wall and for
+ *    the TV wall (`'series'`, which reads whole-show rankings beside seasons). And the existing
  *    `people_taste_matches(10)` for comparison, since the gap analysis names it as a scale
  *    risk (it is not on the For You path).
  * 3. Concurrency: `--concurrency` sessions doing cold refreshes for different readers at
@@ -214,17 +217,21 @@ try {
        from media_items s cross join generate_series(1, 2) n
       where s.kind = 'series' and s.tmdb_id >= 60000000`,
   );
-  // One popularity order over films and seasons: interleave by each row's popularity.
+  // One popularity order over films, seasons and (since the reconcile, 2026-11-13) whole
+  // shows: interleave by each row's popularity. A show is ranked whole (`tv_shows`) as well as
+  // by season, and an account may do both for one show, which is the WS5 dedupe case.
   await q(
     `insert into bench_titles (r, id, kind, category, cluster)
      select row_number() over (order by m.popularity desc, m.id), m.id, m.kind,
-            case when m.kind = 'season' then 'tv_seasons'::ranking_category else 'movies' end,
+            case m.kind when 'season' then 'tv_seasons'::ranking_category
+                        when 'series' then 'tv_shows'::ranking_category
+                        else 'movies' end,
             case when m.original_language in ('ja','ko','zh') then 5
                  when m.original_language in ('hi','te','ta') then 6
                  when m.original_language = 'en' then abs(hashtext(m.id::text)) % 5
                  else 7 end
        from media_items m
-      where m.kind in ('movie', 'season') and (m.tmdb_id >= 50000000 or m.parent_id is not null)
+      where m.kind in ('movie', 'season', 'series') and (m.tmdb_id >= 50000000 or m.parent_id is not null)
         and m.title like 'Bench %'`,
   );
   const titleCount = Number((await q(`select count(*) from bench_titles`)).rows[0].count);
@@ -425,6 +432,13 @@ try {
     );
     const cold = await timed(reader, `select count(*)::integer as n from collaborative_candidates('movie', 40)`);
     const warm = await timed(reader, `select count(*)::integer as n from collaborative_candidates('movie', 40)`);
+    // The TV wall's read (reconcile, 2026-11-13: it now reads whole-show rankings too), cold and
+    // warm. Cold clears the cache again so the refresh is in the call, as for films.
+    await reader.query(`reset role`);
+    await clearCache(r.id);
+    await asReader(reader, r.id);
+    const tvCold = await timed(reader, `select count(*)::integer as n from collaborative_candidates('series', 40)`);
+    const tvWarm = await timed(reader, `select count(*)::integer as n from collaborative_candidates('series', 40)`);
     let people;
     try {
       people = await timed(reader, `select count(*)::integer as n from people_taste_matches(10)`);
@@ -446,11 +460,14 @@ try {
       collaborative_cold_ms: round(cold.ms),
       collaborative_warm_ms: round(warm.ms),
       collaborative_rows: warm.rows[0].n,
+      collaborative_tv_cold_ms: round(tvCold.ms),
+      collaborative_tv_warm_ms: round(tvWarm.ms),
+      collaborative_tv_rows: tvWarm.rows[0].n,
       neighbours: neighbours ?? 0,
       people_taste_matches_ms: round(people.ms),
       people_taste_matches_error: people.error ?? undefined,
     });
-    log(`  ${r.tier.padEnd(7)} ranked=${String(r.ranked).padStart(4)} cold=${round(cold.ms)}ms warm=${round(warm.ms)}ms catalogue=${round(catalogue.ms)}ms people=${round(people.ms)}ms neighbours=${neighbours}`);
+    log(`  ${r.tier.padEnd(7)} ranked=${String(r.ranked).padStart(4)} cold=${round(cold.ms)}ms warm=${round(warm.ms)}ms tv=${round(tvCold.ms)}/${round(tvWarm.ms)}ms catalogue=${round(catalogue.ms)}ms people=${round(people.ms)}ms neighbours=${neighbours}`);
   }
   results.per_reader = per;
   const byTier = {};
@@ -472,6 +489,9 @@ try {
     catalogue_ms: summary(per.map((p) => p.catalogue_ms)),
     collaborative_cold_ms: summary(per.map((p) => p.collaborative_cold_ms)),
     collaborative_warm_ms: summary(per.map((p) => p.collaborative_warm_ms)),
+    collaborative_tv_cold_ms: summary(per.map((p) => p.collaborative_tv_cold_ms)),
+    collaborative_tv_warm_ms: summary(per.map((p) => p.collaborative_tv_warm_ms)),
+    collaborative_tv_rows: summary(per.map((p) => p.collaborative_tv_rows)),
     people_taste_matches_ms: summary(per.map((p) => p.people_taste_matches_ms).filter((v) => v != null)),
   };
 
@@ -627,6 +647,9 @@ const md = [
   row('catalogue_candidates', results.all_readers.catalogue_ms),
   row('collaborative_candidates, cold (includes the refresh)', results.all_readers.collaborative_cold_ms),
   row('collaborative_candidates, warm', results.all_readers.collaborative_warm_ms),
+  row("collaborative_candidates('series'), cold", results.all_readers.collaborative_tv_cold_ms),
+  row("collaborative_candidates('series'), warm", results.all_readers.collaborative_tv_warm_ms),
+  row("collaborative_candidates('series') rows (count, not ms)", results.all_readers.collaborative_tv_rows),
   row('people_taste_matches(10) (existing, not For You)', results.all_readers.people_taste_matches_ms),
   '',
   '| Tier | readers | rankings p50 | cold p50 / p95 | warm p50 / p95 | catalogue p50 / p95 | people_taste_matches p50 / p95 | neighbours p50 |',
