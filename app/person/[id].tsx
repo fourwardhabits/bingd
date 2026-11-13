@@ -8,11 +8,13 @@ import {
   Pressable,
   StyleSheet,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
+import { today } from '@/features/collection/dates';
 import { useRankedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
@@ -25,12 +27,13 @@ import {
   type CoverageGroup,
   type FilmographySort,
 } from '@/features/person/filmography';
+import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
 import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
-import { HERO_COLLAPSED_BAND } from '@/features/title/use-hero-reveal';
+import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { track } from '@/lib/analytics';
-import { posterUri, profileUri } from '@/lib/images';
+import { backdropUri, posterUri, profileUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import {
@@ -153,7 +156,8 @@ export default function PersonScreen() {
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const top = usePersonTopBar();
+  const hero = usePersonHero(id ?? null, detail?.credits ?? null);
+  const top = usePersonTopBar(hero !== null);
   // Read once, so the bar closes over a value rather than over a query result that could
   // be refetched to null between renders.
   const name = detail?.name ?? null;
@@ -336,7 +340,10 @@ export default function PersonScreen() {
         onScroll={top.onScroll}
         scrollEventThrottle={16}
       >
-        <TitleHero collapsedHeight={top.collapsedHero} topInset={top.topInset} />
+        {/* One of their own films behind them, chosen from credits already on the page
+            (`pickPersonBackdrop`), or the branded band when none has a backdrop — and
+            while the credits load, so the page never draws a broken image. */}
+        <TitleHero uri={hero} collapsedHeight={top.collapsedHero} topInset={top.topInset} />
 
         {loading ? (
           // The loading language, under the page's own top rather than a blank screen
@@ -600,25 +607,60 @@ const PAGE = 12;
 const TITLE_FADE = 24;
 
 /**
+ * **The hero's artwork: a backdrop from their latest released work** (founder QA P1-9).
+ *
+ * `pickPersonBackdrop` holds the rule and its tests. Nothing is fetched for it: the
+ * backdrop is a column of the `media_items` rows `usePerson` already reads.
+ *
+ * **Chosen once per person, then kept.** The first answer for this person is pinned for
+ * the life of the page, so a background refresh of a stale filmography — or a re-render
+ * with a rebuilt credits array — never swaps the picture under the reader. Until there is
+ * an answer (credits loading, or none with a backdrop) the hero is the branded band, and
+ * `TitleHero`'s image fades in over the band's own Parchment when one arrives.
+ */
+function usePersonHero(personId: string | null, credits: PersonCredit[] | null) {
+  const picked = useMemo(
+    () => (credits ? (pickPersonBackdrop(credits, today())?.backdropPath ?? null) : null),
+    [credits],
+  );
+  const [pinned, setPinned] = useState<{ personId: string | null; path: string } | null>(null);
+  const held = pinned?.personId === personId ? pinned.path : null;
+  // Set during render, React's pattern for state derived from a change: one extra render,
+  // no effect, and no frame drawn with the old person's picture.
+  if (held === null && picked !== null) setPinned({ personId, path: picked });
+  return backdropUri(held ?? picked, 'hero');
+}
+
+/**
  * The person page's top bar arithmetic.
  *
  * Two values, because the page has two edges to cross. **The ground** arrives over the
- * collapsed band, exactly as `useHeroReveal` does it for a title or a list without
- * artwork, so the bar is Paper by the time the band has gone. **The name** arrives only
- * once the large name has passed under the bar — measured off the identity block by
- * `useDetailHeader`, the rule every detail page follows — because here the name sits under
- * a portrait that hangs below the band, and fading it in with the ground would put it in
- * the bar while the large one is still on screen.
+ * last stretch of the hero, exactly as `useHeroReveal` does it for a title or a list —
+ * over the collapsed band when there is no artwork (from the top, as before), and over the
+ * last `REVEAL_WINDOW` of the 16:9 backdrop when there is — so the bar is Paper by the time
+ * the hero has gone, and never lays Paper over a picture that is still on screen.
+ *
+ * **The name** arrives only once the large name has passed under the bar — measured off
+ * the identity block by `useDetailHeader`, the rule every detail page follows — because
+ * here the name sits under a portrait that hangs below the hero, and fading it in with the
+ * ground would put it in the bar while the large one is still on screen.
  */
-function usePersonTopBar() {
+function usePersonTopBar(hasArtwork: boolean) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const header = useDetailHeader();
   const [scrollY] = useState(() => new Animated.Value(0));
   const [identityBottom, setIdentityBottom] = useState<number | null>(null);
 
   const barHeight = insets.top + NAV_BAR_HEIGHT;
+  // `useHeroReveal`'s arithmetic. With no artwork it is [0, HERO_COLLAPSED_BAND] exactly,
+  // the range this page has always used.
+  const groundEnd = hasArtwork
+    ? Math.max(width / theme.layout.aspect.backdrop - barHeight, 2)
+    : HERO_COLLAPSED_BAND;
+  const groundStart = Math.max(groundEnd - REVEAL_WINDOW, 0);
   const ground = scrollY.interpolate({
-    inputRange: [0, HERO_COLLAPSED_BAND],
+    inputRange: [groundStart, groundEnd],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
