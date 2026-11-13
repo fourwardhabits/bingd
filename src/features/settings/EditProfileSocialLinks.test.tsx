@@ -354,15 +354,29 @@ describe('Save in the header', () => {
     expect(view.queryByText('Save changes')).toBeNull();
   });
 
-  it('is a tertiary text action, like Settings’ Close', async () => {
+  /**
+   * **The standard Save since 2026-11-13** (founder spec §2A): compact filled Maroon with a
+   * Parchment label — the slimmer Rank button's treatment — where a grey tertiary word was.
+   * Settings' header Close, which this used to match, is gone.
+   */
+  it('is the shared filled Maroon SaveButton', async () => {
     const view = await renderWithProviders(<EditProfileScreen />);
     const { StyleSheet } = jest.requireActual<typeof import('react-native')>('react-native');
-    const style = StyleSheet.flatten(
-      typeof save(view).props.style === 'function'
-        ? save(view).props.style({ pressed: false })
-        : save(view).props.style,
-    );
-    expect(style.backgroundColor).toBe('transparent');
+    const fill = StyleSheet.flatten(view.getByTestId('save-button-fill').props.style);
+    expect(fill.backgroundColor).toBe('#773744');
+    expect(StyleSheet.flatten(save(view).props.style).minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it('saves once for a double tap', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Bio'), 'Mostly thrillers.');
+    await fireEvent.press(save(view));
+    await fireEvent.press(save(view));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
   it('is disabled until something has changed, and says why', async () => {
