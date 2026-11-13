@@ -3688,6 +3688,32 @@ describe('the show decision a season ranking left open', () => {
     await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
   });
 
+  it('does not finish a later sheet when a Keep Show reply lands after closing', async () => {
+    // Independent review (WS-TVC): the reply of a Keep sent before the sheet closed must
+    // not run `onDone` for whatever the reader has open by then.
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) =>
+      name === 'keep_show'
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await waitFor(() => expect(sheet.getByTestId('log-keep-show')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+    await waitFor(() => expect(callsTo('keep_show')).toHaveLength(1));
+    await sheet.show(null);
+    await act(async () => {
+      answer({ data: { status: 'kept', created: true, kept_at: 'now' }, error: null });
+    });
+    await settle();
+
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it('records nothing when the sheet is dismissed', async () => {
     const onClose = jest.fn();
     const onUpdateShow = jest.fn();

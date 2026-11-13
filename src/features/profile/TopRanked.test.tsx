@@ -394,4 +394,29 @@ describe('a whole show on the wall', () => {
     expect(wall(view)).toEqual(['8.5 Barry']);
     expect(view.getByLabelText(/^Barry, .*average of 2 ranked seasons/)).toBeTruthy();
   });
+
+  it('keeps explicit before an equal average on the mixed wall, whatever the ids', async () => {
+    // Independent review (WS-TVC): the All wall broke an exact series tie by id. Both
+    // series score 10.0 (a band of one in each pool); the explicit show comes first even
+    // though the average's id sorts earlier.
+    const season = ranked('a-season', 'Season 1', 1, 'tv_seasons', 'loved');
+    mockRows = [
+      ranked('m-a', 'Movie A', 1, 'movies', 'fine'),
+      {
+        ...season,
+        media_items: {
+          ...season.media_items,
+          parent_id: 'a-series',
+          parent: { title: 'Average Show', genres: ['Drama'], original_language: 'en' },
+        },
+      },
+      show('z-show', 'Explicit Show', 1),
+    ];
+    const view = await settled(await open());
+    const tiles = wall(view);
+    expect(tiles.indexOf('10.0 Explicit Show')).toBeGreaterThanOrEqual(0);
+    expect(tiles.indexOf('10.0 Explicit Show')).toBeLessThan(
+      tiles.indexOf('10.0 Average Show'),
+    );
+  });
 });
