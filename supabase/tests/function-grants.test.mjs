@@ -1017,6 +1017,46 @@ test('write RPCs are refused on privilege, not merely on the suspension guard', 
   }
 });
 
+/**
+ * 20261119000100. Community-score contributor eligibility added three helpers, and all
+ * three are internal: absent from ALLOWED above, so the sweep already refuses them, and
+ * asserted by name here so a later grant has to delete a line that says why not.
+ *
+ *   _contributor_min_rankings()             the threshold; nothing a client needs.
+ *   _effective_show_scores(uuid, uuid[])    takes user ids and returns each one's score
+ *   _effective_show_score(uuid, uuid)       for a show with no visibility, status or
+ *                                           block check at all: a client grant would read
+ *                                           private and blocking accounts' scores.
+ *
+ * They run inside `community_score`, a definer function, which executes as the owner.
+ */
+test('the community eligibility helpers are internal', async () => {
+  const t = await createTestDb();
+  try {
+    const alice = await t.createUser({ username: 'alice' });
+    for (const role of ['anon', 'authenticated']) {
+      await t.asRole(role, role === 'anon' ? null : alice, async () => {
+        for (const call of [
+          `select _contributor_min_rankings()`,
+          `select * from _effective_show_scores('${alice}', array['${alice}']::uuid[])`,
+          `select * from _effective_show_score('${alice}', '${alice}')`,
+        ]) {
+          const err = await t.errorFrom(call);
+          assert.match(err?.message ?? '', /permission denied/i, `${role}: ${call}`);
+        }
+      });
+    }
+    // And community_score, which calls them, is still the signed-in client's to call.
+    const film = await t.createMovie('Grant Probe', 951);
+    await t.asUser(alice, async () => {
+      const { rows } = await t.sql(`select * from community_score($1)`, [film]);
+      assert.equal(rows[0].rating_count, 0);
+    });
+  } finally {
+    await t.close();
+  }
+});
+
 test('assert_can_write is internal, and still runs inside the definer functions', async () => {
   const t = await createTestDb();
   try {

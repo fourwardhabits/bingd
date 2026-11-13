@@ -294,3 +294,25 @@ describe('what is compared', () => {
     assert.ok(after < 10, `expected the first film to fall below 10, got ${after}`);
   });
 });
+
+describe('community-score eligibility is not a Following rule (20261119000100, §4I)', () => {
+  it('counts a followee with two rankings, whom community_score leaves out', async () => {
+    // The ten-rankings contributor threshold belongs to bingd community scores alone.
+    // Following is the people you chose, at the founder's minimum of one, unchanged.
+    const id = await movie('fs_two_rankings');
+    const other = await movie('fs_two_rankings_other');
+    const bob = await rater(id, 'loved');
+    await t.actAs(bob);
+    await t.rankToCompletion(other, 'fine', async (pivot) => pivot);
+    await t.actAs(alice);
+    await follow(alice, bob);
+
+    const following = await scoreOf(id);
+    assert.equal(following.rating_count, 1);
+    assert.equal(Number(following.score), 10);
+
+    const community = (await t.sql(`select * from community_score($1)`, [id])).rows[0];
+    assert.equal(community.rating_count, 0, 'two rankings is not a community contributor');
+    assert.equal(community.score, null);
+  });
+});
