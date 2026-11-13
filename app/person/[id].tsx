@@ -343,8 +343,8 @@ export default function PersonScreen() {
   /**
    * Whether the reader's rankings have been read. Until they have, the page cannot tell a
    * ranked title from an unranked one, so it offers no `+` at all rather than a `+` that
-   * might resume or restart a ranking that already exists (independent review) — the
-   * bookmark waits for the watchlist the same way.
+   * might resume or restart a ranking that already exists (independent review). Only the
+   * `+` waits on this; the bookmark waits on the watchlist alone, as before.
    */
   const rankingsKnown = rankedMovies.isSuccess && rankedShows.isSuccess && logged.isSuccess;
   const openRank = (credit: PersonCredit) => {
@@ -609,11 +609,14 @@ export default function PersonScreen() {
                          * until the watchlist has been read rather than guessing.
                          */
                         trailing={
-                          !rankingsKnown || ranked.has(credit.mediaItemId) ? undefined : (
+                          ranked.has(credit.mediaItemId) ? undefined : (
                             <TitleRowActions
                               name={credit.title}
                               kind={credit.kind}
                               score={null}
+                              // No `+` until the reader's rankings are read; the bookmark
+                              // does not wait on them (independent review).
+                              rankable={rankingsKnown}
                               saved={watchlistToggle.isSaved(credit.mediaItemId)}
                               busy={watchlistToggle.busy === credit.mediaItemId}
                               onRank={() => openRank(credit)}

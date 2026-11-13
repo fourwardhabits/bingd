@@ -823,7 +823,7 @@ describe('the refined person page', () => {
   });
 
   /** Independent review, 2026-11-13: no `+` until the reader's rankings are known. */
-  it('offers no + Rank on any row until the reader’s rankings have been read', async () => {
+  it('offers no + Rank until the reader’s rankings have been read, and keeps the bookmark', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const realRankings = tableRows.rankings;
@@ -837,6 +837,8 @@ describe('the refined person page', () => {
     const view = await renderWithProviders(<PersonScreen />);
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     expect(view.queryByLabelText('Log Inception')).toBeNull();
+    // The bookmark does not wait on the rankings: it needs only the watchlist.
+    expect(await view.findByLabelText('Add Inception to Watchlist')).toBeTruthy();
     Object.defineProperty(tableRows, 'rankings', {
       configurable: true,
       writable: true,
