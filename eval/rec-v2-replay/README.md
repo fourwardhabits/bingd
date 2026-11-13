@@ -42,7 +42,7 @@ can run. Everything below has been run end to end on a synthetic export generate
 
    It prints aggregate tables only. Add `REC_V2_REPLAY_OUT=~/private/` to also write `replay.md`.
 
-3. Share the printed tables. **Delete the export.** Never commit it; `.gitignore` catches the
+3. Share the printed tables. **Delete the export.** Never commit it; `eval/rec-v2-replay/.gitignore` catches the
    obvious names in case one is saved here by mistake, and `run.mjs` refuses to read it there.
 
 The synthetic proof: `node eval/rec-v2-replay/run.mjs --synthetic`.

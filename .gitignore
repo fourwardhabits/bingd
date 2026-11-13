@@ -78,12 +78,3 @@ expo-env.d.ts
 # committed file imports whether or not git has heard of it (review 28b), so local-only
 # scratch has to be ignored rather than merely uncommitted.
 .claude/
-
-# Recommendation V2 replay (eval/rec-v2-replay). An export is pseudonymous, not anonymous, and
-# run.mjs refuses one inside the repository anyway; these catch a copy saved here by mistake.
-eval/rec-v2-replay/out/
-eval/rec-v2-replay/**/*.export.json
-eval/rec-v2-replay/**/replay-export*.json
-eval/rec-v2-replay/**/replay*.md
-!eval/rec-v2-replay/README.md
-rec-v2-replay-export*.json
