@@ -55,6 +55,9 @@ import {
 import { logTitle, setWatchDate } from '@/features/watch-history/writes';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { watchCountLabel } from '@/features/watch-history/watch-history';
+import { formatScore } from './score';
+import { keepShow } from '@/features/ranking/session';
+import type { ShowDecision, UpdateShowLink } from '@/features/ranking/RankingSheet';
 
 export type LoggableTitle = {
   id: string;
@@ -73,6 +76,16 @@ export type LoggableTitle = {
 };
 
 export type LogSheetProps = {
+  /**
+   * **The parent-show decision a season's ranking left open** (WS-TVC, founder spec t168u
+   * §3B). Present only on the post-rank sheet a season's *Add details* opened while Update
+   * Show was on offer: the completion area is then `Update Show 9.5` and `Keep Show 9.5`
+   * instead of Done, and both wait for the details to land first. Dismissing the sheet
+   * records nothing.
+   */
+  showDecision?: ShowDecision | null;
+  /** Update Show, after the details barrier: the show's ordinary correction, linked. */
+  onUpdateShow?: (link: UpdateShowLink) => void;
   title: LoggableTitle | null;
   onClose: () => void;
   /**
@@ -222,6 +235,8 @@ export function LogSheet({
   openSection,
   onDone,
   inWatchHistory,
+  showDecision,
+  onUpdateShow,
 }: LogSheetProps) {
   if (!title) return null;
 
@@ -243,6 +258,8 @@ export function LogSheet({
       openSection={openSection}
       onDone={onDone}
       inWatchHistory={inWatchHistory}
+      showDecision={showDecision}
+      onUpdateShow={onUpdateShow}
     />
   );
 }
@@ -310,6 +327,8 @@ function Body({
   openSection = null,
   onDone,
   inWatchHistory = false,
+  showDecision = null,
+  onUpdateShow,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -1527,6 +1546,60 @@ function Body({
   };
 
   /**
+   * **The details land before the show is decided** (WS-TVC §3B), by the barrier `choose`
+   * uses: the note's debounce handed over, the date and companion lanes waited out, and
+   * the first decision held once if a detail failed meanwhile, with its message showing.
+   * Resolves whether to go on.
+   */
+  const detailsSettled = async () => {
+    const failuresBefore = detailFailures.current;
+    flushNote();
+    await Promise.all([dateQueue.current, companionQueue.current]);
+    if (detailFailures.current !== failuresBefore && !heldForFailure.current) {
+      heldForFailure.current = true;
+      return false;
+    }
+    return true;
+  };
+
+  /** One decision at a time, synchronously: a double tap is one Update or one Keep. */
+  const deciding = useRef(false);
+  const [keepingShow, setKeepingShow] = useState(false);
+  const [keepShowError, setKeepShowError] = useState<string | null>(null);
+
+  const updateShowFromDetails = async () => {
+    if (!showDecision || !onUpdateShow || deciding.current) return;
+    deciding.current = true;
+    try {
+      if (!(await detailsSettled())) return;
+      onUpdateShow({
+        showId: showDecision.showId,
+        bucket: showDecision.bucket,
+        linkedPlacementId: showDecision.linkedPlacementId,
+      });
+    } finally {
+      deciding.current = false;
+    }
+  };
+
+  const keepShowFromDetails = async () => {
+    if (!showDecision || deciding.current) return;
+    deciding.current = true;
+    setKeepShowError(null);
+    try {
+      if (!(await detailsSettled())) return;
+      setKeepingShow(true);
+      const result = await keepShow(showDecision.linkedPlacementId);
+      setKeepingShow(false);
+      // No optimistic "kept": the sheet leaves only once the server has recorded it.
+      if (result.outcome === 'kept') finish();
+      else setKeepShowError(result.message);
+    } finally {
+      deciding.current = false;
+    }
+  };
+
+  /**
    * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
    *
    * There was a "Saving…" line here, and then a reserved blank slot holding its
@@ -1841,7 +1914,59 @@ function Body({
          * backdrop, and a title that has not been ranked yet has no moment this would
          * be the end of.
          */}
-        {postRank ? (
+        {postRank && showDecision ? (
+          /**
+           * **Update Show or Keep Show, in place of Done** (WS-TVC, founder spec t168u §3B):
+           * the filled primary across the form, the quiet grey Keep centred under it. The
+           * number is the reader's whole-show score, or none while it is unknown. The
+           * header's Close and Back still leave, recording no decision.
+           */
+          <View style={styles.done} testID="log-show-decision">
+            <Button
+              label={
+                showDecision.showScore != null
+                  ? `Update Show ${formatScore(showDecision.showScore)}`
+                  : 'Update Show'
+              }
+              onPress={() => void updateShowFromDetails()}
+              disabled={keepingShow}
+              disabledReason={keepingShow ? 'Keeping your show score' : undefined}
+              accessibilityHint="Saves your details, then re-ranks the show"
+              testID="log-update-show"
+            />
+            <View style={styles.keepShow}>
+              <Button
+                label={
+                  keepingShow
+                    ? 'Keeping…'
+                    : showDecision.showScore != null
+                      ? `Keep Show ${formatScore(showDecision.showScore)}`
+                      : 'Keep Show'
+                }
+                kind="tertiary"
+                tone="secondary"
+                size="sm"
+                hitSlop={KEEP_SLOP}
+                onPress={() => void keepShowFromDetails()}
+                disabled={keepingShow}
+                disabledReason={keepingShow ? 'Keeping your show score' : undefined}
+                accessibilityHint="Saves your details and keeps your show's ranking as it is"
+                testID="log-keep-show"
+              />
+              {keepShowError ? (
+                <Text
+                  variant="footnote"
+                  tone="action"
+                  style={styles.status}
+                  accessibilityRole="alert"
+                  testID="log-keep-error"
+                >
+                  {keepShowError}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : postRank ? (
           <View style={styles.done}>
             <Button label="Done" onPress={finish} />
           </View>
@@ -1886,6 +2011,12 @@ function Body({
 /** Re-exported: the field moved to `NoteComposer`, its importers did not. */
 export { NoteInput };
 
+/** `Button sm` is drawn at the compact action height; this returns it to 44pt. */
+const KEEP_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[4], gap: theme.space[4] },
   /**
@@ -1929,6 +2060,8 @@ const styles = StyleSheet.create({
   },
   rankedText: { flex: 1, gap: 2 },
   done: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  // Keep Show: quiet, centred across the whole form, under Update Show (WS-TVC).
+  keepShow: { alignItems: 'center', paddingTop: theme.space[2], gap: theme.space[1] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
   unavailable: {
     paddingHorizontal: theme.layout.gutter,
