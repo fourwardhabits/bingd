@@ -1,4 +1,4 @@
-import { pickPersonBackdrop } from './backdrop';
+import { HERO_RELEVANCE_WINDOW, pickPersonBackdrop } from './backdrop';
 import type { PersonCredit } from './use-person';
 
 /**
@@ -192,5 +192,116 @@ describe('pickPersonBackdrop', () => {
         ]),
       ).toBeNull();
     });
+  });
+});
+
+/**
+ * **Highest-rated first** (founder spec §6, 2026-11-13). `score` is TMDB's audience rating,
+ * weighted by vote count and null below the vote floor, so a null is "not reliably rated".
+ */
+describe('pickPersonBackdrop — highest-rated eligible work first', () => {
+  it('takes the highest-rated acting credit over the newest one', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'newest', releaseDate: '2025-06-01', score: 6.4 }),
+        credit({ mediaItemId: 'acclaimed', releaseDate: '2008-07-18', score: 8.5 }),
+        credit({ mediaItemId: 'middling', releaseDate: '2016-02-12', score: 7.1 }),
+      ]),
+    ).toBe('acclaimed');
+  });
+
+  it('never lets a title with too few votes to rate win on a rating', () => {
+    // Below the vote floor the adapter writes no score at all: it cannot compete.
+    expect(
+      picked([
+        credit({ mediaItemId: 'unreviewed', releaseDate: '2025-01-01', score: null }),
+        credit({ mediaItemId: 'rated', releaseDate: '2012-01-01', score: 6.9 }),
+      ]),
+    ).toBe('rated');
+  });
+
+  it('falls back to the newest released acting credit when none is reliably rated', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'old', releaseDate: '2001-01-01', score: null }),
+        credit({ mediaItemId: 'new', releaseDate: '2024-01-01', score: null }),
+      ]),
+    ).toBe('new');
+  });
+
+  it('keeps the rating contest to their best-known work', () => {
+    // Eleven popular credits, then a revered title they have a cameo in, far down the
+    // popularity order: the cameo does not stand for them.
+    const known = Array.from({ length: HERO_RELEVANCE_WINDOW }, (_, n) =>
+      credit({ mediaItemId: `known-${n}`, score: 6 + n / 100, order: n }),
+    );
+    const cameo = credit({ mediaItemId: 'cameo', score: 9.3, order: 40 });
+    expect(picked([...known, cameo])).toBe(`known-${HERO_RELEVANCE_WINDOW - 1}`);
+  });
+
+  it('never picks a self-appearance, however well rated', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'talk-show', self: true, score: 9.6, order: 0 }),
+        credit({ mediaItemId: 'film', score: 7.0, order: 1 }),
+      ]),
+    ).toBe('film');
+  });
+
+  it('never picks an unreleased or undated credit, however well rated', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'upcoming', releaseDate: '2027-05-01', score: 9.9 }),
+        credit({ mediaItemId: 'undated', releaseDate: null, score: 9.8 }),
+        credit({ mediaItemId: 'out', releaseDate: '2019-01-01', score: 6.1 }),
+      ]),
+    ).toBe('out');
+  });
+
+  it('needs a backdrop: the best rating without artwork gives way', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'no-art', backdropPath: null, score: 9.1, order: 0 }),
+        credit({ mediaItemId: 'art', score: 7.2, order: 1 }),
+      ]),
+    ).toBe('art');
+  });
+
+  it('breaks an equal rating by popularity, then by id', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'b-less', score: 8.0, order: 5 }),
+        credit({ mediaItemId: 'a-more', score: 8.0, order: 2 }),
+      ]),
+    ).toBe('a-more');
+    expect(
+      picked([
+        credit({ mediaItemId: 'zz', score: 8.0, order: 3 }),
+        credit({ mediaItemId: 'aa', score: 8.0, order: 3 }),
+      ]),
+    ).toBe('aa');
+  });
+
+  it('picks the same credit whatever order the credits arrive in', () => {
+    const credits = [
+      credit({ mediaItemId: 'x', score: 7.5, order: 4, releaseDate: '2010-01-01' }),
+      credit({ mediaItemId: 'y', score: 8.2, order: 1, releaseDate: '2015-01-01' }),
+      credit({ mediaItemId: 'z', score: 8.2, order: 6, releaseDate: '2023-01-01' }),
+      credit({ mediaItemId: 'w', score: null, order: 0, releaseDate: '2025-01-01' }),
+    ];
+    const once = picked(credits);
+    expect(once).toBe('y');
+    expect(picked([...credits].reverse())).toBe(once);
+    expect(picked([credits[2]!, credits[0]!, credits[3]!, credits[1]!])).toBe(once);
+  });
+
+  it('still falls to their crew work, and then to the band', () => {
+    expect(
+      picked([
+        credit({ mediaItemId: 'directed', as: 'crew', crewRole: 'Director', score: 7.7 }),
+        credit({ mediaItemId: 'appearance', self: true, score: 9 }),
+      ]),
+    ).toBe('directed');
+    expect(picked([credit({ mediaItemId: 'appearance', self: true, score: 9 })])).toBeNull();
   });
 });

@@ -106,6 +106,25 @@ jest.mock('@/lib/tmdb-adapter', () => ({
  * dropped it, and a screen given a stub for the rule it is supposed to obey proves
  * nothing about whether it obeys the rule.
  */
+/**
+ * The log and ranking sheets are Search's own, tested where they live; here what matters
+ * is that a filmography row opens them, with which title, and how often.
+ */
+const mockLogSheet: { props: Record<string, unknown> | null; opened: unknown[] } = {
+  props: null,
+  opened: [],
+};
+jest.mock('@/features/collection/LogSheet', () => ({
+  LogSheet: (props: Record<string, unknown>) => {
+    if (props.title && props.title !== mockLogSheet.props?.title) mockLogSheet.opened.push(props.title);
+    mockLogSheet.props = props;
+    return null;
+  },
+}));
+jest.mock('@/features/ranking/RankingSheet', () => ({
+  RankingSheet: () => null,
+}));
+
 jest.mock('@/features/collection/writes', () => ({
   ...jest.requireActual('@/features/collection/writes'),
   newOperationId: () => 'op-1',
@@ -167,6 +186,8 @@ beforeEach(() => {
   tableRows.watchlist = [];
   tableRows.rankings = [];
   tableRows.user_media = [];
+  mockLogSheet.props = null;
+  mockLogSheet.opened = [];
 });
 
 const open = async () => {
@@ -200,7 +221,7 @@ describe('a person as a discovery surface', () => {
   it('says who they are before it says what they did', async () => {
     const view = await open();
 
-    expect(view.getByText('Acting · born 1974 · Los Angeles, California, USA')).toBeTruthy();
+    expect(view.getByText('Born 1974 · USA')).toBeTruthy();
     expect(view.getByText('An actor and producer.')).toBeTruthy();
   });
 
@@ -486,7 +507,7 @@ describe('the reader’s own state on somebody else’s work', () => {
   it('saves a title to the watchlist from the row', async () => {
     const view = await open();
 
-    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+    await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
     expect(mockSetWatchlist).toHaveBeenCalledWith(
       expect.objectContaining({ mediaItemId: 'film-1', present: true }),
@@ -512,7 +533,7 @@ describe('the reader’s own state on somebody else’s work', () => {
     const view = await open();
     const before = mockReads.watchlist ?? 0;
 
-    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+    await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
     await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
   });
@@ -527,7 +548,7 @@ describe('the reader’s own state on somebody else’s work', () => {
     const view = await open();
     const before = mockReads.watchlist ?? 0;
 
-    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+    await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
     await waitFor(() => expect(mockSetWatchlist).toHaveBeenCalled());
     expect(mockReads.watchlist ?? 0).toBe(before);
@@ -538,7 +559,7 @@ describe('the reader’s own state on somebody else’s work', () => {
     const view = await open();
 
     await waitFor(() =>
-      expect(view.getByLabelText('Remove Inception from your watchlist')).toBeTruthy(),
+      expect(view.getByLabelText('Remove Inception from Watchlist')).toBeTruthy(),
     );
   });
 });
@@ -684,7 +705,7 @@ describe('the bookmark on a credit row', () => {
   it('draws an unsaved bookmark quietly', async () => {
     const view = await open();
 
-    const add = await view.findByLabelText('Add Inception to your watchlist');
+    const add = await view.findByLabelText('Add Inception to Watchlist');
 
     expect(glyphColor(add)).toBe(theme.text.secondary);
   });
@@ -693,8 +714,112 @@ describe('the bookmark on a credit row', () => {
     tableRows.watchlist = [{ user_id: 'user-1', media_item_id: 'film-1', media_items: items[0] }];
     const view = await open();
 
-    const remove = await view.findByLabelText('Remove Inception from your watchlist');
+    const remove = await view.findByLabelText('Remove Inception from Watchlist');
 
     expect(glyphColor(remove)).toBe(theme.semantic.action);
   });
 });
+
+/**
+ * **Founder spec §6 (2026-11-13)**: name → biography → filmography, with at most
+ * `Born YYYY · Country` between the first two; and on every eligible row Search's own
+ * compact + Rank and bookmark, respecting what the reader has already ranked or saved.
+ */
+describe('the refined person page', () => {
+  /** Every testID under the screen, in tree order. */
+  const ids = (view: Awaited<ReturnType<typeof open>>) => {
+    const out: string[] = [];
+    const walk = (node: { props?: { testID?: string }; children?: unknown[] } | string | null) => {
+      if (!node || typeof node === 'string') return;
+      if (node.props?.testID) out.push(node.props.testID);
+      for (const child of node.children ?? []) walk(child as never);
+    };
+    walk(view.toJSON() as never);
+    return out;
+  };
+
+  it('reads name, then the one line of context, then the biography, then the filmography', async () => {
+    const view = await open();
+    const order = ids(view);
+    const at = (id: string) => order.indexOf(id);
+    expect(at('person-name')).toBeGreaterThan(-1);
+    expect(at('person-name')).toBeLessThan(at('person-meta'));
+    expect(at('person-meta')).toBeLessThan(at('biography'));
+    expect(at('biography')).toBeLessThan(at('filmography-header'));
+    expect(view.getByTestId('person-meta')).toHaveTextContent('Born 1974 · USA');
+    expect(view.queryByText(/Acting ·/)).toBeNull();
+    expect(view.queryByText(/Los Angeles/)).toBeNull();
+  });
+
+  it('heads the filmography at the large section size, Cast | Crew as the page’s navigation', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [
+            ...cached.payload.credits,
+            { id: 'film-2', kind: 'movie', role: 'Producer', as: 'crew', crew_role: 'Producer' },
+          ],
+        },
+      },
+    ];
+    const view = await open();
+    const heading = view.getByLabelText('Filmography');
+    expect(StyleSheet.flatten(heading.props.style).fontSize).toBe(
+      theme.typography.sectionHeaderLarge.fontSize,
+    );
+    expect(view.getByRole('tab', { name: 'Cast' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Crew' })).toBeTruthy();
+    // The filters and the order on one line.
+    const controls = view.getByTestId('filmography-controls');
+    expect(StyleSheet.flatten(controls.props.style).flexDirection).toBe('row');
+  });
+
+  it('offers + Rank on an unranked row and opens Search’s log sheet on that title', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+    await waitFor(() =>
+      expect(mockLogSheet.props?.title).toEqual(
+        expect.objectContaining({ id: 'film-1', title: 'Inception', kind: 'movie' }),
+      ),
+    );
+    // A second tap while the sheet is up opens nothing new.
+    await fireEvent.press(view.getByLabelText('Log Titanic'));
+    expect(mockLogSheet.opened).toHaveLength(1);
+  });
+
+  it('draws neither + Rank nor a score badge on a title the reader has ranked', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+        media_items: items[0],
+      },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    // The others keep theirs.
+    expect(view.getByLabelText('Log Titanic')).toBeTruthy();
+  });
+
+  it('writes the watchlist once for a double tap on the bookmark', async () => {
+    let land!: (value: { outcome: 'applied' }) => void;
+    mockSetWatchlist.mockImplementationOnce(
+      () => new Promise((resolve) => (land = resolve as never)),
+    );
+    const view = await open();
+    const bookmark = await view.findByLabelText('Add Inception to Watchlist');
+    await fireEvent.press(bookmark);
+    await fireEvent.press(bookmark);
+    expect(mockSetWatchlist).toHaveBeenCalledTimes(1);
+    land({ outcome: 'applied' });
+    await waitFor(() => expect(mockSetWatchlist).toHaveBeenCalledTimes(1));
+  });
+});
+
