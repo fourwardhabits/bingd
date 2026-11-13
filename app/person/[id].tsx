@@ -318,8 +318,8 @@ export default function PersonScreen() {
    * "How was it?", the band hands over to the comparisons, a finished placement comes back
    * to the sheet with its score. An unfinished placement resumes its own session instead
    * of starting again, so a reader cannot leave a second partial ranking of the same
-   * title. A ranked row draws no `+` at all (below), so there is no second entry point
-   * into a ranking that already exists.
+   * title. A ranked row draws no `+` at all (below; only its bookmark), so there is no
+   * second entry point into a ranking that already exists.
    */
   const celebrate = useCelebrationHandoff();
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
@@ -602,27 +602,27 @@ export default function PersonScreen() {
                         /**
                          * **+ Rank and the bookmark, Search's own row controls**
                          * (`TitleRowActions`, founder spec §6). A title the reader has
-                         * already ranked draws neither — its "Ranked" line says so, and a
-                         * `+` there would be a second way into a ranking that exists —
-                         * and draws no score badge either: no badges on these rows in
-                         * this pass. The bookmark shows the watchlist as it is, and hides
-                         * until the watchlist has been read rather than guessing.
+                         * already ranked draws **the bookmark only** (founder t171u §1.4):
+                         * no `+`, because its "Ranked" line says so and a `+` there would
+                         * be a second way into a ranking that exists, and no score badge
+                         * either (no badges on these rows in this pass), but the
+                         * watchlist is independent of ranking, so its bookmark stays. The
+                         * bookmark shows the watchlist as it is, and hides until the
+                         * watchlist has been read rather than guessing.
                          */
                         trailing={
-                          ranked.has(credit.mediaItemId) ? undefined : (
-                            <TitleRowActions
-                              name={credit.title}
-                              kind={credit.kind}
-                              score={null}
-                              // No `+` until the reader's rankings are read; the bookmark
-                              // does not wait on them (independent review).
-                              rankable={rankingsKnown}
-                              saved={watchlistToggle.isSaved(credit.mediaItemId)}
-                              busy={watchlistToggle.busy === credit.mediaItemId}
-                              onRank={() => openRank(credit)}
-                              onToggleWatchlist={() => void toggleWatchlist(credit)}
-                            />
-                          )
+                          <TitleRowActions
+                            name={credit.title}
+                            kind={credit.kind}
+                            score={null}
+                            // No `+` on a ranked row, and none until the reader's rankings
+                            // are read; the bookmark waits on neither (independent review).
+                            rankable={!ranked.has(credit.mediaItemId) && rankingsKnown}
+                            saved={watchlistToggle.isSaved(credit.mediaItemId)}
+                            busy={watchlistToggle.busy === credit.mediaItemId}
+                            onRank={() => openRank(credit)}
+                            onToggleWatchlist={() => void toggleWatchlist(credit)}
+                          />
                         }
                       />
                     </Fragment>
