@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert, type AlertButton } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -363,7 +364,7 @@ describe('Save in the header', () => {
     const view = await renderWithProviders(<EditProfileScreen />);
     const { StyleSheet } = jest.requireActual<typeof import('react-native')>('react-native');
     const fill = StyleSheet.flatten(view.getByTestId('save-button-fill').props.style);
-    expect(fill.backgroundColor).toBe('#773744');
+    expect(fill.backgroundColor).toBe(theme.semantic.action);
     expect(StyleSheet.flatten(save(view).props.style).minHeight).toBeGreaterThanOrEqual(44);
   });
 

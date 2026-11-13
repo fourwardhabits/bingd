@@ -452,11 +452,14 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
 }
 
 /**
- * The sheet's heading grows with the system text size only to 1.5×: at 2× on a 320pt
+ * The sheet's heading grows with the system text size only so far: at 2× on a 320pt
  * phone "Recommendations" no longer fits a line and broke mid-word (title-page sprint,
- * 2026-11-06). Still well above the body text it heads.
+ * 2026-11-06). The cap was 1.5× of the 17pt `headline` — a 25.5pt ceiling. The heading is
+ * the shared 22pt serif `title2` since 2026-11-13, so the cap is restated to hold the same
+ * ceiling rather than the same ratio (1.15 × 22 ≈ 25.3pt; independent review). Still well
+ * above the body text it heads.
  */
-const HEADING_MAX_SCALE = 1.5;
+const HEADING_MAX_SCALE = 1.15;
 
 const styles = StyleSheet.create({
   // Gives way first when the sheet's 90% runs out, so the action below always shows.

@@ -8,7 +8,7 @@ import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
@@ -64,8 +64,36 @@ export default function SettingsScreen() {
         options={{
           headerShown: true,
           title: 'Settings',
-          // No header Close (founder spec §2B/§7, 2026-11-13): the back arrow already
-          // dismisses this screen, and two dismissals for one screen is one too many.
+          /**
+           * **One way out, on both platforms** (founder spec §2B/§7, 2026-11-13).
+           *
+           * The header's Close text is gone: on Android this screen is pushed with the
+           * native back arrow, so Close was a second dismissal beside it. On iOS the root
+           * layout presents Settings as a modal (`presentation: 'modal'`), and a presented
+           * screen gets **no** back arrow — so there the arrow is drawn here, in the place
+           * and shape the native one takes, and it is still the only control that leaves.
+           * Without it an iOS reader's only exit would be an undiscoverable swipe, and a
+           * VoiceOver reader might have none (independent review, 2026-11-13).
+           */
+          headerLeft:
+            Platform.OS === 'ios'
+              ? () => (
+                  <Pressable
+                    testID="settings-back"
+                    accessibilityRole="button"
+                    accessibilityLabel="Back"
+                    hitSlop={theme.space[2]}
+                    onPress={() => router.back()}
+                    style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={theme.layout.icon.lg}
+                      color={theme.semantic.action}
+                    />
+                  </Pressable>
+                )
+              : undefined,
         }}
       />
       {/* **Four named sections, and the first one had no name at all** (founder,
@@ -595,6 +623,14 @@ function short(value: string | null | undefined) {
 }
 
 const styles = StyleSheet.create({
+  // The native back button's own box: 44pt, glyph against the leading edge.
+  back: {
+    minWidth: theme.layout.minTapTarget,
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  backPressed: { opacity: 0.6 },
   // A 44pt target on a caption-sized label, so the one control on this block that is a
   // control can actually be pressed.
   diagnostics: { paddingTop: theme.space[2], gap: theme.space[1] },

@@ -65,7 +65,7 @@ jest.mock('expo-router', () => ({
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
-  useRouter: () => ({ push: mockPush, replace: mockReplace, back: () => {} }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace, back: () => mockBackForSettings() }),
   // Captures what each screen asks of its native header, so a header control can be
   // asserted on without a navigator.
   Stack: {
@@ -77,6 +77,7 @@ jest.mock('expo-router', () => ({
 }));
 
 let mockStackOptions: Record<string, unknown> = {};
+let mockBackForSettings: () => void = () => {};
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
@@ -1178,12 +1179,42 @@ describe('the Settings sections', () => {
  * Every other section is still here, with its headings one step more prominent.
  */
 describe('the Settings header and sections', () => {
-  it('draws no Close in the header, leaving the back arrow as the way out', async () => {
+  it('draws no Close in the header', async () => {
     mockStackOptions = {};
     await renderWithProviders(<SettingsScreen />);
 
     expect(mockStackOptions.title).toBe('Settings');
     expect(mockStackOptions.headerRight).toBeUndefined();
+  });
+
+  it('draws the back arrow itself on iOS, where a presented modal has none, and it leaves', async () => {
+    mockStackOptions = {};
+    const back = jest.fn();
+    mockBackForSettings = back;
+    await renderWithProviders(<SettingsScreen />);
+
+    const HeaderLeft = mockStackOptions.headerLeft as () => React.ReactElement;
+    expect(HeaderLeft).toBeDefined();
+    const header = await renderWithProviders(<HeaderLeft />);
+    const arrow = header.getByRole('button', { name: 'Back' });
+    expect(StyleSheet.flatten(arrow.props.style).minHeight).toBeGreaterThanOrEqual(44);
+    await fireEvent.press(arrow);
+    expect(back).toHaveBeenCalledTimes(1);
+    mockBackForSettings = () => {};
+  });
+
+  it('leaves Android its native back arrow, and adds nothing beside it', async () => {
+    const { Platform } = jest.requireActual<typeof import('react-native')>('react-native');
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      mockStackOptions = {};
+      await renderWithProviders(<SettingsScreen />);
+      expect(mockStackOptions.headerLeft).toBeUndefined();
+      expect(mockStackOptions.headerRight).toBeUndefined();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: original, configurable: true });
+    }
   });
 
   it('has no Labs section and no title-page switch, in any lane', async () => {

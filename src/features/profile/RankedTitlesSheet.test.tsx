@@ -703,3 +703,80 @@ describe('the main Collection’s filters, over somebody’s ranking', () => {
     expect(order[2]).toMatch(/A Horror/); // 1994
   });
 });
+
+/** Independent review, 2026-11-13: what must not carry over, and what must fall back. */
+describe('state that follows the list on screen', () => {
+  const films = [
+    entry({ mediaItemId: 'a', title: 'A Comedy', position: 1, genres: ['Comedy'] }),
+    entry({ mediaItemId: 'b', title: 'A Horror', position: 2, genres: ['Horror'] }),
+  ];
+
+  it('clears filters when the sheet is closed and opened on another list', async () => {
+    mockMovies = films;
+    mockSeasons = [
+      entry({
+        mediaItemId: 's1',
+        title: 'Season 1',
+        kind: 'season',
+        seriesTitle: 'The Bear',
+        seasonNumber: 1,
+        category: 'tv_seasons',
+        genres: ['Drama'],
+      }),
+    ];
+    const props = {
+      onChangeCategory: jest.fn(),
+      userId: 'anna-id',
+      name: 'Anna',
+      isSelf: false,
+      onPressTitle: jest.fn(),
+      onClose: jest.fn(),
+    };
+    const view = await renderWithProviders(<RankedTitlesSheet category="movies" {...props} />);
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Comedy/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(view.queryByText(/A Horror/)).toBeNull());
+
+    // Closed (the profile keeps it mounted), then opened on TV from the wall.
+    await view.rerender(<RankedTitlesSheet category={null} {...props} />);
+    await view.rerender(<RankedTitlesSheet category="tv_seasons" {...props} />);
+
+    await waitFor(() => expect(view.getByText(/The Bear/)).toBeTruthy());
+    expect(view.queryByText('Nothing matches your filters')).toBeNull();
+    expect(view.getByLabelText(/No filters/)).toBeTruthy();
+  });
+
+  it('falls back to Rank when a seasons-only list cannot offer Runtime', async () => {
+    mockMovies = films.map((film) => ({ ...film, runtimeMinutes: 100 }));
+    mockSeasons = [
+      entry({ mediaItemId: 's1', title: 'Season 1', kind: 'season', seriesTitle: 'The Bear', seasonNumber: 1, category: 'tv_seasons' }),
+    ];
+    const props = {
+      onChangeCategory: jest.fn(),
+      userId: 'anna-id',
+      name: 'Anna',
+      isSelf: false,
+      onPressTitle: jest.fn(),
+      onClose: jest.fn(),
+    };
+    const view = await renderWithProviders(<RankedTitlesSheet category="movies" {...props} />);
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    await fireEvent.press(view.getByLabelText(/^Runtime/));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Runtime/)).toBeTruthy());
+
+    await view.rerender(<RankedTitlesSheet category="tv_seasons" {...props} />);
+    await waitFor(() => expect(view.getByLabelText(/Sorted by Rank, highest first\./)).toBeTruthy());
+  });
+
+  it('names somebody else’s collection on the filter sheet', async () => {
+    mockMovies = films;
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/A Horror/)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
+    expect(view.getByLabelText("Filter and sort Anna's collection")).toBeTruthy();
+  });
+});

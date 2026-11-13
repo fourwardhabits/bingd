@@ -80,4 +80,6 @@ export function useTitleLayoutResolved(): boolean {
 /** Test seam: back to the app's own state, as a launch is. */
 export function resetTitleLayoutForTests(): void {
   current = DEFAULT_LAYOUT;
+  // Mounted readers follow, so a component pinned to `original` does not keep it.
+  for (const listener of listeners) listener();
 }
