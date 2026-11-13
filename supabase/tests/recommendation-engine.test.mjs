@@ -168,6 +168,76 @@ describe('the engine switch', () => {
     assert.equal(await engineFor(reader), 'v1');
   });
 
+  /**
+   * The four fallbacks the reconcile brief asks to be proven (rec/v2-reconcile, 2026-11-13).
+   * Production has none of the `recommendations.v2_*` keys today; the migration seeds them
+   * off, and an operator deleting them must be as safe as never having written them.
+   */
+  describe('flags and fallback', () => {
+    const V2_KEYS = [
+      'recommendations.v2_engine',
+      'recommendations.v2_allowlist',
+      'recommendations.v2_allowlist_engine',
+      'recommendations.v2_rollout_percent',
+    ];
+
+    it('is v1 for everybody when no V2 key exists at all', async () => {
+      await t.actAs(null);
+      await t.sql(`delete from app_config where key = any($1::text[])`, [V2_KEYS]);
+      try {
+        assert.equal(await engineFor(reader), 'v1');
+        assert.equal(await engineFor(other), 'v1');
+        // And the V2 sources answer nothing: there is no engine to serve them.
+        assert.deepEqual(await candidates(reader, { kind: 'movie', languages: ['ja'] }), []);
+        await t.actAs(reader);
+        assert.deepEqual((await t.sql(`select * from collaborative_candidates('movie', 10)`)).rows, []);
+      } finally {
+        await t.actAs(null);
+      }
+    });
+
+    it('is v1 for a malformed v2_engine, whatever else is set', async () => {
+      await setConfig('recommendations.v2_allowlist', [reader]);
+      await setConfig('recommendations.v2_allowlist_engine', 'v2_hybrid');
+      await setConfig('recommendations.v2_rollout_percent', 100);
+      for (const bad of [true, 1, ['v2_metadata'], { engine: 'v2_metadata' }, '', 'V2_METADATA', ' v2_metadata', null]) {
+        await t.actAs(null);
+        await setConfig('recommendations.v2_engine', bad);
+        assert.equal(await engineFor(reader), 'v1', `v2_engine = ${JSON.stringify(bad)}`);
+        assert.equal(await engineFor(other), 'v1', `v2_engine = ${JSON.stringify(bad)}`);
+      }
+      await t.actAs(null);
+    });
+
+    it('gives an allowlisted account the configured engine, and the allowlist engine over it', async () => {
+      await setConfig('recommendations.v2_engine', 'v2_metadata');
+      await setConfig('recommendations.v2_allowlist', [reader]);
+      assert.equal(await engineFor(reader), 'v2_metadata');
+      await t.actAs(null);
+      // Hybrid is reachable through the allowlist alone, while the cohort is on metadata.
+      await setConfig('recommendations.v2_allowlist_engine', 'v2_hybrid');
+      await setConfig('recommendations.v2_rollout_percent', 100);
+      assert.equal(await engineFor(reader), 'v2_hybrid');
+      assert.equal(await engineFor(other), 'v2_metadata');
+      await t.actAs(null);
+    });
+
+    it('is v1 for an account outside the allowlist at 0%, even with hybrid configured', async () => {
+      await setConfig('recommendations.v2_engine', 'v2_hybrid');
+      await setConfig('recommendations.v2_allowlist', [reader]);
+      for (const percent of [0, -5, null]) {
+        await t.actAs(null);
+        await setConfig('recommendations.v2_rollout_percent', percent);
+        assert.equal(await engineFor(other), 'v1', `rollout ${percent}`);
+        assert.equal(await engineFor(reader), 'v2_hybrid');
+      }
+      await t.actAs(null);
+      await t.sql(`delete from app_config where key = 'recommendations.v2_rollout_percent'`);
+      assert.equal(await engineFor(other), 'v1', 'no percentage key');
+      await t.actAs(null);
+    });
+  });
+
   it('only ever adds accounts as the percentage rises', async () => {
     const { rows } = await t.sql(
       `select id, _recommendation_cohort(id) as cohort

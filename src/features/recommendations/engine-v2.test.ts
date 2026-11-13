@@ -286,6 +286,13 @@ describe('the V2 scorer', () => {
     expect(engineFrom('__proto__')).toBe('v1');
   });
 
+  it('reads a malformed engine answer as v1 (rec/v2-reconcile flag proof)', () => {
+    expect(engineFrom('v2_hybrid')).toBe('v2_hybrid');
+    for (const bad of [1, true, {}, ['v2_metadata'], { engine: 'v2_metadata' }, '', 'V2_METADATA', ' v2_metadata']) {
+      expect(engineFrom(bad)).toBe('v1');
+    }
+  });
+
   it('leaves V1 exactly as it was when no engine is given', () => {
     const taste = tasteFrom([{ score: 9, genres: ['Drama'], language: 'en' }]);
     const candidates = [candidate({ mediaItemId: 'near' }), candidate({ language: 'ja' })];
