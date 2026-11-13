@@ -121,8 +121,13 @@ jest.mock('@/features/collection/LogSheet', () => ({
     return null;
   },
 }));
+/** Every subject the ranking sheet was handed, so a test can assert none was. */
+const mockRankingSubjects: unknown[] = [];
 jest.mock('@/features/ranking/RankingSheet', () => ({
-  RankingSheet: () => null,
+  RankingSheet: (props: { subject?: unknown }) => {
+    if (props.subject) mockRankingSubjects.push(props.subject);
+    return null;
+  },
 }));
 
 jest.mock('@/features/collection/writes', () => ({
@@ -188,6 +193,7 @@ beforeEach(() => {
   tableRows.user_media = [];
   mockLogSheet.props = null;
   mockLogSheet.opened = [];
+  mockRankingSubjects.length = 0;
 });
 
 const open = async () => {
@@ -789,7 +795,8 @@ describe('the refined person page', () => {
     expect(mockLogSheet.opened).toHaveLength(1);
   });
 
-  it('draws neither + Rank nor a score badge on a title the reader has ranked', async () => {
+  /** One ranked row: Inception, loved, at the top of the reader's movies. */
+  const rankInception = () => {
     tableRows.rankings = [
       {
         user_id: 'user-1',
@@ -800,12 +807,48 @@ describe('the refined person page', () => {
         media_items: items[0],
       },
     ];
+  };
+
+  /**
+   * Founder t171u §1.4: a ranked row keeps an independent Bookmark. No `+` (the "Ranked"
+   * line says so) and no score badge (no badges in rows), but the watchlist is not the
+   * ranking, so its bookmark stays.
+   */
+  it('draws neither + Rank nor a score badge on a ranked title, but keeps its bookmark', async () => {
+    rankInception();
     const view = await open();
     await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
     expect(view.queryByLabelText('Log Inception')).toBeNull();
     expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy();
     // The others keep theirs.
     expect(view.getByLabelText('Log Titanic')).toBeTruthy();
+  });
+
+  it('saves a ranked title to the watchlist once, opening no sheet and no ranking', async () => {
+    rankInception();
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
+
+    await waitFor(() => expect(mockSetWatchlist).toHaveBeenCalledTimes(1));
+    expect(mockSetWatchlist).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaItemId: 'film-1', present: true }),
+    );
+    expect(mockLogSheet.opened).toHaveLength(0);
+    expect(mockRankingSubjects).toHaveLength(0);
+  });
+
+  it('shows a ranked title already on the watchlist as saved, still reading “Ranked”', async () => {
+    rankInception();
+    tableRows.watchlist = [{ user_id: 'user-1', media_item_id: 'film-1', media_items: items[0] }];
+    const view = await open();
+
+    const remove = await view.findByLabelText('Remove Inception from Watchlist');
+    expect(remove.props.accessibilityState).toEqual(expect.objectContaining({ selected: true }));
+    expect(view.getByText('Ranked')).toBeTruthy();
+    expect(view.queryByText('On your watchlist')).toBeNull();
   });
 
   it('writes the watchlist once for a double tap on the bookmark', async () => {
