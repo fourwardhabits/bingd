@@ -147,10 +147,22 @@ export function TopRanked({
         id: row.mediaItemId,
         tile: () => movieTile(row),
       })),
-      ...series.map((p) => ({ key: p.score, pool: 1, id: p.seriesId, tile: () => seriesTile(p) })),
+      // `series` is already in `compareShowProjections` order (exact score, explicit
+      // before average, position, title, id); two series keep that order between them.
+      ...series.map((p, order) => ({
+        key: p.score,
+        pool: 1,
+        order,
+        id: p.seriesId,
+        tile: () => seriesTile(p),
+      })),
     ];
     return all
-      .sort((a, b) => b.key - a.key || a.pool - b.pool || a.id.localeCompare(b.id))
+      .sort((a, b) =>
+        'order' in a && 'order' in b
+          ? a.order - b.order
+          : b.key - a.key || a.pool - b.pool || a.id.localeCompare(b.id),
+      )
       .slice(0, WALL)
       .map((entry) => entry.tile());
   }, [filter, movies.data, series]);

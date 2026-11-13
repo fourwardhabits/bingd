@@ -245,6 +245,15 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
   if (/already updated from that season/.test(error.message)) {
     return { state: 'failed', message: 'You already updated this show.', restart: false };
   }
+  // 20261120000100: the reader already kept the show for this season (perhaps a Keep
+  // whose reply was lost), so the link cannot also update it.
+  if (/already kept for that season/.test(error.message)) {
+    return {
+      state: 'failed',
+      message: 'You already kept your show score for this season.',
+      restart: false,
+    };
+  }
   if (/show is not ranked|not a season of this show/.test(error.message)) {
     return {
       state: 'failed',

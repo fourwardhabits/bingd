@@ -117,7 +117,11 @@ export type LogSheetProps = {
    * the server owns the change, and on a rerank there is no change to write — either
    * way `set_bucket` answers with its 55000 refusal.
    */
-  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank', context?: RankContext) => void;
+  onRank?: (
+    bucket: BucketId,
+    mode: 'start' | 'rebucket' | 'rerank',
+    context?: RankContext,
+  ) => void;
   /**
    * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
    * and the route underneath it is not the same question as where somebody decided to
@@ -1564,6 +1568,14 @@ function Body({
 
   /** One decision at a time, synchronously: a double tap is one Update or one Keep. */
   const deciding = useRef(false);
+  /** A Keep Show reply that lands after the sheet closed must not finish a later one. */
+  const decisionAlive = useRef(true);
+  useEffect(() => {
+    decisionAlive.current = true;
+    return () => {
+      decisionAlive.current = false;
+    };
+  }, []);
   const [keepingShow, setKeepingShow] = useState(false);
   const [keepShowError, setKeepShowError] = useState<string | null>(null);
 
@@ -1590,6 +1602,7 @@ function Body({
       if (!(await detailsSettled())) return;
       setKeepingShow(true);
       const result = await keepShow(showDecision.linkedPlacementId);
+      if (!decisionAlive.current) return;
       setKeepingShow(false);
       // No optimistic "kept": the sheet leaves only once the server has recorded it.
       if (result.outcome === 'kept') finish();
@@ -1897,7 +1910,6 @@ function Body({
               />
             </View>
           ) : null}
-
         </View>
 
         {/**

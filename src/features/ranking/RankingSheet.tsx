@@ -389,6 +389,18 @@ function Session({
    * records one reaffirmation per season placement.
    */
   const keepInFlight = useRef(false);
+  /**
+   * Whether this session is still on screen when a Keep Show reply lands. A reply that
+   * arrives after the reader dismissed must not close whatever they opened next (the
+   * reaffirmation itself is recorded either way; the server is idempotent).
+   */
+  const keepAlive = useRef(true);
+  useEffect(() => {
+    keepAlive.current = true;
+    return () => {
+      keepAlive.current = false;
+    };
+  }, []);
   const [keeping, setKeeping] = useState(false);
   const [keepError, setKeepError] = useState<string | null>(null);
   /**
@@ -876,6 +888,7 @@ function Session({
     setKeepError(null);
     const result = await keepShow(placementId);
     keepInFlight.current = false;
+    if (!keepAlive.current) return;
     setKeeping(false);
     if (result.outcome === 'kept') {
       await closeAndCelebrate();
