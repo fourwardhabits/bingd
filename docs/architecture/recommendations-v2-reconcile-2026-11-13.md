@@ -285,3 +285,116 @@ stay in single-digit milliseconds.
 | Land the A2 migration now (inert) or hold it | **Land it inert**: it is off, tested, and holding it means renumbering again later |
 | Accept V2's lower pool recall / cold start as the cost of "following is not taste" | **Yes for the allowlist and staged rollout, watched**; revisit with the real replay and the rank-from-For-You rate before 100% |
 | QA allowlist accounts | Founder plus 2–3 QA accounts, named by the founder |
+
+## 10. Follow-up: the Films pool-recall gap in the real replay (2026-11-13)
+
+**What the real replay showed** (run by the coordinator on 44 pseudonymous production
+accounts; reported to this branch as aggregates, not committed): V2 metadata's **Films pool
+recall was −0.136** against V1, while its **TV Recall@50 was +0.106**. The question: is
+dropping the follow-graph source (`social_candidates`) what costs relevant films, and can it
+be kept for films without giving up the TV gain?
+
+### 10.1 Attribution: pool recall split by source
+
+Both the replay (`eval/rec-v2-replay`) and the A3 harness now split pool recall by the source
+that put each held-out positive in the pool — the anchors' TMDB lists, then followees
+(`social`), then trending, then the catalogue fill (and collaborative in A3) — so the parts
+sum to pool recall and a gap reads off by source. Two diagnostics rule the other suspects in
+or out: `v2_metadata+social` (follow graph on both walls) and `v2_metadata+v1_anchors` (V2 with
+V1's anchor selection).
+
+**Synthetic replay** (1,196 generated accounts; a pipeline result, not evidence):
+
+| Films wall, all accounts | Pool recall | via anchors' lists | via social | via trending | via catalogue |
+|---|---|---|---|---|---|
+| V1 | 0.200 ± 0.020 | 0.088 ± 0.014 | 0.080 ± 0.014 | 0.032 ± 0.009 | 0.000 |
+| V2 metadata − V1 | −0.067 ± 0.014 | −0.000 ± 0.000 | **−0.080 ± 0.014** | +0.007 ± 0.004 | +0.006 ± 0.003 |
+| V2 metadata + V1 anchor selection − V1 | −0.067 ± 0.014 | +0.000 | −0.080 ± 0.014 | +0.007 | +0.006 |
+| **`v2_metadata_social` (prototype) − V1** | **+0.005 ± 0.002** | −0.000 | +0.000 | +0.000 | +0.005 ± 0.002 |
+
+The whole Films gap is the social source: the anchors' lists reach exactly the same held-out
+films under both engines, and V1-style anchor selection changes nothing (most collections are
+smaller than the anchor budget, so both selections take every liked title). The catalogue fill
+and trending recover a little (+0.013). **The real export will say whether production looks the
+same**: the coordinator's next run prints this table on the 44 accounts (§10.4).
+
+A3 (synthetic, 480 readers, follows weakly homophilous):
+
+| Paired vs V1, all readers | Pool recall | via anchors' lists | via social | via catalogue | via trending | R@50 | Non-English | Languages served | Era fit | Repeat next |
+|---|---|---|---|---|---|---|---|---|---|---|
+| V2 metadata | −0.065 ± 0.015 | −0.000 | **−0.081 ± 0.015** | +0.004 ± 0.002 | +0.012 ± 0.005 | −0.010 ± 0.008 | +0.029 ± 0.005 | +0.140 ± 0.033 | −0.045 ± 0.011 | +0.078 ± 0.015 |
+| **prototype** | **+0.003 ± 0.003** | −0.000 | +0.000 | +0.003 ± 0.003 | +0.000 | +0.000 ± 0.007 | **+0.029 ± 0.005** | **+0.140 ± 0.033** | +0.006 ± 0.004 | +0.003 ± 0.007 |
+
+| First Five, paired vs V1 | R@20 | R@50 | Pool recall | Utility | Era fit | Repeat next |
+|---|---|---|---|---|---|---|
+| V2 metadata | −0.016 ± 0.016 | −0.027 ± 0.020 | −0.080 ± 0.026 | −0.028 ± 0.012 | −0.151 ± 0.037 | +0.087 ± 0.057 |
+| **prototype** | +0.001 ± 0.007 | +0.005 ± 0.013 | +0.000 | −0.008 ± 0.007 | −0.021 ± 0.014 | −0.034 ± 0.026 |
+
+In A3 (a films-only world) the prototype closes the pool gap **and keeps V2's whole language
+gain** (+0.029 non-English, +0.140 open languages served, identical to V2 metadata), and it
+removes most of V2's First Five regression. The synthetic replay kept only part of the language gain
+(§10.3); the two worlds disagree on that, which is one more reason the real run decides.
+Full report: `recommendations-v2-evaluation-results-2026-11-13b.md`.
+
+### 10.2 The prototype: `v2_metadata_social`
+
+A separate engine id, so nothing about `v2_metadata` changes:
+
+- **Same as `v2_metadata`** in weights, behavioural profile (with whole shows), language-aware
+  anchors, catalogue fill and scorer. Following adds no score term: social ids only join the
+  pool, and the V2 scorer decides on the reader's own evidence.
+- **Plus `social_candidates` on the Films wall only** (`SOCIAL_SOURCE` / `asksSocial` in
+  `rank.ts`). Its **TV wall is `v2_metadata`'s exactly**, so the real replay's TV gain cannot
+  move: proven title for title through the real hook (`for-you-engine-v2-shows.test.tsx`) and
+  metric for metric in both harnesses.
+- **Allowlist-only on the server.** `recommendation_engine()` accepts it only as
+  `recommendations.v2_allowlist_engine`; as `v2_engine` it is an unknown engine and therefore
+  `v1` for everybody, so it can never reach a rollout percentage. `v2_engine = "v1"` still
+  turns it off for the allowlist. It gets the catalogue source and no collaborative evidence.
+  Tests: `recommendation-engine.test.mjs` › *serves the v2_metadata_social prototype to the
+  allowlist only…*, *gives the prototype the catalogue source and no collaborative evidence*.
+- Telemetry carries `engine: "v2_metadata_social"`, so an allowlisted comparison against
+  `v2_metadata` reads straight off `for_you_slate_shown`.
+
+### 10.3 What it may cost: part of V2's multilingual gain on films
+
+In A3 nothing (§10.1). In the synthetic replay, Films wall, paired against V1:
+
+| Slice | Engine | R@50 | Pool recall | Non-English | Languages on wall | Genre entropy |
+|---|---|---|---|---|---|---|
+| all | V2 metadata | +0.003 ± 0.011 | −0.067 ± 0.014 | +0.048 ± 0.003 | +0.68 ± 0.05 | +0.063 ± 0.008 |
+| all | **prototype** | +0.005 ± 0.008 | +0.005 ± 0.002 | +0.027 ± 0.003 | +0.33 ± 0.03 | +0.047 ± 0.006 |
+| sparse ≤ 10 | V2 metadata | +0.012 ± 0.043 | −0.055 ± 0.042 | +0.085 ± 0.009 | +1.45 ± 0.13 | +0.108 ± 0.026 |
+| sparse ≤ 10 | **prototype** | +0.017 ± 0.028 | +0.000 | +0.016 ± 0.005 | +0.25 ± 0.07 | +0.102 ± 0.013 |
+| heavy > 30 | V2 metadata | +0.006 ± 0.009 | −0.054 ± 0.017 | +0.039 ± 0.005 | +0.45 ± 0.06 | +0.043 ± 0.009 |
+| heavy > 30 | **prototype** | +0.005 ± 0.009 | +0.008 ± 0.004 | +0.037 ± 0.005 | +0.42 ± 0.05 | +0.039 ± 0.008 |
+
+Followees' loves are mostly popular English films, and they compete for the same wall. Heavy
+readers keep almost all of V2's language gain (their own evidence outweighs the extra
+candidates); sparse readers give most of it back. If that matters more than the recovered
+films, the next lever is a smaller social quota under the prototype (V1 takes 40) — not built,
+because the real attribution should decide whether it is needed.
+
+### 10.4 For the coordinator's next real run
+
+Same command, same export format (`node eval/rec-v2-replay/run.mjs`). It now replays five
+engines (V1, V2 metadata, the prototype, and the two diagnostics) and prints **Pool recall by
+source** for both walls. What to read:
+
+1. **Films, `v2_metadata − v1`, "via social"**: if it is close to −0.136, the follow graph is the
+   whole gap, as in the synthetic runs; if "via anchors' lists" also moves, something else is
+   at work too (the `+v1_anchors` row then says whether it is anchor selection).
+2. **Films, prototype − V1**: pool recall and R@50 back to V1's, and how much of the
+   non-English / languages gain survives.
+3. **TV, prototype − V2 metadata**: zero by construction (the +0.106 R@50 is kept).
+
+### 10.5 Decisions this adds for the founder
+
+| Decision | Recommended default |
+|---|---|
+| Allowlist the prototype beside `v2_metadata` (founder + QA accounts split between them) | **Yes, once the real attribution confirms the gap is the follow graph** |
+| Is "following adds candidates but never score" acceptable under the spec's "following alone has no effect"? | **Founder's call.** It is a narrower reading than the spec's; the prototype exists so the cost of the strict reading is measured, not assumed |
+| If the prototype becomes the V2 default for films, cap its social quota to protect sparse readers' language mix | Decide after the real run's language columns |
+
+V1 stays the production default; `v2_metadata` and the prototype are both allowlist/rollout
+controlled and off by default; the hybrid stays allowlist-only.

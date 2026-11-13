@@ -52,14 +52,18 @@ The synthetic proof: `node eval/rec-v2-replay/run.mjs --synthetic`.
 - **Holdout:** for each account with at least two Liked rankings, the last 20% of its Liked
   rankings (at least one) by ranking day, then by the account's own ranking order, are hidden
   from every input. Positions are renumbered per pool.
-- **Walls:** a Films wall and a TV wall per account, three launch seeds each, V1 and V2
-  metadata. Taste, profile (films, seasons and whole shows, one series one unit), anchors,
+- **Walls:** a Films wall and a TV wall per account, three launch seeds each, for V1, V2
+  metadata, the allowlist-only prototype `v2_metadata_social` (V2 metadata plus the follow
+  graph on the Films wall only), and two diagnostics that are not shipped configurations
+  (`v2_metadata+social`, follow graph on both walls; `v2_metadata+v1_anchors`, V1's anchor
+  selection). Taste, profile (films, seasons and whole shows, one series one unit), anchors,
   coverage fill, scoring and the draw are the shipped functions. The server sources are
   mirrored from the export: TMDB similar lists, trending lists, followees' Liked titles
   (V1's `social_candidates`), and the catalogue windows (V2's `catalogue_candidates`).
 - **Metrics:** held-out recall@20 and @50, pool recall, non-English share of the wall against
   the account's own mix, languages and genre entropy on the wall, and the share of the wall
-  already seen (expected 0). Per slice: all, sparse (≤ 10 visible rankings), medium (11–30),
+  already seen (expected 0), and **pool recall split by source** (anchors' lists, social,
+  trending, catalogue fill; the parts sum to pool recall), so a V1 − V2 gap reads off by source. Per slice: all, sparse (≤ 10 visible rankings), medium (11–30),
   heavy (> 30), and whole-show rankers (at least as many whole-show rankings as season ones).
 - **V2 hybrid:** not replayed. At the current size it is **not measurable**; the report counts
   how many accounts have the two taste neighbours (Match > 55 on ≥ 5 shared series) a
