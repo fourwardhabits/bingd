@@ -340,9 +340,16 @@ export default function PersonScreen() {
       ),
     [logged.data, ranked],
   );
+  /**
+   * Whether the reader's rankings have been read. Until they have, the page cannot tell a
+   * ranked title from an unranked one, so it offers no `+` at all rather than a `+` that
+   * might resume or restart a ranking that already exists (independent review) — the
+   * bookmark waits for the watchlist the same way.
+   */
+  const rankingsKnown = rankedMovies.isSuccess && rankedShows.isSuccess && logged.isSuccess;
   const openRank = (credit: PersonCredit) => {
     // One flow at a time: a second tap while a sheet is up opens nothing new.
-    if (logging || ranking) return;
+    if (logging || ranking || !rankingsKnown) return;
     const title: LoggableTitle = {
       id: credit.mediaItemId,
       title: credit.title,
@@ -602,7 +609,7 @@ export default function PersonScreen() {
                          * until the watchlist has been read rather than guessing.
                          */
                         trailing={
-                          ranked.has(credit.mediaItemId) ? undefined : (
+                          !rankingsKnown || ranked.has(credit.mediaItemId) ? undefined : (
                             <TitleRowActions
                               name={credit.title}
                               kind={credit.kind}
@@ -889,7 +896,14 @@ function Biography({ text, truncated }: { text: string; truncated: boolean }) {
           <Text
             variant="body"
             onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) =>
-              setMeasured({ body, lines: event.nativeEvent.lines.length })
+              {
+                const count = event.nativeEvent.lines.length;
+                // Unchanged answers keep the same state, so a layout pass that repeats
+                // itself does not re-render the biography (independent review).
+                setMeasured((was) =>
+                  was?.body === body && was.lines === count ? was : { body, lines: count },
+                );
+              }
             }
           >
             {body}
@@ -917,7 +931,8 @@ function Biography({ text, truncated }: { text: string; truncated: boolean }) {
           </Text>
         </Pressable>
       ) : null}
-      {truncated && open ? (
+      {/* Once it is all on screen — opened, or short enough never to need opening. */}
+      {truncated && (open || !long) ? (
         <Text variant="footnote" tone="tertiary" testID="biography-shortened" style={styles.shortened}>
           Shortened. The full biography is on TMDB.
         </Text>
@@ -993,6 +1008,7 @@ const styles = StyleSheet.create({
   // More / Less: a 44pt target with the word on the gutter.
   bioToggle: {
     minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
     justifyContent: 'center',
     alignSelf: 'flex-start',
   },
