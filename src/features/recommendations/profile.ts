@@ -56,6 +56,14 @@ export type ProfileEntry = {
   /** Movies and TV are profiled separately for era. A season counts as TV. */
   kind: 'movie' | 'series' | 'season';
   genres: readonly string[];
+  /**
+   * The share of one unit of evidence this observation carries (default 1). **Each series is
+   * one unit of taste** (WS5, 2026-11-14): the ranked seasons and the whole-show ranking of
+   * one series divide one unit between them (`seriesUnitWeights`, `anchors.ts`), exactly as
+   * V1's `tasteFrom` weighs them, so a show ranked whole and its seasons are not counted
+   * twice and a long show cannot outvote everything else. Scales the title's confidence.
+   */
+  weight?: number;
 };
 
 type FacetStats = {
@@ -251,7 +259,9 @@ export function profileFrom(entries: readonly ProfileEntry[]): Profile {
   for (const entry of entries) {
     if (seen.has(entry.mediaItemId)) continue;
     seen.add(entry.mediaItemId);
-    const { confidence, valence } = evidenceOf(entry);
+    const evidence = evidenceOf(entry);
+    const confidence = evidence.confidence * (entry.weight ?? 1);
+    const { valence } = evidence;
     if (entry.score != null) ranked += 1;
     if (valence != null) {
       opinion += confidence;

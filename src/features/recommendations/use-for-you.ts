@@ -550,12 +550,26 @@ async function collaborativeCandidates(medium: Medium): Promise<Map<string, Coll
   );
 }
 
-/** What the profile reads from the reader's collection: ranked titles first, so they win. */
+/**
+ * What the profile reads from the reader's collection: ranked titles first, so they win.
+ *
+ * **Films, seasons and whole shows** (WS5, 2026-11-14), each scored against its own pool's
+ * bands, with the rows of one series sharing one unit of influence — the same
+ * `seriesUnitWeights` over the same three pools V1's `tasteFrom` reads, so for ranked
+ * evidence the two engines weigh a series identically. Before this the V2 profile read
+ * films and seasons only, and a reader whose TV taste was ranked show by show had none.
+ *
+ * Logged-only titles (never ranked or bucketed in a pool) are weighted among themselves the
+ * same way, so ten logged seasons of one show are one show of logged interest, never ten.
+ */
 export function profileEntriesFrom(
   movies: readonly RankedEntry[],
   seasons: readonly RankedEntry[],
   logged: readonly LoggedEntry[],
+  shows: readonly RankedEntry[] = [],
 ): ProfileEntry[] {
+  const signals = [...movies, ...seasons, ...shows];
+  const rankedWeights = seriesUnitWeights(signals);
   const ranked = (list: readonly RankedEntry[]) => {
     const sizes = bandSizes(list);
     return list.map(
@@ -567,13 +581,18 @@ export function profileEntriesFrom(
         year: entry.year,
         kind: entry.kind,
         genres: entry.genres,
+        weight: rankedWeights.get(entry.mediaItemId) ?? 1,
       }),
     );
   };
+  const rankedIds = new Set(signals.map((entry) => entry.mediaItemId));
+  const loggedOnly = logged.filter((entry) => !rankedIds.has(entry.mediaItemId));
+  const loggedWeights = seriesUnitWeights(loggedOnly);
   return [
     ...ranked(movies),
     ...ranked(seasons),
-    ...logged.map(
+    ...ranked(shows),
+    ...loggedOnly.map(
       (entry): ProfileEntry => ({
         mediaItemId: entry.mediaItemId,
         score: null,
@@ -582,6 +601,7 @@ export function profileEntriesFrom(
         year: entry.year,
         kind: entry.kind,
         genres: entry.genres,
+        weight: loggedWeights.get(entry.mediaItemId) ?? 1,
       }),
     ),
   ];
@@ -1048,7 +1068,7 @@ export function useForYou(
       );
       const v2 = engine !== 'v1';
       const profile: Profile | undefined = v2
-        ? profileFrom(profileEntriesFrom(movies.data ?? [], seasons.data ?? [], logged.data?.entries ?? []))
+        ? profileFrom(profileEntriesFrom(pools.movies, pools.tv_seasons, logged.data?.entries ?? [], pools.tv_shows))
         : undefined;
       const catalogueRequest = profile
         ? {

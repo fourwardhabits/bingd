@@ -24,6 +24,16 @@ For You V2 selection (`selection.ts`) are unchanged and apply to both engines.
 Per title: confidence 1 and valence `(score − 5)/5` when ranked; 0.6 and the band midpoint's
 valence when bucketed but unranked (imports); 0.35 and no valence when only logged.
 
+**Pools read, and one series as one unit (WS5, reconcile 2026-11-13).** The profile reads the
+same three ranked pools V1's `tasteFrom` does — `movies`, `tv_seasons` and `tv_shows` — each
+scored against its own pool's bands, and every title's confidence is multiplied by V1's
+`seriesUnitWeights`: the ranked seasons and whole-show ranking of one series share one unit
+between them, so a show ranked whole and by season is not counted twice and a long show
+cannot outvote everything else. Logged-only titles share a unit per series among themselves
+the same way. Before the reconcile the profile read films and seasons only, so a reader whose
+TV taste was ranked show by show had none of it (`profileEntriesFrom`, tested in
+`tv-shows.test.ts`).
+
 - **Language and genre:** `affinity = neutral + interest × (positivity − neutral)` where
   `interest = 1 − e^(−Σconfidence/3)`, `positivity = (mean + 1)/2`, and `mean` is the facet's
   confidence-weighted valence shrunk toward the reader's own mean by two pseudo-titles.
@@ -132,8 +142,15 @@ Migration `20261116000200_people_whose_taste_you_share.sql`; client in `rank.ts`
 
 A **public**, active account the reader may discover (`can_discover_profile`: not blocked
 either way, not suspended) with a Taste Match on at least `taste.min_common` (5) shared
-ranked titles. The Match is `taste_match`'s own arithmetic, run for one reader against many
-(`_taste_matches`); equality with `taste_match` is tested on random rankings.
+series units. The Match is `taste_match`'s own arithmetic, run for one reader against many
+(`_taste_matches`). Since the reconcile onto main (2026-11-13) that is the **WS5** definition
+(`20261114000400_a_show_counted_once`): titles are matched exactly (a show with the same show,
+a season with the same season), and one series is one unit of evidence — the threshold and
+the shrink count units, and the mean gap and midrank correlation weigh each observation by
+1/(observations in its series). Equality with `taste_match` is tested on random rankings
+**and** on a fixture where people rank two seasons of one show, and a show beside one of its
+own seasons (the random fixture never put two rows of one series in front of the formula,
+which is why it passed against the pre-WS5 copy too).
 
 - **Following plays no part.** A followed account with the same rankings gets the same Match,
   the same weight and the same effect as a stranger (tested). A **private** account is never
@@ -209,12 +226,15 @@ all-pairs work, which §7 rules out.
   which found that the reader's taste neighbours' dislikes never reached a title from any
   other source.
 - Either way it takes two people, so no single person's ranking is ever why a row exists.
-- Each read scores the neighbours' rankings in the requested category only (a film wall
-  never scores their seasons).
+- Each read scores the neighbours' rankings in the categories the wall needs only (a film
+  wall never scores their seasons or shows; a TV wall reads `tv_seasons` and `tv_shows`).
 - Never a person, a neighbour id, one person's score, or a Match. Every neighbour is a public
   account whose rankings the reader could already open, so the aggregate reveals nothing the
   reader could not already see; it only saves them the search.
-- On TV, a neighbour's seasons count once per show, at their best season.
+- On TV, a neighbour counts once per show (one series unit, as WS5): their **whole-show**
+  ranking (`tv_shows`) where they made one, else their best-ranked season. Before the
+  reconcile only `tv_seasons` was read, so a neighbour who ranked shows whole contributed
+  nothing to the TV wall.
 - Excludes whatever the reader has logged or ranked, and shows with a logged season.
 
 ### 2.5 Scoring
@@ -266,7 +286,7 @@ release is needed.
 - **Tested (DB, hook, unit, race):** Match arithmetic equals `taste_match`; following has no
   effect; private, blocked and suspended accounts never count, including from cache; low
   Match gives zero weight; one lover is not enough; negatives lower support; the rater cap
-  binds; TV rolls up per show; anon and internals are refused; the engine switch gates it;
+  binds; TV rolls up per show, including whole-show rankings, once per neighbour; anon and internals are refused; the engine switch gates it;
   concurrent refreshes deduplicate.
 - **Hypothesis:** that taste neighbours' loves are good recommendations for real readers, and
   every constant in §2.2–§2.5. A3 evaluates on labelled-synthetic data only: the source added

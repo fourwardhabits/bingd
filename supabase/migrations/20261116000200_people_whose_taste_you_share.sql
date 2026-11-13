@@ -9,8 +9,10 @@
 --
 --   _scored_rankings(users[])      every ranking of a set of users as its 0–10 score, in one
 --                                  pass (taste_match's `band_bounds` lateral is per row).
---   _taste_matches(reader, users[]) taste_match's arithmetic, unchanged, for one reader
---                                  against many at once. Equality is tested.
+--   _taste_matches(reader, users[]) taste_match's arithmetic (the WS5 definition: one series
+--                                  is one unit of evidence), unchanged, for one reader against
+--                                  many at once. Equality is tested, including a reader who
+--                                  ranked two seasons of one show and a show beside a season.
 --   _refresh_taste_neighbours(reader)  bounded neighbour retrieval into a cache.
 --   collaborative_candidates(kind, limit)  titles those neighbours rate highly, as ids and an
 --                                  aggregate only, for engine `v2_hybrid` only.
@@ -18,7 +20,8 @@
 -- ## Who may be a neighbour
 --
 -- A **public**, active account the reader may discover (not blocked either way), with at
--- least `taste.min_common` exact shared ranked titles. Following plays no part: a followed
+-- least `taste.min_common` shared series units (exact titles matched; a show and its seasons
+-- are one unit, as in `taste_match` since 20261114000400). Following plays no part: a followed
 -- account counts exactly as much as a stranger with the same Match, and a *private* account
 -- is never a neighbour even when the reader follows it — otherwise following would decide
 -- whose evidence counts. Re-checked on every read, so a cached neighbour who goes private,
@@ -167,6 +170,17 @@ revoke execute on function _scored_rankings(uuid[], ranking_category, uuid[]) fr
 -- `taste_match`'s arithmetic — proximity, midrank Spearman, the n/(n+p) shrink — for one
 -- reader against many. **No visibility check**: it takes identities, is granted to nobody,
 -- and every caller filters who it is asked about. Score is null below `taste.min_common`.
+--
+-- **Re-derived from the WS5 definition (20261114000400_a_show_counted_once)**, not from the
+-- pre-WS5 one this file first copied (rec/v2-reconcile, 2026-11-13). Matching stays exact —
+-- a show is compared with the same show and a season with the same season — and **one series
+-- is one unit of evidence**: every shared observation is kept, the ones from one series (a
+-- show and any of its seasons) share one unit of weight, the count the threshold and the
+-- shrink read is of units, and the mean gap and the midrank correlation are weighted by
+-- 1/(observations in the unit). With no series shared more than once every weight is 1 and
+-- this is the formula it replaces. Every expression below is `taste_match`'s, partitioned by
+-- the other person; equality, including two seasons of one show and a show beside one of
+-- its seasons, is tested in `taste-neighbours.test.mjs`.
 create or replace function _taste_matches(p_reader uuid, p_others uuid[])
 returns table (other_id uuid, score integer, common_count integer)
 language sql
@@ -191,20 +205,46 @@ as $$
      where s.user_id <> p_reader
   ),
   common as (
-    select t.user_id, m.a, t.b from mine m join theirs t on t.media_item_id = m.media_item_id
+    select t.user_id, m.a, t.b,
+           -- The series a TV title belongs to (a season's show, a show itself), else the
+           -- title: taste_match's unit, 20261114000400.
+           coalesce(mi.parent_id, mi.id) as unit
+      from mine m
+      join theirs t on t.media_item_id = m.media_item_id
+      join media_items mi on mi.id = m.media_item_id
   ),
   ranked as (
     select user_id, a, b,
+           1.0 / count(*) over (partition by user_id, unit) as w,
            rank() over (partition by user_id order by a)
              + (count(*) over (partition by user_id, a) - 1) / 2.0 as ra,
            rank() over (partition by user_id order by b)
              + (count(*) over (partition by user_id, b) - 1) / 2.0 as rb
       from common
   ),
-  stats as (
-    select user_id, count(*)::integer as n, avg(abs(a - b)) as mean_gap, corr(ra, rb) as rho
+  moments as (
+    select user_id,
+           sum(w * ra) / nullif(sum(w), 0) as mx,
+           sum(w * rb) / nullif(sum(w), 0) as my
       from ranked
      group by user_id
+  ),
+  units as (
+    select user_id, count(distinct unit)::integer as n from common group by user_id
+  ),
+  stats as (
+    select r.user_id,
+           u.n,
+           sum(r.w * abs(r.a - r.b)) / nullif(sum(r.w), 0) as mean_gap,
+           case
+             when sum(r.w * (r.ra - m.mx) ^ 2) > 0 and sum(r.w * (r.rb - m.my) ^ 2) > 0 then
+               sum(r.w * (r.ra - m.mx) * (r.rb - m.my))
+                 / sqrt(sum(r.w * (r.ra - m.mx) ^ 2) * sum(r.w * (r.rb - m.my) ^ 2))
+           end as rho
+      from ranked r
+      join moments m on m.user_id = r.user_id
+      join units u on u.user_id = r.user_id
+     group by r.user_id, u.n
   ),
   parts as (
     select stats.user_id, stats.n, threshold.k, threshold.p,
@@ -391,7 +431,8 @@ revoke execute on function _refresh_taste_neighbours(uuid) from public, anon, au
 -- `support` is a confidence-weighted, shrunk mean valence: Σ weight × (score − 5)/5 over
 -- neighbours who ranked it, divided by Σ weight plus a prior of one full-weight neutral
 -- opinion. Neighbours' dislikes count against a title (spec: consider negatives). On TV, a
--- neighbour's seasons count once per show, at the best season.
+-- neighbour counts once per show: their whole-show ranking where they made one, else their
+-- best season (one series, one unit, as WS5's 20261114000400).
 --
 -- Two kinds of row, told apart by the sign of `support`:
 --
@@ -461,13 +502,30 @@ begin
        and p.visibility = 'public'
        and can_discover_profile(v_me, n.neighbour_id)
   ),
+  -- One opinion per neighbour per title. On TV that title is the **series unit** (WS5,
+  -- 20261114000400): a neighbour's whole-show ranking and their seasons of that show are one
+  -- unit, never two opinions. Where the neighbour ranked the show itself, that ranking is
+  -- their opinion of it — a statement about the show, and nothing is inferred from a season
+  -- when one exists; otherwise it is their best-ranked season, as before. Before the reconcile
+  -- (2026-11-13) only `tv_seasons` was read, so a neighbour who ranked shows whole
+  -- contributed nothing to the TV wall.
   opinions as (
     select case when p_kind = 'series' then coalesce(m.parent_id, m.id) else m.id end as item,
-           s.user_id, max(s.score) as score
-      -- One category: a film wall never needs the neighbours' seasons scored, or the reverse.
-      from _scored_rankings(array(select neighbour_id from nb),
-                            case when p_kind = 'series' then 'tv_seasons'::ranking_category
-                                 else 'movies'::ranking_category end) s
+           s.user_id,
+           coalesce(max(s.score) filter (where m.kind = 'series'), max(s.score)) as score
+      -- Only the categories the wall needs: a film wall never has the neighbours' TV scored,
+      -- or the reverse. Each category is scored against its own bands.
+      from (
+        select * from _scored_rankings(array(select neighbour_id from nb),
+                                       case when p_kind = 'series' then 'tv_seasons'::ranking_category
+                                            else 'movies'::ranking_category end)
+        union all
+        -- No one is asked about on a film wall, so this half reads nothing there.
+        select * from _scored_rankings(case when p_kind = 'series'
+                                            then array(select neighbour_id from nb)
+                                            else '{}'::uuid[] end,
+                                       'tv_shows'::ranking_category)
+      ) s
       join media_items m on m.id = s.media_item_id
      where (p_kind = 'movie' and m.kind = 'movie')
         or (p_kind = 'series' and m.kind in ('season', 'series'))

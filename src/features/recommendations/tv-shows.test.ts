@@ -1,8 +1,9 @@
 import type { RankedEntry } from '@/features/collection/use-collection';
 
 import { seriesAlreadyMet, seriesUnitWeights, socialSeriesFrom } from './anchors';
+import { genreAffinity, languageAffinity, profileFrom } from './profile';
 import { tasteFrom } from './rank';
-import { likedFrom } from './use-for-you';
+import { likedFrom, profileEntriesFrom } from './use-for-you';
 
 /**
  * **Shows and seasons as distinct signals** (TV show & season ranking, founder brief §7,
@@ -130,5 +131,91 @@ describe('a whole show on the TV wall', () => {
       [season('s1', 'from-season', 1)],
     );
     expect([...met].sort()).toEqual(['from-season', 'logged-show']);
+  });
+});
+
+/**
+ * **The V2 profile reads whole shows too** (rec/v2-reconcile, 2026-11-13).
+ *
+ * Engine V2's behavioural profile was built from films and seasons only, so a reader whose
+ * TV taste was ranked show by show had none of it. It now reads the same three pools as V1,
+ * with the same `seriesUnitWeights`, so a show ranked whole and its seasons share one unit.
+ */
+describe('a whole show in the V2 profile', () => {
+  it('reads a whole-show ranking as taste evidence', () => {
+    const profile = profileFrom(
+      profileEntriesFrom([], [], [], [show('kdrama', 1, { genres: ['Romance'], language: 'ko' })]),
+    );
+    expect(profile.sampleSize).toBe(1);
+    expect(languageAffinity(profile, 'ko')).toBeGreaterThan(languageAffinity(profileFrom([]), 'ko'));
+    expect(genreAffinity(profile, 'Romance')).toBeGreaterThan(genreAffinity(profileFrom([]), 'Romance'));
+  });
+
+  it('weighs a series exactly as V1 does: its seasons and its show ranking share one unit', () => {
+    const seasons = [season('s1', 'bear', 1), season('s2', 'bear', 2)];
+    const shows = [show('bear', 1), show('severance', 2)];
+    const entries = profileEntriesFrom([], seasons, [], shows);
+    const v1 = seriesUnitWeights([...seasons, ...shows]);
+    for (const e of entries) expect(e.weight).toBeCloseTo(v1.get(e.mediaItemId) ?? 1);
+    expect(entries.find((e) => e.mediaItemId === 'bear')?.weight).toBeCloseTo(1 / 3);
+    expect(entries.find((e) => e.mediaItemId === 'severance')?.weight).toBe(1);
+  });
+
+  it('does not double-count a show ranked whole and by season', () => {
+    // One series, loved whole and in two seasons, in Korean; one film, loved, in French.
+    // Each is one unit of evidence, so the two languages end level.
+    const loved = { bucket: 'loved' as const };
+    const profile = profileFrom(
+      profileEntriesFrom(
+        [entry({ mediaItemId: 'film', kind: 'movie', category: 'movies', language: 'fr', ...loved })],
+        [season('s1', 'show', 1, { language: 'ko' }), season('s2', 'show', 2, { language: 'ko' })],
+        [],
+        [show('show', 1, { language: 'ko' })],
+      ),
+    );
+    expect(profile.languages.get('ko')?.interest).toBeCloseTo(profile.languages.get('fr')?.interest ?? 0);
+  });
+
+  it('lets ten logged seasons of one show say no more than one logged show', () => {
+    const logged = Array.from({ length: 10 }, (_, n) => ({
+      mediaItemId: `l${n}`,
+      title: 'Long',
+      year: 2020,
+      posterPath: null,
+      genres: ['Comedy'],
+      runtimeMinutes: null,
+      kind: 'season' as const,
+      seriesTitle: 'long',
+      seriesId: 'long',
+      language: 'ja',
+      bucket: null,
+      watchedOn: null,
+      addedAt: null,
+    }));
+    const one = { ...logged[0]!, mediaItemId: 'other', kind: 'series' as const, seriesId: null, language: 'de' };
+    const profile = profileFrom(profileEntriesFrom([], [], [...logged, one]));
+    expect(profile.languages.get('ja')?.interest).toBeCloseTo(profile.languages.get('de')?.interest ?? 0);
+    expect(profile.evidenceCount).toBe(11);
+  });
+
+  it('keeps a ranked title out of the logged evidence, so it is counted once', () => {
+    const ranked = [show('severance', 1)];
+    const logged = [
+      {
+        mediaItemId: 'severance',
+        title: 'Severance',
+        year: 2022,
+        posterPath: null,
+        genres: ['Drama'],
+        runtimeMinutes: null,
+        kind: 'series' as const,
+        seriesTitle: null,
+        language: 'en',
+        bucket: null,
+        watchedOn: null,
+        addedAt: null,
+      },
+    ];
+    expect(profileEntriesFrom([], [], logged, ranked).map((e) => e.mediaItemId)).toEqual(['severance']);
   });
 });

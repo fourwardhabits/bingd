@@ -150,6 +150,78 @@ describe('the batch Taste arithmetic', () => {
     }
   });
 
+  /**
+   * The random fixture above never puts two rows from one series in front of the formula, so
+   * it passed against the pre-WS5 copy too. Here every person ranks several rows of one show:
+   * two seasons of one show, and a whole show beside one of its own seasons
+   * (20261114000400). `_taste_matches` must equal `taste_match` exactly, and its overlap must
+   * be a count of series units, not of rows.
+   */
+  it('equals taste_match when one person ranks two seasons of a show, or a show and a season', async () => {
+    let state = 11;
+    const random = () => ((state = (state * 48271) % 2147483647) / 2147483647);
+    const order = { loved: 0, fine: 1, not_for_me: 2 };
+    const bucketOf = () => (random() < 0.45 ? 'loved' : random() < 0.6 ? 'fine' : 'not_for_me');
+    const ordered = (ids) => ids.map((id) => [id, bucketOf()]).sort((a, b) => order[a[1]] - order[b[1]]);
+
+    const filmsHere = await films(8, 'ws5');
+    const showA = await t.createSeries(`ws5-a-${seq}`, seq++);
+    const a1 = await t.createSeason(showA, 1, 'A1');
+    const a2 = await t.createSeason(showA, 2, 'A2');
+    const a3 = await t.createSeason(showA, 3, 'A3');
+    const showB = await t.createSeries(`ws5-b-${seq}`, seq++);
+    const b1 = await t.createSeason(showB, 1, 'B1');
+    const showC = await t.createSeries(`ws5-c-${seq}`, seq++);
+
+    const rankAll = async (who, { movies, seasons, shows }) => {
+      await rank(who, ordered(movies));
+      await rank(who, ordered(seasons), 'tv_seasons');
+      await rank(who, ordered(shows), 'tv_shows');
+    };
+    const me = await user('ws5_reader');
+    // Two seasons of A (three, in fact), and B ranked whole beside its own season.
+    await rankAll(me, { movies: filmsHere, seasons: [a1, a2, a3, b1], shows: [showB, showC] });
+
+    const others = [];
+    const shapes = [
+      { seasons: [a1, a2], shows: [] }, // two seasons of one show
+      { seasons: [b1], shows: [showB] }, // a show and one of its seasons
+      { seasons: [a1, a2, a3, b1], shows: [showB, showC] },
+      { seasons: [a2, a3], shows: [showB] },
+      { seasons: [a1, b1], shows: [showC, showB] },
+      { seasons: [a1, a3, b1], shows: [] },
+    ];
+    for (const [i, shape] of shapes.entries()) {
+      for (const movieCount of [3, 4, 8]) {
+        const other = await user(`ws5_${i}_${movieCount}`);
+        await rankAll(other, { movies: [...filmsHere].sort(() => random() - 0.5).slice(0, movieCount), ...shape });
+        others.push(other);
+      }
+    }
+
+    const { rows: batch } = await t.sql(`select * from _taste_matches($1, $2::uuid[])`, [me, others]);
+    const byId = new Map(batch.map((row) => [row.other_id, row]));
+    await t.actAs(me);
+    let scored = 0;
+    let fewerUnitsThanRows = 0;
+    for (const other of others) {
+      const single = (await t.sql(`select * from taste_match($1)`, [other])).rows[0];
+      const mine = byId.get(other);
+      assert.equal(mine?.common_count ?? 0, single.common_count, `same unit count for ${other}`);
+      assert.equal(mine?.score ?? null, single.score, `same score for ${other}`);
+      if (single.score != null) scored += 1;
+      const { rows } = await t.sql(
+        `select count(*)::int as n from rankings a join rankings b on b.media_item_id = a.media_item_id
+          where a.user_id = $1 and b.user_id = $2`,
+        [me, other],
+      );
+      if (rows[0].n > single.common_count) fewerUnitsThanRows += 1;
+    }
+    await t.actAs(null);
+    assert.ok(scored >= 6, `the fixture produces real scores (${scored})`);
+    assert.equal(fewerUnitsThanRows, others.length, 'every pair shares more rows than series units');
+  });
+
   it('scores a row the same whether or not the category and title filters are used', async () => {
     const people = [reader, ...(await t.sql(`select user_id from rankings group by user_id limit 6`)).rows.map((r) => r.user_id)];
     const key = (row) => `${row.user_id}:${row.media_item_id}`;
@@ -410,5 +482,51 @@ describe('television', () => {
     assert.equal(hit.endorsers, 2, 'two seasons from one neighbour count once');
     assert.ok(!rows.some((row) => row.media_item_id === s1 || row.media_item_id === s2));
     assert.ok(!(await collaborative(reader, 'movie')).some((row) => row.media_item_id === show));
+  });
+
+  it("reads a neighbour's whole-show ranking (tv_shows), not only their seasons", async () => {
+    const show = await t.createSeries(`tn-whole-${seq}`, seq++);
+    const a = await twin('whole_a');
+    const b = await twin('whole_b');
+    await rank(a, [[show, 'loved']], 'tv_shows');
+    await rank(b, [[show, 'loved']], 'tv_shows');
+    await enable();
+    const hit = (await collaborative(reader, 'series')).find((row) => row.media_item_id === show);
+    assert.ok(hit, 'two neighbours who ranked the show whole endorse it');
+    assert.equal(hit.endorsers, 2);
+    assert.ok(!(await collaborative(reader, 'movie')).some((row) => row.media_item_id === show));
+  });
+
+  it('counts a neighbour once per series when they ranked the show whole and its seasons', async () => {
+    const show = await t.createSeries(`tn-unit-${seq}`, seq++);
+    const s1 = await t.createSeason(show, 1, 'S1');
+    const s2 = await t.createSeason(show, 2, 'S2');
+    const a = await twin('unit_a');
+    const b = await twin('unit_b');
+    await rank(a, [[show, 'loved']], 'tv_shows');
+    await rank(a, [[s1, 'loved'], [s2, 'loved']], 'tv_seasons');
+    await rank(b, [[show, 'loved']], 'tv_shows');
+    await rank(b, [[s1, 'loved']], 'tv_seasons');
+    await enable();
+    const hit = (await collaborative(reader, 'series')).find((row) => row.media_item_id === show);
+    assert.ok(hit);
+    assert.equal(hit.endorsers, 2, 'two people, five rows, two opinions');
+  });
+
+  it("takes a neighbour's whole-show ranking as their opinion of the show over a season", async () => {
+    const show = await t.createSeries(`tn-pref-${seq}`, seq++);
+    const s1 = await t.createSeason(show, 1, 'S1');
+    const a = await twin('pref_a');
+    const b = await twin('pref_b');
+    for (const who of [a, b]) {
+      // Loved one season, and ranked the show as a whole Not for me.
+      await rank(who, [[s1, 'loved']], 'tv_seasons');
+      await rank(who, [[show, 'not_for_me']], 'tv_shows');
+    }
+    await enable();
+    const hit = (await collaborative(reader, 'series')).find((row) => row.media_item_id === show);
+    assert.ok(hit, 'a disputed row: evidence against the show');
+    assert.ok(hit.support < 0, `support ${hit.support}`);
+    assert.equal(hit.endorsers, 0);
   });
 });
