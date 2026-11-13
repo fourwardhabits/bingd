@@ -30,13 +30,23 @@ export type PosterTile = {
   /**
    * **A season's number, for its pill** (Candidate A, founder brief §4, 2026-11-14). Set
    * only by the Collection and profile walls, where a show and its seasons share one grid:
-   * a season's chip reads `S1: 9.8` on Parchment with a Maroon border and text, so it can
+   * a season's chip reads `S1 - 9.8` on Parchment with a Maroon border and text, so it can
    * never be read as the show's own score, which keeps the filled Maroon number. `0` is
-   * Specials, `SP: 9.8`. The colon (2026-11-12) makes the pair read as a label and its
-   * value rather than as two numbers. Absent everywhere else, so every other wall is
+   * Specials, `SP - 9.8`. The separator is a hyphen with one space either side (founder
+   * spec §7, 2026-11-13, after the colon of 2026-11-12), so the pair reads as a label and
+   * its value rather than as two numbers. Absent everywhere else, so every other wall is
    * unchanged.
    */
   season?: number | null;
+  /**
+   * **Which kind of score a series poster carries** (WS-TVC, founder spec t168u §2). The TV
+   * Collection draws one poster per series: `explicit` is the reader's own show ranking, in
+   * the filled Maroon chip every score uses; `average` is the mean of their ranked seasons,
+   * drawn as an **outlined** chip reading `AVG 8.7`. Absent is `explicit`.
+   */
+  scoreSource?: 'explicit' | 'average';
+  /** For an `average`: how many ranked seasons it is the mean of, for the spoken label. */
+  rankedSeasonCount?: number;
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
 };
@@ -321,6 +331,7 @@ function Tile({
   onDismiss?: () => void;
 }) {
   const { score } = tile;
+  const average = tile.scoreSource === 'average';
   /**
    * **The wall is the app's most-pressed surface** (founder premium pass, 2026-09-08).
    *
@@ -355,8 +366,18 @@ function Tile({
             // wall the old bucket tint was at its worst: nine tiles, three colours,
             // none of them the poster's, all of them restating a number already
             // printed on top of them. A season's pill inverts it: Parchment, Maroon.
-            style={[styles.chip, tile.season != null && styles.seasonChip]}
-            testID={tile.season != null ? 'poster-season-pill' : 'poster-score-pill'}
+            style={[
+              styles.chip,
+              tile.season != null && styles.seasonChip,
+              average && styles.averageChip,
+            ]}
+            testID={
+              tile.season != null
+                ? 'poster-season-pill'
+                : average
+                  ? 'poster-average-pill'
+                  : 'poster-score-pill'
+            }
             // Already in the label above, and a chip that announces itself
             // separately makes every tile two stops instead of one.
             accessibilityElementsHidden
@@ -364,13 +385,15 @@ function Tile({
           >
             <Text
               variant="caption"
-              tone={tile.season != null ? 'action' : 'inverse'}
+              tone={tile.season != null || average ? 'action' : 'inverse'}
               allowFontScaling={false}
               numberOfLines={1}
             >
               {tile.season != null
-                ? `${seasonPillLabel(tile.season)}: ${formatScore(score)}`
-                : formatScore(score)}
+                ? seasonPillText(tile.season, score)
+                : average
+                  ? averagePillText(score)
+                  : formatScore(score)}
             </Text>
           </View>
         ) : null}
@@ -458,9 +481,29 @@ function Tile({
  */
 export const seasonPillLabel = (season: number) => (season === 0 ? 'SP' : `S${season}`);
 
+/**
+ * A season pill's whole text: `S1 - 9.8`, exactly one space either side of a hyphen-minus
+ * (founder spec §7, 2026-11-13). The one place the format is written, so the pill and its
+ * tests cannot drift apart.
+ */
+export const seasonPillText = (season: number, score: number) =>
+  `${seasonPillLabel(season)} - ${formatScore(score)}`;
+
+/**
+ * An average pill's whole text: `AVG 8.7` (WS-TVC). One place, so the pill and its tests
+ * cannot drift apart.
+ */
+export const averagePillText = (score: number) => `AVG ${formatScore(score)}`;
+
 const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
   if (tile.year) parts.push(String(tile.year));
+  // A season average says so before its number, so the two kinds of score are told apart
+  // by ear as they are by eye (WS-TVC).
+  if (tile.score != null && tile.scoreSource === 'average') {
+    const n = tile.rankedSeasonCount ?? 0;
+    parts.push(`average of ${n} ranked ${n === 1 ? 'season' : 'seasons'}`);
+  }
   if (tile.score != null) parts.push(`scored ${formatScore(tile.score)} out of 10`);
   // Announced on the tile as well as on its own control, because "Saved" is state a
   // sighted reader gets from a filled glyph they can see without touching anything.
@@ -532,6 +575,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.semantic.score,
     // The border is inside the box, so the padding gives it back to keep the height.
+    paddingVertical: 1,
+  },
+  /**
+   * A season average's pill: outlined Maroon — a Maroon border and Maroon `AVG 8.7` — the
+   * same height as the filled chip (the border is inside the box, so the padding gives it
+   * back). Its ground is the raised white surface rather than nothing: a hollow chip over
+   * poster artwork would put Maroon text on whatever the poster is, which on dark art is
+   * unreadable. Existing tokens only.
+   */
+  averageChip: {
+    backgroundColor: theme.surface.raised,
+    borderWidth: 1,
+    borderColor: theme.semantic.score,
     paddingVertical: 1,
   },
   pressed: { opacity: 0.7 },

@@ -27,6 +27,12 @@ export type WatchDetailsRowsProps = {
    * the commit: it must `flush()` when the reader presses Save or picks a bucket.
    */
   titleNote: TitleNote;
+  /**
+   * The hairline above the rows, which the log sheet draws. A Watch History card's editor
+   * draws its own boundary above its header and passes `false`, so the editor is one ruled
+   * region rather than two rules a few points apart (founder spec §5: fewer dividers).
+   */
+  ruled?: boolean;
 };
 
 type Open = 'who' | 'note' | 'date' | null;
@@ -60,6 +66,7 @@ export function WatchDetailsRows({
   companionIds,
   onToggleCompanion,
   titleNote,
+  ruled = true,
 }: WatchDetailsRowsProps) {
   const [open, setOpen] = useState<Open>(null);
   const toggle = (row: Exclude<Open, null>) => setOpen((was) => (was === row ? null : row));
@@ -81,7 +88,7 @@ export function WatchDetailsRows({
       : 'Add';
 
   return (
-    <View style={styles.rows}>
+    <View style={[styles.rows, !ruled && styles.unruled]}>
       <SheetRow
         icon="people-outline"
         label="Who I watched with"
@@ -157,6 +164,7 @@ const styles = StyleSheet.create({
     borderTopColor: theme.border.hairline,
     paddingTop: theme.space[2],
   },
+  unruled: { borderTopWidth: 0, paddingTop: 0 },
   expanded: { paddingBottom: theme.space[2] },
   noteBox: { paddingHorizontal: theme.layout.gutter, gap: theme.space[2] },
 });

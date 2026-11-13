@@ -239,3 +239,41 @@ describe('the rows', () => {
     expect(view.queryByText('Someone')).toBeNull();
   });
 });
+
+/**
+ * **The shared sheet structure** (founder spec §4, 2026-11-13): the search stays in the
+ * header, the list shrinks to the room above the footer rather than to a fixed cap, and
+ * the one way out is the standard Close footer — not a second Close in the header.
+ */
+describe('the sheet around the list', () => {
+  it('has exactly one Close, the footer, and it closes', async () => {
+    mockRpc.pages = [pageOf(1, 3)];
+    const onClose = jest.fn();
+    const view = await open({ onClose });
+    await waitFor(() => expect(view.getByText('Person 1')).toBeTruthy());
+
+    expect(view.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+    expect(view.getByTestId('dismiss-footer')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches the last row of a long list, with the footer outside the scroll', async () => {
+    mockRpc.pages = [pageOf(1, 40)];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Person 40')).toBeTruthy());
+
+    const { StyleSheet } = jest.requireActual('react-native');
+    const footer = view.getByTestId('dismiss-footer');
+    let scroller = view.getByText('Person 40').parent;
+    while (scroller && scroller.type !== 'RCTScrollView') scroller = scroller.parent;
+    expect(scroller).toBeTruthy();
+    // No fixed cap left on the list: it is the sheet's content area that bounds it.
+    expect(StyleSheet.flatten(scroller?.props.style).maxHeight).toBeUndefined();
+    let up = footer.parent;
+    while (up) {
+      expect(up).not.toBe(scroller);
+      up = up.parent;
+    }
+  });
+});

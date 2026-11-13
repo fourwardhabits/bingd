@@ -1,6 +1,7 @@
 import type { CollectionItem } from './filters';
 import { rankingStateOf } from './ranking-state';
 import { bandSizes, scoreFor, type Bucket } from './score';
+import { projectShows, type ShowProjection } from './show-projection';
 import type { LoggedEntry, RankedEntry, RankingCategory } from './use-collection';
 
 export type WatchedRow = {
@@ -25,34 +26,6 @@ export function filterByMedium<T extends { kind: 'movie' | 'season' | 'series' }
   );
 }
 
-/**
- * **Candidate A's precedence** (founder brief §4, 2026-11-14), as one rule every
- * collection and profile surface shares: a ranked show is drawn only while none of its
- * seasons is ranked. Presentation only. The show's ranking is never deleted, suppressed in
- * storage or recalculated; it is still on the show's page, in the feed, the scores and
- * recommendations. Not applied to watchlists, custom lists, the feed or ranking data.
- *
- *   Show only                show poster + show score
- *   Season 1 only            S1 poster + score
- *   Seasons 1 and 2          both season posters + scores
- *   Show + S1                S1 only
- *   Show + several seasons   every ranked season; no show poster
- */
-export function standsAloneBeside(seasons: readonly { kind: string; seriesId?: string | null }[]) {
-  const shown = new Set(
-    seasons
-      .filter((entry) => entry.kind === 'season' && entry.seriesId)
-      .map((entry) => entry.seriesId as string),
-  );
-  return (item: { kind: string; mediaItemId: string }) =>
-    !(item.kind === 'series' && shown.has(item.mediaItemId));
-}
-
-/** The ranked shows that stand alone beside these ranked seasons. */
-export const standaloneShows = <T extends { kind: string; mediaItemId: string }>(
-  seasons: readonly { kind: string; seriesId?: string | null }[],
-  shows: readonly T[],
-): T[] => shows.filter(standsAloneBeside(seasons));
 
 /**
  * Ranked titles by score, then everything watched but not yet ranked.
@@ -156,47 +129,35 @@ export function watchedItems(
 ): CollectionItem[] {
   const byId = new Map(logged.map((entry) => [entry.mediaItemId, entry]));
 
-  // **Scored per pool, each against its own band sizes.** A show is scored among shows
-  // and a season among seasons; one pooled set of sizes would let a show's bucket count
-  // move a season's score and the reverse.
-  const scored = (pool: readonly RankedEntry[]): CollectionItem[] => {
-    const sizes = bandSizes(pool);
-    return pool.map((entry) => ({
-      mediaItemId: entry.mediaItemId,
-      title: entry.title,
-      seriesTitle: entry.seriesTitle,
-      seasonNumber: entry.seasonNumber,
-      kind: entry.kind,
-      year: entry.year,
-      posterPath: entry.posterPath,
-      genres: entry.genres,
-      language: entry.language,
-      runtimeMinutes: entry.runtimeMinutes,
-      score: scoreFor(entry.bucket, entry.position, sizes),
-      // What the Rating order breaks an equal score on, inside this pool only. See
-      // `CollectionItem.position` and `.category`.
-      position: entry.position,
-      category: entry.category,
-      bucket: entry.bucket,
-      // A ranked title's watch date and collection timestamp live on `user_media`, which
-      // the logged query holds — so they are read across from there. See the note above
-      // for what happens when the caller hands over a list this cannot find them in.
-      watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
-      addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
-    }));
-  };
+  // **TV is one poster per series** (WS-TVC, founder spec t168u §2): see `seriesItems`.
+  if (medium === 'tv_seasons') return seriesItems(ranked, shows, logged);
 
-  // Candidate A's precedence: see `standsAloneBeside`.
-  const standsAlone = standsAloneBeside(ranked);
-
-  const all = [...scored(ranked), ...scored(shows)];
-  const items = all.filter(standsAlone);
-  // Hidden shows count as seen, so the logged half cannot bring one back as unranked.
-  const seen = new Set(all.map((item) => item.mediaItemId));
+  const sizes = bandSizes(ranked);
+  const items: CollectionItem[] = ranked.map((entry) => ({
+    mediaItemId: entry.mediaItemId,
+    title: entry.title,
+    seriesTitle: entry.seriesTitle,
+    seasonNumber: entry.seasonNumber,
+    kind: entry.kind,
+    year: entry.year,
+    posterPath: entry.posterPath,
+    genres: entry.genres,
+    language: entry.language,
+    runtimeMinutes: entry.runtimeMinutes,
+    score: scoreFor(entry.bucket, entry.position, sizes),
+    // What the Rating order breaks an equal score on. See `CollectionItem.position`.
+    position: entry.position,
+    category: entry.category,
+    bucket: entry.bucket,
+    // A ranked title's watch date and collection timestamp live on `user_media`, which
+    // the logged query holds — so they are read across from there.
+    watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
+    addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
+  }));
+  const seen = new Set(items.map((item) => item.mediaItemId));
 
   for (const entry of filterByMedium(logged, medium)) {
     if (seen.has(entry.mediaItemId)) continue;
-    if (!standsAlone(entry)) continue;
     items.push({
       ...toItem(entry),
       score: null,
@@ -207,6 +168,135 @@ export function watchedItems(
 
   return items;
 }
+
+/** The latest of two ISO dates or timestamps, either of which may be missing. */
+const latest = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
+
+/**
+ * **The TV Collection: one poster per parent series** (WS-TVC, founder spec t168u §2,
+ * replacing Candidate A's `standsAloneBeside`).
+ *
+ * Ranked: every series the reader ranked a season or the show of, once, carrying its
+ * effective score (`projectShows`: the explicit show score, else the mean of the ranked
+ * seasons). `mediaItemId` is the series, so a tap opens the show page. Seasons are never
+ * posters here; both ladders are read and never reordered.
+ *
+ * Unranked (logged, never ranked): one poster per series as well, and a logged season or
+ * show whose series already has a ranked poster is absorbed into it rather than shown
+ * twice. A series' own logged row is used when there is one; otherwise the series is
+ * drawn from its first logged season (the logged read carries no series artwork, so the
+ * season's poster stands in). Only the series' own row can make a poster "unfinished":
+ * a season's unfinished placement is resumed from that season's page, not from here.
+ *
+ * Recently watched and Recently added read the latest date among every logged row of the
+ * series; Runtime stays hidden on Watched TV, as before (`offersRuntime` skips every
+ * series poster made here, which all carry `showScore`).
+ */
+function seriesItems(
+  seasons: readonly RankedEntry[],
+  shows: readonly RankedEntry[],
+  logged: readonly LoggedEntry[],
+): CollectionItem[] {
+  const tvLogged = filterByMedium(logged, 'tv_seasons');
+  const seriesOf = (entry: { kind: string; mediaItemId: string; seriesId?: string | null }) =>
+    entry.kind === 'series' ? entry.mediaItemId : (entry.seriesId ?? entry.mediaItemId);
+
+  // Every logged row of a series, for its dates: one pass.
+  const dates = new Map<string, { watchedOn: string | null; addedAt: string | null }>();
+  for (const entry of tvLogged) {
+    const key = seriesOf(entry);
+    const was = dates.get(key) ?? { watchedOn: null, addedAt: null };
+    dates.set(key, {
+      watchedOn: latest(was.watchedOn, entry.watchedOn),
+      addedAt: latest(was.addedAt, entry.addedAt),
+    });
+  }
+
+  const ranked = projectShows(seasons, shows);
+  const items: CollectionItem[] = ranked.map((p) => rankedSeriesItem(p, dates.get(p.seriesId)));
+  const placed = new Set(ranked.map((p) => p.seriesId));
+  const rankedIds = new Set([...seasons, ...shows].map((entry) => entry.mediaItemId));
+
+  // Unranked, grouped by series: the series' own row if it is logged, else its first
+  // logged season.
+  const unranked = new Map<string, { own: LoggedEntry | null; first: LoggedEntry | null }>();
+  for (const entry of tvLogged) {
+    if (rankedIds.has(entry.mediaItemId)) continue;
+    const key = seriesOf(entry);
+    if (placed.has(key)) continue;
+    const group = unranked.get(key) ?? { own: null, first: null };
+    if (entry.kind === 'series') group.own = entry;
+    else if (
+      !group.first ||
+      (entry.seasonNumber ?? Number.MAX_SAFE_INTEGER) <
+        (group.first.seasonNumber ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      group.first = entry;
+    }
+    unranked.set(key, group);
+  }
+  for (const [seriesId, { own, first }] of unranked) {
+    const date = dates.get(seriesId);
+    if (own) {
+      items.push({
+        ...toItem(own),
+        score: null,
+        bucket: null,
+        watchedOn: date?.watchedOn ?? own.watchedOn,
+        addedAt: date?.addedAt ?? own.addedAt,
+        unfinished: rankingStateOf({ ranked: false, bucket: own.bucket }) === 'unfinished',
+        // A TV Collection poster with no score yet (see `offersRuntime`).
+        showScore: null,
+      });
+    } else if (first) {
+      items.push({
+        ...toItem(first),
+        mediaItemId: seriesId,
+        title: first.seriesTitle ?? first.title,
+        seriesTitle: null,
+        seasonNumber: null,
+        kind: 'series',
+        score: null,
+        bucket: null,
+        watchedOn: date?.watchedOn ?? first.watchedOn,
+        addedAt: date?.addedAt ?? first.addedAt,
+        unfinished: false,
+        showScore: null,
+      });
+    }
+  }
+
+  return items;
+}
+
+/** One ranked series poster, from its projection. */
+const rankedSeriesItem = (
+  p: ShowProjection,
+  date: { watchedOn: string | null; addedAt: string | null } | undefined,
+): CollectionItem => ({
+  mediaItemId: p.seriesId,
+  title: p.title,
+  seriesTitle: null,
+  seasonNumber: null,
+  kind: 'series',
+  year: p.year,
+  posterPath: p.posterPath,
+  genres: p.genres,
+  language: p.language,
+  runtimeMinutes: null,
+  score: p.display,
+  position: p.tiePosition,
+  category: 'tv_shows',
+  bucket: p.bucket,
+  watchedOn: date?.watchedOn ?? null,
+  addedAt: date?.addedAt ?? null,
+  showScore: {
+    sumTenths: p.sumTenths,
+    n: p.n,
+    source: p.source,
+    rankedSeasonCount: p.rankedSeasonCount,
+  },
+});
 
 /** The Watchlist, in the same shape. Nothing on it is ranked, by construction. */
 export const watchlistItems = (
