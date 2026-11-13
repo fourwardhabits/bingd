@@ -69,8 +69,13 @@ export const MIN_MATCH = 55;
 export const MIN_COMMON = 5;
 export const SHRINK_PRIOR = 5;
 
-type Engine = 'v1' | 'v2_metadata';
-export const ENGINES: Engine[] = ['v1', 'v2_metadata'];
+/**
+ * `v2_metadata+social` is a **diagnostic, not a shipped configuration**: V2 metadata with the
+ * follow-graph source V2 removes by design put back, so a gap between V1 and V2 can be
+ * attributed to that decision (or not). It is scored exactly as V2 metadata.
+ */
+type Engine = 'v1' | 'v2_metadata' | 'v2_metadata+social';
+export const ENGINES: Engine[] = ['v1', 'v2_metadata', 'v2_metadata+social'];
 
 export type Metrics = {
   recall20: number | null;
@@ -403,7 +408,7 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     similarIds: w.similar.get(a.mediaItemId) ?? [],
   }));
   const met = metOf(account, w);
-  const social = v2 ? [] : socialMirror(account, w, medium, met);
+  const social = engine === 'v2_metadata' ? [] : socialMirror(account, w, medium, met);
   const anchored = anchors.filter((a) => a.similarIds.length > 0).length;
   const lists = medium === 'tv' && anchored > 0 ? TRENDING.tv.slice(0, 1) : TRENDING[medium];
   const trending = [...new Set(lists.flatMap((key) => w.trending.get(key) ?? []))];
@@ -432,7 +437,7 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     anchors,
     taste,
     exclude: new Set(met),
-    engine,
+    engine: v2 ? 'v2_metadata' : 'v1',
     profile,
   });
   const drawn = drawSlate(scored, {
@@ -616,7 +621,10 @@ export type ReplayReport = {
     string,
     Record<string, Record<string, Partial<Record<keyof Metrics, Summary | null>>>>
   >;
-  deltas: Record<string, Record<string, Partial<Record<keyof Metrics, Summary | null>>>>;
+  deltas: Record<
+    string,
+    Record<string, Record<string, Partial<Record<keyof Metrics, Summary | null>>>>
+  >;
   /** Sorted per-account V2 − V1 recall@50 differences, per wall. No keys. */
   perAccount: Record<string, number[]>;
   buckets: Record<string, number>;
@@ -660,17 +668,20 @@ export function replay(input: unknown): ReplayReport {
         for (const k of KEYS) row[k] = summarise(idx.map((i) => per.get(engine)![i]![k]));
         results[medium]![slice]![engine] = row;
       }
-      const d: Partial<Record<keyof Metrics, Summary | null>> = {};
-      for (const k of KEYS) {
-        d[k] = summarise(
-          idx.map((i) => {
-            const a = per.get('v2_metadata')![i]![k];
-            const b = per.get('v1')![i]![k];
-            return a == null || b == null ? null : a - b;
-          }),
-        );
+      deltas[medium]![slice] = {};
+      for (const engine of ENGINES.filter((e) => e !== 'v1')) {
+        const d: Partial<Record<keyof Metrics, Summary | null>> = {};
+        for (const k of KEYS) {
+          d[k] = summarise(
+            idx.map((i) => {
+              const a = per.get(engine)![i]![k];
+              const b = per.get('v1')![i]![k];
+              return a == null || b == null ? null : a - b;
+            }),
+          );
+        }
+        deltas[medium]![slice]![engine] = d;
       }
-      deltas[medium]![slice] = d;
     }
     perAccount[medium] = accounts
       .map((_, i) => {
@@ -742,10 +753,11 @@ export function renderReplay(report: ReplayReport, label: string): string {
           `| ${slice} | ${engine} | ${COLUMNS.map(([k]) => fmt(row[k] ?? null)).join(' | ')} |`,
         );
       }
-      const d = report.deltas[medium]![slice]!;
-      lines.push(
-        `| ${slice} | V2 − V1 | ${COLUMNS.map(([k]) => fmt(d[k] ?? null, true)).join(' | ')} |`,
-      );
+      for (const [engine, d] of Object.entries(report.deltas[medium]![slice]!)) {
+        lines.push(
+          `| ${slice} | ${engine} − v1 | ${COLUMNS.map(([k]) => fmt(d[k] ?? null, true)).join(' | ')} |`,
+        );
+      }
     }
     lines.push('');
     const xs = report.perAccount[medium]!;
@@ -759,6 +771,10 @@ export function renderReplay(report: ReplayReport, label: string): string {
   lines.push('');
   lines.push(
     `**Not measurable at current scale.** A collaborative row needs at least two taste neighbours (Match > ${MIN_MATCH} on ≥ ${MIN_COMMON} shared series, public accounts). Pool coverage: ${h.withTwo}/${h.accounts} accounts have two or more such neighbours, ${h.withOne}/${h.accounts} have one or more. Neighbours per account (no keys): ${distribution([...h.neighbourCounts].sort((a, b) => a - b))}.`,
+  );
+  lines.push('');
+  lines.push(
+    '`v2_metadata+social` is a diagnostic, not a shipped configuration: V2 metadata with the follow-graph source put back, to attribute a V1 − V2 gap.',
   );
   lines.push('');
   lines.push(
