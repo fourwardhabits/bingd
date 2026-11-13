@@ -43,6 +43,9 @@
  * for the axes it declares, and `sort.test.ts` pins the machine.
  */
 
+import type { Ionicons } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
+
 /** Descending is high→low, new→old, Z→A. Ascending is the reverse, in every axis. */
 export type SortDirection = 'desc' | 'asc';
 
@@ -81,6 +84,13 @@ export type SortAxisSpec<Axis extends string> = {
    * because pressing it again *does* something, and without a hint nothing says what.
    */
   repeatHint?: string;
+  /**
+   * For an axis with no `directions`: a small glyph the sort menu draws to the right of its
+   * label, in the slot a directional row's arrow takes (founder QA, 2026-11-12 — Shuffle's
+   * `shuffle-outline`). Display only; it never changes what the row does or says aloud.
+   * Absent means the row is the label alone, as before.
+   */
+  glyph?: ComponentProps<typeof Ionicons>['name'];
 };
 
 /** Whether this axis has two states to move between. */

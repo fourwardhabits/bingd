@@ -245,6 +245,15 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
   if (/already updated from that season/.test(error.message)) {
     return { state: 'failed', message: 'You already updated this show.', restart: false };
   }
+  // 20261120000100: the reader already kept the show for this season (perhaps a Keep
+  // whose reply was lost), so the link cannot also update it.
+  if (/already kept for that season/.test(error.message)) {
+    return {
+      state: 'failed',
+      message: 'You already kept your show score for this season.',
+      restart: false,
+    };
+  }
   if (/show is not ranked|not a season of this show/.test(error.message)) {
     return {
       state: 'failed',
@@ -587,4 +596,61 @@ export async function rankCancel(sessionId: string): Promise<SessionStep> {
   // Already gone is the outcome the caller wanted.
   if (error && error.code !== CODES.notFound) return fail(error);
   return { state: 'ended' };
+}
+
+/**
+ * What `keepShow` answered.
+ *
+ *   kept     the reaffirmation is recorded; `created` is false for a repeat of one already
+ *            recorded (a second tap, or a retry after a lost reply), which is the same row.
+ *   failed   nothing was recorded, or the outcome is unknown (`changed`); the message is for
+ *            a person. Retrying is always safe: the server keeps one row per season
+ *            placement.
+ */
+export type KeepShowResult =
+  | { outcome: 'kept'; created: boolean; keptAt: string | null }
+  | { outcome: 'failed'; message: string; changed: boolean };
+
+/**
+ * **Keep Show** (WS-TVC, founder spec t168u §3D, migration 20261120000100): "I considered
+ * the season I just ranked and my whole-show ranking stands." Records the reaffirmation for
+ * that season placement and changes no ranking, placement, watch, collection row or Feed.
+ */
+export async function keepShow(seasonPlacementId: string): Promise<KeepShowResult> {
+  const { data, error } = await supabase.rpc('keep_show', {
+    p_season_placement_id: seasonPlacementId,
+  });
+  if (!error) {
+    const body = (data ?? {}) as { status?: string; created?: boolean; kept_at?: string | null };
+    if (body.status === 'kept') {
+      return { outcome: 'kept', created: Boolean(body.created), keptAt: body.kept_at ?? null };
+    }
+    // Answered, but not with the shape the server writes: say so rather than claim it.
+    return { outcome: 'failed', message: 'The server did not confirm that.', changed: true };
+  }
+  const changed = classifyWrite(error) !== 'refused';
+  switch (error.code) {
+    case CODES.alreadyRanked:
+      // 23505: an Update Show already resolved, or is resolving, this season.
+      return {
+        outcome: 'failed',
+        message: 'You already updated the show from this season.',
+        changed: false,
+      };
+    case CODES.notFound:
+      // P0002: the season placement is stale or superseded, or the show is not ranked.
+      return {
+        outcome: 'failed',
+        message: 'This season’s ranking has moved on, so there is nothing to keep.',
+        changed: false,
+      };
+    case CODES.suspended:
+      return { outcome: 'failed', message: 'Your account cannot do that right now.', changed: false };
+    default:
+      return {
+        outcome: 'failed',
+        message: 'Could not keep the show. Check your connection and try again.',
+        changed,
+      };
+  }
 }

@@ -115,12 +115,12 @@ const rowTitles = (view: Awaited<ReturnType<typeof open>>) =>
     .filter(
       (label): label is string =>
         Boolean(label) &&
-        /^Add .+ to your watchlist$|^Remove .+ from your watchlist$/.test(label!),
+        /^Add .+ to Watchlist$|^Remove .+ from Watchlist$/.test(label!),
     )
     .map((label) =>
       label
-        .replace(/^Add (.+) to your watchlist$/, '$1')
-        .replace(/^Remove (.+) from your watchlist$/, '$1'),
+        .replace(/^Add (.+) to Watchlist$/, '$1')
+        .replace(/^Remove (.+) from Watchlist$/, '$1'),
     );
 
 const chooseSort = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
@@ -156,7 +156,7 @@ describe('the refreshed page', () => {
   it('keeps the portrait, the name and the facts', async () => {
     const view = await open();
     expect(view.getByTestId('person-meta')).toHaveTextContent(
-      'Acting · born 1963 · Shawnee, Oklahoma, USA',
+      'Born 1963 · USA',
     );
   });
 
@@ -189,10 +189,29 @@ describe('a biography the cache shortened', () => {
     );
   });
 
-  it('makes no such claim about a biography that was whole', async () => {
+  it('makes no such claim about a biography that was whole, and a short one has no More', async () => {
     use(BRYAN_CRANSTON);
     const view = await open('Bryan Cranston');
+    // One sentence fits inside the clamp: no toggle that would do nothing (founder spec §6).
+    expect(view.queryByLabelText('Expand biography')).toBeNull();
+    expect(view.getByTestId('biography-text')).toHaveTextContent(
+      'Bryan Lee Cranston is an American actor and filmmaker.',
+    );
+    expect(view.queryByTestId('biography-shortened')).toBeNull();
+  });
+
+  it('opens a long biography with More and closes it again with Less', async () => {
+    const view = await open();
+    const text = () => view.getByTestId('biography-text');
+    expect(text().props.numberOfLines).toBe(3);
+    expect(view.getByTestId('biography-toggle')).toHaveTextContent('More');
+
     await fireEvent.press(view.getByLabelText('Expand biography'));
+    expect(text().props.numberOfLines).toBeUndefined();
+    expect(view.getByTestId('biography-toggle')).toHaveTextContent('Less');
+
+    await fireEvent.press(view.getByLabelText('Collapse biography'));
+    expect(text().props.numberOfLines).toBe(3);
     expect(view.queryByTestId('biography-shortened')).toBeNull();
   });
 });
@@ -318,7 +337,7 @@ describe('sorting a filmography', () => {
   it('saves from a sorted row, and changes nothing about rankings', async () => {
     const view = await open();
     await chooseSort(view, 'Release date');
-    await fireEvent.press(view.getByLabelText('Add F1 to your watchlist'));
+    await fireEvent.press(view.getByLabelText('Add F1 to Watchlist'));
     expect(mockSetWatchlist).toHaveBeenCalledWith({
       operationId: 'op-1',
       mediaItemId: 'bp-f1',
@@ -346,7 +365,7 @@ describe('sorting a filmography', () => {
     const view = await open();
     await chooseSort(view, 'Release date');
     await waitFor(() =>
-      expect(view.getByLabelText('Remove F1 from your watchlist')).toBeTruthy(),
+      expect(view.getByLabelText('Remove F1 from Watchlist')).toBeTruthy(),
     );
   });
 });

@@ -49,7 +49,14 @@ export default function ProfileListsScreen() {
   const rows = lists.data ?? [];
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12), the Settings root's fix for the same reason
+     * `settings/notifications.tsx` records: the root layout shows a native-stack header on
+     * `lists/by/[userId]`, which already consumes the status-bar inset, so `Screen`'s default `top`
+     * edge added the same inset a second time below it. Left and right still apply; only the top
+     * edge is the header's.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen options={{ title: typeof name === 'string' && name ? `${name}'s lists` : 'Lists' }} />
 
       {lists.isPending ? (

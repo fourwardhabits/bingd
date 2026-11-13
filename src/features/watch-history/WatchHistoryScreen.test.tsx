@@ -1,4 +1,5 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, StyleSheet, type AlertButton } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -187,7 +188,8 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
 
     expect(view.queryByText('Add a past watch')).toBeNull();
     expect(view.queryByText('Log another watch')).toBeNull();
-    expect(view.getByTestId('watch-date-w1').props.children).toMatch(/\(First watch\)$/);
+    // The date alone on every row, the earliest included (founder QA, 2026-11-12).
+    expect(view.getByTestId('watch-date-w1').props.children).not.toMatch(/First watch/);
     expect(view.getByTestId('watch-date-w2').props.children).not.toMatch(/First watch/);
     expect(view.getByTestId('watch-score-w1')).toBeTruthy();
     expect(view.getByLabelText(/^9\.0 out of 10/)).toBeTruthy();
@@ -487,6 +489,75 @@ describe('the page', () => {
     expect(view.getByTestId('watch-history-span').props.children).toMatch(/^First .* · Latest /);
   });
 
+  /**
+   * **The span only when it says something** (founder QA, 2026-11-12): one dated watch, or
+   * dated watches all on one day, would print the same date as both First and Latest.
+   */
+  type Row = Omit<ReturnType<typeof event>, 'watchedOn' | 'basis'> & {
+    watchedOn: string | null;
+    basis: 'reader' | 'none';
+  };
+  const history = (events: Row[]) =>
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: { count: events.length, events, details: new Map(), placements: [], posts: [] },
+    });
+  const undated = (id: string, recordedAt: string) => ({
+    ...event(id, '2000-01-01', recordedAt),
+    watchedOn: null,
+    basis: 'none' as const,
+  });
+
+  it('has no span for two watches on the same day', async () => {
+    history([
+      event('w1', '2026-10-12', '2026-10-12T10:00:00Z'),
+      event('w2', '2026-10-12', '2026-10-12T22:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.queryByTestId('watch-history-span')).toBeNull();
+  });
+
+  it('has no span for one dated watch beside an undated one', async () => {
+    history([
+      undated('w0', '2025-01-01T10:00:00Z'),
+      event('w1', '2026-10-12', '2026-10-12T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.queryByTestId('watch-history-span')).toBeNull();
+  });
+
+  it('keeps the span for two dated watches on different days, earliest first', async () => {
+    history([
+      event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+      event('w2', '2024-03-04', '2024-03-04T12:00:00Z'),
+      event('w3', '2025-06-01', '2025-06-01T10:00:00Z'),
+      undated('w0', '2023-01-01T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-span').props.children).toBe(
+      'First Mar 4, 2024 · Latest Jun 1, 2025',
+    );
+  });
+
+  it('keeps the order, and the undated import in Earlier, with no First watch label', async () => {
+    history([
+      undated('w0', '2023-01-01T10:00:00Z'),
+      event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+      event('w2', '2025-06-01', '2025-06-01T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    // Newest first, the undated viewing last under Earlier — unchanged.
+    const rows = view
+      .getAllByTestId(/^watch-row-/)
+      .map((node) => String(node.props.testID).replace('watch-row-', ''));
+    expect(rows).toEqual(['w2', 'w1', 'w0']);
+    expect(view.getByTestId('watch-date-w0').props.children).toBe('Earlier');
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
+    expect(view.queryByText(/First watch/)).toBeNull();
+  });
+
   it('adds no padding of its own above the summary, under the label’s 44pt row', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
@@ -559,8 +630,8 @@ describe('Back', () => {
 });
 
 /**
- * **The collapsed row** (founder, UI consistency sprint, 2026-11-10): the date — with
- * *(First watch)* where it applies — and Edit directly under it on the left; the score at
+ * **The collapsed row** (founder, UI consistency sprint, 2026-11-10): the date — alone, with
+ * no *(First watch)* since 2026-11-12 — and Edit directly under it on the left; the score at
  * the watch on the right, alone in its column so Edit cannot push it down.
  */
 describe('a collapsed row', () => {
@@ -581,42 +652,64 @@ describe('a collapsed row', () => {
       },
     });
 
-  it('puts Edit directly under the date, and the score alone on the right', async () => {
+  /**
+   * **The date is the anchor and the score is centred on it** (founder spec §5,
+   * 2026-11-13). The date block — the date, then where it came from — is the left column;
+   * the score circle is the right one, centred on that block, so nothing below the date
+   * (the actions, the editor) can move it.
+   */
+  it('anchors the card on the date, with the score alone on the right and centred on it', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     const main = view.getByTestId('watch-main-w1');
     const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
-    // The date's column: the date, then Edit — nothing between them.
-    const leadView = view.getByTestId('watch-date-w1').parent!;
+    expect(lead?.props.testID).toBe('watch-lead-w1');
+    expect(right?.props.testID).toBe('watch-score-w1');
+    expect(StyleSheet.flatten(main.props.style).alignItems).toBe('center');
+    // The date is the block's first line, in the headline style; Edit is not in it.
+    const leadView = view.getByTestId('watch-lead-w1');
     const order = (leadView.children as unknown as { props: { testID?: string } }[]).map(
       (child) => child.props.testID,
     );
-    expect(order).toEqual(['watch-date-w1', 'watch-edit-w1']);
-    expect(lead).toBeTruthy();
-    // The score is the right column, and Edit is not in it.
-    expect(right?.props.testID).toBe('watch-score-w1');
-    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024 (First watch)');
+    expect(order[0]).toBe('watch-date-w1');
+    expect(order).not.toContain('watch-edit-w1');
+    // No *(First watch)* suffix on the earliest dated watch (founder QA, 2026-11-12).
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
   });
 
-  it('keeps the score level with the date, whether Edit or the editor is showing', async () => {
+  it('keeps the score where it was when the editor opens', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    const main = () => StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style);
-    // Top-aligned, so neither Edit's 44pt target below the date nor its removal while
-    // editing can move the circle (independent review).
-    expect(main().alignItems).toBe('flex-start');
+    const mainKids = () =>
+      (view.getByTestId('watch-main-w1').children as unknown as { props: { testID?: string } }[]).map(
+        (child) => child.props.testID,
+      );
+    const before = mainKids();
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    expect(main().alignItems).toBe('flex-start');
-    expect(view.getByTestId('watch-score-w1')).toBeTruthy();
+    expect(mainKids()).toEqual(before);
+    expect(StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style).alignItems).toBe('center');
   });
 
-  it('keeps the companions and the note under the row, never between the date and Edit', async () => {
+  /**
+   * **Edit watch sits with the watch's information** (founder spec §5): the card reads
+   * date, then the companions and note, then its acts — never an act between the date and
+   * the facts it belongs to.
+   */
+  it('draws the facts after the date and the acts after the facts', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     expect(view.getByTestId('watch-with-w2').props.children).toBe('With Alex');
     expect(view.getByTestId('watch-note-w2').props.children).toBe('Better the second time.');
-    const leadView = view.getByTestId('watch-date-w2').parent!;
-    expect(leadView.children).toHaveLength(2);
+    const card = view.getByTestId('watch-row-w2');
+    const ids: string[] = [];
+    const walk = (node: { props?: { testID?: string }; children?: unknown[] }) => {
+      if (node.props?.testID) ids.push(node.props.testID);
+      for (const child of node.children ?? []) if (typeof child === 'object') walk(child as never);
+    };
+    walk(card as never);
+    expect(ids.indexOf('watch-date-w2')).toBeLessThan(ids.indexOf('watch-with-w2'));
+    expect(ids.indexOf('watch-note-w2')).toBeLessThan(ids.indexOf('watch-edit-w2'));
+    expect(within(view.getByTestId('watch-edit-w2')).getByText('Edit watch')).toBeTruthy();
   });
 
   it('expands the watch whose Edit was pressed, and only that one', async () => {
@@ -656,12 +749,12 @@ describe('a collapsed row', () => {
 });
 
 /**
- * **Edit ranking** (founder, UI consistency sprint, 2026-11-10): the title's existing
- * correction flow, opened from a watch's editor. Three acts, kept three: Log another watch
- * is a new viewing (the title page's), Edit is this viewing's details, and Edit ranking is
+ * **Rerank** (founder spec §5, 2026-11-13; *Edit ranking* until then): the title's existing
+ * correction flow, opened from a watch's card or editor. Three acts, kept three: Log another
+ * watch is a new viewing (the title page's), Edit watch is this viewing's details, and Rerank is
  * the current ranking. This one creates no watch, edits none and removes none.
  */
-describe('Edit ranking', () => {
+describe('Rerank', () => {
   const ranked = (extra: Partial<{ placements: unknown[]; posts: unknown[] }> = {}) => {
     mockLogState.mockReturnValue({
       data: {
@@ -715,15 +808,59 @@ describe('Edit ranking', () => {
     });
   });
 
-  it('is offered in the editor beside Remove, only for a ranked title', async () => {
+  /**
+   * **Rerank sits with the watch, not under Remove** (founder spec §5, 2026-11-13). On the
+   * collapsed card it is beside Edit watch; with the editor open it leads the editor's
+   * header, at the same height, and the destructive Remove is last and apart.
+   */
+  it('is offered beside Edit watch on the card, and leads the editor header, only for a ranked title', async () => {
     ranked();
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    // Not on the collapsed row: it is an act of the editor.
-    expect(view.queryByText('Edit ranking')).toBeNull();
+    const actions = within(view.getByTestId('watch-actions-w1'));
+    expect(actions.getByRole('button', { name: 'Rerank' })).toBeTruthy();
+    expect(actions.getByRole('button', { name: /^Edit this watch/ })).toBeTruthy();
+
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    expect(view.getByTestId('watch-edit-ranking-w1')).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Edit ranking' })).toBeTruthy();
+    const header = within(view.getByTestId('watch-editor-header-w1'));
+    expect(header.getByRole('button', { name: 'Rerank' })).toBeTruthy();
+    expect(header.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    expect(header.getByRole('button', { name: 'Save' })).toBeTruthy();
+    expect(header.queryByText('Remove this watch')).toBeNull();
     expect(view.getByText('Remove this watch')).toBeTruthy();
+    expect(view.getAllByRole('button', { name: 'Rerank' })).toHaveLength(1);
+  });
+
+  it('uses the left/right arrows, never the star, which is the initial Rank’s', async () => {
+    ranked();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    // The jest renderer prints an Ionicons glyph rather than its name.
+    const glyph = (name: 'star-outline' | 'swap-horizontal-outline') =>
+      String.fromCodePoint(Ionicons.glyphMap[name] as number);
+    for (const open of [false, true]) {
+      if (open) await fireEvent.press(view.getByTestId('watch-edit-w1'));
+      const rerank = within(view.getByTestId('watch-rerank-w1'));
+      expect(rerank.getByText(glyph('swap-horizontal-outline'))).toBeTruthy();
+      expect(rerank.queryByText(glyph('star-outline'))).toBeNull();
+    }
+  });
+
+  it('is not offered on other cards while one card is being edited', async () => {
+    ranked();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    // Reranking from w2 would close w1's editor and drop its edits without asking.
+    expect(view.queryByTestId('watch-rerank-w2')).toBeNull();
+    expect(view.getByTestId('watch-rerank-w1')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Cancel' }));
+    expect(view.getByTestId('watch-rerank-w2')).toBeTruthy();
+  });
+
+  it('from a collapsed card, opens the rating sheet and writes nothing', async () => {
+    ranked();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(within(view.getByTestId('watch-actions-w2')).getByRole('button', { name: 'Rerank' }));
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    noWatchWrites();
   });
 
   it('is not offered when the title has no ranking to correct', async () => {
@@ -738,8 +875,9 @@ describe('Edit ranking', () => {
       },
     });
     const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.queryByText('Rerank')).toBeNull();
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    expect(view.queryByText('Edit ranking')).toBeNull();
+    expect(view.queryByText('Rerank')).toBeNull();
     expect(view.getByText('Remove this watch')).toBeTruthy();
   });
 
@@ -748,7 +886,7 @@ describe('Edit ranking', () => {
     const view = await renderWithProviders(<WatchHistoryScreen />);
     expect(mockLogSheet.props?.title).toBeNull();
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Rerank' }));
 
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     // The existing sheet, told it is on Watch History so it does not offer a push to it.
@@ -762,7 +900,7 @@ describe('Edit ranking', () => {
     ranked();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Rerank' }));
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
 
     // The sheet decides the mode — `rerank` for the same band, `rebucket` for a new one —
@@ -783,7 +921,7 @@ describe('Edit ranking', () => {
     ranked();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Rerank' }));
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     await act(async () => {
       (mockLogSheet.props!.onRank as (bucket: string, mode: string) => void)('fine', 'rebucket');
@@ -804,7 +942,7 @@ describe('Edit ranking', () => {
     ranked();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Rerank' }));
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     await act(async () => {
       (mockLogSheet.props!.onRank as (bucket: string, mode: string) => void)('loved', 'rerank');
@@ -841,12 +979,12 @@ describe('Edit ranking', () => {
 });
 
 /**
- * **Edit ranking with unsaved watch edits** (stabilization pass, 2026-11-11). It used to
+ * **Rerank with unsaved watch edits** (stabilization pass, 2026-11-11; renamed 2026-11-13). It used to
  * close the editor and drop a changed date or companions without a word. Now, with
  * something pending, it asks Save / Discard / Cancel in the app's native confirm; with
  * nothing pending it opens the ranking exactly as before.
  */
-describe('Edit ranking with unsaved watch edits', () => {
+describe('Rerank with unsaved watch edits', () => {
   let alert: jest.SpyInstance;
   /** The buttons of the last confirm, so a test can press one as a person would. */
   const confirm = () => {
@@ -900,8 +1038,8 @@ describe('Edit ranking with unsaved watch edits', () => {
     return view;
   };
 
-  const pressEditRanking = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
-    await fireEvent.press(view.getByRole('button', { name: 'Edit ranking' }));
+  const pressRerank = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await fireEvent.press(view.getByRole('button', { name: 'Rerank' }));
   };
 
   beforeEach(() => {
@@ -936,7 +1074,7 @@ describe('Edit ranking with unsaved watch edits', () => {
   it('with nothing pending, opens the ranking straight away and asks nothing', async () => {
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await pressEditRanking(view);
+    await pressRerank(view);
 
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     expect(alert).not.toHaveBeenCalled();
@@ -947,7 +1085,7 @@ describe('Edit ranking with unsaved watch edits', () => {
 
   it('with a changed date or companions, asks Save, Discard or Cancel before moving', async () => {
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
 
     expect(alert).toHaveBeenCalledTimes(1);
     expect(confirm().title).toBe('Save changes to this watch?');
@@ -964,7 +1102,7 @@ describe('Edit ranking with unsaved watch edits', () => {
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Watch date/));
     await fireEvent.press(view.getByText('Earlier'));
-    await pressEditRanking(view);
+    await pressRerank(view);
     expect(alert).toHaveBeenCalledTimes(1);
   });
 
@@ -973,7 +1111,7 @@ describe('Edit ranking with unsaved watch edits', () => {
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Who I watched with/));
     await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
-    await pressEditRanking(view);
+    await pressRerank(view);
     expect(alert).toHaveBeenCalledTimes(1);
   });
 
@@ -983,7 +1121,7 @@ describe('Edit ranking with unsaved watch edits', () => {
       () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
     );
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
 
     expect(mockEdit).toHaveBeenCalledWith(
@@ -1014,7 +1152,7 @@ describe('Edit ranking with unsaved watch edits', () => {
       Promise.resolve({ outcome: 'failed', message: 'Could not save this watch.' }),
     );
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
 
     await waitFor(() =>
@@ -1034,13 +1172,13 @@ describe('Edit ranking with unsaved watch edits', () => {
 
     // And asking again still asks, because the companions are still unsaved.
     alert.mockClear();
-    await pressEditRanking(view);
+    await pressRerank(view);
     expect(alert).toHaveBeenCalledTimes(1);
   });
 
   it('Discard drops the edits, writes nothing, and opens the ranking', async () => {
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Discard');
 
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
@@ -1058,7 +1196,7 @@ describe('Edit ranking with unsaved watch edits', () => {
 
   it('Cancel stays in the editor with the edits, writes nothing, and opens nothing', async () => {
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Cancel');
 
     expect(mockLogSheet.props?.title).toBeNull();
@@ -1075,7 +1213,7 @@ describe('Edit ranking with unsaved watch edits', () => {
 
   it('after Save, the ranking is still a correction: rerank passes through, never a rewatch', async () => {
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     expect(mockLogSheet.props?.inWatchHistory).toBe(true);
@@ -1123,7 +1261,7 @@ describe('Edit ranking with unsaved watch edits', () => {
       if (path === 'nothing pending') await fireEvent.press(view.getByTestId('watch-edit-w1'));
       await fireEvent.press(view.getByLabelText(/^Note/));
       await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), `Note: ${path}`);
-      await pressEditRanking(view);
+      await pressRerank(view);
       if (path !== 'nothing pending') await confirm().press(path);
       await waitFor(() =>
         expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ note: `Note: ${path}` })),
@@ -1146,7 +1284,7 @@ describe('Edit ranking with unsaved watch edits', () => {
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Watch date/));
     await fireEvent.press(view.getByText('Earlier'));
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
 
     await waitFor(() =>
@@ -1159,13 +1297,13 @@ describe('Edit ranking with unsaved watch edits', () => {
     expect(view.getByRole('button', { name: 'Earlier', selected: true })).toBeTruthy();
   });
 
-  it('a change undone before Edit ranking is nothing pending, and asks nothing', async () => {
+  it('a change undone before Rerank is nothing pending, and asks nothing', async () => {
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Who I watched with/));
     await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
     await fireEvent.press(view.getByRole('checkbox', { name: 'Alex' }));
-    await pressEditRanking(view);
+    await pressRerank(view);
 
     await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
     expect(alert).not.toHaveBeenCalled();
@@ -1177,7 +1315,7 @@ describe('Edit ranking with unsaved watch edits', () => {
       () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
     );
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
     await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
 
@@ -1198,20 +1336,20 @@ describe('Edit ranking with unsaved watch edits', () => {
     );
   });
 
-  it('holds Cancel, Save and Edit ranking while its Save is in flight, so nothing is lost or doubled', async () => {
+  it('holds Cancel, Save and Rerank while its Save is in flight, so nothing is lost or doubled', async () => {
     let land!: (value: { outcome: string }) => void;
     mockDetails.mockImplementationOnce(
       () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
     );
     const view = await editW1();
-    await pressEditRanking(view);
+    await pressRerank(view);
     await confirm().press('Save');
     await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
 
     expect(view.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
     alert.mockClear();
-    await pressEditRanking(view);
+    await pressRerank(view);
     expect(alert).not.toHaveBeenCalled();
     expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
 
@@ -1222,4 +1360,51 @@ describe('Edit ranking with unsaved watch edits', () => {
     expect(mockDetails).toHaveBeenCalledTimes(1);
     expect(mockEdit).toHaveBeenCalledTimes(1);
   });
+
+  /** Independent review, 2026-11-13: the collapsed card's Rerank is a new entry point. */
+  it('holds a collapsed card’s Rerank while the save its editor just made is still writing', async () => {
+    let land!: (value: { outcome: string }) => void;
+    mockDetails.mockImplementationOnce(
+      () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
+    );
+    const view = await editW1();
+    await fireEvent.press(view.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(view.queryByTestId('watch-editor-w1')).toBeNull());
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+
+    const rerank = within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' });
+    expect(rerank).toBeDisabled();
+    await fireEvent.press(rerank);
+    expect(mockLogSheet.props?.title ?? null).toBeNull();
+
+    await act(async () => {
+      land({ outcome: 'ok' });
+    });
+    await waitFor(() =>
+      expect(
+        within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' }),
+      ).not.toBeDisabled(),
+    );
+  });
+
+  it('keeps Save’s own word while Rerank only flushes the note', async () => {
+    let flushed!: () => void;
+    mockSaveNote.mockImplementationOnce(
+      () => new Promise((resolve) => (flushed = () => resolve({ outcome: 'ok' }))) as never,
+    );
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A note.');
+    await pressRerank(view);
+
+    // Held, but not "Saving…": nothing about this watch is being written.
+    expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(view.queryByText('Saving…')).toBeNull();
+    await act(async () => {
+      flushed?.();
+    });
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+  });
 });
+

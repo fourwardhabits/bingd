@@ -482,6 +482,46 @@ describe('analytics', () => {
   });
 });
 
+/**
+ * **The shared sheet structure** (founder spec §4, 2026-11-13): the standard header, the
+ * CTA pinned in the footer with the quiet Close under it, and a results list that shrinks
+ * to the room above the footer rather than to a fixed cap. The CTA's behaviour and the
+ * recommendation logic are not this test's subject and are unchanged.
+ */
+describe('the sheet around it', () => {
+  it('pins the CTA and the Close footer below the picker, outside its scroll', async () => {
+    const sheetProps = props();
+    await renderWithProviders(<GroupPicksSheet {...sheetProps} />);
+    await waitFor(() => expect(screen.getByText('Abby')).toBeTruthy());
+
+    const footer = screen.getByTestId('sheet-footer');
+    expect(within(footer).getByRole('button', { name: /add someone|get picks/i })).toBeTruthy();
+    expect(within(footer).getByRole('button', { name: 'Close' })).toBeTruthy();
+    expect(within(screen.getByTestId('group-choosing')).queryByRole('button', { name: 'Close' })).toBeNull();
+
+    await fireEvent.press(within(footer).getByRole('button', { name: 'Close' }));
+    expect(sheetProps.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes from the results with the same footer, and caps no list height', async () => {
+    const sheetProps = await openResults();
+    await waitFor(() => expect(screen.getByTestId('group-picks-list')).toBeTruthy());
+
+    const list = StyleSheet.flatten(screen.getByTestId('group-picks-list').props.style);
+    expect(list.maxHeight).toBeUndefined();
+    expect(list.flexShrink).toBe(1);
+    expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Close' }));
+    expect(sheetProps.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('heads both steps with the shared serif sheet title', async () => {
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+    expect(screen.getByRole('header', { name: 'Group Recommendations' })).toBeTruthy();
+  });
+});
+
 describe('the group is ephemeral', () => {
   it('forgets everything when the sheet closes and reopens', async () => {
     const first = await openResults();

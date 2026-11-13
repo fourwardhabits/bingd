@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { formatScore } from '@/features/collection/score';
+import { averageCaption } from '@/features/collection/show-projection';
 import { ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -9,13 +10,14 @@ import { theme } from '@/ui/tokens';
  *
  * Post-QA sprint 2 (2026-11-05) reworked the row, not the scores behind it:
  *
- *        (8.4)            8.7             —
+ *        (8.4)            (8.7)            —
  *     Your score       bingd (4)     Following (0)
  *
  * - three columns of exactly equal width, each value centred with its label centred
  *   directly beneath it, and the same padding above and below the row;
- * - the reader's own score keeps the filled Maroon circle once ranked; bingd and
- *   Following are quieter numbers;
+ * - the reader's own score is the filled Maroon circle once ranked; bingd and Following
+ *   are the outlined Maroon ring with Maroon numerals where a score exists (founder spec
+ *   §8, 2026-11-13 — they were bare numbers until then);
  * - the label carries the real **rating** count in brackets, as the server reports it,
  *   and only once it has reported it — never a 0 drawn while the number is loading;
  * - a score that does not exist is a dash. Its reason ("Not enough ratings", "No ratings
@@ -25,7 +27,18 @@ import { theme } from '@/ui/tokens';
  *   stacks them into rows, so nothing is ever clipped.
  */
 export type ImmersiveScoresProps = {
-  you: { score: number | null; pending?: boolean; onPress?: () => void } | null;
+  you: {
+    score: number | null;
+    pending?: boolean;
+    onPress?: () => void;
+    /**
+     * **A series' season average** (WS-TVC, founder spec t168u §2): on a series page with
+     * no explicit show ranking but ranked seasons, the mean of those seasons — drawn as the
+     * outlined `AVG 8.7` with "Average of N ranked seasons" under it, never as the filled
+     * circle that means an explicit ranking. Ignored when `score` is present.
+     */
+    average?: { score: number; count: number } | null;
+  } | null;
   /**
    * `ratingCount` is null when the server has not given one; `loading` says it is still
    * being asked, which is the only time the column says "Loading".
@@ -51,6 +64,7 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
   const { width, fontScale } = useWindowDimensions();
   if (!you && !bingd && !following) return null;
   const youRanked = you?.score != null;
+  const youAverage = !youRanked && you?.average ? you.average : null;
   // Three columns need about 300pt of 1x text; below that, at this text size, they stack.
   const stacked = width / fontScale < STACK_BELOW;
 
@@ -60,9 +74,10 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
         <Cell
           testID="immersive-score-you"
           label="Your score"
-          score={you.score}
-          reason={youRanked ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
+          score={youRanked ? you.score : (youAverage?.score ?? null)}
+          reason={youRanked || youAverage ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
           prominent={youRanked}
+          average={youAverage}
           stacked={stacked}
           onPress={you.onPress}
           hint={youRanked || you.pending ? 'Opens your rating options' : 'Ranks this title'}
@@ -112,6 +127,7 @@ function Cell({
   score,
   reason,
   prominent = false,
+  average = null,
   divided = false,
   stacked = false,
   onPress,
@@ -127,6 +143,8 @@ function Cell({
   /** Why there is no number — spoken, never printed. */
   reason: string | null;
   prominent?: boolean;
+  /** The personal slot's season average, drawn outlined as `AVG` with its caption. */
+  average?: { score: number; count: number } | null;
   divided?: boolean;
   stacked?: boolean;
   onPress?: () => void;
@@ -136,16 +154,35 @@ function Cell({
   const body = (
     <>
       <View style={styles.valueSlot}>
-        {prominent && score != null ? (
-          <ScoreBadge score={score} bucket={null} size="md" variant="filled" />
+        {/**
+         * **One rule for all three** (founder spec §8, 2026-11-13): the reader's own score
+         * is a filled Maroon circle with Parchment numerals; bingd's and Following's are a
+         * Maroon ring with Maroon numerals; a score that does not exist is a dash, never
+         * an empty circle. Presentation only — which number is shown, its sample floor and
+         * what it means are decided upstream and are unchanged.
+         */}
+        {average ? (
+          <View testID={`${testID}-average`} style={styles.averageChip}>
+            <Text
+              variant="headline"
+              tone="action"
+              numberOfLines={1}
+              allowFontScaling={false}
+              style={styles.averageValue}
+            >
+              {`AVG ${formatScore(average.score)}`}
+            </Text>
+          </View>
+        ) : score != null ? (
+          <ScoreBadge
+            score={score}
+            bucket={null}
+            size="md"
+            variant={prominent ? 'filled' : 'outlined'}
+          />
         ) : (
-          <Text
-            variant="headline"
-            tone={value ? 'primary' : 'tertiary'}
-            style={value ? styles.value : null}
-            numberOfLines={1}
-          >
-            {value ?? DASH}
+          <Text variant="headline" tone="tertiary" numberOfLines={1}>
+            {DASH}
           </Text>
         )}
       </View>
@@ -163,6 +200,18 @@ function Cell({
           <Text variant="footnote" tone="tertiary">{` (${count})`}</Text>
         ) : null}
       </Text>
+      {/* The contextual explanation the founder asked for on the show page (t168u §2). */}
+      {average ? (
+        <Text
+          variant="caption"
+          tone="tertiary"
+          numberOfLines={2}
+          style={stacked ? styles.labelStacked : styles.label}
+          testID={`${testID}-caption`}
+        >
+          {averageCaption(average.count)}
+        </Text>
+      ) : null}
     </>
   );
   const style = stacked
@@ -170,6 +219,7 @@ function Cell({
     : [styles.cell, divided && styles.divided];
   const spoken = [
     spokenLabel ?? label,
+    average ? averageCaption(average.count) : null,
     value ? `${value} out of 10` : reason,
     count != null ? ratings(count) : null,
   ]
@@ -230,7 +280,18 @@ const styles = StyleSheet.create({
   },
   /** Every value sits in a slot the badge's height, so the three labels share a baseline. */
   valueSlot: { height: BADGE, alignItems: 'center', justifyContent: 'center' },
-  value: { fontVariant: ['tabular-nums'] },
+  averageValue: { fontVariant: ['tabular-nums'] },
+  // The season average: outlined Maroon, Maroon numerals, pill-shaped so "AVG" reads as a
+  // label on the number, at the badge's own height (WS-TVC).
+  averageChip: {
+    minHeight: BADGE - theme.space[2],
+    paddingHorizontal: theme.space[3],
+    borderRadius: theme.radius.full,
+    borderWidth: 2,
+    borderColor: theme.semantic.score,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   label: { textAlign: 'center', alignSelf: 'stretch' },
   stripStacked: { flexDirection: 'column' },
   cellStacked: {

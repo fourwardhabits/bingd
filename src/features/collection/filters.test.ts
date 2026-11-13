@@ -1055,11 +1055,22 @@ describe('Shuffle', () => {
     expect(ids(visibleItems([rows[0] as CollectionItem], none, SHUFFLE, 6))).toEqual(['s00']);
   });
 
-  it('carries a hint that pressing it again reshuffles, and has no direction', () => {
+  it('carries a hint that pressing it again reshuffles, a glyph, and no direction', () => {
     expect(COLLECTION_SORT_AXES.shuffle).toEqual({
       axis: 'shuffle',
       label: 'Shuffle',
       repeatHint: 'Tap again to reshuffle',
+      // Drawn in the menu where a directional row's arrow is (founder QA, 2026-11-12).
+      glyph: 'shuffle-outline',
     });
+  });
+});
+
+/** WS-TVC: the Watched TV half is series posters now, and still offers no Runtime. */
+describe('offersRuntime on the one-poster TV Collection', () => {
+  it('skips series posters, scored or not, and keeps a Watchlist series', () => {
+    const poster = { kind: 'series' as const, showScore: { sumTenths: 85, n: 1, source: 'explicit' as const, rankedSeasonCount: 0 } };
+    expect(offersRuntime([poster, { kind: 'series', showScore: null }])).toBe(false);
+    expect(offersRuntime([{ kind: 'series' }])).toBe(true);
   });
 });

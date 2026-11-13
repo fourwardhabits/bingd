@@ -129,11 +129,23 @@ const mockPrefWrites: { name: string; value: unknown }[] = [];
 /** Keys whose read rejects, so a store failure is expressible rather than only absence. */
 const mockPrefFailing = new Set<string>();
 
+/**
+ * Keys whose reads wait until `releasePrefReads`, and then answer with what the store held
+ * **when the read began** — the stale answer a slow store gives, which is the race.
+ */
+const mockPrefHeld = new Map<string, (() => void)[]>();
+/** Every key read, in order. */
+const mockPrefReads: string[] = [];
+
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) =>
-    mockPrefFailing.has(name)
-      ? Promise.reject(new Error('store unavailable'))
-      : Promise.resolve(mockPrefStore[name] ?? null),
+  readPref: (name: string) => {
+    mockPrefReads.push(name);
+    if (mockPrefFailing.has(name)) return Promise.reject(new Error('store unavailable'));
+    const snapshot = mockPrefStore[name] ?? null;
+    const waiting = mockPrefHeld.get(name);
+    if (waiting) return new Promise((resolve) => waiting.push(() => resolve(snapshot)));
+    return Promise.resolve(snapshot);
+  },
   writePref: (name: string, value: unknown) => {
     mockPrefWrites.push({ name, value });
     mockPrefStore[name] = value;
@@ -144,6 +156,17 @@ jest.mock('@/lib/prefs', () => ({
 const MEDIUM_KEY = 'user-1.collection.medium';
 const VIEW_MODE_KEY = 'user-1.collection.view-mode';
 const NUDGE_KEY = 'user-1.collection.unranked-nudge';
+const SEGMENT_KEY = 'user-1.collection.segment';
+
+const holdPrefReads = (name: string) => {
+  if (!mockPrefHeld.has(name)) mockPrefHeld.set(name, []);
+};
+const pendingPrefReads = (name: string) => mockPrefHeld.get(name)?.length ?? 0;
+const releasePrefReads = (name: string) => {
+  const waiting = mockPrefHeld.get(name) ?? [];
+  mockPrefHeld.delete(name);
+  for (const answer of waiting) answer();
+};
 
 const watched = (id: string, kind: 'movie' | 'season') => ({
   media_item_id: id,
@@ -181,6 +204,8 @@ beforeEach(() => {
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
+  mockPrefHeld.clear();
+  mockPrefReads.length = 0;
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockTables.user_media = [];
   // Nothing is ranked in any of these: `rankings` is what turns a logged title into a
@@ -1257,4 +1282,335 @@ describe('the backlog and Refine cards', () => {
     });
   });
 
+});
+
+/**
+ * **Watched, Watchlist or Unranked, remembered per account** (founder, 2026-11-12).
+ *
+ * `${profile.id}.collection.segment`, beside the side and the view mode and independent of
+ * both. Only a reader's choice writes it — the marquee, the cards, the medium switch's fall
+ * back to Watched, and a re-press of the tab — never the default on mount, never the
+ * display-only Unranked fallback, and never a navigation's request.
+ */
+describe('the remembered section', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  /** Until the screen has asked for `key` and its answer has been applied. */
+  const settled = async (key: string) => {
+    await waitFor(() => expect(mockPrefReads).toContain(key));
+    await act(async () => {});
+  };
+  const writesTo = (key: string) => mockPrefWrites.filter((write) => write.name === key);
+
+  it('opens a new account on Movies / Watched, and writes nothing on mount', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await settled(SEGMENT_KEY);
+    await settled(MEDIUM_KEY);
+
+    expect(shown(view)).toBe('Watched');
+    expect(side(view)).toBe('Movies');
+    expect(mockPrefWrites).toEqual([]);
+  });
+
+  it('reopens on TV / Watchlist after a restart', async () => {
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const first = await open();
+    await switchTo(first, 'TV');
+    await choose(first, 'Watchlist');
+    await waitFor(() => expect(shown(first)).toBe('Watchlist'));
+    expect(mockPrefStore[SEGMENT_KEY]).toBe('watchlist');
+    expect(mockPrefStore[MEDIUM_KEY]).toBe('tv_seasons');
+    await first.unmount();
+
+    const view = await open();
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(side(view)).toBe('TV');
+  });
+
+  it('keeps the section and the side independent', async () => {
+    mockPrefStore[SEGMENT_KEY] = 'watchlist';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+
+    await switchTo(view, 'TV');
+    expect(shown(view)).toBe('Watchlist');
+    expect(writesTo(SEGMENT_KEY)).toEqual([]);
+
+    await choose(view, 'Watched');
+    expect(side(view)).toBe('TV');
+    expect(mockPrefStore[MEDIUM_KEY]).toBe('tv_seasons');
+    expect(mockPrefStore[SEGMENT_KEY]).toBe('watched');
+  });
+
+  it.each<[string, unknown]>([
+    ['an older label', 'Watchlist'],
+    ['Lists', 'lists'],
+    ['a retired tab', 'ranked'],
+    ['a number', 2],
+    ['an object', { segment: 'watchlist' }],
+    ['an array', ['watchlist']],
+  ])('opens on Watched when the stored section is %s', async (_name, stored) => {
+    mockPrefStore[SEGMENT_KEY] = stored;
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await settled(SEGMENT_KEY);
+
+    expect(shown(view)).toBe('Watched');
+    expect(mockPrefWrites).toEqual([]);
+  });
+
+  it('opens on Watched when the store refuses', async () => {
+    mockPrefFailing.add(SEGMENT_KEY);
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await settled(SEGMENT_KEY);
+
+    expect(shown(view)).toBe('Watched');
+  });
+
+  describe('a remembered Unranked', () => {
+    it('shows Watched while this side has nothing unranked, and keeps the saved Unranked', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'unranked';
+      mockTables.user_media = [];
+      const view = await open();
+      await settled(SEGMENT_KEY);
+
+      expect(shown(view)).toBe('Watched');
+      expect(writesTo(SEGMENT_KEY)).toEqual([]);
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('unranked');
+    });
+
+    it('is not overwritten while the collection is loading, and comes back once it has', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'unranked';
+      mockTables.user_media = [watched('m1', 'movie')];
+      mockDelayMs.user_media = 300;
+      const view = await open();
+      await settled(SEGMENT_KEY);
+
+      // Loading: nothing reads as unranked yet, so the display falls back and the store does not.
+      expect(shown(view)).toBe('Watched');
+      expect(writesTo(SEGMENT_KEY)).toEqual([]);
+
+      await waitFor(() => expect(shown(view)).toBe('Unranked'));
+      expect(writesTo(SEGMENT_KEY)).toEqual([]);
+    });
+
+    /** The stated choice: the medium switch's fall back to Watched is a tap, and is saved. */
+    it('is replaced by Watched when the reader switches to a side with nothing unranked', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'unranked';
+      mockTables.user_media = [watched('m1', 'movie')];
+      const view = await open();
+      await waitFor(() => expect(shown(view)).toBe('Unranked'));
+
+      await switchTo(view, 'TV');
+
+      expect(shown(view)).toBe('Watched');
+      expect(writesTo(SEGMENT_KEY)).toEqual([{ name: SEGMENT_KEY, value: 'watched' }]);
+    });
+  });
+
+  describe('a navigation that asks for a section or a side', () => {
+    it('opens Unranked over a remembered Watchlist still being read, and does not save it', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'watchlist';
+      holdPrefReads(SEGMENT_KEY);
+      mockParams.show = 'unranked';
+      mockTables.user_media = [watched('m1', 'movie')];
+      const view = await open();
+      await waitFor(() => expect(pendingPrefReads(SEGMENT_KEY)).toBe(1));
+      await waitFor(() => expect(shown(view)).toBe('Unranked'));
+
+      await act(async () => releasePrefReads(SEGMENT_KEY));
+
+      expect(shown(view)).toBe('Unranked');
+      expect(writesTo(SEGMENT_KEY)).toEqual([]);
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('watchlist');
+
+      // The reader's own next tap is what saves.
+      await choose(view, 'Watched');
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('watched');
+    });
+
+    it('opens the side a navigation asked for over a slow remembered side, and restores the section', async () => {
+      mockPrefStore[MEDIUM_KEY] = 'movies';
+      mockPrefStore[SEGMENT_KEY] = 'watchlist';
+      holdPrefReads(MEDIUM_KEY);
+      mockParams.medium = 'tv_seasons';
+      mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+      const view = await open();
+      await waitFor(() => expect(pendingPrefReads(MEDIUM_KEY)).toBe(1));
+
+      await act(async () => releasePrefReads(MEDIUM_KEY));
+
+      expect(side(view)).toBe('TV');
+      // The param is about the side only: the section is still the reader's own.
+      await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+      expect(mockPrefWrites).toEqual([]);
+    });
+  });
+
+  describe('a slow read', () => {
+    it('does not overrule a run of section taps, and the last tap is what is stored', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'watchlist';
+      holdPrefReads(SEGMENT_KEY);
+      mockTables.user_media = [watched('m1', 'movie')];
+      const view = await open();
+      await waitFor(() => expect(pendingPrefReads(SEGMENT_KEY)).toBe(1));
+      // Unranked is offered only once the collection has loaded. Waited for without touching
+      // the menu, so the three taps below are the first choice the reader makes.
+      await waitFor(() => expect(mockReads.user_media ?? 0).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(mockPrefWrites).toEqual([]);
+
+      await choose(view, 'Unranked');
+      await choose(view, 'Watched');
+      await choose(view, 'Unranked');
+      await act(async () => releasePrefReads(SEGMENT_KEY));
+
+      expect(shown(view)).toBe('Unranked');
+      expect(writesTo(SEGMENT_KEY).at(-1)).toEqual({ name: SEGMENT_KEY, value: 'unranked' });
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('unranked');
+    });
+
+    it('does not overrule a run of side taps, and the last tap is what is stored', async () => {
+      mockPrefStore[MEDIUM_KEY] = 'movies';
+      holdPrefReads(MEDIUM_KEY);
+      mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+      const view = await open();
+      await waitFor(() => expect(pendingPrefReads(MEDIUM_KEY)).toBe(1));
+
+      await switchTo(view, 'TV');
+      await switchTo(view, 'Movies');
+      await switchTo(view, 'TV');
+      await act(async () => releasePrefReads(MEDIUM_KEY));
+
+      expect(side(view)).toBe('TV');
+      expect(writesTo(MEDIUM_KEY).at(-1)).toEqual({ name: MEDIUM_KEY, value: 'tv_seasons' });
+    });
+  });
+
+  /** The stated choice: a re-press of the tab is a choice, and Watched is saved. */
+  describe('re-tapping the tab', () => {
+    it('returns to Watched, keeps the side, and a restart shows Watched', async () => {
+      mockTables.user_media = [watched('s1', 'season')];
+      const first = await open();
+      await switchTo(first, 'TV');
+      await choose(first, 'Watchlist');
+      await waitFor(() => expect(shown(first)).toBe('Watchlist'));
+
+      await act(async () => pressTab());
+
+      expect(shown(first)).toBe('Watched');
+      expect(side(first)).toBe('TV');
+      expect(writesTo(SEGMENT_KEY).at(-1)).toEqual({ name: SEGMENT_KEY, value: 'watched' });
+      await first.unmount();
+
+      const view = await open();
+      await settled(SEGMENT_KEY);
+      expect(shown(view)).toBe('Watched');
+      await waitFor(() => expect(side(view)).toBe('TV'));
+    });
+
+    it('outranks a remembered Watchlist still being read', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'watchlist';
+      holdPrefReads(SEGMENT_KEY);
+      const view = await open();
+      await waitFor(() => expect(pendingPrefReads(SEGMENT_KEY)).toBe(1));
+
+      await act(async () => pressTab());
+      await act(async () => releasePrefReads(SEGMENT_KEY));
+
+      expect(shown(view)).toBe('Watched');
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('watched');
+    });
+
+    it('writes nothing when the press arrives from another tab', async () => {
+      mockPrefStore[SEGMENT_KEY] = 'watchlist';
+      const view = await open();
+      await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+
+      mockNavigation.focused = false;
+      await act(async () => pressTab());
+
+      expect(shown(view)).toBe('Watchlist');
+      expect(mockPrefWrites).toEqual([]);
+    });
+  });
+
+  describe('two accounts on one device', () => {
+    it('never shows the outgoing account’s TV / Watchlist, even while the incoming reads are out', async () => {
+      mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+      const view = await open();
+      await switchTo(view, 'TV');
+      await choose(view, 'Watchlist');
+      await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+      const writesBefore = mockPrefWrites.length;
+
+      holdPrefReads('user-2.collection.segment');
+      holdPrefReads('user-2.collection.medium');
+      mockProfile.id = 'user-2';
+      await view.rerender(<CollectionScreen />);
+      await waitFor(() => expect(pendingPrefReads('user-2.collection.segment')).toBe(1));
+
+      expect(shown(view)).toBe('Watched');
+      expect(side(view)).toBe('Movies');
+
+      await act(async () => {
+        releasePrefReads('user-2.collection.segment');
+        releasePrefReads('user-2.collection.medium');
+      });
+      expect(shown(view)).toBe('Watched');
+      expect(side(view)).toBe('Movies');
+
+      // The outgoing account's keys are untouched, and the incoming one gained none.
+      expect(mockPrefStore[SEGMENT_KEY]).toBe('watchlist');
+      expect(mockPrefStore[MEDIUM_KEY]).toBe('tv_seasons');
+      expect(mockPrefWrites).toHaveLength(writesBefore);
+    });
+
+    it('reads the incoming account’s own section, even after the outgoing one chose', async () => {
+      mockPrefStore['user-2.collection.segment'] = 'watchlist';
+      const view = await open();
+      await choose(view, 'Watched');
+
+      mockProfile.id = 'user-2';
+      await view.rerender(<CollectionScreen />);
+
+      await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    });
+
+    it('falls back to Watched, not the previous account’s section, when the incoming read fails', async () => {
+      const view = await open();
+      await choose(view, 'Watchlist');
+      await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+
+      mockPrefFailing.add('user-2.collection.segment');
+      mockProfile.id = 'user-2';
+      await view.rerender(<CollectionScreen />);
+      await settled('user-2.collection.segment');
+
+      expect(shown(view)).toBe('Watched');
+    });
+  });
+
+  it('is not moved by For You, and does not move it', async () => {
+    mockPrefStore['user-1.for-you.selection'] = { medium: 'tv', topMedium: 'tv' };
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+    await settled(SEGMENT_KEY);
+    await settled(MEDIUM_KEY);
+
+    expect(side(view)).toBe('Movies');
+    expect(shown(view)).toBe('Watched');
+
+    await switchTo(view, 'TV');
+    await choose(view, 'Watchlist');
+    expect(mockPrefReads.some((name) => name.includes('for-you'))).toBe(false);
+    expect(mockPrefWrites.some((write) => write.name.includes('for-you'))).toBe(false);
+    expect(mockPrefStore['user-1.for-you.selection']).toEqual({ medium: 'tv', topMedium: 'tv' });
+  });
 });

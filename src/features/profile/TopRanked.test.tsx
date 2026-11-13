@@ -121,7 +121,9 @@ const ranked = (
     runtime_minutes: 100,
     kind: category === 'tv_seasons' ? 'season' : 'movie',
     original_language: 'en',
-    parent_id: category === 'tv_seasons' ? 'series-1' : null,
+    // One series per season (WS-TVC): the wall draws one poster per series, so each of
+    // these seasons is its series' only ranked season and the poster carries its score.
+    parent_id: category === 'tv_seasons' ? `series-${id}` : null,
     parent:
       category === 'tv_seasons' ? { title, genres: ['Drama'], original_language: 'en' } : null,
   },
@@ -320,9 +322,9 @@ describe('the walls with nothing to interleave', () => {
 });
 
 /**
- * **Whole shows on the profile wall** (Candidate A, 2026-11-14). A ranked show stands for
- * itself only while none of its seasons is ranked, is scored among shows, and joins the TV
- * wall by the score it prints.
+ * **Whole shows on the profile wall** (2026-11-14; one poster per series since WS-TVC,
+ * 2026-11-13). A ranked show is scored among shows; a series is one tile whatever was
+ * ranked of it, and joins the TV wall by the score it prints.
  */
 describe('a whole show on the wall', () => {
   const show = (
@@ -353,9 +355,68 @@ describe('a whole show on the wall', () => {
     await waitFor(() => expect(wall(view)).toContain('10.0 Severance'));
   });
 
-  it('hides a show once one of its seasons is ranked', async () => {
-    mockRows = [ranked('s-a', 'TV A', 1, 'tv_seasons'), show('series-1', 'The Show', 1)];
+  /**
+   * **One poster per series** (WS-TVC, founder spec t168u §2): a ranked show and a ranked
+   * season of it are one tile, the series, at the explicit show score.
+   */
+  it('draws a series once, at its explicit score, when the show and a season are ranked', async () => {
+    const season = ranked('s-a', 'Season 1', 1, 'tv_seasons', 'fine');
+    mockRows = [
+      {
+        ...season,
+        media_items: {
+          ...season.media_items,
+          parent_id: 'show-1',
+          parent: { title: 'The Show', genres: ['Drama'], original_language: 'en' },
+        },
+      },
+      show('show-1', 'The Show', 1),
+    ];
     const view = await settled(await open());
-    expect(wall(view).some((tile) => tile.endsWith('The Show'))).toBe(false);
+    expect(wall(view)).toEqual(['10.0 The Show']);
+  });
+
+  it('draws a series ranked only by its seasons at their mean, labelled as an average', async () => {
+    const seasonOf = (id: string, position: number, bucket: Row['bucket']) => {
+      const row = ranked(id, `Season ${position}`, position, 'tv_seasons', bucket);
+      return {
+        ...row,
+        media_items: {
+          ...row.media_items,
+          parent_id: 'show-2',
+          parent: { title: 'Barry', genres: ['Drama'], original_language: 'en' },
+        },
+      };
+    };
+    // Two loved seasons: 10.0 and 7.0, mean 8.5.
+    mockRows = [seasonOf('b1', 1, 'loved'), seasonOf('b2', 2, 'loved')];
+    const view = await settled(await open());
+    expect(wall(view)).toEqual(['8.5 Barry']);
+    expect(view.getByLabelText(/^Barry, .*average of 2 ranked seasons/)).toBeTruthy();
+  });
+
+  it('keeps explicit before an equal average on the mixed wall, whatever the ids', async () => {
+    // Independent review (WS-TVC): the All wall broke an exact series tie by id. Both
+    // series score 10.0 (a band of one in each pool); the explicit show comes first even
+    // though the average's id sorts earlier.
+    const season = ranked('a-season', 'Season 1', 1, 'tv_seasons', 'loved');
+    mockRows = [
+      ranked('m-a', 'Movie A', 1, 'movies', 'fine'),
+      {
+        ...season,
+        media_items: {
+          ...season.media_items,
+          parent_id: 'a-series',
+          parent: { title: 'Average Show', genres: ['Drama'], original_language: 'en' },
+        },
+      },
+      show('z-show', 'Explicit Show', 1),
+    ];
+    const view = await settled(await open());
+    const tiles = wall(view);
+    expect(tiles.indexOf('10.0 Explicit Show')).toBeGreaterThanOrEqual(0);
+    expect(tiles.indexOf('10.0 Explicit Show')).toBeLessThan(
+      tiles.indexOf('10.0 Average Show'),
+    );
   });
 });

@@ -150,7 +150,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   md: { minHeight: theme.layout.buttonMinHeight, paddingHorizontal: theme.space[5] },
-  sm: { minHeight: 36, paddingHorizontal: theme.space[4] },
+  sm: {
+    minHeight: theme.layout.control.compactAction.visibleHeight,
+    paddingHorizontal: theme.space[4],
+  },
   primary: { backgroundColor: theme.semantic.action },
   secondary: {
     backgroundColor: theme.surface.raised,

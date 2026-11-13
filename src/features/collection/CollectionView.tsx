@@ -333,8 +333,14 @@ export function CollectionView({
             // numbers, which is what keeps it from looking like a scoreboard.
             score: item.score,
             bucket: item.bucket,
-            // A ranked season's pill names its season (Candidate A): `S4 9.1`.
+            // A ranked season's pill names its season: `S4 - 9.1`. The TV Collection draws
+            // series, not seasons, since WS-TVC, so this only fires where a season tile
+            // still appears.
             season: item.kind === 'season' && item.score != null ? (item.seasonNumber ?? null) : null,
+            // WS-TVC: a series poster's score is its explicit show ranking (filled) or the
+            // mean of its ranked seasons (outlined `AVG`).
+            scoreSource: item.showScore?.source,
+            rankedSeasonCount: item.showScore?.rankedSeasonCount,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
           // The wall's top space follows the header now, rather than preceding it.
@@ -376,7 +382,16 @@ export function CollectionView({
                   <TitleRowActions
                     name={nameOf(item)}
                     kind={item.kind}
-                    score={item.score != null ? { score: item.score, bucket: item.bucket } : null}
+                    score={
+                      item.score != null
+                        ? {
+                            score: item.score,
+                            bucket: item.bucket,
+                            // WS-TVC: a season average draws outlined, as on the wall.
+                            variant: item.showScore?.source === 'average' ? 'outlined' : 'filled',
+                          }
+                        : null
+                    }
                     saved={null}
                     onRank={() => onPressItem(item.mediaItemId)}
                     onToggleWatchlist={() => {}}

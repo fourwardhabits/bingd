@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Fragment, useMemo, useState } from 'react';
@@ -8,14 +7,27 @@ import {
   Pressable,
   StyleSheet,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  type TextLayoutEventData,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
-import { useRankedCollection, useWatchlist } from '@/features/collection/use-collection';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
+import { today } from '@/features/collection/dates';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-state';
+import { TitleRowActions } from '@/features/collection/TitleRowActions';
+import {
+  useLoggedCollection,
+  useRankedCollection,
+  useWatchlist,
+} from '@/features/collection/use-collection';
 import { useWatched } from '@/features/collection/use-watched';
-import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
+import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
+import { mustReconcile } from '@/features/collection/writes';
 import {
   INITIAL_FILMOGRAPHY_SORT,
   filmographyAxes,
@@ -25,18 +37,17 @@ import {
   type CoverageGroup,
   type FilmographySort,
 } from '@/features/person/filmography';
+import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
+import { birthLine } from '@/features/person/identity';
 import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
+import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
-import { HERO_COLLAPSED_BAND } from '@/features/title/use-hero-reveal';
-import { track } from '@/lib/analytics';
-import { posterUri, profileUri } from '@/lib/images';
-import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
+import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
+import { backdropUri, posterUri, profileUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
   Avatar,
-  ClampedText,
-  ContentToolbar,
   EmptyState,
   Screen,
   SegmentedTabs,
@@ -151,9 +162,9 @@ export default function PersonScreen() {
   const [sort, setSort] = useState<FilmographySort>(INITIAL_FILMOGRAPHY_SORT);
   const [sortOpen, setSortOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
-  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const top = usePersonTopBar();
+  const hero = usePersonHero(id ?? null, detail?.credits ?? null);
+  const top = usePersonTopBar(hero !== null);
   // Read once, so the bar closes over a value rather than over a query result that could
   // be refetched to null between renders.
   const name = detail?.name ?? null;
@@ -279,36 +290,82 @@ export default function PersonScreen() {
   const boundary = coverage.kind === 'partial' ? coverage.from : null;
   const tail = tailStart(sorted, activeSort);
 
+  /**
+   * **Search's watchlist write, shared** (founder spec §6, 2026-11-13). The page had its
+   * own copy, guarded by a state value — so two taps inside one frame both reached
+   * `set_watchlist` before the first re-render drew the bookmark busy. `useWatchlistToggle`
+   * is the hook Search and the list rows use, and its guard is a ref, which answers
+   * synchronously: one write per tap, whichever row. Analytics, reconciliation on an
+   * unknown outcome and the failure alert are unchanged; the title's own cache is still
+   * invalidated here, as it was.
+   */
+  const watchlistToggle = useWatchlistToggle(viewer.id, 'title');
   const toggleWatchlist = async (credit: PersonCredit) => {
-    if (busyId) return;
-    setBusyId(credit.mediaItemId);
-    const present = !saved.has(credit.mediaItemId);
-    const result = await setWatchlist({
-      operationId: newOperationId(),
-      mediaItemId: credit.mediaItemId,
-      present,
-    });
-    setBusyId(null);
-
-    // Additions only, and only on `ok` — the same rule as the other three bookmarks.
-    if (present && result.outcome === 'ok') {
-      track({ name: 'watchlist_added', props: { surface: 'title' } });
-    }
-
-    // Reconciled on an unknown outcome as well as on success — the same rule the other
-    // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
+    const result = await watchlistToggle.toggle(credit.mediaItemId);
+    if (!result) return;
     if (mustReconcile(result)) {
-      await Promise.all([
-        // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
-        invalidateAfterWatchlistChange(queryClient, viewer.id),
-        queryClient.invalidateQueries({ queryKey: queryKeys.title(credit.mediaItemId) }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.title(credit.mediaItemId) });
     }
-
     if (result.outcome === 'failed') {
       Alert.alert('Could not update watchlist', result.message);
+    }
+  };
+
+  /**
+   * **+ Rank from a filmography row: Search's path, not a new one** (founder spec §6).
+   *
+   * The same `LogSheet` → `RankingSheet` pair Search mounts, wired the same way: `+` opens
+   * "How was it?", the band hands over to the comparisons, a finished placement comes back
+   * to the sheet with its score. An unfinished placement resumes its own session instead
+   * of starting again, so a reader cannot leave a second partial ranking of the same
+   * title. A ranked row draws no `+` at all (below; only its bookmark), so there is no
+   * second entry point into a ranking that already exists.
+   */
+  const celebrate = useCelebrationHandoff();
+  const [logging, setLogging] = useState<LoggableTitle | null>(null);
+  const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  const [placement, setPlacement] = useState<PostRank | null>(null);
+  const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
+  const logged = useLoggedCollection(viewer.id);
+  const unfinished = useMemo(
+    () =>
+      new Map(
+        (logged.data?.entries ?? [])
+          .filter(
+            (entry) =>
+              rankingStateOf({ ranked: ranked.has(entry.mediaItemId), bucket: entry.bucket }) ===
+              'unfinished',
+          )
+          .map((entry) => [entry.mediaItemId, entry.bucket as string] as const),
+      ),
+    [logged.data, ranked],
+  );
+  /**
+   * Whether the reader's rankings have been read. Until they have, the page cannot tell a
+   * ranked title from an unranked one, so it offers no `+` at all rather than a `+` that
+   * might resume or restart a ranking that already exists (independent review). Only the
+   * `+` waits on this; the bookmark waits on the watchlist alone, as before.
+   */
+  const rankingsKnown = rankedMovies.isSuccess && rankedShows.isSuccess && logged.isSuccess;
+  const openRank = (credit: PersonCredit) => {
+    // One flow at a time: a second tap while a sheet is up opens nothing new.
+    if (logging || ranking || !rankingsKnown) return;
+    const title: LoggableTitle = {
+      id: credit.mediaItemId,
+      title: credit.title,
+      year: credit.year,
+      posterUri: posterUri(credit.posterPath, 'card'),
+      kind: credit.kind,
+    };
+    const bucket = unfinished.get(credit.mediaItemId);
+    const resume = bucket ? resumeSubject(title, bucket) : null;
+    if (resume) {
+      setRanking(resume);
+      setRankedTitle(title);
+      setPlacement(null);
       return;
     }
+    setLogging(title);
   };
 
   // `claimed` counts as loading, and that is the point of carrying it up here: somebody
@@ -336,7 +393,10 @@ export default function PersonScreen() {
         onScroll={top.onScroll}
         scrollEventThrottle={16}
       >
-        <TitleHero collapsedHeight={top.collapsedHero} topInset={top.topInset} />
+        {/* One of their own films behind them, chosen from credits already on the page
+            (`pickPersonBackdrop`), or the branded band when none has a backdrop — and
+            while the credits load, so the page never draws a broken image. */}
+        <TitleHero uri={hero} collapsedHeight={top.collapsedHero} topInset={top.topInset} />
 
         {loading ? (
           // The loading language, under the page's own top rather than a blank screen
@@ -387,13 +447,14 @@ export default function PersonScreen() {
               <Text variant="title1" accessibilityRole="header" testID="person-name">
                 {detail.name}
               </Text>
-              {/* Known-for and the life dates, on one line, because each on its own is
-                  a fragment and together they place somebody. Absent entirely rather
-                  than shown as a dash: TMDB genuinely does not have a birthday for
-                  everybody, and an em dash where a date goes reads as a failure. */}
-              {metaLine(detail) ? (
-                <Text variant="footnote" tone="secondary" testID="person-meta">
-                  {metaLine(detail)}
+              {/* **At most `Born 1959 · Japan`** (founder spec §6, 2026-11-13), where it was
+                  `Acting · born 1974 · Los Angeles, California, USA`: the hierarchy is
+                  name → biography → filmography, and this line is the one piece of
+                  context kept between the first two. Absent entirely rather than a dash
+                  when TMDB has neither fact (`birthLine`). */}
+              {birthLine(detail) ? (
+                <Text variant="footnote" tone="tertiary" testID="person-meta">
+                  {birthLine(detail)}
                 </Text>
               ) : null}
             </View>
@@ -408,48 +469,35 @@ export default function PersonScreen() {
                   Not "In your catalogue", and since 2026-11-11 not "Known for" either:
                   this is their work, all of it that was kept, in an order the reader can
                   choose. */}
-              <ContentToolbar
-                edgeInset={0}
-                testID="filmography-header"
-                title={
-                  <Text
-                    variant="sectionHeader"
-                    tone="action"
-                    accessibilityRole="header"
-                    accessibilityLabel="Filmography"
-                  >
-                    Filmography
-                  </Text>
-                }
-              >
-                {roleCredits.length > 1 ? (
-                  <SortChip
-                    axes={axes}
-                    value={activeSort}
-                    onPress={() => setSortOpen((open) => !open)}
-                  />
-                ) : null}
-              </ContentToolbar>
-
-              {sortOpen && roleCredits.length > 1 ? (
-                <View testID="filmography-sort-menu">
-                  <SortMenu
-                    axes={axes}
-                    value={activeSort}
-                    onChange={(next) => {
-                      setSort(next);
-                      // A different order: its first page. Keeping the count would drop
-                      // the reader into the middle of an order they have not seen the start of.
-                      setShown(PAGE);
-                    }}
-                    onClose={() => setSortOpen(false)}
-                  />
-                </View>
-              ) : null}
+              {/**
+               * **The filmography, modernised** (founder spec §6, 2026-11-13).
+               *
+               *     FILMOGRAPHY                                  ← the large section heading
+               *     [      Cast      |      Crew      ]           ← which work: navigation
+               *     All  Movies  TV                ⇅ Popular     ← narrow it, and order it
+               *
+               * Cast / Crew is "take me to this content", so it is the segmented `nav`
+               * control across the gutters; All / Movies / TV narrows what is shown, so it
+               * stays the quiet underline tabs, on one line with the sort chip — the
+               * filters and the order together, where the Collection tab puts them. The
+               * three orders (Popular, Release date, Highest rated) and every note about
+               * what TMDB kept are unchanged.
+               */}
+              <View style={styles.filmographyHead} testID="filmography-header">
+                <Text
+                  variant="sectionHeaderLarge"
+                  tone="action"
+                  accessibilityRole="header"
+                  accessibilityLabel="Filmography"
+                >
+                  Filmography
+                </Text>
+              </View>
 
               {hasCast && hasCrew ? (
-                <View style={styles.tabs}>
+                <View style={styles.roleTabs}>
                   <SegmentedTabs
+                    variant="nav"
                     options={ROLE_TABS}
                     value={shownRole}
                     accessibilityLabel="Cast or crew"
@@ -466,20 +514,47 @@ export default function PersonScreen() {
                 </View>
               ) : null}
 
-              {filterable ? (
-                <View style={styles.tabs}>
-                  <SegmentedTabs
-                    options={KIND_TABS}
-                    value={activeFilter}
-                    accessibilityLabel="Movies or TV"
+              {filterable || roleCredits.length > 1 ? (
+                <View style={styles.controls} testID="filmography-controls">
+                  <View style={styles.kindTabs}>
+                    {filterable ? (
+                      <SegmentedTabs
+                        options={KIND_TABS}
+                        value={activeFilter}
+                        accessibilityLabel="Movies or TV"
+                        onChange={(next) => {
+                          setFilter(next);
+                          // Back to the first page. Keeping the count across a filter
+                          // change means switching to TV on somebody with four TV credits
+                          // silently shows all four and hides the See more that explains
+                          // why the list is short.
+                          setShown(PAGE);
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                  {roleCredits.length > 1 ? (
+                    <SortChip
+                      axes={axes}
+                      value={activeSort}
+                      onPress={() => setSortOpen((open) => !open)}
+                    />
+                  ) : null}
+                </View>
+              ) : null}
+
+              {sortOpen && roleCredits.length > 1 ? (
+                <View testID="filmography-sort-menu">
+                  <SortMenu
+                    axes={axes}
+                    value={activeSort}
                     onChange={(next) => {
-                      setFilter(next);
-                      // Back to the first page. Keeping the count across a filter
-                      // change means switching to TV on somebody with four TV credits
-                      // silently shows all four and hides the See more that explains
-                      // why the list is short.
+                      setSort(next);
+                      // A different order: its first page. Keeping the count would drop
+                      // the reader into the middle of an order they have not seen the start of.
                       setShown(PAGE);
                     }}
+                    onClose={() => setSortOpen(false)}
                   />
                 </View>
               ) : null}
@@ -524,12 +599,29 @@ export default function PersonScreen() {
                           index + 1 !== tail
                         }
                         onPress={() => router.push(`/title/${credit.mediaItemId}`)}
+                        /**
+                         * **+ Rank and the bookmark, Search's own row controls**
+                         * (`TitleRowActions`, founder spec §6). A title the reader has
+                         * already ranked draws **the bookmark only** (founder t171u §1.4):
+                         * no `+`, because its "Ranked" line says so and a `+` there would
+                         * be a second way into a ranking that exists, and no score badge
+                         * either (no badges on these rows in this pass), but the
+                         * watchlist is independent of ranking, so its bookmark stays. The
+                         * bookmark shows the watchlist as it is, and hides until the
+                         * watchlist has been read rather than guessing.
+                         */
                         trailing={
-                          <SaveAction
-                            saved={saved.has(credit.mediaItemId)}
-                            title={credit.title}
-                            busy={busyId === credit.mediaItemId}
-                            onPress={() => void toggleWatchlist(credit)}
+                          <TitleRowActions
+                            name={credit.title}
+                            kind={credit.kind}
+                            score={null}
+                            // No `+` on a ranked row, and none until the reader's rankings
+                            // are read; the bookmark waits on neither (independent review).
+                            rankable={!ranked.has(credit.mediaItemId) && rankingsKnown}
+                            saved={watchlistToggle.isSaved(credit.mediaItemId)}
+                            busy={watchlistToggle.busy === credit.mediaItemId}
+                            onRank={() => openRank(credit)}
+                            onToggleWatchlist={() => void toggleWatchlist(credit)}
                           />
                         }
                       />
@@ -589,6 +681,48 @@ export default function PersonScreen() {
           </>
         )}
       </Animated.ScrollView>
+
+      {/* Search's pair, wired exactly as Search wires them (`app/(tabs)/log.tsx`). */}
+      <LogSheet
+        title={logging}
+        onClose={() => {
+          setLogging(null);
+          setPlacement(null);
+          celebrate();
+        }}
+        surface="title"
+        postRank={placement}
+        onDone={() => {
+          setLogging(null);
+          setPlacement(null);
+          celebrate();
+        }}
+        onRank={(bucket, mode) => {
+          if (!logging) return;
+          // The log sheet closes as the comparison opens: one sheet at a time.
+          setRanking({
+            id: logging.id,
+            title: logging.title,
+            bucket,
+            posterUri: logging.posterUri,
+            kind: logging.kind,
+            mode,
+          });
+          setRankedTitle(logging);
+          setLogging(null);
+        }}
+      />
+      <RankingSheet
+        subject={ranking}
+        onClose={() => setRanking(null)}
+        onFinishLog={(result) => {
+          setRanking(null);
+          if (!rankedTitle) return;
+          setPlacement(result);
+          setLogging(rankedTitle);
+        }}
+        surface="title"
+      />
     </Screen>
   );
 }
@@ -600,25 +734,60 @@ const PAGE = 12;
 const TITLE_FADE = 24;
 
 /**
+ * **The hero's artwork: a backdrop from their latest released work** (founder QA P1-9).
+ *
+ * `pickPersonBackdrop` holds the rule and its tests. Nothing is fetched for it: the
+ * backdrop is a column of the `media_items` rows `usePerson` already reads.
+ *
+ * **Chosen once per person, then kept.** The first answer for this person is pinned for
+ * the life of the page, so a background refresh of a stale filmography — or a re-render
+ * with a rebuilt credits array — never swaps the picture under the reader. Until there is
+ * an answer (credits loading, or none with a backdrop) the hero is the branded band, and
+ * `TitleHero`'s image fades in over the band's own Parchment when one arrives.
+ */
+function usePersonHero(personId: string | null, credits: PersonCredit[] | null) {
+  const picked = useMemo(
+    () => (credits ? (pickPersonBackdrop(credits, today())?.backdropPath ?? null) : null),
+    [credits],
+  );
+  const [pinned, setPinned] = useState<{ personId: string | null; path: string } | null>(null);
+  const held = pinned?.personId === personId ? pinned.path : null;
+  // Set during render, React's pattern for state derived from a change: one extra render,
+  // no effect, and no frame drawn with the old person's picture.
+  if (held === null && picked !== null) setPinned({ personId, path: picked });
+  return backdropUri(held ?? picked, 'hero');
+}
+
+/**
  * The person page's top bar arithmetic.
  *
  * Two values, because the page has two edges to cross. **The ground** arrives over the
- * collapsed band, exactly as `useHeroReveal` does it for a title or a list without
- * artwork, so the bar is Paper by the time the band has gone. **The name** arrives only
- * once the large name has passed under the bar — measured off the identity block by
- * `useDetailHeader`, the rule every detail page follows — because here the name sits under
- * a portrait that hangs below the band, and fading it in with the ground would put it in
- * the bar while the large one is still on screen.
+ * last stretch of the hero, exactly as `useHeroReveal` does it for a title or a list —
+ * over the collapsed band when there is no artwork (from the top, as before), and over the
+ * last `REVEAL_WINDOW` of the 16:9 backdrop when there is — so the bar is Paper by the time
+ * the hero has gone, and never lays Paper over a picture that is still on screen.
+ *
+ * **The name** arrives only once the large name has passed under the bar — measured off
+ * the identity block by `useDetailHeader`, the rule every detail page follows — because
+ * here the name sits under a portrait that hangs below the hero, and fading it in with the
+ * ground would put it in the bar while the large one is still on screen.
  */
-function usePersonTopBar() {
+function usePersonTopBar(hasArtwork: boolean) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const header = useDetailHeader();
   const [scrollY] = useState(() => new Animated.Value(0));
   const [identityBottom, setIdentityBottom] = useState<number | null>(null);
 
   const barHeight = insets.top + NAV_BAR_HEIGHT;
+  // `useHeroReveal`'s arithmetic. With no artwork it is [0, HERO_COLLAPSED_BAND] exactly,
+  // the range this page has always used.
+  const groundEnd = hasArtwork
+    ? Math.max(width / theme.layout.aspect.backdrop - barHeight, 2)
+    : HERO_COLLAPSED_BAND;
+  const groundStart = Math.max(groundEnd - REVEAL_WINDOW, 0);
   const ground = scrollY.interpolate({
-    inputRange: [0, HERO_COLLAPSED_BAND],
+    inputRange: [groundStart, groundEnd],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
@@ -696,68 +865,87 @@ function ListNote({
   );
 }
 
-/**
- * "Acting · born 1960 · Nairobi", assembled from whatever TMDB actually has.
- *
- * Every part is optional and the joiner never leaves a dangling separator, which is
- * the whole reason this is a function rather than a template in the markup.
- */
-function metaLine(person: {
-  knownFor: string | null;
-  birthday: string | null;
-  deathday: string | null;
-  placeOfBirth: string | null;
-}) {
-  const years = person.birthday
-    ? person.deathday
-      ? `${person.birthday.slice(0, 4)}–${person.deathday.slice(0, 4)}`
-      : `born ${person.birthday.slice(0, 4)}`
-    : null;
-
-  return [person.knownFor, years, person.placeOfBirth].filter(Boolean).join(' · ') || null;
-}
-
 /** Lines the biography takes before `more`. */
 const BIOGRAPHY_LINES = 3;
 
 /**
- * The biography, three lines until it is opened, with `… more` on the third.
+ * **A long biography collapses, with a clear More / Less** (founder spec §6, 2026-11-13).
  *
- * `ClampedText`, the title page's synopsis treatment, because it is the same kind of block
- * doing the same job — and because the previous hand-rolled version put `more` on a line
- * of its own, which is the defect that component was built to fix.
- *
- * **What it promises when opened** (audit, 2026-11-11). The adapter keeps 1,200
- * characters of TMDB's biography (`MAX_BIOGRAPHY_CHARS`), cut mid-word. Opening it used to
- * show those characters and an ellipsis, under a control whose only word was `more` — so
- * the reader was promised the rest and given a fragment. Now a shortened biography ends at
- * its last whole sentence (or word, if a sentence would lose too much), and once it is
- * fully on screen it says plainly that it was shortened and where the rest is.
+ * `ClampedText`, which this used, puts an inline "more" on the last line and deliberately
+ * draws no "less" once open. The founder asked for an explicit pair, so the biography
+ * clamps to {@link BIOGRAPHY_LINES} and a separate More / Less under it opens and closes
+ * it. The toggle is drawn only for a biography that is actually longer than the clamp: an
+ * invisible, unclamped copy measures its lines (the technique `ClampedText` uses), and
+ * until that answer arrives a length estimate stands in, so a short biography never shows
+ * a control that does nothing. A cut biography still says so once it is open, outside the
+ * toggle so a screen reader reaches it.
  */
 function Biography({ text, truncated }: { text: string; truncated: boolean }) {
+  const body = truncated ? shortened(text) : text;
+  const [measured, setMeasured] = useState<{ body: string; lines: number } | null>(null);
+  const [open, setOpen] = useState(false);
+  const lines = measured?.body === body ? measured.lines : null;
+  const long = lines !== null ? lines > BIOGRAPHY_LINES : body.length > BIOGRAPHY_ESTIMATE;
+
   return (
-    <ClampedText
-      text={truncated ? shortened(text) : text}
-      clamp={BIOGRAPHY_LINES}
-      testIDPrefix="biography"
-      expandLabel="Expand biography"
-      collapseLabel="Collapse biography"
-      completeFooter={
-        truncated ? (
+    <View style={styles.block} testID="biography">
+      <View>
+        <View
+          style={styles.measure}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
           <Text
-            variant="footnote"
-            tone="tertiary"
-            testID="biography-shortened"
-            style={styles.shortened}
+            variant="body"
+            onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) =>
+              {
+                const count = event.nativeEvent.lines.length;
+                // Unchanged answers keep the same state, so a layout pass that repeats
+                // itself does not re-render the biography (independent review).
+                setMeasured((was) =>
+                  was?.body === body && was.lines === count ? was : { body, lines: count },
+                );
+              }
+            }
           >
-            Shortened. The full biography is on TMDB.
+            {body}
           </Text>
-        ) : undefined
-      }
-      style={styles.block}
-    />
+        </View>
+        <Text
+          variant="body"
+          numberOfLines={open || !long ? undefined : BIOGRAPHY_LINES}
+          testID="biography-text"
+        >
+          {body}
+        </Text>
+      </View>
+      {long ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={open ? 'Collapse biography' : 'Expand biography'}
+          onPress={() => setOpen((was) => !was)}
+          style={({ pressed }) => [styles.bioToggle, pressed && styles.pressed]}
+          testID="biography-toggle"
+        >
+          <Text variant="footnote" tone="action">
+            {open ? 'Less' : 'More'}
+          </Text>
+        </Pressable>
+      ) : null}
+      {/* Once it is all on screen — opened, or short enough never to need opening. */}
+      {truncated && (open || !long) ? (
+        <Text variant="footnote" tone="tertiary" testID="biography-shortened" style={styles.shortened}>
+          Shortened. The full biography is on TMDB.
+        </Text>
+      ) : null}
+    </View>
   );
 }
+
+/** Before the measure answers: about three lines of body text on a narrow phone. */
+const BIOGRAPHY_ESTIMATE = 160;
 
 /**
  * What the reader has already done with this title, in one word or none.
@@ -778,51 +966,6 @@ function stateLabel(
   }
   if (state.saved.has(credit.mediaItemId)) return 'On your watchlist';
   return null;
-}
-
-/**
- * Save to the watchlist, from the row.
- *
- * A bookmark rather than a labelled button: this is a trailing control in a list of
- * twelve, and twelve words that all say "Watchlist" would be the loudest thing on a
- * page about somebody's work. The state is carried by the filled versus outlined
- * glyph and stated in full in the accessibility label, which is where a one-glyph
- * control has to say what it means.
- */
-function SaveAction({
-  saved,
-  title,
-  busy,
-  onPress,
-}: {
-  saved: boolean;
-  title: string;
-  busy: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: saved, disabled: busy }}
-      accessibilityLabel={
-        saved ? `Remove ${title} from your watchlist` : `Add ${title} to your watchlist`
-      }
-      onPress={onPress}
-      disabled={busy}
-      hitSlop={theme.space[3]}
-      style={({ pressed }) => [styles.save, (pressed || busy) && styles.pressed]}
-    >
-      {/* Filled Maroon when saved, outlined and secondary otherwise — Search's pair,
-          which is the app's one watchlist treatment. This drew Maroon in both states,
-          so an unsaved bookmark on a person page read as already selected while the
-          same control on Search did not (pre-GTM audit, 2026-09-07). */}
-      <Ionicons
-        name={saved ? 'bookmark' : 'bookmark-outline'}
-        size={theme.layout.icon.md}
-        color={saved ? theme.semantic.action : theme.text.secondary}
-      />
-    </Pressable>
-  );
 }
 
 /** The portrait's diameter, which is also how far it hangs into the band. */
@@ -858,17 +1001,41 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.full,
     backgroundColor: theme.surface.sunken,
   },
-  // The biography sits under the facts as part of the identity's answer: 12, not a section seam.
+  // The biography sits under the name as part of the identity's answer: 12, not a section seam.
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
   },
-  // Its own gutter: it sits after the biography's press target, not inside its padding.
-  shortened: { paddingTop: theme.space[2], paddingHorizontal: theme.layout.gutter },
+  // Off the flow and invisible: the unclamped copy that counts the biography's lines.
+  measure: { position: 'absolute', left: 0, right: 0, opacity: 0 },
+  // More / Less: a 44pt target with the word on the gutter.
+  bioToggle: {
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  shortened: { paddingTop: theme.space[1] },
   // Identity → the work: a major section seam (design-system.md §5, `space[6]`).
   section: { paddingTop: theme.space[6] },
-  // Header row → its controls: compact, related (`space[2]`); the last control → the list: 12.
-  tabs: { paddingTop: theme.space[2] },
+  // The heading on the gutter, at the large section-heading size.
+  filmographyHead: {
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    paddingHorizontal: theme.layout.gutter,
+  },
+  // Cast | Crew across the gutters; then the filters and the order on one line.
+  roleTabs: { paddingTop: theme.space[1] },
+  controls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[2],
+    paddingTop: theme.space[2],
+    paddingRight: theme.layout.gutter,
+  },
+  // Takes what the sort chip leaves; its own row scrolls sideways if it ever has to.
+  kindTabs: { flex: 1, minWidth: 0 },
   list: { paddingTop: theme.space[2] },
   note: {
     paddingHorizontal: theme.layout.gutter,
@@ -888,12 +1055,6 @@ const styles = StyleSheet.create({
   },
   caption: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   state: { paddingTop: theme.space[6] },
-  save: {
-    minWidth: theme.layout.minTapTarget,
-    minHeight: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   pressed: { opacity: 0.7 },
   footer: {
     paddingHorizontal: theme.layout.gutter,

@@ -63,7 +63,16 @@ export { useKeyboardHeight } from './use-keyboard-height';
 export { usePullRefresh } from './use-pull-refresh';
 export { Screen } from './Screen';
 export { ScreenError, type ScreenErrorProps } from './ScreenError';
-export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
+export {
+  Sheet,
+  SheetHeader,
+  SheetRow,
+  type SheetHeaderProps,
+  type SheetProps,
+  type SheetRowProps,
+} from './Sheet';
+export { DismissFooter, type DismissFooterProps } from './DismissFooter';
+export { SaveButton, type SaveButtonProps } from './SaveButton';
 export { MiniButton } from './MiniButton';
 export { SheetDone } from './SheetDone';
 export {
