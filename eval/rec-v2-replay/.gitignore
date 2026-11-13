@@ -1,0 +1,9 @@
+# Recommendation V2 replay. An export is pseudonymous, not anonymous; run.mjs refuses one inside
+# the repository anyway, and these catch a copy or a report saved here by mistake. Kept in this
+# folder, not the root .gitignore: the root file is an input to the Expo runtime fingerprint.
+out/
+*.export.json
+replay-export*.json
+rec-v2-replay-export*.json
+replay*.md
+!README.md

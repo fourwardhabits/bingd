@@ -798,6 +798,14 @@ export type AnalyticsEvent =
         anchors_used: number;
         /** How many candidates survived eligibility — the universe the wall is drawn from. */
         pool_size: number;
+        /**
+         * Which For You engine drew the wall (2026-11-10, Engine V2): `v1`, `v2_metadata`,
+         * `v2_hybrid`, or the allowlist-only prototype `v2_metadata_social` (2026-11-13).
+         * One of a closed set of server-chosen words; never anything about the reader.
+         */
+        engine: 'v1' | 'v2_metadata' | 'v2_hybrid' | 'v2_metadata_social';
+        /** How many distinct original languages are on the wall. A count, never a code. */
+        wall_languages: number;
       };
     }
 
@@ -1466,6 +1474,13 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'liked_titles',
   'anchors_used',
   'pool_size',
+  /**
+   * Engine V2 (2026-11-10). `engine` is one of the closed engine ids `recommendation_engine`
+   * answers with; `wall_languages` is a count of distinct original languages on one wall.
+   * Neither names a title, a language or a person.
+   */
+  'engine',
+  'wall_languages',
   // The Letterboxd import (2026-09-11). Four counts and nothing else: how many films an
   // archive held, how many viewings were attached to them, how many rows the catalogue
   // placed, and how many it could not. `surface` and `outcome` are already above and carry
