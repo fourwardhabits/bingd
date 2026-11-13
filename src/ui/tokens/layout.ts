@@ -69,6 +69,20 @@ export const layout = {
      * type, where it is the difference between a compact control and a full-width one.
      */
     inlineButtonMaxWidth: 168,
+    /**
+     * **The compact filled action: the slimmer Rank button's metrics, named once**
+     * (founder spec §2A, 2026-11-13).
+     *
+     * The Rank invitation on the title page is drawn 8pt under the 44pt floor and pads the
+     * difference back as touch area (`TitleActions`' `RANK_VISIBLE_HEIGHT`). `SaveButton`
+     * is the same control in a header, and takes its numbers from here rather than copying
+     * them, so a change to the compact action's shape is one edit. The 44pt target is kept
+     * by the control's own pressable box, never by slop a parent can clip on Android.
+     */
+    compactAction: {
+      visibleHeight: 36,
+      paddingHorizontal: space[3],
+    },
   },
   /**
    * What lifts a 32pt chip to the 44pt target without drawing it any larger

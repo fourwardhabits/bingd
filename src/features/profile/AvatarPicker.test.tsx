@@ -84,3 +84,27 @@ describe('the profile picture actions', () => {
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('user-1/me.jpg'));
   });
 });
+
+/**
+ * **Less bulky, same target** (founder spec §7, 2026-11-13): the pair is drawn at the
+ * compact 36pt height and padded back to a 44pt target, inside the row's own box.
+ */
+describe('the compact photo actions', () => {
+  it('draws both at the compact height, with slop that returns each to 44pt', async () => {
+    const view = await renderWithProviders(<AvatarPicker />);
+    for (const name of ['Remove', 'Change']) {
+      const button = view.getByRole('button', { name });
+      const style = styleOf(button as unknown as Node) as { minHeight?: number };
+      const slop = button.props.hitSlop as { top: number; bottom: number };
+      expect(style.minHeight).toBe(theme.layout.control.compactAction.visibleHeight);
+      expect((style.minHeight ?? 0) + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+        theme.layout.minTapTarget,
+      );
+    }
+    // The slop sits inside the row, where Android will deliver a touch to it.
+    const row = StyleSheet.flatten(view.getByTestId('avatar-actions').props.style);
+    expect(row.paddingVertical).toBe(
+      (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+    );
+  });
+});

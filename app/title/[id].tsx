@@ -38,6 +38,7 @@ import {
   useLoggedCollection,
   type RankingCategory,
 } from '@/features/collection/use-collection';
+import { projectShow } from '@/features/collection/show-projection';
 import { useMyScores, useTitleScore } from '@/features/collection/use-score';
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
 import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
@@ -56,9 +57,11 @@ import {
 import {
   RankingSheet,
   type RankingSubject,
+  type ShowDecision,
   type UpdateShowLink,
 } from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
+import { RERANK_ICON, RERANK_LABEL } from '@/features/watch-history/rerank';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { AddToListSheet } from '@/features/lists/AddToListSheet';
@@ -363,6 +366,13 @@ export default function TitleScreen() {
     showId: string;
     linkedPlacementId: string;
   } | null>(null);
+  /**
+   * WS-TVC (founder spec t168u §3B): the Update Show / Keep Show decision a season's reveal
+   * left open when the reader took *Add details*. Held for the post-rank details sheet,
+   * which offers both in place of Done; cleared on every way out of that sheet, so a
+   * dismissal records nothing and nothing carries into a later log.
+   */
+  const [pendingShowDecision, setPendingShowDecision] = useState<ShowDecision | null>(null);
   /**
    * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
    *
@@ -814,6 +824,19 @@ export default function TitleScreen() {
   const seasonWatchlist = useWatchlistToggle(profile.id, 'title');
   /** Each season's logged bucket, so a season row's `+` can resume an unfinished placement. */
   const loggedForSeasons = useLoggedCollection(profile.id, { enabled: isSeriesTitle });
+  /**
+   * WS-TVC (founder spec t168u §2): on a series page with no explicit show ranking, the
+   * reader's personal slot shows the mean of their ranked seasons — the same effective
+   * score the Collection poster carries (`projectShow`), over the whole season pool already
+   * read above. Null for a film, a season, or a series none of whose seasons is ranked.
+   */
+  const seasonAverage = useMemo(
+    () =>
+      isSeriesTitle && data?.title?.id && rankedSeasons.data
+        ? projectShow(data.title.id, rankedSeasons.data, [])
+        : null,
+    [isSeriesTitle, data?.title?.id, rankedSeasons.data],
+  );
 
   /**
    * How far the page has scrolled, as one animated value.
@@ -2296,6 +2319,14 @@ export default function TitleScreen() {
                     score,
                     pending: Boolean(data.ranked) && score == null,
                     onPress: () => (data.ranked ? setManaging(true) : rank()),
+                    // WS-TVC: an unranked series with ranked seasons shows their mean.
+                    average:
+                      isSeries && !data.ranked && seasonAverage
+                        ? {
+                            score: seasonAverage.display,
+                            count: seasonAverage.rankedSeasonCount,
+                          }
+                        : null,
                   }
                 : null
             }
@@ -3077,10 +3108,18 @@ export default function TitleScreen() {
            This is the half the founder physically hit: a reader who takes *Add details*
            finishes here rather than on the reveal, and the payoff used to be held by a
            ranking sheet that had already unmounted. Empty queue, nothing happens. */
+        // WS-TVC: the open show decision, only on the post-rank sheet it was carried to.
+        showDecision={placement ? pendingShowDecision : null}
+        onUpdateShow={(link) => {
+          // The details have landed (LogSheet's barrier); the show's correction opens.
+          setPendingShowDecision(null);
+          updateShow(link);
+        }}
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setPendingShowLink(null);
+          setPendingShowDecision(null);
           celebrate();
         }}
         onClose={() => {
@@ -3089,6 +3128,8 @@ export default function TitleScreen() {
           setActionError(null);
           // Leaving the show's band chooser without choosing abandons Update Show.
           setPendingShowLink(null);
+          // And leaving the details sheet records no show decision (§3E).
+          setPendingShowDecision(null);
           celebrate();
         }}
         onRank={(bucket, mode, context) => {
@@ -3186,6 +3227,8 @@ export default function TitleScreen() {
           setOpenWriting(null);
           setOpenSection(null);
           setPlacement(result);
+          // WS-TVC: Add details does not resolve the show; the decision rides along.
+          setPendingShowDecision(result.showDecision ?? null);
           setLoggingTitle(rankedTitle);
         }}
         onUpdateShow={updateShow}
@@ -3405,13 +3448,14 @@ export default function TitleScreen() {
                  * `value` on a `SheetRow` sets beside the label and truncates at phone width,
                  * which is a founder decision this menu already carries.
                  */}
-                {/* The star is kept from the row this replaces, and so is its behaviour:
-                    straight into the log sheet, where the band chooser is. Leads the group
-                    because correcting a rating is the common act and logging a second
-                    viewing is the rare one. */}
+                {/* **Rerank** (founder spec §5, 2026-11-13; it was *Edit ranking*), with the
+                    left/right arrows — the star is the initial Rank's alone. Behaviour kept:
+                    straight into the log sheet, where the band chooser is, and no watch is
+                    recorded. Leads the group because correcting a rating is the common act
+                    and logging a second viewing is the rare one. */}
                 <SheetRow
-                  icon="star-outline"
-                  label="Edit ranking"
+                  icon={RERANK_ICON}
+                  label={RERANK_LABEL}
                   onPress={() => {
                     setManaging(false);
                     openLog();

@@ -862,6 +862,11 @@ const ALLOWED = {
   // a way to write about anybody else. Everything else proactive (the ledger, the arbiter,
   // the collectors, the tick, the status) is service_role or internal and is not here.
   'record_notification_open(uuid,text,text)': ['authenticated'],
+
+  // 20261120000100, Keep Show. Writes only the caller's own `show_reaffirmations` row for
+  // the caller's own fresh season placement (resolved by `auth.uid()`, so another user's
+  // id answers as a missing one), idempotently, and changes no ranking or Feed row.
+  'keep_show(uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {
