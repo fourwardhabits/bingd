@@ -443,12 +443,12 @@ describe('the shared filter state', () => {
     const view = await renderWithProviders(<RecommendationsScreen />);
 
     // Choose Comedy on For you.
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
 
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
 
     // Switch tabs. The founder's example: Comedy stays on, and only the Comedy
     // recommendation survives.
@@ -456,7 +456,7 @@ describe('the shared filter state', () => {
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     expect(view.queryByText('Hereditary (2010)')).toBeNull();
-    expect(view.getByText('Filters · 1')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy();
   });
 
   it('offers one obvious Clear all', async () => {
@@ -465,7 +465,7 @@ describe('the shared filter state', () => {
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -484,7 +484,7 @@ describe('the shared filter state', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Horror')).toBeTruthy());
     await fireEvent.press(view.getByText('Horror'));
     await fireEvent.press(view.getByText('Apply'));
@@ -656,7 +656,7 @@ describe('re-tapping the For You tab', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -666,7 +666,7 @@ describe('re-tapping the For You tab', () => {
 
     // Going back to the top of a section is not a reason to throw away what somebody
     // chose. The same rule Collection's own note states about its medium and filters.
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
   });
 
   it('stays where it is when the press arrives from another tab', async () => {

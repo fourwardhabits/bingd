@@ -124,6 +124,8 @@ export function FollowListSheet({
       visible
       onClose={close}
       label={TITLE[kind]}
+      // The standard browsing sheet (FU1113-B): one height whether the list holds 3 or 300.
+      size="standard"
       /**
        * **One way out, at the foot** (founder spec §2B/§4, 2026-11-13). The header's
        * tertiary Close is gone: a dismiss-only sheet closes from the standard quiet footer,

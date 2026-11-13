@@ -348,12 +348,33 @@ describe('the reviews preview', () => {
 });
 
 /**
- * **A series' season average in the personal slot** (WS-TVC, founder spec t168u §2): an
- * outlined `AVG 8.7` with "Average of N ranked seasons" under it, never the filled circle
- * that means an explicit show ranking.
+ * **A series' season average in the personal slot** (WS-TVC, founder spec t168u §2;
+ * FU1113-B): the same `ScoreCircle` as every other metric, outlined, labelled "Season
+ * Average" in place of "Your score" — no `AVG` in the circle, no "Average of N ranked
+ * seasons" paragraph. The season count is only spoken.
  */
 describe('the season average in Your score', () => {
-  it('draws AVG and its caption when the show is unranked but seasons are', async () => {
+  /** Every string under a node, nested Text included. */
+  const textOf = (node: unknown): string => {
+    if (node == null) return '';
+    if (typeof node === 'string') return node;
+    if (typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    const element = node as { children?: unknown; props?: { children?: unknown } };
+    return textOf(element.props?.children ?? element.children ?? []);
+  };
+  /** The circle's own node: `ScoreBadge` puts the spoken value on the drawn circle. */
+  const circle = (view: Awaited<ReturnType<typeof render>>, value: string) =>
+    StyleSheet.flatten(view.getByLabelText(`${value} out of 10`).props.style);
+
+  it('whole-show only: the filled circle, labelled Your score', async () => {
+    const view = await render(<ImmersiveScores you={{ score: 9.2 }} bingd={null} following={null} />);
+    expect(circle(view, '9.2').backgroundColor).toBe(theme.semantic.score);
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(view.queryByText('Season Average')).toBeNull();
+  });
+
+  it('seasons only: the outlined circle, labelled Season Average, with no paragraph and no AVG', async () => {
     const view = await render(
       <ImmersiveScores
         you={{ score: null, average: { score: 8.7, count: 3 } }}
@@ -361,39 +382,58 @@ describe('the season average in Your score', () => {
         following={null}
       />,
     );
-    expect(view.getByText('AVG 8.7')).toBeTruthy();
-    expect(view.getByTestId('immersive-score-you-caption')).toHaveTextContent(
-      'Average of 3 ranked seasons',
-    );
-    const chip = StyleSheet.flatten(view.getByTestId('immersive-score-you-average').props.style);
-    expect(chip.borderColor).toBe(theme.semantic.score);
-    expect(chip.backgroundColor).toBeUndefined();
-    expect(view.getByLabelText(/^Your score\. Average of 3 ranked seasons\. 8\.7 out of 10/)).toBeTruthy();
-    // Not the explicit score's filled circle.
-    expect(view.queryByLabelText('8.7 out of 10')).toBeNull();
+    const ring = circle(view, '8.7');
+    expect(ring.borderColor).toBe(theme.semantic.score);
+    expect(ring.borderWidth).toBe(2);
+    expect(ring.backgroundColor).toBeUndefined();
+    // The number alone inside the circle.
+    expect(view.getByText('8.7')).toBeTruthy();
+    expect(view.queryByText(/AVG/)).toBeNull();
+    // "Season Average" replaces "Your score"; no caption paragraph.
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Season Average');
+    expect(view.queryByText('Your score')).toBeNull();
+    expect(view.queryByText(/ranked seasons?$/)).toBeNull();
+    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
+    // The count survives for a screen reader.
+    expect(
+      view.getByLabelText(/^Season Average\. Average of 3 ranked seasons\. 8\.7 out of 10/),
+    ).toBeTruthy();
   });
 
-  it('says "1 ranked season" for one', async () => {
+  it('says "1 ranked season" for one, to a screen reader', async () => {
     const view = await render(
       <ImmersiveScores you={{ score: null, average: { score: 9, count: 1 } }} bingd={null} following={null} />,
     );
-    expect(view.getByTestId('immersive-score-you-caption')).toHaveTextContent(
-      'Average of 1 ranked season',
-    );
+    expect(view.getByLabelText(/Average of 1 ranked season\./)).toBeTruthy();
   });
 
-  it('keeps the explicit show score filled, and ignores an average beside it', async () => {
+  it('show and seasons: the explicit score wins, filled, and the average is ignored', async () => {
     const view = await render(
       <ImmersiveScores you={{ score: 9.5, average: { score: 8.1, count: 2 } }} bingd={null} following={null} />,
     );
-    expect(view.getByLabelText('9.5 out of 10')).toBeTruthy();
-    expect(view.queryByText(/^AVG/)).toBeNull();
-    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
+    expect(circle(view, '9.5').backgroundColor).toBe(theme.semantic.score);
+    expect(view.queryByLabelText('8.1 out of 10')).toBeNull();
+    expect(view.queryByText('Season Average')).toBeNull();
+    expect(view.queryByText(/AVG/)).toBeNull();
+  });
+
+  it('switches to the filled circle when an explicit ranking is added after the average', async () => {
+    const view = await render(
+      <ImmersiveScores you={{ score: null, average: { score: 8.7, count: 3 } }} bingd={null} following={null} />,
+    );
+    expect(circle(view, '8.7').backgroundColor).toBeUndefined();
+
+    await view.rerender(
+      <ImmersiveScores you={{ score: 9.1, average: { score: 8.7, count: 3 } }} bingd={null} following={null} />,
+    );
+    expect(circle(view, '9.1').backgroundColor).toBe(theme.semantic.score);
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(view.queryByLabelText('8.7 out of 10')).toBeNull();
   });
 
   it('keeps the unranked state when there is neither', async () => {
     const view = await render(<ImmersiveScores you={{ score: null }} bingd={null} following={null} />);
-    expect(view.queryByText(/^AVG/)).toBeNull();
+    expect(view.queryByText(/AVG/)).toBeNull();
     expect(view.getByLabelText(/Not ranked yet/)).toBeTruthy();
   });
 });

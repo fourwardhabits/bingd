@@ -72,7 +72,7 @@ export type CollectionItem = {
    * and this is what the Rating order compares, so 8.65 sorts below 8.7 although both
    * display 8.7. `source` says whether the number is the user's explicit show ranking or
    * the mean of their ranked seasons, which is also what draws the pill filled or
-   * outlined (`AVG`). Absent on films, and on a series that has neither.
+   * outlined (`SN AVG`). Absent on films, and on a series that has neither.
    */
   showScore?: {
     sumTenths: number;

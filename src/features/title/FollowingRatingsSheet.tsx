@@ -1,6 +1,14 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, EmptyState, ScoreBadge, Sheet, SkeletonRow, Text } from '@/ui/components';
+import {
+  Avatar,
+  DismissFooter,
+  EmptyState,
+  ScoreBadge,
+  Sheet,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { useFollowingRatings, type FollowingRating } from './use-following-ratings';
@@ -48,7 +56,14 @@ export function FollowingRatingsSheet({
   if (!mediaItemId) return null;
 
   return (
-    <Sheet visible onClose={onClose} label={`People you follow who rated ${titleName}`}>
+    <Sheet
+      visible
+      onClose={onClose}
+      label={`People you follow who rated ${titleName}`}
+      // The standard browsing sheet (FU1113-B): a fixed 80% with Close pinned below the list.
+      size="standard"
+      footer={<DismissFooter onPress={onClose} />}
+    >
       {/**
        * **One line, and the subtitle under it is gone** (founder, 2026-09-05).
        *
@@ -109,11 +124,6 @@ export function FollowingRatingsSheet({
         </ScrollView>
       )}
 
-      {/* The labelled way out every sheet carries — `Sheet` hides its scrim from the
-          accessibility tree on the understanding that this exists. */}
-      <View style={styles.foot}>
-        <Button label="Done" onPress={onClose} />
-      </View>
     </Sheet>
   );
 }
@@ -166,7 +176,8 @@ function RatingRow({ row, onPress }: { row: FollowingRating; onPress: () => void
 const styles = StyleSheet.create({
   head: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2], gap: 2 },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[4] },
-  list: { maxHeight: 420 },
+  // Flexes to the standard sheet's room, so the last row scrolls clear of the footer.
+  list: { flex: 1 },
   listContent: { paddingBottom: theme.space[2] },
   row: {
     flexDirection: 'row',
@@ -181,6 +192,5 @@ const styles = StyleSheet.create({
   name: { fontFamily: fontFamily.sansSemibold },
   verdict: { alignItems: 'flex-end', gap: 2 },
   truncated: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
-  foot: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
 });

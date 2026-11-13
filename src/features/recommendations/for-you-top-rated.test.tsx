@@ -282,7 +282,7 @@ describe('choosing Top Rated', () => {
     expect(view.queryByLabelText(/^Sent to You/)).toBeNull();
     expect(view.queryByText('Find for a Group')).toBeNull();
     // Filters narrow *which titles*, which is a question this wall can answer.
-    expect(view.getByText('Filters')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters' })).toBeTruthy();
   });
 
   it('leaves Sent to you off when it comes back, rather than under the wrong wall', async () => {
@@ -462,7 +462,7 @@ describe('a filter that matches nothing on the pages loaded so far', () => {
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('Film p-0, 2014')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('1990s'));
@@ -490,7 +490,7 @@ describe('a filter that matches nothing on the pages loaded so far', () => {
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Only Drama, 2014')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('2010s'));
@@ -546,7 +546,7 @@ describe('keep looking on a deeply scrolled wall', () => {
 
     // Comedy alone matches three, so the wall renders and can be scrolled — and the
     // auto-advance spends its ten pages getting there.
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -570,7 +570,7 @@ describe('keep looking on a deeply scrolled wall', () => {
 
     // Now a filter combination nothing loaded satisfies, which resets the budget to ten
     // while the wall sits far deeper than that.
-    await fireEvent.press(view.getByText(/^Filters/));
+    await fireEvent.press(view.getByTestId('for-you-filters'));
     await waitFor(() => expect(view.getByText('1990s')).toBeTruthy());
     await fireEvent.press(view.getByText('1990s'));
     await fireEvent.press(view.getByText('Apply'));

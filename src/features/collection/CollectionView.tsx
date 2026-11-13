@@ -338,7 +338,7 @@ export function CollectionView({
             // still appears.
             season: item.kind === 'season' && item.score != null ? (item.seasonNumber ?? null) : null,
             // WS-TVC: a series poster's score is its explicit show ranking (filled) or the
-            // mean of its ranked seasons (outlined `AVG`).
+            // mean of its ranked seasons (outlined `SN AVG`).
             scoreSource: item.showScore?.source,
             rankedSeasonCount: item.showScore?.rankedSeasonCount,
           }))}
@@ -387,8 +387,10 @@ export function CollectionView({
                         ? {
                             score: item.score,
                             bucket: item.bucket,
-                            // WS-TVC: a season average draws outlined, as on the wall.
+                            // WS-TVC: a season average draws outlined, as on the wall —
+                            // the same `SN AVG` badge since FU1113-B.
                             variant: item.showScore?.source === 'average' ? 'outlined' : 'filled',
+                            average: item.showScore?.source === 'average',
                           }
                         : null
                     }
