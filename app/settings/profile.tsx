@@ -14,7 +14,7 @@ import {
 } from '@/features/profile/social-links';
 import { useAccountWrites } from '@/features/settings/use-account';
 import { queryKeys } from '@/lib/query';
-import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
+import { Field, KeyboardScreen, SaveButton, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** The bio's ceiling, matching `profiles.bio_shape`. */
@@ -260,16 +260,15 @@ export default function EditProfileScreen() {
           headerShown: true,
           title: 'Edit Profile',
           headerBackTitle: 'Back',
-          // `fit` because a header has no room to grow into: at the largest type sizes the
-          // label shrinks a little rather than wrapping the bar to two lines.
+          // **The standard Save** (founder spec §2A, 2026-11-13): compact filled Maroon at
+          // the top right, the slimmer Rank button's shape, where a grey tertiary word was.
+          // Same conditions as before; it also ignores a second tap while the first lands.
           headerRight: () => (
-            <Button
-              label={busy ? 'Saving…' : 'Save'}
+            <SaveButton
+              saving={busy}
               accessibilityLabel={busy ? 'Saving changes' : 'Save changes'}
-              kind="tertiary"
-              fit
               onPress={() => void save()}
-              disabled={busy || !changed || !valid}
+              disabled={!changed || !valid}
               disabledReason={
                 busy
                   ? 'Saving your changes'
@@ -347,13 +346,16 @@ export default function EditProfileScreen() {
 
         <View style={styles.section}>
           <SectionHeader title="Social links" />
-          <View style={styles.body}>
-            {/* Said once, above the five. The boxes accept the same forms as before —
-                a username, an @handle, a profile link — without a line under each one
-                explaining it (founder, 2026-09-16). */}
-            <Text variant="caption" tone="tertiary">
-              Optional. Add a handle or link.
-            </Text>
+          {/* Said once, above the five, and **set with its heading rather than with the
+              fields** (founder spec §7, 2026-11-13): the note reads as the heading's
+              subtitle, and the five boxes below get a field interval of their own
+              instead of starting one gap under a caption. The boxes accept the same forms
+              as before — a username, an @handle, a profile link — without a line under
+              each one explaining it (founder, 2026-09-16). */}
+          <Text variant="caption" tone="tertiary" style={styles.sectionNote}>
+            Optional. Add a handle or link.
+          </Text>
+          <View style={[styles.body, styles.linkFields]} testID="social-link-fields">
 
             {SOCIAL_NETWORKS.map((network) => {
               const result = normalized[network];
@@ -394,4 +396,9 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
   },
   error: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  // Pulled up under the heading's 44pt row, so it reads as that heading's subtitle.
+  sectionNote: { paddingHorizontal: theme.layout.gutter, marginTop: -theme.space[2] },
+  // A labelled field is two lines and a box: they need more air between them than
+  // the 12pt that separates a caption from what it describes.
+  linkFields: { gap: theme.space[4], paddingTop: theme.space[4] },
 });

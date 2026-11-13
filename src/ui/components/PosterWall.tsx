@@ -30,10 +30,11 @@ export type PosterTile = {
   /**
    * **A season's number, for its pill** (Candidate A, founder brief §4, 2026-11-14). Set
    * only by the Collection and profile walls, where a show and its seasons share one grid:
-   * a season's chip reads `S1: 9.8` on Parchment with a Maroon border and text, so it can
+   * a season's chip reads `S1 - 9.8` on Parchment with a Maroon border and text, so it can
    * never be read as the show's own score, which keeps the filled Maroon number. `0` is
-   * Specials, `SP: 9.8`. The colon (2026-11-12) makes the pair read as a label and its
-   * value rather than as two numbers. Absent everywhere else, so every other wall is
+   * Specials, `SP - 9.8`. The separator is a hyphen with one space either side (founder
+   * spec §7, 2026-11-13, after the colon of 2026-11-12), so the pair reads as a label and
+   * its value rather than as two numbers. Absent everywhere else, so every other wall is
    * unchanged.
    */
   season?: number | null;
@@ -369,7 +370,7 @@ function Tile({
               numberOfLines={1}
             >
               {tile.season != null
-                ? `${seasonPillLabel(tile.season)}: ${formatScore(score)}`
+                ? seasonPillText(tile.season, score)
                 : formatScore(score)}
             </Text>
           </View>
@@ -457,6 +458,14 @@ function Tile({
  * 0), which a bare `S0` would leave a reader to decode.
  */
 export const seasonPillLabel = (season: number) => (season === 0 ? 'SP' : `S${season}`);
+
+/**
+ * A season pill's whole text: `S1 - 9.8`, exactly one space either side of a hyphen-minus
+ * (founder spec §7, 2026-11-13). The one place the format is written, so the pill and its
+ * tests cannot drift apart.
+ */
+export const seasonPillText = (season: number, score: number) =>
+  `${seasonPillLabel(season)} - ${formatScore(score)}`;
 
 const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
