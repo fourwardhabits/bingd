@@ -45,6 +45,15 @@
  * ---------------------------------------------------------------------------
  */
 
+import {
+  NEUTRAL,
+  decadeOf,
+  eraAffinity,
+  genreAffinity,
+  languageAffinity,
+  type Profile,
+} from './profile';
+
 /** Bumped when a weight or rule below changes, so a slate can be attributed. */
 export const CONFIG_VERSION = 'foryou-v1-2026-08-16';
 
@@ -74,7 +83,20 @@ export type Candidate = {
   genres: readonly string[];
   language: string | null;
   popularity: number | null;
+  /**
+   * Engine V2 hybrid only: what the reader's taste neighbours think of it, as the server's
+   * aggregate (`collaborative_candidates`). Never a person; absent everywhere else.
+   */
+  collaborative?: Collaborative | null;
 };
+
+/**
+ * Taste-compatible collaborative evidence for one title: a confidence-weighted, shrunk mean
+ * valence (−1…+1) and how many neighbours scored it 7 or more. Positive support means at
+ * least two neighbours loved it (an endorsed title, which may be added to the pool);
+ * negative means at least two disliked it (a disputed title, evidence only).
+ */
+export type Collaborative = { support: number; endorsers: number };
 
 /** How much the viewer's ranking history leans toward each genre and language. */
 export type Taste = {
@@ -338,7 +360,13 @@ export type Explanation = {
   /** 0–1, the bounded popularity prior. */
   popularity: number;
   /** Which signal actually carried it. Drives the sentence and the debug view. */
-  lead: 'anchors' | 'genre' | 'language' | 'popular';
+  lead: 'anchors' | 'genre' | 'language' | 'era' | 'collaborative' | 'popular';
+  /** Engine V2 only: the candidate's decade and the reader's era affinity for it. */
+  era?: { decade: number; affinity: number } | null;
+  /** Engine V2 hybrid only: the neighbours' aggregate, when it contributed. */
+  collaborative?: Collaborative | null;
+  /** The `ENGINES` version that scored it. Absent on V1, which predates the field. */
+  engine?: string;
 };
 
 export type Scored = Candidate & { explanation: Explanation };
@@ -452,6 +480,175 @@ function leadOf(terms: {
   // case, and calling it 'popular' is at least true of the source it came from.
   return value > 0 ? lead : 'popular';
 }
+
+// ---------------------------------------------------------------------------
+// Engine V2 (founder spec 2026-11-10, A1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which scorer a slate is built with. Chosen per reader by the server
+ * (`recommendation_engine`), defaulting to `v1`; an unrecognised value is `v1`, so a
+ * client that predates an engine never guesses at it.
+ */
+export type EngineId = 'v1' | 'v2_metadata' | 'v2_hybrid';
+
+export type EngineWeights = {
+  anchor: number;
+  genre: number;
+  language: number;
+  era: number;
+  popularity: number;
+  collaborative: number;
+};
+
+/**
+ * Every engine's weights, versioned, in one place.
+ *
+ * **`v2_metadata` changes one thing in the mix: it adds era.** The four V1 terms keep
+ * V1's proportions exactly (each × 0.93, rounded to the hundredth) and era takes the
+ * remaining 0.07. What V2 changes is what the terms *mean* — `profile.ts` replaces V1's
+ * volume-normalised, always-positive affinities with saturating, signed ones — and where
+ * candidates come from (language-aware anchors and the catalogue source). Keeping the
+ * proportions fixed is deliberate: the evaluation in `docs/architecture/recommendations-v2.md`
+ * can then attribute a difference to a definition or a source rather than to a re-weight.
+ *
+ * Era is small on purpose. The 2026-09-13 held-out evaluation on production rankings
+ * (seven raters; `docs/product/recommendations.md` §11.1) found a plain decade term
+ * *lowered* film ordering. V2's era term is a different feature — preference relative to
+ * exposure, neutral without evidence — but nothing real has shown it helps yet, so it is
+ * given the least room that still lets it break near-ties.
+ */
+export const ENGINES: Record<EngineId, { version: string; weights: EngineWeights }> = {
+  v1: { version: CONFIG_VERSION, weights: { ...WEIGHTS, era: 0, collaborative: 0 } },
+  v2_metadata: {
+    // 2026-11-11: a disliked genre lowers a multi-genre title (independent review).
+    version: 'foryou-v2-metadata-2026-11-11',
+    weights: { anchor: 0.56, genre: 0.17, language: 0.11, era: 0.07, popularity: 0.09, collaborative: 0 },
+  },
+  /**
+   * `v2_metadata` × 0.85, rounded, plus collaborative evidence at 0.15 — the same "add one
+   * thing at a time" rule. 0.15 is a starting hypothesis, not a measured optimum: A3's
+   * sensitivity sweep reports how ordering moves across 0.05–0.35 on synthetic readers.
+   */
+  v2_hybrid: {
+    // 2026-11-11: A1's genre rule, and neighbours' dislikes lower a title (review).
+    version: 'foryou-v2-hybrid-2026-11-11',
+    weights: { anchor: 0.48, genre: 0.14, language: 0.09, era: 0.06, popularity: 0.08, collaborative: 0.15 },
+  },
+};
+
+/**
+ * The neighbours' support at which the collaborative term is full strength: a cohort whose
+ * shrunk mean valence is +0.5, i.e. well-matched people who on average scored it about 7.5.
+ */
+export const COLLABORATIVE_FULL = 0.5;
+
+/** Under this many endorsers, collaborative evidence scores but is never named as the reason. */
+export const COLLABORATIVE_NAMED_AT = 3;
+
+export function engineFrom(value: unknown): EngineId {
+  // Own keys only: `'toString' in ENGINES` is true.
+  return typeof value === 'string' && Object.hasOwn(ENGINES, value) ? (value as EngineId) : 'v1';
+}
+
+/**
+ * One candidate against one reader, under a V2 engine.
+ *
+ * The anchor term and the popularity prior are V1's, unchanged. Genre, language and era
+ * come from the behavioural profile, each defaulting to its neutral value when the reader
+ * has no evidence — so an unfamiliar language or decade is never scored as a rejection.
+ *
+ * `lead` is computed from each term's **excess over neutral**, not its raw value: a title
+ * in a language the reader has never touched still collects the neutral language term, and
+ * that must never become "More from Japanese".
+ */
+export function scoreCandidateV2(
+  candidate: Candidate,
+  anchors: readonly Anchor[],
+  profile: Profile,
+  engine: { version: string; weights: EngineWeights },
+): Scored {
+  const { weights } = engine;
+  const v1 = scoreCandidate(candidate, anchors, EMPTY_TASTE);
+  const hits = v1.explanation.anchors;
+  const raw = hits.reduce((total, hit) => total + hit.contribution, 0);
+  const breadth = 1 + 0.25 * Math.min(3, Math.max(0, hits.length - 1));
+  const anchorSignal = saturate(raw * breadth);
+
+  // The best genre carries interest, as in V1; the worst genre's distance *below* neutral
+  // is taken off it, one for one. Without the second half a disliked genre would count
+  // only on titles where every genre is disliked — a Horror-Thriller would score exactly
+  // like a Western for a reader who keeps putting horror in Not for me (independent
+  // review, 2026-11-11). A title is never excluded by it: the term bottoms out at zero.
+  let genre: Explanation['genre'] = null;
+  let worst: number = NEUTRAL.genre;
+  for (const name of candidate.genres) {
+    const affinity = genreAffinity(profile, name);
+    if (affinity > (genre?.affinity ?? -1)) genre = { genre: name, affinity };
+    if (affinity < worst) worst = affinity;
+  }
+  const genreValue = Math.max(0, (genre?.affinity ?? NEUTRAL.genre) - (NEUTRAL.genre - worst));
+
+  const languageValue = languageAffinity(profile, candidate.language);
+  const kind = candidate.kind === 'movie' ? 'movie' : 'series';
+  const eraValue = eraAffinity(profile, kind, candidate.year);
+  const decade = decadeOf(candidate.year);
+  const popularity = v1.explanation.popularity;
+  const collaborative = weights.collaborative > 0 ? (candidate.collaborative ?? null) : null;
+  // Signed: a title the reader's taste neighbours disliked is scored down, by the same
+  // scale a liked one is scored up (independent review, 2026-11-11). It only ever applies
+  // to a title already in the pool — disputed titles are never a source.
+  const collaborativeValue = collaborative
+    ? Math.min(1, Math.max(-1, collaborative.support / COLLABORATIVE_FULL))
+    : 0;
+
+  const total =
+    weights.anchor * anchorSignal +
+    weights.genre * genreValue +
+    weights.language * languageValue +
+    weights.era * eraValue +
+    weights.popularity * popularity +
+    weights.collaborative * collaborativeValue;
+
+  const excess = {
+    anchor: weights.anchor * anchorSignal,
+    genre: weights.genre * Math.max(0, genreValue - NEUTRAL.genre),
+    language: weights.language * Math.max(0, languageValue - NEUTRAL.language),
+    era: weights.era * Math.max(0, eraValue - NEUTRAL.era),
+    popularity: weights.popularity * popularity,
+    collaborative: weights.collaborative * Math.max(0, collaborativeValue),
+  };
+  const ordered: [Explanation['lead'], number][] = [
+    ['anchors', excess.anchor],
+    ['genre', excess.genre],
+    ['language', excess.language],
+    ['era', excess.era],
+    ['collaborative', excess.collaborative],
+    ['popular', excess.popularity],
+  ];
+  ordered.sort((a, b) => b[1] - a[1]);
+  const [lead, value] = ordered[0]!;
+
+  return {
+    ...candidate,
+    explanation: {
+      total,
+      anchors: hits,
+      genre: genre && genre.affinity > NEUTRAL.genre ? genre : null,
+      language:
+        candidate.language && languageValue > NEUTRAL.language
+          ? { code: candidate.language, affinity: languageValue }
+          : null,
+      era: decade != null && eraValue > NEUTRAL.era ? { decade, affinity: eraValue } : null,
+      collaborative: collaborativeValue > 0 ? collaborative : null,
+      popularity,
+      lead: value > 0 ? lead : 'popular',
+      engine: engine.version,
+    },
+  };
+}
+
+const EMPTY_TASTE: Taste = { genres: new Map(), languages: new Map(), sampleSize: 0 };
 
 // ---------------------------------------------------------------------------
 // Diversity
@@ -978,6 +1175,12 @@ export type SlateInput = {
   /** Everything already in the viewer's collection. Excluded outright. */
   exclude: ReadonlySet<string>;
   limit?: number;
+  /**
+   * Engine V2. Both or neither: with an engine other than `v1` and a profile, candidates
+   * are scored by {@link scoreCandidateV2}; otherwise by V1, exactly as before.
+   */
+  engine?: EngineId;
+  profile?: Profile;
 };
 
 /**
@@ -1001,9 +1204,11 @@ export function buildSlate({
   limit,
   seed,
   exposure,
+  engine,
+  profile,
 }: SlateInput & { seed?: number; exposure?: Exposure }): Scored[] {
   return diversify(
-    scoreSlate({ candidates, anchors, taste, exclude }),
+    scoreSlate({ candidates, anchors, taste, exclude, engine, profile }),
     limit ?? SLATE_SIZE,
     seed,
     exposure,
@@ -1023,7 +1228,14 @@ export function buildSlate({
  * {@link buildSlate} remains the whole pipeline for every caller that wants one answer —
  * the quality report, and the tests that assert on the ceilings.
  */
-export function scoreSlate({ candidates, anchors, taste, exclude }: SlateInput): Scored[] {
+export function scoreSlate({
+  candidates,
+  anchors,
+  taste,
+  exclude,
+  engine = 'v1',
+  profile,
+}: SlateInput): Scored[] {
   const seen = new Set<string>();
   const eligible: Candidate[] = [];
 
@@ -1041,9 +1253,12 @@ export function scoreSlate({ candidates, anchors, taste, exclude }: SlateInput):
   // whose failure would be the most obviously stupid thing the feature could do.
   const anchorIds = new Set(anchors.map((anchor) => anchor.mediaItemId));
 
-  return eligible
-    .filter((candidate) => !anchorIds.has(candidate.mediaItemId))
-    .map((candidate) => scoreCandidate(candidate, anchors, taste));
+  const kept = eligible.filter((candidate) => !anchorIds.has(candidate.mediaItemId));
+  if (engine !== 'v1' && profile) {
+    const config = ENGINES[engine];
+    return kept.map((candidate) => scoreCandidateV2(candidate, anchors, profile, config));
+  }
+  return kept.map((candidate) => scoreCandidate(candidate, anchors, taste));
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1294,21 @@ export function headlineFor(
 
   if (explanation.lead === 'language' && explanation.language && taste.sampleSize >= CONFIDENT_AT) {
     return `More from ${languageLabel(explanation.language.code)}`;
+  }
+
+  if (explanation.lead === 'era' && explanation.era && taste.sampleSize >= CONFIDENT_AT) {
+    return `More from the ${explanation.era.decade}s, which you rank highly`;
+  }
+
+  // Never a name, and never on fewer than three people: the sentence must not be a way to
+  // learn what one particular account thought.
+  if (
+    explanation.lead === 'collaborative' &&
+    explanation.collaborative &&
+    explanation.collaborative.endorsers >= COLLABORATIVE_NAMED_AT &&
+    taste.sampleSize >= CONFIDENT_AT
+  ) {
+    return 'Loved by people with taste like yours';
   }
 
   // Named for what it is. "Recommended for you" over a popularity ranking is exactly
