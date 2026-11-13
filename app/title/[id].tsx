@@ -38,6 +38,7 @@ import {
   useLoggedCollection,
   type RankingCategory,
 } from '@/features/collection/use-collection';
+import { projectShow } from '@/features/collection/show-projection';
 import { useMyScores, useTitleScore } from '@/features/collection/use-score';
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
 import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
@@ -815,6 +816,19 @@ export default function TitleScreen() {
   const seasonWatchlist = useWatchlistToggle(profile.id, 'title');
   /** Each season's logged bucket, so a season row's `+` can resume an unfinished placement. */
   const loggedForSeasons = useLoggedCollection(profile.id, { enabled: isSeriesTitle });
+  /**
+   * WS-TVC (founder spec t168u §2): on a series page with no explicit show ranking, the
+   * reader's personal slot shows the mean of their ranked seasons — the same effective
+   * score the Collection poster carries (`projectShow`), over the whole season pool already
+   * read above. Null for a film, a season, or a series none of whose seasons is ranked.
+   */
+  const seasonAverage = useMemo(
+    () =>
+      isSeriesTitle && data?.title?.id && rankedSeasons.data
+        ? projectShow(data.title.id, rankedSeasons.data, [])
+        : null,
+    [isSeriesTitle, data?.title?.id, rankedSeasons.data],
+  );
 
   /**
    * How far the page has scrolled, as one animated value.
@@ -2297,6 +2311,14 @@ export default function TitleScreen() {
                     score,
                     pending: Boolean(data.ranked) && score == null,
                     onPress: () => (data.ranked ? setManaging(true) : rank()),
+                    // WS-TVC: an unranked series with ranked seasons shows their mean.
+                    average:
+                      isSeries && !data.ranked && seasonAverage
+                        ? {
+                            score: seasonAverage.display,
+                            count: seasonAverage.rankedSeasonCount,
+                          }
+                        : null,
                   }
                 : null
             }
