@@ -67,6 +67,10 @@ jest.mock('@tanstack/react-query', () => {
   const { useEffect, useState } = jest.requireActual('react');
   return {
     keepPreviousData: 'keepPreviousData',
+    // `useSeasons` passes it as the queryFn when there is no series. The stand-in never
+    // calls a disabled query's queryFn, so its value only has to exist; what a refetch
+    // does with it is covered against a real client in `use-seasons.test.tsx`.
+    skipToken: Symbol('skipToken'),
     // Later pages are covered against a real client in `use-title-search.pages.test.tsx`;
     // here no page past the first is ever asked for, so the list of queries is empty.
     useQueries: ({ combine }: any) => (combine ? combine([]) : []),

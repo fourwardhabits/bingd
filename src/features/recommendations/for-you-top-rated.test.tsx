@@ -1,5 +1,6 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 import { bandSizes, formatScore, scoreFor, type Bucket } from '@/features/collection/score';
 
@@ -40,6 +41,13 @@ let mockTopRatedDelayMs = 0;
 const mockCatalogue: Record<string, Record<string, unknown>> = {};
 /** The reader's own `rankings` rows: what `useMyScores` derives their score chips from. */
 let mockRankings: Record<string, unknown>[] = [];
+
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
