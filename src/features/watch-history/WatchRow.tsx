@@ -225,6 +225,9 @@ export function WatchRow({
               label={RERANK_LABEL}
               accessibilityHint="Compares this title again. Records no new watch."
               onPress={onEditRanking}
+              // A save from the editor that just closed may still be writing this watch:
+              // the ranking does not open over it (independent review).
+              disabledReason={busy ? 'Saving' : undefined}
             />
           ) : null}
         </View>
@@ -342,15 +345,25 @@ function WatchEditor({
    */
   const inFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
-  const begin = () => {
+  /**
+   * Whether what is in flight writes this watch, which is when Save may say "Saving…". A
+   * Rerank that only flushes the note before opening the ranking holds the controls
+   * just the same, but it is not a save, and Save keeps its word (independent review).
+   */
+  const [writing, setWriting] = useState(false);
+  const begin = (writes = true) => {
     if (inFlight.current) return false;
     inFlight.current = true;
     setSubmitting(true);
+    setWriting(writes);
     return true;
   };
   const end = () => {
     inFlight.current = false;
-    if (mounted.current) setSubmitting(false);
+    if (mounted.current) {
+      setSubmitting(false);
+      setWriting(false);
+    }
   };
   const locked = busy || submitting;
 
@@ -387,7 +400,7 @@ function WatchEditor({
     if (inFlight.current) return;
     const edit = pendingEdit();
     const goToRanking = async () => {
-      if (!begin()) return;
+      if (!begin(false)) return;
       try {
         await titleNote.flush();
       } finally {
@@ -459,9 +472,9 @@ function WatchEditor({
           <SaveButton
             testID={`watch-save-${event.id}`}
             accessibilityLabel="Save"
-            saving={submitting}
-            disabled={busy}
-            disabledReason={busy ? 'Saving' : undefined}
+            saving={writing}
+            disabled={busy || submitting}
+            disabledReason={busy || submitting ? 'Saving' : undefined}
             onPress={() => void save()}
           />
         </View>

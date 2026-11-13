@@ -821,5 +821,28 @@ describe('the refined person page', () => {
     land({ outcome: 'applied' });
     await waitFor(() => expect(mockSetWatchlist).toHaveBeenCalledTimes(1));
   });
+
+  /** Independent review, 2026-11-13: no `+` until the reader's rankings are known. */
+  it('offers no + Rank on any row until the reader’s rankings have been read', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const realRankings = tableRows.rankings;
+    // Hold the rankings read: the page must not guess that a ranked title is unranked.
+    Object.defineProperty(tableRows, 'rankings', {
+      configurable: true,
+      get: () => {
+        throw gate;
+      },
+    });
+    const view = await renderWithProviders(<PersonScreen />);
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+    Object.defineProperty(tableRows, 'rankings', {
+      configurable: true,
+      writable: true,
+      value: realRankings,
+    });
+    release();
+  });
 });
 

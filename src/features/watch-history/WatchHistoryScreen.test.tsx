@@ -1360,4 +1360,51 @@ describe('Rerank with unsaved watch edits', () => {
     expect(mockDetails).toHaveBeenCalledTimes(1);
     expect(mockEdit).toHaveBeenCalledTimes(1);
   });
+
+  /** Independent review, 2026-11-13: the collapsed card's Rerank is a new entry point. */
+  it('holds a collapsed card’s Rerank while the save its editor just made is still writing', async () => {
+    let land!: (value: { outcome: string }) => void;
+    mockDetails.mockImplementationOnce(
+      () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
+    );
+    const view = await editW1();
+    await fireEvent.press(view.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(view.queryByTestId('watch-editor-w1')).toBeNull());
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+
+    const rerank = within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' });
+    expect(rerank).toBeDisabled();
+    await fireEvent.press(rerank);
+    expect(mockLogSheet.props?.title ?? null).toBeNull();
+
+    await act(async () => {
+      land({ outcome: 'ok' });
+    });
+    await waitFor(() =>
+      expect(
+        within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' }),
+      ).not.toBeDisabled(),
+    );
+  });
+
+  it('keeps Save’s own word while Rerank only flushes the note', async () => {
+    let flushed!: () => void;
+    mockSaveNote.mockImplementationOnce(
+      () => new Promise((resolve) => (flushed = () => resolve({ outcome: 'ok' }))) as never,
+    );
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A note.');
+    await pressRerank(view);
+
+    // Held, but not "Saving…": nothing about this watch is being written.
+    expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(view.queryByText('Saving…')).toBeNull();
+    await act(async () => {
+      flushed?.();
+    });
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+  });
 });
+
