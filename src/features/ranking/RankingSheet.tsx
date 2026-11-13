@@ -28,6 +28,7 @@ import {
 } from '@/features/collection/genre-rank';
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
+import { useMyScores } from '@/features/collection/use-score';
 import {
   asRankingCategory,
   CATEGORY_NAME,
@@ -57,6 +58,7 @@ import {
   rankRebucket,
   rankSkip,
   rankStart,
+  keepShow,
   type Placed,
   type PlacedMovement,
   type SessionStep,
@@ -140,6 +142,15 @@ export type UpdateShowLink = {
   linkedPlacementId: string;
 };
 
+/**
+ * **The parent-show decision a season's ranking left open** (WS-TVC, founder spec t168u
+ * §3). Carried out of the reveal by *Add details*, so the post-rank details sheet can offer
+ * Update Show and Keep Show in place of Done: the show, its band, the season placement that
+ * offered the choice, and the reader's current whole-show score — null when it is not known
+ * yet, in which case the labels carry no number rather than a guessed one.
+ */
+export type ShowDecision = UpdateShowLink & { showScore: number | null };
+
 export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
   subject: RankingSubject | null;
@@ -169,7 +180,16 @@ export type RankingSheetProps = {
    * mounts this one does; the prop is optional so that adding a fourth cannot silently
    * break, and the reveal falls back to the two controls it has always had.
    */
-  onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
+  onFinishLog?: (placement: {
+    score: number;
+    position: number;
+    category: string;
+    /**
+     * Present when the reveal offered Update Show (WS-TVC): the decision is still the
+     * reader's, so the details sheet carries it on. Absent everywhere else.
+     */
+    showDecision?: ShowDecision;
+  }) => void;
   /**
    * **The placement, told to the caller the moment it lands** — for a caller that has to
    * count placements itself rather than wait for a refetch to do it.
@@ -355,6 +375,22 @@ function Session({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
+  /**
+   * The reader's current scores, for the show a season's Update Show / Keep Show names
+   * (WS-TVC, founder spec t168u §3A): the whole-show score, never the season's. Read only
+   * for a season, the one subject that can offer them, from the cache the Collection
+   * already fills; until it answers the labels carry no number.
+   */
+  const myScores = useMyScores(profile.id, subject.kind === 'season');
+  /**
+   * **Keep Show, once** (WS-TVC §3D): one call at a time — the ref answers synchronously,
+   * so a double tap is one request — and no optimistic "kept". A failure keeps the sheet
+   * open with the reason and both choices still live; retrying is safe because the server
+   * records one reaffirmation per season placement.
+   */
+  const keepInFlight = useRef(false);
+  const [keeping, setKeeping] = useState(false);
+  const [keepError, setKeepError] = useState<string | null>(null);
   /**
    * What the placement on screen earned, for the reveal to name (post-QA sprint 2,
    * 2026-11-05). A copy of what the detection already hands the celebration queue — the
