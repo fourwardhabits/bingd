@@ -57,6 +57,7 @@ import {
 import {
   RankingSheet,
   type RankingSubject,
+  type ShowDecision,
   type UpdateShowLink,
 } from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
@@ -365,6 +366,13 @@ export default function TitleScreen() {
     showId: string;
     linkedPlacementId: string;
   } | null>(null);
+  /**
+   * WS-TVC (founder spec t168u §3B): the Update Show / Keep Show decision a season's reveal
+   * left open when the reader took *Add details*. Held for the post-rank details sheet,
+   * which offers both in place of Done; cleared on every way out of that sheet, so a
+   * dismissal records nothing and nothing carries into a later log.
+   */
+  const [pendingShowDecision, setPendingShowDecision] = useState<ShowDecision | null>(null);
   /**
    * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
    *
@@ -3100,10 +3108,18 @@ export default function TitleScreen() {
            This is the half the founder physically hit: a reader who takes *Add details*
            finishes here rather than on the reveal, and the payoff used to be held by a
            ranking sheet that had already unmounted. Empty queue, nothing happens. */
+        // WS-TVC: the open show decision, only on the post-rank sheet it was carried to.
+        showDecision={placement ? pendingShowDecision : null}
+        onUpdateShow={(link) => {
+          // The details have landed (LogSheet's barrier); the show's correction opens.
+          setPendingShowDecision(null);
+          updateShow(link);
+        }}
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setPendingShowLink(null);
+          setPendingShowDecision(null);
           celebrate();
         }}
         onClose={() => {
@@ -3112,6 +3128,8 @@ export default function TitleScreen() {
           setActionError(null);
           // Leaving the show's band chooser without choosing abandons Update Show.
           setPendingShowLink(null);
+          // And leaving the details sheet records no show decision (§3E).
+          setPendingShowDecision(null);
           celebrate();
         }}
         onRank={(bucket, mode, context) => {
@@ -3209,6 +3227,8 @@ export default function TitleScreen() {
           setOpenWriting(null);
           setOpenSection(null);
           setPlacement(result);
+          // WS-TVC: Add details does not resolve the show; the decision rides along.
+          setPendingShowDecision(result.showDecision ?? null);
           setLoggingTitle(rankedTitle);
         }}
         onUpdateShow={updateShow}
