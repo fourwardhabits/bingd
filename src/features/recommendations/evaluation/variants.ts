@@ -8,7 +8,7 @@ import type { Variant } from './pipeline';
  * Bump `EVAL_CONFIG_VERSION` whenever a variant, a metric or a default here changes. The world
  * has its own version (`WORLD_VERSION`); a report names both, plus the seed.
  */
-export const EVAL_CONFIG_VERSION = 'rec-eval-config-2026-11-10.1';
+export const EVAL_CONFIG_VERSION = 'rec-eval-config-2026-11-13.1';
 
 const base = {
   languageAnchors: true,
@@ -101,7 +101,30 @@ export const SWEEPS: Variant[] = [
   ),
 ];
 
-export const ALL_VARIANTS: Variant[] = [...ENGINE_VARIANTS, ...ABLATIONS, ...SWEEPS];
+/**
+ * Diagnostics (reconcile, 2026-11-13). **Not shipped configurations**: each moves one thing to
+ * attribute a regression the 2026-11-11 run reported.
+ *
+ * - `v1-no-social` / `v2m-plus-social`: V2 removes the follow-graph source by design (following
+ *   alone is not evidence about taste). If V1 without it falls to V2's pool recall, and V2 with
+ *   it climbs to V1's, the pool-recall gap is that decision, not a defect.
+ * - `v2m-no-catalogue-no-social`: V2's sources reduced to V1's minus social (anchors, trending).
+ * - `v2m-pre-ws5`: V2 metadata with the pre-reconcile profile (whole-show rankings ignored). The
+ *   same as V2 metadata on the film wall; the reference for the TV whole-show slice.
+ */
+export const DIAGNOSTICS: Variant[] = [
+  { ...ENGINE_VARIANTS[0]!, id: 'v1-no-social', label: 'V1 − social source', group: 'diagnostic', social: false },
+  { id: 'v2m-plus-social', label: 'V2 metadata + social source', group: 'diagnostic', engine: 'v2', weights: metadata, ...base, social: true },
+  { id: 'v2m-no-catalogue-no-social', label: 'V2 metadata − catalogue (V1 sources − social)', group: 'diagnostic', engine: 'v2', weights: metadata, ...base, catalogue: false },
+];
+
+/** The TV whole-show evaluation: the engines plus the pre-reconcile profile as reference. */
+export const TV_VARIANTS: Variant[] = [
+  ...ENGINE_VARIANTS,
+  { id: 'v2m-pre-ws5', label: 'V2 metadata, pre-reconcile profile (shows ignored)', group: 'diagnostic', engine: 'v2', weights: metadata, ...base, showsInProfile: false },
+];
+
+export const ALL_VARIANTS: Variant[] = [...ENGINE_VARIANTS, ...ABLATIONS, ...SWEEPS, ...DIAGNOSTICS];
 
 /** Seeds averaged per reader: anchor rotation and the draw both vary across launches. */
 export const LAUNCH_SEEDS = [11, 23, 37] as const;

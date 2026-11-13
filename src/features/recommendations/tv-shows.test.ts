@@ -144,11 +144,20 @@ describe('a whole show on the TV wall', () => {
 describe('a whole show in the V2 profile', () => {
   it('reads a whole-show ranking as taste evidence', () => {
     const profile = profileFrom(
-      profileEntriesFrom([], [], [], [show('kdrama', 1, { genres: ['Romance'], language: 'ko' })]),
+      profileEntriesFrom(
+        [],
+        [],
+        [],
+        [show('kdrama', 1, { genres: ['Romance'], language: 'ko' })],
+      ),
     );
     expect(profile.sampleSize).toBe(1);
-    expect(languageAffinity(profile, 'ko')).toBeGreaterThan(languageAffinity(profileFrom([]), 'ko'));
-    expect(genreAffinity(profile, 'Romance')).toBeGreaterThan(genreAffinity(profileFrom([]), 'Romance'));
+    expect(languageAffinity(profile, 'ko')).toBeGreaterThan(
+      languageAffinity(profileFrom([]), 'ko'),
+    );
+    expect(genreAffinity(profile, 'Romance')).toBeGreaterThan(
+      genreAffinity(profileFrom([]), 'Romance'),
+    );
   });
 
   it('weighs a series exactly as V1 does: its seasons and its show ranking share one unit', () => {
@@ -167,13 +176,26 @@ describe('a whole show in the V2 profile', () => {
     const loved = { bucket: 'loved' as const };
     const profile = profileFrom(
       profileEntriesFrom(
-        [entry({ mediaItemId: 'film', kind: 'movie', category: 'movies', language: 'fr', ...loved })],
-        [season('s1', 'show', 1, { language: 'ko' }), season('s2', 'show', 2, { language: 'ko' })],
+        [
+          entry({
+            mediaItemId: 'film',
+            kind: 'movie',
+            category: 'movies',
+            language: 'fr',
+            ...loved,
+          }),
+        ],
+        [
+          season('s1', 'show', 1, { language: 'ko' }),
+          season('s2', 'show', 2, { language: 'ko' }),
+        ],
         [],
         [show('show', 1, { language: 'ko' })],
       ),
     );
-    expect(profile.languages.get('ko')?.interest).toBeCloseTo(profile.languages.get('fr')?.interest ?? 0);
+    expect(profile.languages.get('ko')?.interest).toBeCloseTo(
+      profile.languages.get('fr')?.interest ?? 0,
+    );
   });
 
   it('lets ten logged seasons of one show say no more than one logged show', () => {
@@ -192,9 +214,17 @@ describe('a whole show in the V2 profile', () => {
       watchedOn: null,
       addedAt: null,
     }));
-    const one = { ...logged[0]!, mediaItemId: 'other', kind: 'series' as const, seriesId: null, language: 'de' };
+    const one = {
+      ...logged[0]!,
+      mediaItemId: 'other',
+      kind: 'series' as const,
+      seriesId: null,
+      language: 'de',
+    };
     const profile = profileFrom(profileEntriesFrom([], [], [...logged, one]));
-    expect(profile.languages.get('ja')?.interest).toBeCloseTo(profile.languages.get('de')?.interest ?? 0);
+    expect(profile.languages.get('ja')?.interest).toBeCloseTo(
+      profile.languages.get('de')?.interest ?? 0,
+    );
     expect(profile.evidenceCount).toBe(11);
   });
 
@@ -216,6 +246,8 @@ describe('a whole show in the V2 profile', () => {
         addedAt: null,
       },
     ];
-    expect(profileEntriesFrom([], [], logged, ranked).map((e) => e.mediaItemId)).toEqual(['severance']);
+    expect(profileEntriesFrom([], [], logged, ranked).map((e) => e.mediaItemId)).toEqual([
+      'severance',
+    ]);
   });
 });

@@ -477,7 +477,14 @@ export function generateWorld(config: WorldConfig = DEFAULT_WORLD): World {
 // Test readers and held-out evidence
 // ---------------------------------------------------------------------------
 
-export type Stratum = Archetype | 'cold_start';
+/**
+ * `cold_start` keeps five ranked titles (the First Five), `cold_start_3` three and
+ * `cold_start_0` none: everything else they ranked is held out and nothing is logged.
+ */
+export type Stratum = Archetype | 'cold_start' | 'cold_start_3' | 'cold_start_0';
+
+const COLD_KEEP: Partial<Record<Stratum, number>> = { cold_start: 5, cold_start_3: 3, cold_start_0: 0 };
+export const isColdStart = (stratum: Stratum) => COLD_KEEP[stratum] != null;
 
 export type TestReader = {
   person: number;
@@ -498,15 +505,23 @@ export const DEFAULT_QUOTAS: Record<Stratum, number> = {
   classic: 40,
   niche: 40,
   cold_start: 40,
+  // Added by the reconcile (2026-11-13). After the original strata, so their readers are the
+  // same readers as in every earlier report.
+  cold_start_3: 40,
+  cold_start_0: 40,
 };
 
 /**
  * A stratified set of readers, each with a quarter of their ranked titles held out.
  *
- * Cold-start readers keep only five ranked titles and nothing logged; everything else they
- * ranked is held out. Readers are disjoint across strata.
+ * Cold-start readers keep only five, three or no ranked titles and nothing logged; everything
+ * else they ranked is held out. Readers are disjoint across strata.
  */
-export function chooseTestReaders(world: World, quotas = DEFAULT_QUOTAS, seed = world.config.seed + 1): TestReader[] {
+export function chooseTestReaders(
+  world: World,
+  quotas: Partial<Record<Stratum, number>> = DEFAULT_QUOTAS,
+  seed = world.config.seed + 1,
+): TestReader[] {
   const r = rng(seed);
   const used = new Set<number>();
   const readers: TestReader[] = [];
@@ -514,12 +529,12 @@ export function chooseTestReaders(world: World, quotas = DEFAULT_QUOTAS, seed = 
   const order = r.shuffle(world.people.map((p) => p.index));
 
   for (const stratum of Object.keys(quotas) as Stratum[]) {
-    const want = quotas[stratum];
+    const want = quotas[stratum] ?? 0;
     let taken = 0;
     for (const index of order) {
       if (taken >= want) break;
       const person = world.people[index]!;
-      if (stratum === 'cold_start') {
+      if (isColdStart(stratum)) {
         if (!eligible(person, 15) || !['mainstream', 'minority', 'polyglot'].includes(person.archetype)) continue;
       } else if (person.archetype !== stratum || !eligible(person, 12)) {
         continue;
@@ -528,7 +543,7 @@ export function chooseTestReaders(world: World, quotas = DEFAULT_QUOTAS, seed = 
       taken += 1;
       const shuffled = r.shuffle([...person.ranked]);
       const keep =
-        stratum === 'cold_start' ? 5 : person.ranked.length - Math.max(3, Math.round(person.ranked.length * 0.25));
+        COLD_KEEP[stratum] ?? person.ranked.length - Math.max(3, Math.round(person.ranked.length * 0.25));
       const kept = new Set(shuffled.slice(0, keep).map((row) => row.title));
       const ranked = person.ranked
         .filter((row) => kept.has(row.title))
@@ -538,8 +553,8 @@ export function chooseTestReaders(world: World, quotas = DEFAULT_QUOTAS, seed = 
         person: index,
         stratum,
         ranked,
-        bucketed: stratum === 'cold_start' ? [] : person.bucketed,
-        logged: stratum === 'cold_start' ? [] : person.logged,
+        bucketed: isColdStart(stratum) ? [] : person.bucketed,
+        logged: isColdStart(stratum) ? [] : person.logged,
         hidden,
       });
     }

@@ -6,9 +6,9 @@ import { join, resolve } from 'node:path';
 import { profileFrom } from '../profile';
 import { ENGINES, scoreSlate, tasteFrom, type Candidate } from '../rank';
 
-import { evaluate, renderReport, type CollaborativeInput } from './evaluate';
-import { profileEntriesOf, scoreWith } from './pipeline';
-import { ABLATIONS, ALL_VARIANTS, ENGINE_VARIANTS } from './variants';
+import { evaluate, evaluateTv, genreEntropy, orderingAuc, renderReport, type CollaborativeInput } from './evaluate';
+import { profileEntriesOf, scoreWith, tvCollectionOf, wallFor } from './pipeline';
+import { ABLATIONS, ALL_VARIANTS, ENGINE_VARIANTS, TV_VARIANTS } from './variants';
 import {
   DEFAULT_QUOTAS,
   DEFAULT_WORLD,
@@ -96,7 +96,17 @@ function runCollaborative(world: World, readers: readonly TestReader[], dir: str
 
 describe('For You offline evaluation (synthetic)', () => {
   const small = { ...DEFAULT_WORLD, titles: 500, people: 400, watchedMedian: 24 };
-  const quotas = { mainstream: 6, polyglot: 4, minority: 5, non_english: 3, classic: 3, niche: 3, cold_start: 3 };
+  const quotas = {
+    mainstream: 6,
+    polyglot: 4,
+    minority: 5,
+    non_english: 3,
+    classic: 3,
+    niche: 3,
+    cold_start: 3,
+    cold_start_3: 2,
+    cold_start_0: 2,
+  };
 
   it('generates the same world for the same seed, and a different one for another', () => {
     const a = generateWorld(small);
@@ -119,6 +129,8 @@ describe('For You offline evaluation (synthetic)', () => {
       const inputs = [...reader.ranked.map((row) => row.title), ...reader.bucketed.map((row) => row.title), ...reader.logged];
       expect(inputs.some((t) => hidden.has(t))).toBe(false);
       if (reader.stratum === 'cold_start') expect(reader.ranked).toHaveLength(5);
+      if (reader.stratum === 'cold_start_3') expect(reader.ranked).toHaveLength(3);
+      if (reader.stratum === 'cold_start_0') expect(reader.ranked).toHaveLength(0);
     }
   });
 
@@ -163,6 +175,67 @@ describe('For You offline evaluation (synthetic)', () => {
     expect(renderReport(report)).toMatch(/SYNTHETIC DATA/);
   });
 
+  it('computes the reconcile metrics from first principles', () => {
+    expect(orderingAuc(new Map([[1, 0.9], [2, 0.1], [3, 0.5]]), [1], [2, 3])).toBe(1);
+    expect(orderingAuc(new Map([[1, 0.5], [2, 0.5]]), [1], [2])).toBe(0.5);
+    expect(orderingAuc(new Map([[1, 0.5]]), [1], [])).toBeNull();
+    expect(genreEntropy([['Drama'], ['Drama']])).toBe(0);
+    expect(genreEntropy([['Drama'], ['Comedy']])).toBeCloseTo(1);
+    expect(genreEntropy([['Drama', 'Comedy']])).toBeCloseTo(1);
+  });
+
+  it('draws recall@50 from the same draw the wall is the prefix of', () => {
+    const world = generateWorld(small);
+    const readers = chooseTestReaders(world, quotas).slice(0, 4);
+    for (const reader of readers) {
+      for (const variant of ENGINE_VARIANTS) {
+        const input = { world, reader, variant, collaborative: new Map(), anchorSeed: 11, drawSeed: 11 * 7919 };
+        const { wall, extended } = wallFor(input);
+        expect(extended.slice(0, wall.length).map((s) => s.mediaItemId)).toEqual(wall.map((s) => s.mediaItemId));
+        expect(extended.length).toBeGreaterThanOrEqual(wall.length);
+      }
+    }
+  });
+
+  it('records TV in the shapes it claims, with one series as one unit', () => {
+    const world = generateWorld(small);
+    const reader = chooseTestReaders(world, quotas).find((r) => r.ranked.length >= 8)!;
+    const whole = tvCollectionOf(world, reader, 'whole_show');
+    expect(whole.seasons).toHaveLength(0);
+    expect(whole.shows).toHaveLength(reader.ranked.length);
+    whole.shows.forEach((row, i) => expect(row.position).toBe(i + 1));
+    const bySeason = tvCollectionOf(world, reader, 'by_season');
+    expect(bySeason.shows).toHaveLength(0);
+    expect(bySeason.seasons.length).toBeGreaterThanOrEqual(reader.ranked.length);
+    expect(new Set(bySeason.seasons.map((row) => row.seriesId)).size).toBe(reader.ranked.length);
+    const both = tvCollectionOf(world, reader, 'show_and_seasons');
+    expect(both.shows).toHaveLength(reader.ranked.length);
+    expect(both.seasons).toHaveLength(2 * reader.ranked.length);
+  });
+
+  it('reads whole-show rankings into the V2 profile only after the reconcile', () => {
+    const world = generateWorld(small);
+    const readers = chooseTestReaders(world, quotas).filter((r) => r.ranked.length >= 8).slice(0, 3);
+    const report = evaluateTv(world, readers, new Map(), TV_VARIANTS, ['whole_show', 'show_and_seasons']);
+    // A whole-show ranker's profile is empty of TV without the fix, so their walls differ.
+    const fixed = report.results.whole_show!.v2_metadata!;
+    const before = report.results.whole_show!['v2m-pre-ws5']!;
+    expect(fixed.utility?.mean).not.toBe(before.utility?.mean);
+    for (const shape of report.shapes) {
+      for (const id of ['v1', 'v2_metadata', 'v2_hybrid']) {
+        const row = report.results[shape]![id]!;
+        for (const key of ['recall', 'recall50', 'utility', 'nonEnglishShare'] as const) {
+          const value = row[key]?.mean;
+          if (value == null) continue;
+          expect(value).toBeGreaterThanOrEqual(0);
+          expect(value).toBeLessThanOrEqual(1);
+        }
+        // Exclusion holds on TV too: nothing the reader met reaches the wall.
+        expect(row.seenShare?.mean).toBe(0);
+      }
+    }
+  });
+
   (FULL ? it : it.skip)(
     'full evaluation',
     () => {
@@ -174,13 +247,17 @@ describe('For You offline evaluation (synthetic)', () => {
       const generatedMs = Date.now() - started;
       const collaborative = runCollaborative(world, readers, out);
       const report = evaluate(world, readers, collaborative, ALL_VARIANTS);
-      const markdown = renderReport(report);
-      writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2));
+      const tvStarted = Date.now();
+      const tv = evaluateTv(world, readers, collaborative, TV_VARIANTS);
+      const tvMs = Date.now() - tvStarted;
+      const markdown = renderReport(report, tv);
+      writeFileSync(join(out, 'report.json'), JSON.stringify({ ...report, tv, tvMs }, null, 2));
       writeFileSync(join(out, 'report.md'), markdown);
       // eslint-disable-next-line no-console
       console.log(`${markdown}\n\nWorld generated in ${generatedMs} ms; total ${Date.now() - started} ms. Written to ${out}.`);
       expect(report.following.v2WallsChanged).toBe(0);
+      for (const id of ['v1', 'v2_metadata', 'v2_hybrid']) expect(report.results[id]!.all!.seenShare?.mean).toBe(0);
     },
-    60 * 60 * 1000,
+    3 * 60 * 60 * 1000,
   );
 });
