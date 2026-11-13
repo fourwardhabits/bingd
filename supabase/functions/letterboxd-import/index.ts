@@ -45,8 +45,11 @@ import {
   imdbKind,
   imdbTitleType,
   needsWindow,
+  needsWindowOriginal,
   needsWindowTv,
+  originalClaim,
   pick,
+  pickOriginal,
   pickTv,
 } from './match.mjs';
 
@@ -201,19 +204,36 @@ async function searchTv(
   return Array.isArray(body?.results) ? body.results : [];
 }
 
-type Outcome = { matched: boolean; empty: boolean; unconfident: boolean; unwritable: boolean };
+type Outcome = {
+  matched: boolean;
+  empty: boolean;
+  unconfident: boolean;
+  unwritable: boolean;
+  /**
+   * 20261118000100. Which branch decided an IMDb claim: the /find outcome (`conflict_kind`,
+   * `conflict_year`, `ambiguous`, `unsupported`, `match`, `none`), and for a match whether
+   * its title corroborated it. Counted in the batch answer, never named: it is how an
+   * operator tells from a staging reimport why a row ended where it did.
+   */
+  find?: string;
+  corroboration?: string;
+  searchedOriginal?: boolean;
+};
 
 /**
  * **An IMDb claim** (20261113000100): the identifier first, a title second.
  *
- *   Tier 2  TMDB `/find/{tt}?external_source=imdb_id`. An answer of the expected kind that
- *           agrees with the row places it, and is the ONLY path that hands the database
- *           the id to remember (`p_imdb_id`). An episode is unsupported; a title of the
- *           other kind, a disagreeing one or two of them are final non-matches.
+ *   Tier 2  TMDB `/find/{tt}?external_source=imdb_id`. The one answer of the expected kind,
+ *           dated within a year of the row, IS the title: a verified id outweighs a
+ *           display-title difference (20261118000100, `verifiedIdentityAgrees`). It is the
+ *           ONLY path that hands the database the id to remember (`p_imdb_id`). An episode
+ *           is unsupported; a title of the other kind, one dated out of tolerance, or two
+ *           of the kind are final non-matches.
  *   Tier 3  When /find knows nothing: the same conservative title-and-year search a
  *           Letterboxd row gets (`pick`), on `/search/movie` or `/search/tv` by the kind
- *           the IMDb type implies. Never by popularity; ambiguity stays unresolved. A title
- *           search proves nothing about the id, so it never writes it.
+ *           the IMDb type implies, and then once more by the row's IMDb Original Title when
+ *           it has one (`pickOriginal`). Never by popularity; ambiguity stays unresolved. A
+ *           title search proves nothing about the id, so it never writes it.
  *
  * Tier 1 (a catalogue title already carrying the id) ran in SQL before this was called.
  */
@@ -248,6 +268,9 @@ async function resolveImdb(
     bearer,
   );
   const decision = decideFind(claim, found);
+  outcome.find =
+    decision.outcome === 'conflict' ? `conflict_${decision.reason}` : decision.outcome;
+  if (decision.outcome === 'match') outcome.corroboration = decision.corroboration;
 
   if (decision.outcome === 'unsupported') {
     await db.rpc('_import_provider_resolve', {
@@ -287,6 +310,26 @@ async function resolveImdb(
       results = [...results, ...before, ...after];
     }
     chosen = choose(titleClaim, results);
+
+    /**
+     * **Then by IMDb's Original Title** (20261118000100). The display-title search above is
+     * the en-US one; a row whose IMDb title is a translation can still be found by the
+     * title it was released under. Same strict `pick`, judged on the result's original
+     * title, and only when the row has one that differs.
+     */
+    const byOriginal = originalClaim(claim);
+    if (!chosen && byOriginal) {
+      outcome.searchedOriginal = true;
+      let more = await searchFor(byOriginal, key, bearer);
+      if (byOriginal.year !== null && needsWindowOriginal(claim, more, kind)) {
+        const before = await searchFor(byOriginal, key, bearer, byOriginal.year - 1);
+        const after = await searchFor(byOriginal, key, bearer, byOriginal.year + 1);
+        more = [...more, ...before, ...after];
+      }
+      chosen = pickOriginal(claim, more, kind);
+      results = [...results, ...more];
+    }
+
     if (!chosen) {
       if (results.length === 0) outcome.empty = true;
       else outcome.unconfident = true;
@@ -339,6 +382,11 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
   const empty: number[] = [];
   const unconfident: number[] = [];
   let unwritable = 0;
+  /** 20261118000100. IMDb branch counts (`Outcome.find`); counts only, never a title. */
+  const imdb: Record<string, number> = {};
+  const bump = (name: string | undefined) => {
+    if (name) imdb[name] = (imdb[name] ?? 0) + 1;
+  };
   /**
    * **Claims to hand back unasked** (independent review 83a).
    *
@@ -363,6 +411,9 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
             if (result.unconfident) unconfident.push(1);
             if (result.unwritable) unwritable += 1;
             if (result.matched) matched += 1;
+            bump(result.find && `find_${result.find}`);
+            if (result.corroboration) bump(`verified_title_${result.corroboration}`);
+            if (result.searchedOriginal) bump('searched_original_title');
             return;
           }
           let results = await search(claim, key, bearer);
@@ -467,6 +518,7 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     noResults: empty.length,
     notConfident: unconfident.length,
     unwritable,
+    imdb,
   };
 }
 

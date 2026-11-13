@@ -317,18 +317,118 @@ export function tvAsCandidate(result) {
 }
 
 /**
- * Whether a /find hit is plausibly the title the row names: a squashed title or original
- * title in common with the row's title or original title, and years within one where both
- * are known. Mirrors `_import_imdb_identity_agrees`.
+ * Whether a TITLE-SEARCH result is plausibly the title the row names: a squashed title or
+ * original title in common with the row's title or original title, and years within one
+ * where both are known. Mirrors `_import_imdb_identity_agrees`.
+ *
+ * **Not the test for a /find answer any more** (20261118000100). A title search proves
+ * nothing about the id, so its answer must look like the row. A /find answer is TMDB's own
+ * mapping for the exact tt id, and is judged by `verifiedIdentityAgrees` instead.
  */
 export function identityAgrees(claim, candidate) {
   if (!claim || !candidate) return false;
   const theirs = [squash(candidate.title), squash(candidate.original_title)].filter(Boolean);
   const ours = [squash(claim.name), squash(claim.original_title)].filter(Boolean);
   if (!theirs.some((value) => ours.includes(value))) return false;
+  return yearAgrees(claim, candidate);
+}
+
+/**
+ * The release-year tolerance a verified id is held to: the same ±1 every other tier uses.
+ *
+ * Deliberately not widened for a verified id. The one-year gap is the territory/festival
+ * difference between IMDb's year and TMDB's primary release date (Slumdog Millionaire,
+ * 2008/2009); nothing in the founder QA evidence needed two, and two would start admitting
+ * the remake-a-year-later shape the year check exists to stop.
+ */
+export const VERIFIED_YEAR_TOLERANCE = 1;
+
+/** Years within the tolerance, or unknown on either side (nothing to disagree about). */
+function yearAgrees(claim, candidate) {
   if (claim.year === null || claim.year === undefined) return true;
   const year = yearOf(candidate);
-  return year === null || Math.abs(year - claim.year) <= 1;
+  return year === null || Math.abs(year - claim.year) <= VERIFIED_YEAR_TOLERANCE;
+}
+
+/**
+ * Whether the one /find hit of the expected kind is the row's title (20261118000100).
+ * Mirrors `_import_imdb_verified_agrees`.
+ *
+ * ---------------------------------------------------------------------------
+ * THE FOUNDER QA IMPORT (2026-11-12), AND WHY THE TITLE IS NOT CONSULTED
+ *
+ * A /find answer is TMDB's own record that this title carries this exact tt id. It used to
+ * be rejected as a `conflict` whenever its display title differed from IMDb's, and the
+ * conflict was final, so the title search never ran either. That is how
+ *
+ *   IMDb "Harry Potter and the Sorcerer's Stone"        TMDB 671 "…Philosopher's Stone"
+ *   IMDb "Star Wars: Episode VII - The Force Awakens"   TMDB 140607 "Star Wars: The Force Awakens"
+ *
+ * ended in "Couldn't match" with the right film one id away: a regional title, a franchise
+ * prefix, `&` for "and", a show IMDb and TMDB name differently. None of those is a
+ * contradiction; they are two catalogues' display names for one identified title.
+ *
+ * What still contradicts a verified id, and stays a veto:
+ *   the other kind          `decideFind` (a Movie row whose id names a series, or the reverse)
+ *   two results of the kind `decideFind` (duplicate TMDB titles claiming one id: ambiguous)
+ *   an episode or season    `decideFind` (unsupported)
+ *   a year out of tolerance here: TMDB's title is dated more than one year from IMDb's
+ *
+ * Title evidence is still read (`titleCorroboration`), as SUPPORT for the report, never as a
+ * veto on a verified id.
+ */
+export function verifiedIdentityAgrees(claim, candidate) {
+  if (!claim || !candidate) return false;
+  return yearAgrees(claim, candidate);
+}
+
+/** `squash`, with a standalone `&` read as "and" first. Corroboration only. */
+const squashAnd = (value) =>
+  typeof value === 'string' ? squash(value.replace(/\s*&\s*/g, ' and ')) : '';
+
+/** Letters-and-digits words, folded the way `squash` folds them. Corroboration only. */
+const words = (value) =>
+  typeof value === 'string'
+    ? value
+        .replace(/&/g, ' and ')
+        .split(/[^\p{L}\p{N}]+/u)
+        .map(squash)
+        .filter(Boolean)
+    : [];
+
+/**
+ * How far the row's title and a verified candidate's title agree, for the report only:
+ *
+ *   exact    a squashed title or original title in common (what `identityAgrees` needs)
+ *   variant  `&`/"and", one title containing the other (a franchise prefix or subtitle),
+ *            or most words in common (a regional word: Sorcerer's/Philosopher's,
+ *            Pajamas/Pyjamas)
+ *   none     nothing in common that this can see
+ *
+ * **Never a veto.** A verified id with `none` still matches; the count of those is reported
+ * so an operator can audit them, which is the whole use of this.
+ */
+export function titleCorroboration(claim, candidate) {
+  if (!claim || !candidate) return 'none';
+  const theirs = [candidate.title, candidate.original_title];
+  const ours = [claim.name, claim.original_title];
+  const pairs = theirs.flatMap((a) => ours.map((b) => [a, b])).filter(([a, b]) => a && b);
+
+  if (pairs.some(([a, b]) => squash(a) !== '' && squash(a) === squash(b))) return 'exact';
+
+  for (const [a, b] of pairs) {
+    const x = squashAnd(a);
+    const y = squashAnd(b);
+    if (x === '' || y === '') continue;
+    if (x === y) return 'variant';
+    const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+    if (short.length >= 4 && long.includes(short)) return 'variant';
+    const wx = new Set(words(a));
+    const wy = new Set(words(b));
+    const shared = [...wx].filter((w) => wy.has(w)).length;
+    if (shared >= 2 && shared / Math.max(wx.size, wy.size) >= 0.5) return 'variant';
+  }
+  return 'none';
 }
 
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -336,13 +436,18 @@ const list = (value) => (Array.isArray(value) ? value : []);
 /**
  * What TMDB's /find answer for the row's tt id means.
  *
- *   match        exactly one result of the expected kind, and it agrees with the row
+ *   match        exactly one result of the expected kind, dated within tolerance
  *   unsupported  the id names an episode or a season, or the IMDb type has no destination
- *   conflict     the id names a title of the OTHER kind, or one that disagrees with the row
+ *   conflict     the id names a title of the OTHER kind (`reason: 'kind'`), or the one
+ *                result of the kind is dated out of tolerance (`reason: 'year'`)
  *   ambiguous    more than one result of the expected kind
  *   none         TMDB has nothing for the id; a title search may still find it
  *
  * Every outcome but `match` and `none` is final: asking again returns the same answer.
+ * A `match` carries `corroboration` (`titleCorroboration`), which decides nothing.
+ *
+ * 20261118000100: a display-title difference is no longer a conflict. See
+ * `verifiedIdentityAgrees`.
  */
 export function decideFind(claim, body) {
   const expected = imdbKind(imdbTitleType(claim?.title_type));
@@ -357,17 +462,60 @@ export function decideFind(claim, body) {
 
   if (own.length > 1) return { outcome: 'ambiguous' };
   if (own.length === 1) {
-    return identityAgrees(claim, own[0])
+    return verifiedIdentityAgrees(claim, own[0])
       ? {
           outcome: 'match',
           kind: expected,
           result: expected === 'movie' ? movies[0] : shows[0],
+          corroboration: titleCorroboration(claim, own[0]),
         }
-      : { outcome: 'conflict' };
+      : { outcome: 'conflict', reason: 'year' };
   }
-  if (other.length > 0) return { outcome: 'conflict' };
+  if (other.length > 0) return { outcome: 'conflict', reason: 'kind' };
   if (parts.length > 0) return { outcome: 'unsupported' };
   return { outcome: 'none' };
+}
+
+/**
+ * The claim a second, original-title search judges by, or null when there is none to make
+ * (20261118000100). IMDb's `Original Title` is sent only when it differs from `Title`
+ * (`read-imdb`), so a row with one is a row whose display title may be a translation.
+ */
+export function originalClaim(claim) {
+  const original = typeof claim?.original_title === 'string' ? claim.original_title.trim() : '';
+  if (squash(original) === '' || squash(original) === squash(claim?.name)) return null;
+  return { row_id: claim.row_id, name: original, year: claim.year ?? null };
+}
+
+/**
+ * Results seen through their ORIGINAL titles, so `pick` judges an original-title search on
+ * the field that search is about. TMDB's `title` is its en-US display title; a film searched
+ * by "Das Leben der Anderen" comes back titled "The Lives of Others".
+ */
+function asOriginals(results, kind) {
+  return list(results).map((r) => {
+    const view = kind === 'series' ? tvAsCandidate(r) : r;
+    return { ...view, title: typeof view.original_title === 'string' ? view.original_title : '' };
+  });
+}
+
+/**
+ * `pick` for an original-title search: the same strict rule (exact squashed title, ±1, an
+ * exact year first, popularity never), applied to the result's original title against the
+ * row's. Returns the raw TMDB result, or null.
+ */
+export function pickOriginal(claim, results, kind = 'movie') {
+  const byOriginal = originalClaim(claim);
+  if (!byOriginal) return null;
+  const candidates = asOriginals(results, kind);
+  const chosen = pick(byOriginal, candidates);
+  return chosen ? list(results)[candidates.indexOf(chosen)] : null;
+}
+
+/** `needsWindow` for an original-title search. */
+export function needsWindowOriginal(claim, results, kind = 'movie') {
+  const byOriginal = originalClaim(claim);
+  return byOriginal ? needsWindow(byOriginal, asOriginals(results, kind)) : false;
 }
 
 /** `pick`, over TV search results. Returns the raw TMDB result, or null. */

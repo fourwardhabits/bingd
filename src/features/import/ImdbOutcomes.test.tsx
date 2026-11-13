@@ -363,6 +363,19 @@ describe('a long list', () => {
     expect(rowsOf(view, 'unmatched')).toHaveLength(2 * PAGE);
   });
 
+  // Founder QA, 2026-11-12: nine "Couldn't match" rows. Nine is the first length past
+  // COLLAPSE_ABOVE (8), so the intended view is five rows and "Show all 9".
+  it('collapses at nine, the first length past the threshold, to five and Show all 9', async () => {
+    unresolved(many(9));
+    const view = await restored({ watched: 647, unmatched: 9 });
+    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
+    expect(rowsOf(view, 'unmatched')).toHaveLength(COLLAPSED);
+    expect(view.getByLabelText('9 Couldn’t match')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Show all 9' }));
+    expect(rowsOf(view, 'unmatched')).toHaveLength(9);
+    expect(view.queryByRole('button', { name: /^Show / })).toBeNull();
+  });
+
   it('a short list is never collapsed', async () => {
     unresolved(many(8));
     const view = await restored({ watched: 1, unmatched: 8 });
