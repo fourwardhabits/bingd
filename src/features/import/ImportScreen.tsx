@@ -11,10 +11,13 @@ import { theme } from '@/ui/tokens';
 
 import { HOW_TO_STEPS, HowToExportSheet, IMDB_HOW_TO_STEPS } from './HowToExportSheet';
 import { ProviderChoice } from './ProviderChoice';
+import { ImportOutcomeList } from './ImportOutcomeList';
+import type { OutcomeSectionId } from './outcomes';
 import { ProviderLogo } from './ProviderLogo';
 import { type ImportProvider } from './providers';
 import type { ArchivePreview } from './read-archive';
 import type { ImdbPreview } from './read-imdb';
+import { useImdbOutcomes } from './use-imdb-outcomes';
 import {
   isImdbPreview,
   providerOfJob,
@@ -463,6 +466,7 @@ function Body({
         return (
           <ImdbSummary
             counts={state.status.counts}
+            jobId={state.status.jobId}
             onRank={onRank}
             onDone={onLeave}
             onReset={onReset}
@@ -1237,12 +1241,15 @@ function Note({ children, warning = false }: { children: string; warning?: boole
  */
 function ImdbSummary({
   counts,
+  jobId,
   onRank,
   onDone,
   onReset,
   onContinue,
 }: {
   counts: ImportCounts;
+  /** The finished job, for its own unresolved rows and this process's parse of the file. */
+  jobId?: string;
   onRank: () => void;
   onDone: () => void;
   onReset: () => void;
@@ -1268,6 +1275,23 @@ function ImdbSummary({
   // TMDB files as an episode. Every "Not supported" gets a sentence.
   const otherUnsupported = Math.max(unsupported - shows - episodes, 0);
 
+  /**
+   * **Each heading by title, where the titles can be known and add up** (`outcomes.ts`).
+   * Couldn't match reads the job's own kept rows on any visit; shows, episodes and other
+   * types exist only in this process's parse, so they are listed for the import just sent
+   * and are back to the sentence after a restart. A list replaces its sentence, carrying
+   * its own reason; a heading with no list keeps the sentence it always had.
+   */
+  const sections = useImdbOutcomes(counts, jobId);
+  const listed = (id: OutcomeSectionId) => {
+    const section = sections.find((s) => s.id === id);
+    return section?.titles ? <ImportOutcomeList section={section} /> : null;
+  };
+  const showList = listed('tv');
+  const episodeList = listed('episodes');
+  const otherList = listed('other');
+  const unmatchedList = listed('unmatched');
+
   return (
     <View style={styles.block}>
       {/* "Already here" only when something was: a file that added nothing because
@@ -1292,22 +1316,26 @@ function ImdbSummary({
         {failed > 0 ? <Count value={failed} label="Couldn’t import" /> : null}
       </View>
 
-      {shows > 0 ? (
-        <Text variant="footnote" tone="tertiary">
-          {`${plural(shows, 'TV show was', 'TV shows were')} matched but not added. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.`}
-        </Text>
-      ) : null}
-      {episodes > 0 ? (
+      {showList ??
+        (shows > 0 ? (
+          <Text variant="footnote" tone="tertiary">
+            {`${plural(shows, 'TV show was', 'TV shows were')} matched but not added. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.`}
+          </Text>
+        ) : null)}
+      {episodeList}
+      {!episodeList && episodes > 0 ? (
         <Text variant="footnote" tone="tertiary">
           {`${plural(episodes, 'TV episode wasn’t', 'TV episodes weren’t')} added. bingd doesn’t track single episodes.`}
         </Text>
       ) : null}
-      {otherUnsupported > 0 ? (
+      {otherList}
+      {!otherList && otherUnsupported > 0 ? (
         <Text variant="footnote" tone="tertiary">
           {`${plural(otherUnsupported, 'title wasn’t', 'titles weren’t')} added because ${otherUnsupported === 1 ? 'it’s' : 'they’re'} a kind of title bingd doesn’t track, like a game or a single episode.`}
         </Text>
       ) : null}
-      {unmatched > 0 ? (
+      {unmatchedList}
+      {!unmatchedList && unmatched > 0 ? (
         <Text variant="footnote" tone="tertiary">
           {`We couldn’t match ${plural(unmatched, 'title', 'titles')} from your file, so ${unmatched === 1 ? 'it wasn’t' : 'they weren’t'} added.`}
         </Text>
