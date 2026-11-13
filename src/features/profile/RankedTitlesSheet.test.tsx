@@ -343,33 +343,55 @@ describe('a whole show on the TV list', () => {
       ...over,
     });
 
-  it('lists a show that stands alone, its ordinal marked as a show’s', async () => {
+  /**
+   * **One row per series** (WS-TVC, founder spec t168u §2, replacing Candidate A): the
+   * owner's effective score — their explicit show ranking, else the mean of their ranked
+   * seasons — and never a season as its own row.
+   */
+  it('lists a ranked show once, at its explicit score, with no ladder ordinal', async () => {
     mockShows = [show()];
     const view = await open({ category: 'tv_seasons' });
 
     await waitFor(() => expect(view.getByText(/Severance/)).toBeTruthy());
-    expect(view.getByText('show')).toBeTruthy();
+    expect(view.queryByText(/^#\d/)).toBeNull();
+    expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy();
   });
 
-  it('hides a show once one of its seasons is ranked, without touching its score', async () => {
-    mockShows = [show({ mediaItemId: 'bear', title: 'The Bear' })];
+  it('draws the series, not the season, when only a season is ranked, at the season mean', async () => {
+    mockSeasons = [
+      season({ mediaItemId: 's-1', position: 1 }),
+      season({ mediaItemId: 's-2', title: 'Season 2', seasonNumber: 2, position: 2 }),
+    ];
+    const view = await open({ category: 'tv_seasons' });
+
+    await waitFor(() => expect(view.getByText(/The Bear/)).toBeTruthy());
+    expect(view.queryByText(/The Bear, S1/)).toBeNull();
+    expect(view.getAllByText(/The Bear/)).toHaveLength(1);
+    // 10.0 and 7.0 → 8.5, in the outlined badge, said as an average.
+    expect(view.getByLabelText(/^8\.5 out of 10/)).toBeTruthy();
+    expect(view.getByText('Average of 2 ranked seasons')).toBeTruthy();
+  });
+
+  it('uses the explicit show score over the season mean when both are ranked', async () => {
+    mockShows = [show({ mediaItemId: 'bear', title: 'The Bear', bucket: 'fine' })];
     mockSeasons = [season()];
     const view = await open({ category: 'tv_seasons' });
 
-    await waitFor(() => expect(view.getByText(/The Bear, S1/)).toBeTruthy());
-    expect(view.queryByText('show')).toBeNull();
+    await waitFor(() => expect(view.getByText(/The Bear/)).toBeTruthy());
     expect(view.getAllByText(/The Bear/)).toHaveLength(1);
+    expect(view.getByLabelText(/^6\.9 out of 10/)).toBeTruthy();
+    expect(view.queryByText(/^Average of/)).toBeNull();
   });
 
-  it('orders a show and a season by the score each prints', async () => {
-    // A loved season (10.0, a band of one) above a fine show (6.9, a band of one).
+  it('orders series by their effective scores', async () => {
+    // A loved season of The Bear (10.0, a band of one) above a fine show (6.9).
     mockShows = [show({ bucket: 'fine' })];
     mockSeasons = [season({ bucket: 'loved' })];
     const view = await open({ category: 'tv_seasons' });
 
     await waitFor(() => expect(view.getByText(/Severance/)).toBeTruthy());
-    const texts = JSON.stringify(view.toJSON()).match(/"(The Bear, S1|Severance)"/g) ?? [];
-    expect(texts[0]).toContain('The Bear, S1');
+    const texts = JSON.stringify(view.toJSON()).match(/"(The Bear|Severance)"/g) ?? [];
+    expect(texts[0]).toContain('The Bear');
   });
 });
 

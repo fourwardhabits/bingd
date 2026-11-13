@@ -66,6 +66,20 @@ export type CollectionItem = {
    * expresses is the one the reader is shown.
    */
   addedAt: string | null;
+  /**
+   * **A TV series' effective score, exactly** (WS-TVC, founder spec t168u §2). Present on
+   * the one poster per series the TV Collection draws: `score` is its 1 dp display value,
+   * and this is what the Rating order compares, so 8.65 sorts below 8.7 although both
+   * display 8.7. `source` says whether the number is the user's explicit show ranking or
+   * the mean of their ranked seasons, which is also what draws the pill filled or
+   * outlined (`AVG`). Absent on films, and on a series that has neither.
+   */
+  showScore?: {
+    sumTenths: number;
+    n: number;
+    source: 'explicit' | 'average';
+    rankedSeasonCount: number;
+  } | null;
 };
 
 export type Decade = '2020s' | '2010s' | '2000s' | '1990s' | 'earlier';
@@ -601,8 +615,16 @@ export function runtimeOf(item: Pick<CollectionItem, 'runtimeMinutes'>): number 
  * be a control that sinks every row together and changes nothing, the defect
  * `sortAxesFor` exists to refuse. The TV Watchlist holds series, which do have one.
  */
-export const offersRuntime = (items: readonly Pick<CollectionItem, 'kind'>[]): boolean =>
-  items.some((item) => item.kind === 'movie' || item.kind === 'series');
+export const offersRuntime = (
+  items: readonly Pick<CollectionItem, 'kind' | 'showScore'>[],
+): boolean =>
+  // 20261120000100 (WS-TVC): a TV Collection series poster (`showScore` set, even to null)
+  // stands for a series and its ranked seasons, and carries no runtime — so the Watched TV
+  // half stays without Runtime, as it was when it held seasons. A Watchlist series has no
+  // `showScore` and still offers it.
+  items.some(
+    (item) => item.kind === 'movie' || (item.kind === 'series' && item.showScore === undefined),
+  );
 
 /**
  * One axis's comparator, **total in every case**, and the totality is the point.
@@ -635,6 +657,21 @@ export function compareItems(sort: CollectionSortState) {
         if (a.score == null && b.score == null) return byId;
         if (a.score == null) return 1;
         if (b.score == null) return -1;
+        // 20261120000100 (WS-TVC): two series posters compare their effective scores at
+        // full precision, in integer tenths (`show-projection.ts`): sumTenths_a × n_b
+        // against sumTenths_b × n_a. Then an explicit show before an average, then the
+        // tie position in the order's direction (the explicit show's position, or its best
+        // season's), then title, then id. Deterministic, and no ladder is reordered.
+        if (a.showScore && b.showScore) {
+          const exact = (a.showScore.sumTenths * b.showScore.n - b.showScore.sumTenths * a.showScore.n) * flip;
+          if (exact !== 0) return exact;
+          const bySource =
+            (a.showScore.source === 'explicit' ? 0 : 1) - (b.showScore.source === 'explicit' ? 0 : 1);
+          if (bySource !== 0) return bySource;
+          const byTie =
+            a.position != null && b.position != null ? (b.position - a.position) * flip : 0;
+          return byTie || byName(a, b) || byId;
+        }
         // An equal score is a rounding collision, not a tie. The ordinal decides, in the
         // score's own direction — a better (smaller) position is the higher score — so the
         // title the reader picked stays above the one they picked it over. The id is only

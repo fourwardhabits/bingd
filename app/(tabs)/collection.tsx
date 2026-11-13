@@ -708,8 +708,11 @@ function Watched({
   const ranked = useRankedCollection(userId, medium);
   /**
    * **TV is two rankings** (TV show & season ranking, 2026-11-14): the seasons above and
-   * the whole shows here, each scored against its own bands and drawn together under
-   * Candidate A's precedence (`watchedItems`). Movies never asks for this one.
+   * the whole shows here, each scored against its own bands. The Watched wall draws **one
+   * poster per series** from the two (WS-TVC, founder spec t168u §2, `watchedItems` →
+   * `projectShows`): the explicit show score, else the mean of the ranked seasons. Both
+   * pools are read whole, as they already were, so there is no request per series. Movies
+   * never asks for this one.
    */
   const shows = useRankedCollection(userId, 'tv_shows', { enabled: medium === 'tv_seasons' });
   const logged = useLoggedCollection(userId);
