@@ -64,7 +64,7 @@ export type WatchRowProps = {
 /**
  * One watch, as a line in this title's own historical feed (founder QA, 2026-09-21).
  *
- * **Left:** the date as the label — *(First watch)* on the earliest dated one only — then who
+ * **Left:** the date as the label — no *(First watch)* suffix (founder QA, 2026-11-12) — then who
  * it was watched with and the watch's note, with More for a long one. **Right:** the
  * reader's score AT this watch, in the app's one score circle. Not the current score: a
  * later Edit ranking moves the title page, never this row (`scoresByWatch`). No
@@ -104,15 +104,29 @@ export function WatchRow({
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
   const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
-  // "First watch" only when it is first *and* dated (§D.2).
-  const primary = label === 'first' ? `${dateLabel} (First watch)` : dateLabel;
+  // The date alone (founder QA, 2026-11-12). The row's place in the list already says which
+  // watch came first; *(First watch)* on one entry read as a tag on a single row. The order
+  // and the *Earlier* group are unchanged — only the suffix is gone.
+  const primary = dateLabel;
   const source = isFromDiary(event) ? 'From Letterboxd' : null;
   const withLine = companions.length
     ? `With ${companions.map((person) => person.name).join(', ')}`
     : null;
   const longNote = Boolean(note && note.length > NOTE_PREVIEW);
+  // The quiet facts about where the date came from, on one line so an imported or undated
+  // watch costs a card one line, not two.
+  const provenance = [label === 'earlier' ? 'Date not recorded' : null, source]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
+    /**
+     * **Each watch is a card** (UI wave, 2026-11-12): the house card treatment —
+     * `surface.raised` on Paper, `radius.card`, the hairline border `FeaturedCard` draws —
+     * in place of a full-width row and a rule between rows. The list spaces the cards.
+     * Everything inside is unchanged, the inline editor included: it opens inside the
+     * card, under the facts, so the watch being edited stays one object on the page.
+     */
     <View style={styles.row} testID={`watch-row-${event.id}`}>
       {/**
        * **The date and Edit on the left, the score on the right** (founder, UI consistency
@@ -149,16 +163,11 @@ export function WatchRow({
       </View>
 
       {/* The watch's facts, the full width of the row so a long note reads as prose. */}
-      {label === 'earlier' || source || withLine || note ? (
+      {provenance || withLine || note ? (
         <View style={styles.facts}>
-          {label === 'earlier' ? (
-            <Text variant="footnote" tone="tertiary">
-              Date not recorded
-            </Text>
-          ) : null}
-          {source ? (
-            <Text variant="footnote" tone="tertiary">
-              {source}
+          {provenance ? (
+            <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
+              {provenance}
             </Text>
           ) : null}
           {withLine ? (
@@ -419,7 +428,9 @@ function WatchEditor({
         {onEditRanking ? (
           <View testID={`watch-edit-ranking-${event.id}`}>
             <SheetRow
-              icon="swap-vertical-outline"
+              // The title page's own Edit ranking icon, so the one act reads the same in
+              // both places (founder QA, 2026-11-12).
+              icon="star-outline"
               label="Edit ranking"
               onPress={locked ? undefined : () => editRanking(onEditRanking)}
               disabledReason={locked ? 'Saving' : undefined}
@@ -444,11 +455,22 @@ function WatchEditor({
 
 const styles = StyleSheet.create({
   /**
-   * The row's gutters live on its parts rather than on the row, so the inline editor can be
-   * the full width of the screen — the log sheet's rows draw their own gutters — without
-   * a negative margin pulling it back out over padding it should never have been inside.
+   * The card. Its inner gutters live on its parts rather than on the card, so the inline
+   * editor can be the full width of the card — the log sheet's rows draw their own gutters,
+   * which is the design system's 16pt card padding — without a negative margin pulling it
+   * back out over padding it should never have been inside.
+   *
+   * No height, no `overflow: hidden`: at the largest text sizes, on a 320pt screen, the
+   * date wraps and the card grows with it rather than clipping anything.
    */
-  row: { paddingVertical: theme.space[3] },
+  row: {
+    marginHorizontal: theme.layout.gutter,
+    paddingVertical: theme.space[3],
+    backgroundColor: theme.surface.raised,
+    borderRadius: theme.radius.card,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+  },
   // Top-aligned: the score sits level with the date's line and never moves when Edit is
   // drawn under the date or gives way to the editor (independent review).
   main: {
@@ -471,8 +493,11 @@ const styles = StyleSheet.create({
   facts: { gap: theme.space[1], paddingHorizontal: theme.layout.gutter },
   more: { alignSelf: 'flex-start' },
   editor: { marginTop: theme.space[3], gap: theme.space[3] },
+  // Wraps rather than overflowing the card when large text makes the two buttons wider
+  // than a narrow card.
   actions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: theme.space[3],
     justifyContent: 'flex-end',
     paddingHorizontal: theme.layout.gutter,

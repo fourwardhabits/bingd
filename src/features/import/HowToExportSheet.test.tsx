@@ -3,7 +3,7 @@ import { StyleSheet } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
-import { HOW_TO_STEPS, HowToExportSheet } from './HowToExportSheet';
+import { HOW_TO_STEPS, HowToExportSheet, IMDB_HOW_TO_STEPS } from './HowToExportSheet';
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 
@@ -90,5 +90,22 @@ describe('the help sheet', () => {
       paddingBottom?: number;
     };
     expect(panelStyle.paddingBottom ?? 0).toBeGreaterThanOrEqual(theme.space[4]);
+  });
+});
+
+describe('IMDb’s help sheet', () => {
+  it('says where IMDb puts Export: at the top right of Your Ratings, not in a menu', async () => {
+    // IMDb Help, Ratings FAQ (updated 9 Feb 2026): the Export icon is at the top right of
+    // Your Ratings. The old step sent people looking for a menu (copy fix, 2026-11-13).
+    const view = await renderWithProviders(
+      <HowToExportSheet visible onClose={() => {}} surface="settings" provider="imdb" />,
+    );
+    expect(view.getByText('Tap Export at the top right of Your Ratings.')).toBeTruthy();
+    expect(view.queryByText(/menu/)).toBeNull();
+    IMDB_HOW_TO_STEPS.forEach((step, index) => {
+      expect(view.getByText(step)).toBeTruthy();
+      expect(view.getByText(String(index + 1))).toBeTruthy();
+      expect(step).not.toMatch(/\u2014/);
+    });
   });
 });

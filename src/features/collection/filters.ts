@@ -227,8 +227,14 @@ export const COLLECTION_SORT_AXES = {
     directions: { desc: 'Z–A', asc: 'A–Z' },
     defaultDirection: 'asc',
   },
-  // No `directions`, which is how `ui/sort.ts` knows there is nothing to reverse.
-  shuffle: { axis: 'shuffle', label: 'Shuffle', repeatHint: 'Tap again to reshuffle' },
+  // No `directions`, which is how `ui/sort.ts` knows there is nothing to reverse. The glyph
+  // sits where the other rows' arrows do (founder QA, 2026-11-12).
+  shuffle: {
+    axis: 'shuffle',
+    label: 'Shuffle',
+    repeatHint: 'Tap again to reshuffle',
+    glyph: 'shuffle-outline',
+  },
 } as const satisfies Record<SortAxis, SortAxisSpec<SortAxis>>;
 
 export const emptyFilters = (): CollectionFilters => ({
