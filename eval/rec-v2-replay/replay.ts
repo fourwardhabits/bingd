@@ -149,12 +149,16 @@ export function holdOut(doc: ReplayExport): { accounts: Account[]; skipped: numb
       if (item.kind === 'movie') held.movies.add(item.m);
       else held.tv.add(item.kind === 'season' ? (item.parent ?? item.m) : item.m);
     }
-    accounts.push({
-      key,
-      visible: renumber(rows.filter((r) => !heldIds.has(r.m))),
-      logged: (loggedBy.get(key) ?? []).filter((l) => !heldIds.has(l.m)),
-      held,
-    });
+    const visible = renumber(rows.filter((r) => !heldIds.has(r.m)));
+    const loggedVisible = (loggedBy.get(key) ?? []).filter((l) => !heldIds.has(l.m));
+    // A held-out season of a show the reader still visibly has (another season, or the show
+    // itself) can never reach the TV wall: the show is met, so it is excluded. Counting it as a
+    // miss would charge both engines for the exclusion, so it is not a target.
+    for (const id of [...visible.map((r) => r.m), ...loggedVisible.map((l) => l.m)]) {
+      const m = media.get(id);
+      held.tv.delete(m?.kind === 'season' && m.parent ? m.parent : id);
+    }
+    accounts.push({ key, visible, logged: loggedVisible, held });
   }
   return { accounts, skipped };
 }
@@ -702,6 +706,15 @@ const COLUMNS: [keyof Metrics, string][] = [
   ['poolSize', 'Pool size'],
 ];
 
+/** Every value, sorted, when there are few (today's cohort); otherwise quantiles. Never a key. */
+function distribution(sorted: readonly number[]): string {
+  if (sorted.length === 0) return 'no values';
+  if (sorted.length <= 60) return `values ${sorted.join(', ')}`;
+  const q = (p: number) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))];
+  return `min ${sorted[0]}, p10 ${q(0.1)}, p25 ${q(0.25)}, median ${q(0.5)}, p75 ${q(0.75)}, p90 ${q(0.9)}, max ${sorted[sorted.length - 1]}`;
+}
+
 export function renderReplay(report: ReplayReport, label: string): string {
   const lines: string[] = [];
   lines.push(`# Recommendation V2 replay: ${label}`);
@@ -737,7 +750,7 @@ export function renderReplay(report: ReplayReport, label: string): string {
     lines.push('');
     const xs = report.perAccount[medium]!;
     lines.push(
-      `Per-account V2 − V1 recall@50 (sorted, no keys; n=${xs.length}): worse ${xs.filter((x) => x < 0).length}, same ${xs.filter((x) => x === 0).length}, better ${xs.filter((x) => x > 0).length}. Values: ${xs.join(', ') || '—'}.`,
+      `Per-account V2 − V1 recall@50 (no keys; n=${xs.length}): worse ${xs.filter((x) => x < 0).length}, same ${xs.filter((x) => x === 0).length}, better ${xs.filter((x) => x > 0).length}. ${distribution(xs)}.`,
     );
     lines.push('');
   }
@@ -745,7 +758,7 @@ export function renderReplay(report: ReplayReport, label: string): string {
   lines.push('## V2 hybrid');
   lines.push('');
   lines.push(
-    `**Not measurable at current scale.** A collaborative row needs at least two taste neighbours (Match > ${MIN_MATCH} on ≥ ${MIN_COMMON} shared series, public accounts). Pool coverage: ${h.withTwo}/${h.accounts} accounts have two or more such neighbours, ${h.withOne}/${h.accounts} have one or more. Neighbour count distribution (sorted, no keys): ${[...h.neighbourCounts].sort((a, b) => a - b).join(', ') || '—'}.`,
+    `**Not measurable at current scale.** A collaborative row needs at least two taste neighbours (Match > ${MIN_MATCH} on ≥ ${MIN_COMMON} shared series, public accounts). Pool coverage: ${h.withTwo}/${h.accounts} accounts have two or more such neighbours, ${h.withOne}/${h.accounts} have one or more. Neighbours per account (no keys): ${distribution([...h.neighbourCounts].sort((a, b) => a - b))}.`,
   );
   lines.push('');
   lines.push(

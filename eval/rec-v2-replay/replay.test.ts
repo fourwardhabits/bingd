@@ -98,7 +98,7 @@ describe('Recommendation V2 replay', () => {
   });
 
   (process.env.REC_V2_REPLAY === '1' ? it : it.skip)(
-    'replays an export (run.mjs)',
+    'REPLAY_EXPORT_RUNNER: replays an export (run.mjs)',
     () => {
       const synthetic = process.env.REC_V2_REPLAY_SYNTHETIC === '1';
       const path = process.env.REC_V2_REPLAY_EXPORT;

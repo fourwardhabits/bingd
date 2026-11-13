@@ -65,10 +65,12 @@ const result = spawnSync(
     'jest',
     join('eval', 'rec-v2-replay', 'replay.test.ts'),
     '-t',
-    'replays an export',
+    'REPLAY_EXPORT_RUNNER',
     '--runInBand',
   ],
-  // Nothing interpolated from input: paths travel in the environment, never on the command line.
-  { cwd: root, stdio: 'inherit', shell: true, env },
+  // One word for the test name, and a shell only where npx is a .cmd: with `shell: true` the
+  // arguments are joined with spaces, so a multi-word `-t` would be split into path patterns.
+  // Nothing here is interpolated from input: paths travel in the environment.
+  { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env },
 );
 process.exit(result.status ?? 1);
