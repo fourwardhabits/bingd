@@ -346,3 +346,54 @@ describe('the reviews preview', () => {
     expect(full.getByLabelText('Sort reviews')).toBeTruthy();
   });
 });
+
+/**
+ * **A series' season average in the personal slot** (WS-TVC, founder spec t168u §2): an
+ * outlined `AVG 8.7` with "Average of N ranked seasons" under it, never the filled circle
+ * that means an explicit show ranking.
+ */
+describe('the season average in Your score', () => {
+  it('draws AVG and its caption when the show is unranked but seasons are', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={{ score: null, average: { score: 8.7, count: 3 } }}
+        bingd={null}
+        following={null}
+      />,
+    );
+    expect(view.getByText('AVG 8.7')).toBeTruthy();
+    expect(view.getByTestId('immersive-score-you-caption')).toHaveTextContent(
+      'Average of 3 ranked seasons',
+    );
+    const chip = StyleSheet.flatten(view.getByTestId('immersive-score-you-average').props.style);
+    expect(chip.borderColor).toBe(theme.semantic.score);
+    expect(chip.backgroundColor).toBeUndefined();
+    expect(view.getByLabelText(/^Your score\. Average of 3 ranked seasons\. 8\.7 out of 10/)).toBeTruthy();
+    // Not the explicit score's filled circle.
+    expect(view.queryByLabelText('8.7 out of 10')).toBeNull();
+  });
+
+  it('says "1 ranked season" for one', async () => {
+    const view = await render(
+      <ImmersiveScores you={{ score: null, average: { score: 9, count: 1 } }} bingd={null} following={null} />,
+    );
+    expect(view.getByTestId('immersive-score-you-caption')).toHaveTextContent(
+      'Average of 1 ranked season',
+    );
+  });
+
+  it('keeps the explicit show score filled, and ignores an average beside it', async () => {
+    const view = await render(
+      <ImmersiveScores you={{ score: 9.5, average: { score: 8.1, count: 2 } }} bingd={null} following={null} />,
+    );
+    expect(view.getByLabelText('9.5 out of 10')).toBeTruthy();
+    expect(view.queryByText(/^AVG/)).toBeNull();
+    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
+  });
+
+  it('keeps the unranked state when there is neither', async () => {
+    const view = await render(<ImmersiveScores you={{ score: null }} bingd={null} following={null} />);
+    expect(view.queryByText(/^AVG/)).toBeNull();
+    expect(view.getByLabelText(/Not ranked yet/)).toBeTruthy();
+  });
+});
