@@ -1825,7 +1825,9 @@ describe('a series', () => {
     await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('I liked it'));
 
-    const update = await view.findByText('Update Show');
+    // WS-TVC (t168u §3A): the reveal's primary exit carries the show's score once it is
+    // known ("Update Show 6.9"), so it is found by its id rather than its exact words.
+    const update = await view.findByTestId('reveal-update-show');
     await fireEvent.press(update);
 
     // The show's band chooser, on the band it already has: the same band re-ranks it
@@ -1842,6 +1844,72 @@ describe('a series', () => {
         }),
       ),
     );
+  });
+
+  it('carries the open show decision through Add details to the details sheet', async () => {
+    // WS-TVC (t168u §3B): Add details does not resolve the show. The post-rank sheet
+    // offers Update Show in place of Done, and it opens the same linked correction.
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: 'fine',
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    mockRpcResults.log_title = { status: 'ok', created: true, watch_event_id: 'w-1' };
+    mockRpcResults.rank_start = {
+      done: true,
+      position: 1,
+      category: 'tv_seasons',
+      bucket: 'loved',
+      score: 10,
+      adjustable: false,
+      placement_id: 'placement-s2',
+      parent: { media_item_id: 'series-1', ranked: true, bucket: 'fine' },
+    };
+    mockRpcResults.rank_again = {
+      done: false,
+      session_id: 'show-session',
+      pivot: 'other-show',
+    };
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+    await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    await fireEvent.press(await view.findByTestId('reveal-add-details'));
+    const update = await view.findByTestId('log-update-show');
+    expect(view.getByTestId('log-keep-show')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Done' })).toBeNull();
+    await fireEvent.press(update);
+
+    await waitFor(() => expect(view.getByLabelText('It was fine')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({
+          p_media_item_id: 'series-1',
+          p_linked_placement_id: 'placement-s2',
+        }),
+      ),
+    );
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'keep_show')).toHaveLength(0);
   });
 
   it('draws a ranked season row as its score circle, against seasons only', async () => {
@@ -3678,12 +3746,7 @@ describe('a title in the collection that is not ranked', () => {
   it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of [
-      'Rerank',
-      'Log another watch',
-      'Who I watched with',
-      'Add a note',
-    ]) {
+    for (const label of ['Rerank', 'Log another watch', 'Who I watched with', 'Add a note']) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
     expect(view.queryByText('Ranking')).toBeNull();
