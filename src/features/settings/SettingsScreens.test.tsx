@@ -65,7 +65,12 @@ jest.mock('expo-router', () => ({
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
-  useRouter: () => ({ push: mockPush, replace: mockReplace, back: () => mockBackForSettings() }),
+  useRouter: () => ({
+    push: mockPush,
+    replace: mockReplace,
+    back: () => mockBackForSettings(),
+    canGoBack: () => true,
+  }),
   // Captures what each screen asks of its native header, so a header control can be
   // asserted on without a navigator.
   Stack: {
