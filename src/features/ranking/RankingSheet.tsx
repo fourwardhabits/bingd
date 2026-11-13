@@ -865,6 +865,26 @@ function Session({
   };
 
   /**
+   * **Keep Show from the reveal** (WS-TVC §3D): record that the reader's whole-show ranking
+   * stands, then leave exactly as Done does. Nothing is shown as kept until the server says
+   * so; a failure stays on the reveal with its reason and every exit still live.
+   */
+  const keepFromReveal = async (placementId: string) => {
+    if (keepInFlight.current) return;
+    keepInFlight.current = true;
+    setKeeping(true);
+    setKeepError(null);
+    const result = await keepShow(placementId);
+    keepInFlight.current = false;
+    setKeeping(false);
+    if (result.outcome === 'kept') {
+      await closeAndCelebrate();
+      return;
+    }
+    setKeepError(result.message);
+  };
+
+  /**
    * The `onPlaced` contract: tell the caller about the placement, once.
    *
    * An effect rather than a branch inside `apply`, for two reasons. `apply` is a
@@ -915,6 +935,18 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
+            showScore={
+              step.parent?.mediaItemId
+                ? (myScores.data?.get(step.parent.mediaItemId)?.score ?? null)
+                : null
+            }
+            keeping={keeping}
+            keepError={keepError}
+            onKeepShow={
+              onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
+                ? () => void keepFromReveal(step.placementId!)
+                : undefined
+            }
             onUpdateShow={
               onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
                 ? () => {
@@ -945,10 +977,23 @@ function Session({
                     // handoff never settles. Deferred with that work, deliberately: the
                     // onboarding path here uses `onPlaced` and never reaches this line.
                     void close();
+                    // WS-TVC §3B: Add details does not resolve the show. When Update Show was
+                    // offered, the decision rides along to the details sheet.
+                    const decided =
+                      onUpdateShow && offersUpdateShow(subject, step)
+                        ? {
+                            showId: step.parent!.mediaItemId,
+                            bucket: step.parent!.bucket,
+                            linkedPlacementId: step.placementId!,
+                            showScore:
+                              myScores.data?.get(step.parent!.mediaItemId)?.score ?? null,
+                          }
+                        : undefined;
                     onFinishLog({
                       score: step.score,
                       position: step.position,
                       category: step.category,
+                      ...(decided ? { showDecision: decided } : {}),
                     });
                   }
                 : undefined
@@ -1724,7 +1769,17 @@ function Reveal({
   onDone,
   onFinishLog,
   onUpdateShow,
+  onKeepShow,
+  showScore = null,
+  keeping = false,
+  keepError = null,
 }: {
+  /** Keep Show (WS-TVC): present exactly when Update Show is. */
+  onKeepShow?: () => void;
+  /** The reader's current whole-show score for the labels, or null while unknown. */
+  showScore?: number | null;
+  keeping?: boolean;
+  keepError?: string | null;
   /**
    * **Update Show**, when this season's placement may lead into its show's correction.
    * Present only when the session decided every condition holds (`onUpdateShow` on the
@@ -1883,25 +1938,55 @@ function Reveal({
    * Show `onUpdateShow`. Done joins the pair unless Update Show is offered, in which case
    * it is the quiet control under it (drawn below).
    */
-  const exitPair: RevealExit[] = [
-    onUpdateShow
-      ? {
-          label: 'Update Show',
-          kind: 'secondary',
-          onPress: onUpdateShow,
+  const showLabel = (verb: string) =>
+    showScore != null ? `${verb} ${formatScore(showScore)}` : verb;
+  /**
+   * **When the show is the open question** (WS-TVC, founder spec t168u §3A): Add details
+   * (secondary) on the left, `Update Show 9.5` (the filled primary) on the right, at the
+   * compact size, with `Keep Show 9.5` quiet and centred under the pair. Done is not
+   * drawn: the sheet's close and system Back are the dismissal, and they record nothing.
+   * Stacked, the primary leads. Everywhere else the exits are exactly as they were.
+   */
+  const deciding = Boolean(onUpdateShow);
+  const exitPair: RevealExit[] = deciding
+    ? [
+        ...(onFinishLog
+          ? [
+              {
+                label: 'Add details',
+                kind: 'secondary',
+                onPress: onFinishLog,
+                testID: 'reveal-add-details',
+              } as RevealExit,
+            ]
+          : []),
+        {
+          label: showLabel('Update Show'),
+          kind: 'primary',
+          onPress: onUpdateShow!,
           hint: 'Re-ranks the show this season belongs to',
           testID: 'reveal-update-show',
-        }
-      : { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
-    ...(onFinishLog
-      ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
-      : []),
-  ];
-  const exitsStacked = !revealExitsFitRow(
-    exitPair.map((exit) => exit.label),
-    windowWidth,
-    fontScale,
-  );
+        },
+      ]
+    : [
+        { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
+        ...(onFinishLog
+          ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
+          : []),
+      ];
+  const exitsStacked = deciding
+    ? !compactExitsFitRow(
+        exitPair.map((exit) => exit.label),
+        windowWidth,
+        fontScale,
+      )
+    : !revealExitsFitRow(
+        exitPair.map((exit) => exit.label),
+        windowWidth,
+        fontScale,
+      );
+  // Stacked, the primary comes first.
+  const shownExits = deciding && exitsStacked ? [...exitPair].reverse() : exitPair;
   const exitRows = (exitsStacked ? exitPair.length : 1) + (onUpdateShow ? 1 : 0);
 
   const revealBodyMax = Math.max(
@@ -2336,35 +2421,61 @@ function Reveal({
        * width and text size (`revealExitsFitRow`), and stacks full width, in the same
        * order, when they would not. A label is never shrunk, clipped or truncated.
        */}
-      <View style={styles.revealControls}>
+      <View
+        style={[styles.revealControls, deciding && styles.revealControlsWide]}
+        testID="reveal-controls"
+      >
         <View
           style={exitsStacked ? styles.revealExitsStacked : styles.revealExits}
           testID="reveal-exits"
         >
-          {exitPair.map((exit) => (
+          {shownExits.map((exit) => (
             <View
               key={exit.label}
-              style={exitsStacked ? undefined : styles.revealExit}
+              style={exitsStacked ? undefined : deciding ? styles.revealExitNatural : styles.revealExit}
               testID={`reveal-exit-${exit.kind}`}
             >
               <Button
                 label={exit.label}
                 kind={exit.kind}
+                // The slimmer Rank button's height, slop back to 44pt (WS-TVC §3A).
+                size={deciding ? 'sm' : 'md'}
+                hitSlop={deciding ? COMPACT_EXIT_SLOP : undefined}
                 onPress={exit.onPress}
+                disabled={deciding && keeping}
+                disabledReason={deciding && keeping ? 'Keeping your show score' : undefined}
                 accessibilityHint={exit.hint}
                 testID={exit.testID}
               />
             </View>
           ))}
         </View>
-        {onUpdateShow ? (
-          <Button
-            label="Done"
-            kind="tertiary"
-            tone="secondary"
-            onPress={onDone}
-            testID="reveal-done"
-          />
+        {deciding && onKeepShow ? (
+          <View style={styles.revealKeep}>
+            <Button
+              label={keeping ? 'Keeping…' : showLabel('Keep Show')}
+              kind="tertiary"
+              tone="secondary"
+              size="sm"
+              hitSlop={COMPACT_EXIT_SLOP}
+              disabled={keeping}
+              disabledReason={keeping ? 'Keeping your show score' : undefined}
+              accessibilityHint="Keeps your show's ranking as it is"
+              onPress={onKeepShow}
+              testID="reveal-keep-show"
+            />
+            {keepError ? (
+              <Text
+                variant="footnote"
+                tone="action"
+                style={styles.centre}
+                accessibilityRole="alert"
+                testID="reveal-keep-error"
+              >
+                {keepError}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
       </View>
     </View>
@@ -2520,6 +2631,50 @@ export function revealLabelWidth(label: string, fontScale: number) {
   return em * 17 * fontScale * 1.04 + 2 * theme.space[5] + 4;
 }
 
+/**
+ * The compact exits' slop: `Button`'s small size is drawn at the slimmer Rank height and
+ * this returns it to the 44pt target.
+ */
+const COMPACT_EXIT_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
+/**
+ * Inter Medium advances, in em, for every character the compact exits draw: `Button`'s
+ * small size sets its label in `callout` (Inter Medium 15pt). Measured from the font file
+ * (`RankingSheet.test.tsx` re-measures them), so a score's digits are counted exactly.
+ */
+export const COMPACT_EXIT_CHAR_EM: Record<string, number> = {
+  '0': 0.6455, '1': 0.415, '2': 0.6162, '3': 0.627, '4': 0.6563, '5': 0.603, '6': 0.6299,
+  '7': 0.5713, '8': 0.6294, '9': 0.6299, ' ': 0.2666, '.': 0.3032, A: 0.709, K: 0.6875,
+  S: 0.646, U: 0.7402, a: 0.5679, d: 0.6182, e: 0.5874, h: 0.6016, i: 0.252, l: 0.252,
+  o: 0.604, p: 0.6182, s: 0.5386, t: 0.3403, w: 0.8291,
+};
+
+/**
+ * One compact exit's natural width: the label in Inter Medium at `callout`'s 15pt and the
+ * reader's text size, 4% over the measured advance, plus `Button sm`'s 16pt of padding and
+ * the border either side. A character not in the table counts at 0.75em, above any here.
+ */
+export function compactLabelWidth(label: string, fontScale: number) {
+  const em = [...label].reduce((sum, ch) => sum + (COMPACT_EXIT_CHAR_EM[ch] ?? 0.75), 0);
+  return em * 15 * fontScale * 1.04 + 2 * theme.space[4] + 4;
+}
+
+/**
+ * **Whether the Update Show pair sits side by side** (WS-TVC §3A): at their natural widths,
+ * not equal halves, across the sheet's own gutter — the controls block steps out of the
+ * reveal's padding for this (`revealControlsWide`). Side by side at 360pt and up at default
+ * text; stacked only when the width or the reader's text size genuinely forbids it.
+ */
+export function compactExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
+  if (labels.length < 2) return true;
+  const row = windowWidth - 2 * theme.layout.gutter;
+  const total = labels.reduce((sum, label) => sum + compactLabelWidth(label, fontScale), 0);
+  return total + theme.space[2] * (labels.length - 1) <= row;
+}
+
 /** However small the phone, the body keeps room for the score and the title. */
 const REVEAL_BODY_MIN = 220;
 const REVEAL_AWARD_BADGE = 40;
@@ -2614,6 +2769,12 @@ const styles = StyleSheet.create({
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
+  // The Update Show pair at its labels' own widths, centred as a group (WS-TVC).
+  revealExitNatural: { flexGrow: 0 },
+  // Across the sheet's own gutter rather than inside the reveal's padding as well.
+  revealControlsWide: { marginHorizontal: -theme.layout.gutter, paddingHorizontal: theme.layout.gutter },
+  // Keep Show: quiet, centred across the whole width, under the pair.
+  revealKeep: { alignItems: 'center', gap: theme.space[1] },
   /** The same exits, full width and in the same order, when the halves are too narrow. */
   revealExitsStacked: { gap: theme.space[2] },
   centre: { textAlign: 'center' },
