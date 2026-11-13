@@ -21,6 +21,13 @@ export type TitleRowActionsProps = {
    */
   onRank: () => void;
   onToggleWatchlist: () => void;
+  /**
+   * False draws no `+`, only the bookmark: for a surface that cannot yet tell whether the
+   * reader has ranked this title, where a `+` could re-enter a ranking that exists (the
+   * person page while its ranking reads load). Defaults to true, so every other caller is
+   * unchanged.
+   */
+  rankable?: boolean;
 };
 
 /**
@@ -49,6 +56,7 @@ export function TitleRowActions({
   busy = false,
   onRank,
   onToggleWatchlist,
+  rankable = true,
 }: TitleRowActionsProps) {
   if (score) {
     return (
@@ -60,15 +68,17 @@ export function TitleRowActions({
 
   return (
     <View style={styles.actions} testID="title-row-actions-unranked">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Log ${name}`}
-        onPress={onRank}
-        hitSlop={theme.space[2]}
-        style={styles.action}
-      >
-        <Ionicons name="add-circle" size={theme.layout.icon.lg} color={theme.semantic.action} />
-      </Pressable>
+      {rankable ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Log ${name}`}
+          onPress={onRank}
+          hitSlop={theme.space[2]}
+          style={styles.action}
+        >
+          <Ionicons name="add-circle" size={theme.layout.icon.lg} color={theme.semantic.action} />
+        </Pressable>
+      ) : null}
 
       {saved !== null ? (
         <Pressable
