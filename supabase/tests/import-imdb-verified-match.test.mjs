@@ -9,6 +9,10 @@ import {
   pickOriginal,
   titleCorroboration,
   VERIFIED_YEAR_TOLERANCE,
+  bucketFor,
+  mappingNorm,
+  mappingTitleAgrees,
+  releaseYearAgreeing,
   verifiedIdentityAgrees,
 } from '../functions/letterboxd-import/match.mjs';
 
@@ -17,6 +21,7 @@ import {
   film,
   findFor,
   found,
+  MAPPING_CASES,
   show,
   VERIFIED_CASES,
   VERIFIED_TV_CASES,
@@ -113,7 +118,8 @@ describe('tt8503618 Hamilton (2020): the control case', () => {
       hamilton,
       found({ movie_results: [film(556574, 'Hamilton', '2016-06-26')] }),
     );
-    assert.deepEqual(decision, { outcome: 'conflict', reason: 'year' });
+    assert.equal(decision.outcome, 'conflict');
+    assert.equal(decision.reason, 'year');
   });
 
   it('a /find with nothing falls through to the title search', () => {
@@ -183,7 +189,8 @@ describe('what still contradicts a verified id', () => {
       claim({ name: 'Heat', year: 1995 }),
       found({ movie_results: [film(949, 'Heat', '1986-01-01')] }),
     );
-    assert.deepEqual(decision, { outcome: 'conflict', reason: 'year' });
+    assert.equal(decision.outcome, 'conflict');
+    assert.equal(decision.reason, 'year');
   });
 
   it('the tolerance is one year on a verified id, and two is already out', () => {
@@ -308,5 +315,128 @@ describe('titleCorroboration (support only)', () => {
     );
     assert.equal(c('Cats', 'The Godfather'), 'none');
     assert.equal(c('Up', 'Upgrade'), 'none');
+  });
+});
+
+describe('the shared id is a higher bar than the match (20261118000200)', () => {
+  for (const c of [...VERIFIED_CASES, ...VERIFIED_TV_CASES, ...MAPPING_CASES]) {
+    it(`${c.writes ? 'writes' : 'withholds'}: ${c.label}`, () => {
+      const decision = decideFind(c.row, findFor(c));
+      assert.equal(decision.outcome, 'match', 'every one of them still links the row');
+      assert.equal(decision.writesMapping, c.writes);
+    });
+  }
+
+  it('folds "&", a leading article, punctuation and diacritics, and nothing else', () => {
+    assert.equal(mappingNorm('Fathers & Daughters'), mappingNorm('Fathers and Daughters'));
+    assert.equal(mappingNorm('The Long Goodbye Film'), mappingNorm('Long Goodbye Film'));
+    assert.equal(mappingNorm('A Quiet Place'), 'quietplace');
+    assert.equal(mappingNorm('An Education'), 'education');
+    assert.equal(mappingNorm('Amélie'), 'amelie');
+    // Only a LEADING article, and only as a whole word.
+    assert.equal(mappingNorm('Theory of Everything'), 'theoryofeverything');
+    assert.equal(mappingNorm('A'), 'a');
+    assert.equal(mappingNorm('Into the Wild'), 'intothewild');
+  });
+
+  it('refuses a regional word, a prefix or a subtitle: those link, they do not teach', () => {
+    const agree = (name, title) => mappingTitleAgrees({ name }, { title });
+    assert.equal(
+      agree(
+        'Harry Potter and the Sorcerer’s Stone',
+        "Harry Potter and the Philosopher's Stone",
+      ),
+      false,
+    );
+    assert.equal(
+      agree('Star Wars: Episode VII - The Force Awakens', 'Star Wars: The Force Awakens'),
+      false,
+    );
+    assert.equal(agree('Fyre', 'Fyre: The Greatest Party That Never Happened'), false);
+    assert.equal(agree('Alien', 'Aliens'), false);
+    assert.equal(agree('The Ring', 'Thering'), true, 'squash-equal still agrees');
+  });
+
+  it('agrees through either side’s original title (the alternate title IMDb exports)', () => {
+    assert.equal(
+      mappingTitleAgrees(
+        { name: 'The Lives of Others', original_title: 'Das Leben der Anderen' },
+        { title: 'Lives of Others, The', original_title: 'Das Leben der Anderen' },
+      ),
+      true,
+    );
+  });
+});
+
+describe('releaseYearAgreeing: every TMDB release date, all countries and types', () => {
+  const row = claim({ name: 'Hamilton', year: 2020 });
+  const dates = (...list) => ({
+    results: list.map(([country, ...days]) => ({
+      iso_3166_1: country,
+      release_dates: days.map((d) => ({ release_date: `${d}T00:00:00.000Z`, type: 3 })),
+    })),
+  });
+
+  it('finds the streaming premiere behind a later primary date', () => {
+    assert.equal(releaseYearAgreeing(row, dates(['US', '2025-09-05', '2020-07-03'])), 2020);
+  });
+
+  it('looks across every country', () => {
+    assert.equal(
+      releaseYearAgreeing(row, dates(['US', '2025-09-05'], ['AU', '2021-02-01'])),
+      2021,
+    );
+  });
+
+  it('prefers the closest year when several are within tolerance', () => {
+    assert.equal(
+      releaseYearAgreeing(
+        row,
+        dates(['US', '2021-01-01'], ['GB', '2020-03-01'], ['FR', '2019-12-01']),
+      ),
+      2020,
+    );
+  });
+
+  it('returns null when no date is within a year, or there are none, or the row has no year', () => {
+    assert.equal(
+      releaseYearAgreeing(row, dates(['US', '2025-09-05'], ['GB', '2018-01-01'])),
+      null,
+    );
+    assert.equal(releaseYearAgreeing(row, { results: [] }), null);
+    assert.equal(releaseYearAgreeing(row, null), null);
+    assert.equal(releaseYearAgreeing(claim({ year: null }), dates(['US', '2020-01-01'])), null);
+    assert.equal(
+      releaseYearAgreeing(row, { results: [{ release_dates: [{ release_date: '' }] }] }),
+      null,
+    );
+  });
+});
+
+describe('bucketFor: one bucket per claimed row, from what the database settled', () => {
+  it('an undated /find hit the database refused is unmatched, never matched', () => {
+    const row = claim({ name: 'Undated', year: 2005 });
+    const decision = decideFind(row, found({ movie_results: [film(1, 'Undated', '')] }));
+    assert.equal(decision.outcome, 'match', 'the Edge alone would have called it matched');
+    assert.equal(bucketFor({ status: 'unmatched', placed: true }), 'unmatched');
+  });
+
+  it('maps every status, and every failure, to exactly one bucket', () => {
+    const cases = [
+      [{ status: 'matched', placed: true }, 'matched'],
+      [{ status: 'unsupported', placed: true }, 'matched_not_added'],
+      [{ status: 'unsupported' }, 'unsupported'],
+      [{ status: 'unmatched' }, 'unmatched'],
+      [{ status: 'needs_provider' }, 'retry'],
+      [{ status: 'stale' }, 'stale'],
+      [{ status: null }, 'stale'],
+      [{ threw: true }, 'failed'],
+      [{ released: true }, 'released'],
+      [{ released: true, threw: true, status: 'matched' }, 'released'],
+    ];
+    for (const [input, bucket] of cases)
+      assert.equal(bucketFor(input), bucket, JSON.stringify(input));
+    const all = new Set(cases.map(([input]) => bucketFor(input)));
+    assert.equal(all.size, 8);
   });
 });

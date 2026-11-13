@@ -39,7 +39,10 @@ export const show = (id, name, first_air_date, original_name = name) => ({
   first_air_date,
 });
 
-// Each case: the IMDb row, the one /find hit TMDB gives for its id, and the old verdict.
+// Each case: the IMDb row, the one /find hit TMDB gives for its id, and whether the SHARED
+// media_items.imdb_id is written (20261118000200: only when the title agrees too, exactly or
+// after punctuation, "&"/"and", a leading article or the original title). Every case links
+// the row; `writes: false` is a verified id that won over a disagreeing display title.
 export const VERIFIED_CASES = [
   {
     label: 'tt0241527, regional title: Sorcerer’s vs Philosopher’s Stone',
@@ -49,6 +52,7 @@ export const VERIFIED_CASES = [
       imdb_id: 'tt0241527',
     }),
     hit: film(671, "Harry Potter and the Philosopher's Stone", '2001-11-16'),
+    writes: false,
   },
   {
     label: 'tt2488496, franchise prefix: Episode VII vs no episode number',
@@ -58,31 +62,37 @@ export const VERIFIED_CASES = [
       imdb_id: 'tt2488496',
     }),
     hit: film(140607, 'Star Wars: The Force Awakens', '2015-12-15'),
+    writes: false,
   },
   {
     label: 'regional spelling: Pajamas vs Pyjamas',
     row: claim({ name: 'The Boy in the Striped Pajamas', year: 2008, imdb_id: 'tt9000001' }),
     hit: film(900001, 'The Boy in the Striped Pyjamas', '2008-09-12'),
+    writes: false,
   },
   {
     label: 'series prefix on the IMDb side: The Divergent Series: Insurgent vs Insurgent',
     row: claim({ name: 'The Divergent Series: Insurgent', year: 2015, imdb_id: 'tt9000002' }),
     hit: film(900002, 'Insurgent', '2015-03-18'),
+    writes: false,
   },
   {
     label: 'subtitle on the TMDB side: Fyre vs Fyre: The Greatest Party…',
     row: claim({ name: 'Fyre', year: 2019, imdb_id: 'tt9000003' }),
     hit: film(900003, 'Fyre: The Greatest Party That Never Happened', '2019-01-18'),
+    writes: false,
   },
   {
     label: '& vs and: Fathers & Daughters',
     row: claim({ name: 'Fathers & Daughters', year: 2015, imdb_id: 'tt9000004' }),
     hit: film(900004, 'Fathers and Daughters', '2015-10-01'),
+    writes: true,
   },
   {
     label: 'one-year territory gap on a verified id',
     row: claim({ name: 'Festival Year Film', year: 2008, imdb_id: 'tt9000005' }),
     hit: film(900005, 'Festival Year Film (Release Title)', '2009-01-09'),
+    writes: false,
   },
 ];
 
@@ -96,6 +106,7 @@ export const VERIFIED_TV_CASES = [
       title_type: 'TV Series',
     }),
     hit: show(900006, 'The Series', '2022-09-21'),
+    writes: false,
   },
   {
     label: 'TV variant title: a mini-series named differently on each side',
@@ -106,6 +117,34 @@ export const VERIFIED_TV_CASES = [
       title_type: 'TV Mini Series',
     }),
     hit: show(900007, 'The Long Night', '2019-05-06'),
+    writes: false,
+  },
+];
+
+/** Verified ids whose titles agree once normalised: these DO write the shared id. */
+export const MAPPING_CASES = [
+  {
+    label: 'punctuation only: Spider-Man: Into the Spider-Verse',
+    row: claim({ name: 'Spider-Man: Into the Spider-Verse', year: 2018, imdb_id: 'tt9000008' }),
+    hit: film(900008, 'Spiderman Into the Spiderverse', '2018-12-14'),
+    writes: true,
+  },
+  {
+    label: 'a leading article: The Long Goodbye Film vs Long Goodbye Film',
+    row: claim({ name: 'Long Goodbye Film', year: 2011, imdb_id: 'tt9000009' }),
+    hit: film(900009, 'The Long Goodbye Film', '2011-04-01'),
+    writes: true,
+  },
+  {
+    label: 'an alternate title: IMDb Original Title equals TMDB original title',
+    row: claim({
+      name: 'The Lives of Others',
+      original_title: 'Das Leben der Anderen',
+      year: 2006,
+      imdb_id: 'tt9000010',
+    }),
+    hit: film(900010, 'Lives of Others', '2006-03-23', 'Das Leben der Anderen'),
+    writes: true,
   },
 ];
 

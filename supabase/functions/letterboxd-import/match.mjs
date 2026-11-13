@@ -432,7 +432,117 @@ export function titleCorroboration(claim, candidate) {
   return 'none';
 }
 
+/**
+ * A title folded for the SHARED-MAPPING test (20261118000200): `&` read as "and", one
+ * leading English article dropped, then `squash`. Mirrors `_import_imdb_title_norm`
+ * character for character, which is why it is regex-on-text before the fold rather than
+ * anything word-aware.
+ */
+export function mappingNorm(value) {
+  if (typeof value !== 'string') return '';
+  return squash(value.replace(/&/g, ' and ').replace(/^\s*(the|a|an)\s+/i, ''));
+}
+
+/**
+ * Whether a verified title may also TEACH the catalogue the id (20261118000200). Mirrors
+ * `_import_imdb_mapping_title_agrees`.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE SHARED ID HAS A HIGHER BAR THAN THE MATCH
+ *
+ * The match decides one person's row; `media_items.imdb_id` decides every future row in
+ * every account, through Tier 1, with no provider call and no title check. So a verified
+ * id is enough to LINK the row (`verifiedIdentityAgrees`), and the mapping is written only
+ * when the title agrees as well: a squashed title or original title in common, or one that
+ * agrees once `&` is read as "and" and a leading article is dropped ("The X" / "X").
+ *
+ * A verified id that won over a disagreeing display title (Sorcerer's/Philosopher's, a
+ * franchise prefix, a renamed show) links the row and writes nothing shared. The next import
+ * of that title asks /find again, which is one request and the same answer.
+ */
+export function mappingTitleAgrees(claim, candidate) {
+  if (!claim || !candidate) return false;
+  const theirs = [candidate.title, candidate.original_title];
+  const ours = [claim.name, claim.original_title];
+  for (const a of theirs) {
+    for (const b of ours) {
+      const sa = squash(a);
+      const sb = squash(b);
+      if (sa !== '' && sa === sb) return true;
+      const na = mappingNorm(a);
+      const nb = mappingNorm(b);
+      if (na !== '' && na === nb) return true;
+    }
+  }
+  return false;
+}
+
 const list = (value) => (Array.isArray(value) ? value : []);
+
+/**
+ * The release year, among ALL of a movie's TMDB release dates (every country, every type),
+ * closest to the row's year and within tolerance, or null (20261118000200).
+ *
+ * The rescue for a `conflict` with `reason: 'year'`: TMDB's primary date is one release of
+ * many, and it moves. Hamilton (tt8503618) is IMDb 2020, the Disney+ premiere; TMDB 556574's
+ * primary date became a 2025 theatrical release. A verified id whose title has ANY dated
+ * release within a year of IMDb's is the same film; one with none stays a conflict.
+ *
+ * Read only on that conflict path, so a normal match costs no extra request.
+ */
+export function releaseYearAgreeing(claim, body) {
+  if (!claim || claim.year === null || claim.year === undefined) return null;
+  let best = null;
+  for (const country of list(body?.results)) {
+    for (const release of list(country?.release_dates)) {
+      const year = Number(String(release?.release_date ?? '').slice(0, 4));
+      if (!Number.isFinite(year) || year < 1000) continue;
+      const gap = Math.abs(year - claim.year);
+      if (gap > VERIFIED_YEAR_TOLERANCE) continue;
+      if (best === null || gap < Math.abs(best - claim.year) || (gap === Math.abs(best - claim.year) && year < best)) {
+        best = year;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The one bucket a claimed IMDb row lands in for the batch answer (20261118000200).
+ *
+ * Decided by what the DATABASE settled (`_import_provider_resolve` returns the row's status),
+ * never by what the Edge Function hoped: an undated /find hit the Edge accepted can still be
+ * refused by the re-check against a catalogue date, and used to be counted `matched` while
+ * the row said `unmatched`. Exactly one of:
+ *
+ *   matched            in the collection's path
+ *   matched_not_added  a whole show, recognised and reported, not added
+ *   unsupported        an episode, a season, or a type bingd has no place for
+ *   unmatched          settled without a title
+ *   retry              back to needs_provider for another attempt
+ *   stale              the job settled first; nothing was written
+ *   failed             the request threw; the lease lapses and it is offered again
+ *   released           handed back unasked (rate limited)
+ *
+ * @param {{ status?: string | null, placed?: boolean, threw?: boolean, released?: boolean }} [row]
+ * @returns {string}
+ */
+export function bucketFor({ status = null, placed = false, threw = false, released = false } = {}) {
+  if (released) return 'released';
+  if (threw) return 'failed';
+  switch (status) {
+    case 'matched':
+      return 'matched';
+    case 'unsupported':
+      return placed ? 'matched_not_added' : 'unsupported';
+    case 'unmatched':
+      return 'unmatched';
+    case 'needs_provider':
+      return 'retry';
+    default:
+      return 'stale';
+  }
+}
 
 /**
  * What TMDB's /find answer for the row's tt id means.
@@ -446,7 +556,8 @@ const list = (value) => (Array.isArray(value) ? value : []);
  *   none         TMDB has nothing for the id; a title search may still find it
  *
  * Every outcome but `match` and `none` is final: asking again returns the same answer.
- * A `match` carries `corroboration` (`titleCorroboration`), which decides nothing.
+ * A `match` carries `corroboration` (`titleCorroboration`), which decides nothing, and
+ * `writesMapping` (`mappingTitleAgrees`), which decides whether the shared id is written.
  *
  * 20261118000100: a display-title difference is no longer a conflict. See
  * `verifiedIdentityAgrees`.
@@ -467,14 +578,19 @@ export function decideFind(claim, body) {
   // `_import_match_batch_imdb` counts both kinds and calls it ambiguous, so this must too.
   if (own.length === 1 && other.length > 0) return { outcome: 'ambiguous' };
   if (own.length === 1) {
+    const result = expected === 'movie' ? movies[0] : shows[0];
     return verifiedIdentityAgrees(claim, own[0])
       ? {
           outcome: 'match',
           kind: expected,
-          result: expected === 'movie' ? movies[0] : shows[0],
+          result,
           corroboration: titleCorroboration(claim, own[0]),
+          // 20261118000200: whether the database will also write the shared id.
+          writesMapping: mappingTitleAgrees(claim, own[0]),
         }
-      : { outcome: 'conflict', reason: 'year' };
+      : // The candidate travels with a year conflict so a movie can be rescued by its
+        // other release dates (`releaseYearAgreeing`); a conflict is still a conflict.
+        { outcome: 'conflict', reason: 'year', kind: expected, result };
   }
   if (other.length > 0) return { outcome: 'conflict', reason: 'kind' };
   if (parts.length > 0) return { outcome: 'unsupported' };

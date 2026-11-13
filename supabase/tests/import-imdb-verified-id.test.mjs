@@ -20,7 +20,16 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { decideFind, pick, pickOriginal } from '../functions/letterboxd-import/match.mjs';
+import {
+  bucketFor,
+  catalogueItem,
+  decideFind,
+  mappingNorm,
+  mappingTitleAgrees,
+  pick,
+  pickOriginal,
+  releaseYearAgreeing,
+} from '../functions/letterboxd-import/match.mjs';
 
 import { createTestDb } from './harness.mjs';
 import {
@@ -28,6 +37,7 @@ import {
   film,
   findFor,
   found,
+  MAPPING_CASES,
   show,
   VERIFIED_CASES,
   VERIFIED_TV_CASES,
@@ -100,6 +110,17 @@ const matchAndClaim = async (job) => {
   return rows;
 };
 
+/** `_import_provider_resolve` as the Edge Function calls it, returning the settled status. */
+const resolve = async (rowId, item, imdbId = null, releaseYear = null) =>
+  (
+    await one(`select _import_provider_resolve($1, $2, false, $3, false, $4) as status`, [
+      rowId,
+      item,
+      imdbId,
+      releaseYear,
+    ])
+  ).status;
+
 const statusOf = async (rowId) =>
   await one(`select status, media_item_id from import_rows where id = $1`, [rowId]);
 
@@ -125,11 +146,12 @@ describe('Edge and SQL accept the same verified set (the founder QA classes)', (
     await t.sql(`delete from user_media where user_id in ($1, $2)`, [ana, bo]);
   });
 
-  for (const c of VERIFIED_CASES) {
-    it(`a movie: ${c.label}`, async () => {
-      // Edge: the /find answer is a match.
+  for (const c of [...VERIFIED_CASES, ...MAPPING_CASES]) {
+    it(`a movie (${c.writes ? 'writes' : 'withholds'} the shared id): ${c.label}`, async () => {
+      // Edge: the /find answer is a match, and says whether the shared id will be written.
       const decision = decideFind(c.row, findFor(c));
       assert.equal(decision.outcome, 'match');
+      assert.equal(decision.writesMapping, c.writes, 'Edge prediction');
 
       const item = await catalogue(c.hit, 'movie');
 
@@ -138,26 +160,33 @@ describe('Edge and SQL accept the same verified set (the founder QA classes)', (
       const claims = await matchAndClaim(job);
       assert.equal(claims.length, 1, 'Tier 1 hands it to the provider');
       assert.equal(claims[0].imdb_id, c.row.imdb_id);
-      await t.sql(`select _import_provider_resolve($1, $2, false, $3)`, [
-        claims[0].row_id,
-        item,
-        c.row.imdb_id,
-      ]);
-      // SQL: the re-check accepts what the Edge accepted, and the id is learned.
+      const settled = await resolve(claims[0].row_id, item, c.row.imdb_id);
+      // SQL: the re-check accepts what the Edge accepted, links the row either way, and
+      // writes the shared id exactly when the Edge said it would (20261118000200).
+      assert.equal(settled, 'matched');
+      assert.equal(bucketFor({ status: settled, placed: true }), 'matched');
       assert.deepEqual(await statusOf(claims[0].row_id), {
         status: 'matched',
         media_item_id: item,
       });
-      assert.equal(await imdbIdOf(item), c.row.imdb_id);
+      assert.equal(await imdbIdOf(item), c.writes ? c.row.imdb_id : null, 'SQL write');
       await runToEnd(job);
       const first = await countsOf(job);
       assert.equal(first.watched, 1);
       assert.equal(first.unmatched, 0);
 
-      // Second import of the same file: Tier 1 settles it on the learned mapping, whose
-      // display title differs from IMDb's. No provider call, no duplicate.
+      // Second import of the same file. With the mapping written, Tier 1 settles it with no
+      // provider call. Without it, /find is asked again and gives the same answer. Either
+      // way: no duplicate, reported as imported before.
       const again = await stage(ana, [rowOf(c.row)]);
-      assert.equal((await matchAndClaim(again)).length, 0, 'no provider call on a reimport');
+      const reclaims = await matchAndClaim(again);
+      if (c.writes) {
+        assert.equal(reclaims.length, 0, 'no provider call on a reimport');
+      } else {
+        assert.equal(reclaims.length, 1, 'the provider is asked again');
+        assert.equal(await resolve(reclaims[0].row_id, item, c.row.imdb_id), 'matched');
+        assert.equal(await imdbIdOf(item), null, 'still nothing shared');
+      }
       await runToEnd(again);
       const second = await countsOf(again);
       assert.equal(second.unmatched, 0);
@@ -171,32 +200,34 @@ describe('Edge and SQL accept the same verified set (the founder QA classes)', (
         await count('imported_titles', 'user_id = $1 and media_item_id = $2', [ana, item]),
         1,
       );
-      // Account isolation: somebody else's collection is untouched by the shared mapping.
+      // Account isolation: somebody else's collection is untouched.
       assert.equal(await count('user_media', 'user_id = $1', [bo]), 0);
     });
   }
 
   for (const c of VERIFIED_TV_CASES) {
     it(`a whole show, recognised and not added: ${c.label}`, async () => {
-      assert.equal(decideFind(c.row, findFor(c)).outcome, 'match');
+      const decision = decideFind(c.row, findFor(c));
+      assert.equal(decision.outcome, 'match');
+      assert.equal(decision.writesMapping, c.writes);
       const item = await catalogue(c.hit, 'series');
 
       const job = await stage(ana, [rowOf(c.row)]);
       const claims = await matchAndClaim(job);
       assert.equal(claims.length, 1);
-      await t.sql(`select _import_provider_resolve($1, $2, false, $3)`, [
-        claims[0].row_id,
-        item,
-        c.row.imdb_id,
-      ]);
-      assert.equal((await statusOf(claims[0].row_id)).status, 'unsupported');
+      const settled = await resolve(claims[0].row_id, item, c.row.imdb_id);
+      assert.equal(settled, 'unsupported');
+      assert.equal(bucketFor({ status: settled, placed: true }), 'matched_not_added');
+      assert.equal(await imdbIdOf(item), c.writes ? c.row.imdb_id : null);
       await runToEnd(job);
       const first = await countsOf(job);
       assert.equal(first.unsupported_tv, 1, 'counted as a matched TV show not added');
       assert.equal(first.unmatched, 0);
 
       const again = await stage(ana, [rowOf(c.row)]);
-      assert.equal((await matchAndClaim(again)).length, 0);
+      const reclaims = await matchAndClaim(again);
+      assert.equal(reclaims.length, c.writes ? 0 : 1);
+      if (!c.writes) await resolve(reclaims[0].row_id, item, c.row.imdb_id);
       await runToEnd(again);
       assert.equal((await countsOf(again)).unsupported_tv, 1);
       // Never a series, never a season, in anybody's collection.
@@ -226,7 +257,9 @@ describe('what still contradicts a verified id, on both sides', () => {
   ]) {
     it(`a year ${label}: Edge conflict, re-check unmatched, Tier 1 unmatched`, async () => {
       const c = yearCase(date);
-      assert.deepEqual(decideFind(c.row, findFor(c)), { outcome: 'conflict', reason: 'year' });
+      const decision = decideFind(c.row, findFor(c));
+      assert.equal(decision.outcome, 'conflict');
+      assert.equal(decision.reason, 'year');
 
       const item = await catalogue(c.hit, 'movie');
       const job = await stage(cy, [rowOf(c.row)]);
@@ -433,8 +466,264 @@ describe('a verified variant never changes a ranking', () => {
   });
 });
 
-describe('grants on what 20261118000100 defines', () => {
-  it('the new helper is reachable by no client role', async () => {
+describe('every claimed row lands in exactly one bucket (20261118000200)', () => {
+  let gi;
+  before(async () => {
+    gi = await t.createUser({ username: 'imdb_verified_gi' });
+  });
+  beforeEach(async () => {
+    await t.sql(`delete from import_jobs`);
+    await t.sql(`delete from user_media where user_id = $1`, [gi]);
+  });
+
+  /** Writes a /find hit through the real upsert, exactly as the Edge Function does. */
+  const upsertHit = async (hit) =>
+    (
+      await one(`select media_item_id from tmdb_upsert_titles($1::jsonb)`, [
+        JSON.stringify([catalogueItem(hit)]),
+      ])
+    ).media_item_id;
+
+  it('an undated /find hit the re-check refuses on a catalogue date is unmatched, not matched', async () => {
+    const tmdbId = 900800;
+    // A detail call already dated the title; /find now answers with no date at all.
+    await upsertHit(film(tmdbId, 'Undated Answer', '2001-05-01'));
+    const row = claim({ name: 'Undated Answer', year: 2005, imdb_id: tt() });
+    const hit = { ...film(tmdbId, 'Undated Answer', ''), release_date: '' };
+
+    // The Edge accepts it (no date: nothing to disagree about)...
+    const decision = decideFind(row, found({ movie_results: [hit] }));
+    assert.equal(decision.outcome, 'match');
+
+    // ...the upsert keeps the stored date (coalesce), and the re-check refuses it.
+    const item = await upsertHit(hit);
+    assert.equal(
+      (await one(`select release_date::text as d from media_items where id = $1`, [item])).d,
+      '2001-05-01',
+    );
+    const job = await stage(gi, [rowOf(row)]);
+    const [claimed] = await matchAndClaim(job);
+    const settled = await resolve(claimed.row_id, item, row.imdb_id);
+    assert.equal(settled, 'unmatched');
+    // The batch answer counts the database's answer: one bucket, and it is not matched.
+    assert.equal(bucketFor({ status: settled, placed: true }), 'unmatched');
+    await runToEnd(job);
+    const counts = await countsOf(job);
+    assert.equal(counts.unmatched, 1);
+    assert.equal(counts.watched, 0);
+    assert.equal(await imdbIdOf(item), null);
+  });
+
+  it('a mixed batch: one bucket per row, and the buckets add up to the rows claimed', async () => {
+    const placed = await catalogue(film(900810, 'Bucket Placed', '2010-01-01'), 'movie');
+    const show1 = await catalogue(show(900811, 'Bucket Show', '2010-01-01'), 'series');
+    const rows = [
+      claim({ name: 'Bucket Placed', year: 2010, imdb_id: tt() }),
+      claim({ name: 'Bucket Show', year: 2010, imdb_id: tt(), title_type: 'TV Series' }),
+      claim({ name: 'Bucket Episode', year: 2010, imdb_id: tt() }),
+      claim({ name: 'Bucket Nothing', year: 2010, imdb_id: tt() }),
+      claim({ name: 'Bucket Retry', year: 2010, imdb_id: tt() }),
+    ];
+    const job = await stage(
+      gi,
+      rows.map((r) => rowOf(r)),
+    );
+    await t.sql(`select _import_match_batch($1, 50)`, [job]);
+    const { rows: claims } = await t.sql(`select * from _import_provider_claim(50)`);
+    assert.equal(claims.length, rows.length);
+    const byName = Object.fromEntries(claims.map((c) => [c.name, c.row_id]));
+
+    const buckets = [
+      bucketFor({
+        status: await resolve(byName['Bucket Placed'], placed, rows[0].imdb_id),
+        placed: true,
+      }),
+      bucketFor({
+        status: await resolve(byName['Bucket Show'], show1, rows[1].imdb_id),
+        placed: true,
+      }),
+      bucketFor({
+        status: (
+          await one(`select _import_provider_resolve($1, null, false, null, true) as s`, [
+            byName['Bucket Episode'],
+          ])
+        ).s,
+      }),
+      bucketFor({
+        status: (
+          await one(`select _import_provider_resolve($1, null, true) as s`, [
+            byName['Bucket Nothing'],
+          ])
+        ).s,
+      }),
+      bucketFor({
+        status: (
+          await one(`select _import_provider_resolve($1, null, false) as s`, [
+            byName['Bucket Retry'],
+          ])
+        ).s,
+      }),
+    ];
+    assert.deepEqual(buckets, [
+      'matched',
+      'matched_not_added',
+      'unsupported',
+      'unmatched',
+      'retry',
+    ]);
+    // A second answer for a row already settled writes nothing and says so.
+    assert.equal(await resolve(byName['Bucket Placed'], placed, rows[0].imdb_id), 'stale');
+  });
+});
+
+describe('the shared-mapping title rule is the same function on both sides', () => {
+  const samples = [
+    'Fathers & Daughters',
+    'Fathers and Daughters',
+    'The Long Goodbye Film',
+    'A Quiet Place',
+    'An Education',
+    'A',
+    'The',
+    'Theory of Everything',
+    '  the   Ring',
+    'THE RING',
+    'Amélie',
+    'Harry Potter and the Sorcerer’s Stone',
+    'Spider-Man: Into the Spider-Verse',
+    'Леон',
+    '千と千尋の神隠し',
+    'Rock & Roll & Rhythm',
+    '',
+  ];
+
+  it('_import_imdb_title_norm equals mappingNorm on every sample', async () => {
+    for (const value of samples) {
+      const { n } = await one(`select _import_imdb_title_norm($1) as n`, [value]);
+      assert.equal(n, mappingNorm(value), JSON.stringify(value));
+    }
+  });
+
+  it('_import_imdb_mapping_title_agrees equals mappingTitleAgrees on every pair', async () => {
+    const pairs = [
+      ['Fathers & Daughters', 'Fathers and Daughters'],
+      ['Long Goodbye Film', 'The Long Goodbye Film'],
+      ['Harry Potter and the Sorcerer’s Stone', "Harry Potter and the Philosopher's Stone"],
+      ['Insurgent', 'The Divergent Series: Insurgent'],
+      ['Spider-Man: Into the Spider-Verse', 'Spiderman Into the Spiderverse'],
+      ['Alien', 'Aliens'],
+    ];
+    for (const [name, title] of pairs) {
+      const item = await catalogue(film(901000 + seq, title, '2000-01-01'), 'movie');
+      const { ok } = await one(`select _import_imdb_mapping_title_agrees($1, $2, null) as ok`, [
+        item,
+        name,
+      ]);
+      assert.equal(ok, mappingTitleAgrees({ name }, { title }), `${name} / ${title}`);
+    }
+  });
+});
+
+describe('a moved primary date: Hamilton, tt8503618 (20261118000200)', () => {
+  let ho;
+  before(async () => {
+    ho = await t.createUser({ username: 'imdb_verified_ho' });
+  });
+  beforeEach(async () => {
+    await t.sql(`delete from import_jobs`);
+    await t.sql(`delete from user_media where user_id = $1`, [ho]);
+  });
+
+  // Synthetic /release_dates for TMDB 556574: the 2020 streaming premiere and a 2025
+  // theatrical release, which is now the primary date. Shape as TMDB documents it.
+  const releaseDates = {
+    id: 556574,
+    results: [
+      {
+        iso_3166_1: 'US',
+        release_dates: [
+          { certification: 'PG-13', release_date: '2020-07-03T00:00:00.000Z', type: 4 },
+          { certification: 'PG-13', release_date: '2025-09-05T00:00:00.000Z', type: 3 },
+        ],
+      },
+      {
+        iso_3166_1: 'GB',
+        release_dates: [{ release_date: '2025-09-12T00:00:00.000Z', type: 3 }],
+      },
+    ],
+  };
+  const hit = film(556574, 'Hamilton', '2025-09-05');
+
+  it('Edge: a year conflict, rescued by another release date within a year', () => {
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: 'tt8503618' });
+    const decision = decideFind(row, found({ movie_results: [hit] }));
+    assert.equal(decision.outcome, 'conflict');
+    assert.equal(decision.reason, 'year');
+    assert.equal(decision.result.id, 556574);
+    assert.equal(releaseYearAgreeing(row, releaseDates), 2020);
+  });
+
+  it('SQL: accepted with the release-year evidence, the row linked, the shared id withheld', async () => {
+    // A fresh synthetic id: the control case above already taught the catalogue tt8503618.
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: tt() });
+    const item = await catalogue({ ...hit, id: 900901 }, 'movie');
+    const job = await stage(ho, [rowOf(row)]);
+    const [claimed] = await matchAndClaim(job);
+    assert.equal(await resolve(claimed.row_id, item, row.imdb_id, 2020), 'matched');
+    // The title agrees exactly, but the catalogue's own date (2025) does not, so Tier 1
+    // could not accept this mapping by itself: nothing shared is written.
+    assert.equal(await imdbIdOf(item), null);
+    await runToEnd(job);
+    assert.equal((await countsOf(job)).watched, 1);
+  });
+
+  it('SQL: without the evidence, or with evidence out of tolerance, it stays a conflict', async () => {
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: tt() });
+    const item = await catalogue(film(900900, 'Hamilton', '2025-09-05'), 'movie');
+    for (const evidence of [null, 2017, 2023]) {
+      await t.sql(`delete from import_jobs`);
+      const job = await stage(ho, [rowOf(row)]);
+      const [claimed] = await matchAndClaim(job);
+      assert.equal(await resolve(claimed.row_id, item, row.imdb_id, evidence), 'unmatched');
+    }
+  });
+
+  it('Edge: no release date within a year keeps the conflict', () => {
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: 'tt8503618' });
+    const late = {
+      results: [
+        { iso_3166_1: 'US', release_dates: [{ release_date: '2025-09-05T00:00:00.000Z' }] },
+      ],
+    };
+    assert.equal(releaseYearAgreeing(row, late), null);
+  });
+});
+
+describe('grants on what 20261118000100 and 20261118000200 define', () => {
+  it('the new helpers are reachable by no client role', async () => {
+    for (const fn of [
+      '_import_imdb_verified_agrees(uuid, media_kind, integer)',
+      '_import_imdb_title_norm(text)',
+      '_import_imdb_mapping_title_agrees(uuid, text, text)',
+    ]) {
+      for (const role of ['anon', 'authenticated']) {
+        const { rows } = await t.sql(`select has_function_privilege($1, $2, 'execute') as ok`, [
+          role,
+          fn,
+        ]);
+        assert.equal(rows[0].ok, false, `${role} ${fn}`);
+      }
+    }
+  });
+
+  it('the old five-argument resolve is gone, so no overload can be ambiguous', async () => {
+    const { rows } = await t.sql(
+      `select count(*)::int as n from pg_proc where proname = '_import_provider_resolve'`,
+    );
+    assert.equal(rows[0].n, 1);
+  });
+
+  it('the verified helper alone is reachable by no client role', async () => {
     for (const role of ['anon', 'authenticated']) {
       const { rows } = await t.sql(
         `select has_function_privilege($1, '_import_imdb_verified_agrees(uuid, media_kind, integer)', 'execute') as ok`,
@@ -446,9 +735,9 @@ describe('grants on what 20261118000100 defines', () => {
 
   it('_import_provider_resolve stays service-role only', async () => {
     const { rows } = await t.sql(
-      `select has_function_privilege('authenticated', '_import_provider_resolve(uuid, uuid, boolean, text, boolean)', 'execute') as a,
-              has_function_privilege('anon', '_import_provider_resolve(uuid, uuid, boolean, text, boolean)', 'execute') as b,
-              has_function_privilege('service_role', '_import_provider_resolve(uuid, uuid, boolean, text, boolean)', 'execute') as c`,
+      `select has_function_privilege('authenticated', '_import_provider_resolve(uuid, uuid, boolean, text, boolean, integer)', 'execute') as a,
+              has_function_privilege('anon', '_import_provider_resolve(uuid, uuid, boolean, text, boolean, integer)', 'execute') as b,
+              has_function_privilege('service_role', '_import_provider_resolve(uuid, uuid, boolean, text, boolean, integer)', 'execute') as c`,
     );
     assert.deepEqual(rows[0], { a: false, b: false, c: true });
   });

@@ -39,6 +39,7 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  * a suite of its own.
  */
 import {
+  bucketFor,
   catalogueItem,
   catalogueSeries,
   decideFind,
@@ -51,6 +52,7 @@ import {
   pick,
   pickOriginal,
   pickTv,
+  releaseYearAgreeing,
 } from './match.mjs';
 
 const CORS = {
@@ -218,7 +220,26 @@ type Outcome = {
   find?: string;
   corroboration?: string;
   searchedOriginal?: boolean;
+  /**
+   * 20261118000200. The ONE bucket this row ends in (`bucketFor`), from the status the
+   * database settled, so the batch answer can never call a row matched that the re-check
+   * refused. `mapping` says whether the shared id is eligible to be written (the database
+   * still declines when another title already carries the id).
+   */
+  bucket?: string;
+  mapping?: 'eligible' | 'withheld';
+  rescuedByReleaseDate?: boolean;
 };
+
+/**
+ * `_import_provider_resolve`, returning the status the database settled the row in
+ * (20261118000200), or null when the call failed or the job had already settled.
+ */
+async function settle(db: SupabaseClient, params: Record<string, unknown>): Promise<string | null> {
+  const { data, error } = await db.rpc('_import_provider_resolve', params);
+  if (error) return null;
+  return typeof data === 'string' ? data : null;
+}
 
 /**
  * **An IMDb claim** (20261113000100): the identifier first, a title second.
@@ -252,12 +273,13 @@ async function resolveImdb(
   const kind = imdbKind(imdbTitleType(claim.title_type));
 
   if (kind === null || !claim.imdb_id) {
-    await db.rpc('_import_provider_resolve', {
+    const status = await settle(db, {
       p_row_id: claim.row_id,
       p_media_item_id: null,
       p_final: true,
       p_unsupported: kind === null,
     });
+    outcome.bucket = bucketFor({ status });
     return outcome;
   }
 
@@ -273,21 +295,50 @@ async function resolveImdb(
   if (decision.outcome === 'match') outcome.corroboration = decision.corroboration;
 
   if (decision.outcome === 'unsupported') {
-    await db.rpc('_import_provider_resolve', {
+    const status = await settle(db, {
       p_row_id: claim.row_id,
       p_media_item_id: null,
       p_final: true,
       p_unsupported: true,
     });
+    outcome.bucket = bucketFor({ status });
     return outcome;
   }
-  if (decision.outcome === 'conflict' || decision.outcome === 'ambiguous') {
+
+  /**
+   * **A year conflict on a movie: every release date, once** (20261118000200).
+   *
+   * TMDB's primary date is one release among many and it moves (Hamilton: IMDb 2020, TMDB
+   * 556574 now primary-dated 2025). Only here, and only for a movie (`/release_dates` is a
+   * movie endpoint), the title's full release list is read; any date within a year of
+   * IMDb's rescues the verified id. The agreeing year goes to the database as evidence
+   * (`p_release_year`), because the catalogue keeps the primary date only. A rescued match
+   * never writes the shared id: the catalogue's own date still disagrees, so Tier 1 could
+   * not accept that mapping by itself.
+   */
+  let rescuedYear: number | null = null;
+  if (
+    decision.outcome === 'conflict' &&
+    decision.reason === 'year' &&
+    decision.kind === 'movie' &&
+    typeof decision.result?.id === 'number'
+  ) {
+    const dates = await tmdbGet(`/movie/${decision.result.id}/release_dates`, {}, key, bearer);
+    rescuedYear = releaseYearAgreeing(claim, dates);
+    if (rescuedYear !== null) {
+      outcome.find = 'conflict_year_rescued';
+      outcome.rescuedByReleaseDate = true;
+    }
+  }
+
+  if ((decision.outcome === 'conflict' && rescuedYear === null) || decision.outcome === 'ambiguous') {
     outcome.unconfident = true;
-    await db.rpc('_import_provider_resolve', {
+    const status = await settle(db, {
       p_row_id: claim.row_id,
       p_media_item_id: null,
       p_final: true,
     });
+    outcome.bucket = bucketFor({ status });
     return outcome;
   }
 
@@ -295,9 +346,11 @@ async function resolveImdb(
   let verified = false;
   let final = false;
 
-  if (decision.outcome === 'match') {
+  if (decision.outcome === 'match' || rescuedYear !== null) {
     chosen = decision.result as ProviderResult;
     verified = true;
+    outcome.mapping =
+      decision.outcome === 'match' && decision.writesMapping ? 'eligible' : 'withheld';
   } else {
     const titleClaim: Claim = { row_id: claim.row_id, name: claim.name, year: claim.year };
     const searchFor = kind === 'series' ? searchTv : search;
@@ -346,13 +399,22 @@ async function resolveImdb(
     : null;
   if (chosen && !mediaItemId) outcome.unwritable = true;
 
-  await db.rpc('_import_provider_resolve', {
+  const params: Record<string, unknown> = {
     p_row_id: claim.row_id,
     p_media_item_id: mediaItemId,
     p_final: final,
     p_imdb_id: verified && mediaItemId ? claim.imdb_id : null,
-  });
-  outcome.matched = mediaItemId !== null;
+  };
+  // Sent only when it is evidence, so a database without 20261118000200 is never sent an
+  // argument it does not know on the common path.
+  if (rescuedYear !== null && mediaItemId) params.p_release_year = rescuedYear;
+  const status = await settle(db, params);
+
+  // 20261118000200: the database's answer, not ours. An undated /find hit the re-check
+  // refused against a catalogue date is `unmatched` here, not `matched`.
+  outcome.bucket = bucketFor({ status, placed: mediaItemId !== null });
+  outcome.matched = outcome.bucket === 'matched' || outcome.bucket === 'matched_not_added';
+  if (!outcome.matched) outcome.mapping = undefined;
   return outcome;
 }
 
@@ -414,6 +476,9 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
             bump(result.find && `find_${result.find}`);
             if (result.corroboration) bump(`verified_title_${result.corroboration}`);
             if (result.searchedOriginal) bump('searched_original_title');
+            if (result.mapping) bump(`shared_id_${result.mapping}`);
+            // Exactly one per claimed IMDb row; see `bucketFor`.
+            bump(`row_${result.bucket ?? bucketFor({})}`);
             return;
           }
           let results = await search(claim, key, bearer);
@@ -491,6 +556,7 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
             rateLimited = true;
             unasked.push(claim.row_id);
           }
+          if (claim.provider === 'imdb') bump(`row_${bucketFor({ threw: !limited, released: limited })}`);
         }
       }),
     );
@@ -500,7 +566,10 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     if (rateLimited) break;
   }
 
-  for (const claim of (claims as Claim[]).slice(dispatched)) unasked.push(claim.row_id);
+  for (const claim of (claims as Claim[]).slice(dispatched)) {
+    unasked.push(claim.row_id);
+    if (claim.provider === 'imdb') bump(`row_${bucketFor({ released: true })}`);
+  }
   let released = 0;
   if (unasked.length > 0) {
     const { data } = await db.rpc('_import_provider_release', { p_row_ids: unasked });
