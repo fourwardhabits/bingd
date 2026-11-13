@@ -22,7 +22,7 @@ import type { Breakdown, BreakdownRow } from './tracks';
 /**
  * How many rows are mounted before the reader asks for more.
  *
- * **The cap is on what is *mounted*, not on what is scrollable.** `maxHeight: 380` below
+ * **The cap is on what is *mounted*, not on what is scrollable.** The list's flex below
  * bounds the viewport and nothing else: a `ScrollView` mounts every child it is given, so
  * before this cap existed, opening Movie Muncher on a collection at its gold tier mounted
  * **a thousand `TitleRow`s and started a thousand poster requests** in one frame. That is

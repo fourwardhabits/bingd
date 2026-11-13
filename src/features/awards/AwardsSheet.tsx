@@ -182,14 +182,14 @@ const styles = StyleSheet.create({
    * Bounded by the space the sheet actually has, not by what twenty rows measure.
    *
    * `flexGrow: 0` alone was the bug the founder saw as Awards content running into the
-   * Done footer. Flex children in React Native do not shrink unless told to, so a list
+   * Close footer. Flex children in React Native do not shrink unless told to, so a list
    * taller than the sheet’s `maxHeight: '90%'` kept its full measured height and pushed
    * the foot below the sheet’s bottom edge — and every award track ships, so the list
    * is always taller than the sheet on a phone.
    *
-   * `flexShrink: 1` rather than the `maxHeight: 380` its sibling sheets use: the other
-   * lists are drill-downs that should stay small next to their heading, while this one
-   * is the sheet's whole content and should take the room that is left. Grow stays off
+   * `flexShrink: 1`, which every list sheet uses since 2026-11-13 (founder spec §4) in
+   * place of the fixed caps they had: the list takes the room the sheet has left above
+   * its footer. Grow stays off
    * so a short list — the loading skeleton, the error state — does not stretch.
    */
   list: { flexGrow: 0, flexShrink: 1 },
