@@ -168,7 +168,7 @@ export function LogAnotherWatchSheet({
               current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
             )
           }
-          titleNote={titleNote}
+          note={{ kind: 'title', titleNote }}
         />
       </ScrollView>
     </Sheet>
