@@ -95,6 +95,8 @@ export function AvatarPicker() {
           <Button
             label="Remove"
             kind="secondary"
+            size="sm"
+            hitSlop={COMPACT_SLOP}
             disabled={busy}
             disabledReason="Updating your picture."
             onPress={() => void remove()}
@@ -102,6 +104,8 @@ export function AvatarPicker() {
         ) : null}
         <Button
           label={busy ? 'Working…' : profile.avatarUri ? 'Change' : 'Choose a picture'}
+          size="sm"
+          hitSlop={COMPACT_SLOP}
           disabled={busy}
           disabledReason="Updating your picture."
           onPress={() => void choose()}
@@ -115,6 +119,17 @@ export function AvatarPicker() {
   );
 }
 
+/**
+ * **Less bulky, same target** (founder spec §7, 2026-11-13). The pair is drawn at
+ * `Button`'s small size — 36pt, the slimmer Rank button's height — and this slop gives the
+ * 8pt back, so each is still a 44pt target. Same kinds, same order, same words: only
+ * their size changed.
+ */
+const COMPACT_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
 const styles = StyleSheet.create({
   block: {
     marginTop: theme.space[6],
@@ -123,5 +138,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.raised,
   },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[3] },
+  // The vertical padding holds the slop *inside* the row's box: Android delivers no touch
+  // outside a parent's bounds, so slop that overhung the row would be decoration.
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space[2],
+    paddingVertical: COMPACT_SLOP.top,
+  },
 });

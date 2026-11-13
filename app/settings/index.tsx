@@ -16,13 +16,8 @@ import { ProviderLogos } from '@/features/import/ProviderLogo';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
-import { Button, Screen, SectionHeader, Text } from '@/ui/components';
+import { Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
-import {
-  isTitleLayoutAvailable,
-  setTitleLayout,
-  useStoredTitleLayout,
-} from '@/features/title/title-layout';
 
 /**
  * Settings, as an information architecture rather than a single scroll.
@@ -47,7 +42,6 @@ import {
 export default function SettingsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
-  const titleLayout = useStoredTitleLayout();
 
   const leave = async () => {
     await signOut();
@@ -70,9 +64,8 @@ export default function SettingsScreen() {
         options={{
           headerShown: true,
           title: 'Settings',
-          headerRight: () => (
-            <Button label="Close" kind="tertiary" onPress={() => router.back()} />
-          ),
+          // No header Close (founder spec §2B/§7, 2026-11-13): the back arrow already
+          // dismisses this screen, and two dismissals for one screen is one too many.
         }}
       />
       {/* **Four named sections, and the first one had no name at all** (founder,
@@ -96,7 +89,7 @@ export default function SettingsScreen() {
           links out would be a tap that buys nothing. */}
       <ScrollView contentContainerStyle={styles.page}>
         <View style={styles.section}>
-          <SectionHeader title="Account" />
+          <SectionHeader title="Account" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
               icon="person-outline"
@@ -207,7 +200,7 @@ export default function SettingsScreen() {
             carries a version, a build number and a platform, and carries no account, no
             identifier and no address of the person sending it. */}
         <View style={styles.section}>
-          <SectionHeader title="Help & feedback" />
+          <SectionHeader title="Help & feedback" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
               icon="alert-circle-outline"
@@ -233,26 +226,9 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Labs: one row per alternative, and the row is the whole switch: tap it to swap,
-            and the next title page opens in the other layout. Since the release pass
-            (2026-11-07) the Cinematic title page is the default everywhere, production
-            included, and this row is how somebody returns to the Original one.
-            `title-layout.ts` says how to put Original back for everyone. */}
-        {isTitleLayoutAvailable() ? (
-          <View style={styles.section}>
-            <SectionHeader title="Labs" />
-            <View style={[styles.group, styles.sectionGroup]}>
-              <Row
-                icon="flask-outline"
-                label="Title page"
-                detail={titleLayout === 'immersive' ? 'Cinematic' : 'Original'}
-                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the cinematic title page'}
-                onPress={() => void setTitleLayout(titleLayout === 'immersive' ? 'original' : 'immersive')}
-                last
-              />
-            </View>
-          </View>
-        ) : null}
+        {/* **No Labs section** (founder spec §7, 2026-11-13). Its one row switched the title
+            page between Cinematic and Original; Cinematic is the standard page now and the
+            switch is gone with it (`title-layout.ts`). */}
         {/* Privacy and Terms, under a heading of their own since 2026-09-05.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
@@ -269,7 +245,7 @@ export default function SettingsScreen() {
             TMDB's notice, quoted in their words — and a legal document is not a
             credit. */}
         <View style={styles.section}>
-          <SectionHeader title="Legal" />
+          <SectionHeader title="Legal" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
               icon="lock-closed-outline"
@@ -402,7 +378,7 @@ function About() {
 
   return (
     <View style={styles.block}>
-      <SectionHeader title="About" />
+      <SectionHeader title="About" size="large" />
       <View style={styles.blockBody}>
         <Image
           source={TMDB_LOGO}

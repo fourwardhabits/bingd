@@ -9,13 +9,14 @@ import { theme } from '@/ui/tokens';
  *
  * Post-QA sprint 2 (2026-11-05) reworked the row, not the scores behind it:
  *
- *        (8.4)            8.7             —
+ *        (8.4)            (8.7)            —
  *     Your score       bingd (4)     Following (0)
  *
  * - three columns of exactly equal width, each value centred with its label centred
  *   directly beneath it, and the same padding above and below the row;
- * - the reader's own score keeps the filled Maroon circle once ranked; bingd and
- *   Following are quieter numbers;
+ * - the reader's own score is the filled Maroon circle once ranked; bingd and Following
+ *   are the outlined Maroon ring with Maroon numerals where a score exists (founder spec
+ *   §8, 2026-11-13 — they were bare numbers until then);
  * - the label carries the real **rating** count in brackets, as the server reports it,
  *   and only once it has reported it — never a 0 drawn while the number is loading;
  * - a score that does not exist is a dash. Its reason ("Not enough ratings", "No ratings
@@ -136,8 +137,20 @@ function Cell({
   const body = (
     <>
       <View style={styles.valueSlot}>
-        {prominent && score != null ? (
-          <ScoreBadge score={score} bucket={null} size="md" variant="filled" />
+        {/**
+         * **One rule for all three** (founder spec §8, 2026-11-13): the reader's own score
+         * is a filled Maroon circle with Parchment numerals; bingd's and Following's are a
+         * Maroon ring with Maroon numerals; a score that does not exist is a dash, never
+         * an empty circle. Presentation only — which number is shown, its sample floor and
+         * what it means are decided upstream and are unchanged.
+         */}
+        {score != null ? (
+          <ScoreBadge
+            score={score}
+            bucket={null}
+            size="md"
+            variant={prominent ? 'filled' : 'outlined'}
+          />
         ) : (
           <Text
             variant="headline"

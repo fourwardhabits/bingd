@@ -91,6 +91,10 @@ export const typography = {
    * it to those eight headings by name and kept 12pt everywhere else — Settings, Where to
    * Watch, the filter sheets, the Leaderboard's timeframe. Reached only through
    * `SectionHeader`'s `size="large"`, never set as a variant by hand.
+   *
+   * **Settings' own section headings joined them on 2026-11-13** (founder spec §7:
+   * "increase section-header prominence"): the Settings index only. Its sub-screens,
+   * Where to Watch, the filter sheets and the Leaderboard keep 12pt.
    */
   sectionHeaderLarge: {
     fontFamily: fontFamily.sansSemibold,

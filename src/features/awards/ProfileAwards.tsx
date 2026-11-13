@@ -1,12 +1,15 @@
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { SectionHeader, type SectionHeaderSize, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { AwardBadge } from './AwardBadge';
+import { AwardBreakdownSheet } from './AwardBreakdownSheet';
 import { TierDots } from './TierDots';
 import { featuredAwards, PROFILE_AWARD_SLOTS } from './featured';
-import type { AwardProgress } from './progress';
+import { breakdownFor, type AwardProgress } from './progress';
+import { AWARD_TRACKS } from './tracks';
 import { unlockTimes, useAwardUnlocks } from './use-award-unlocks';
 import { useAwards } from './use-awards';
 
@@ -15,8 +18,15 @@ export type ProfileAwardsProps = {
   viewerId: string;
   /** Whose shelf: the profile being looked at, which may or may not be the viewer. */
   userId: string;
-  /** Opens the full twenty. The one interaction this section has. */
+  /** Opens the full twenty. */
   onSeeAll: () => void;
+  /**
+   * Where a title tapped inside an award's breakdown goes. Passed by the profile screens
+   * with the same handler the full Awards sheet gets; without it the rows are inert.
+   */
+  onPressTitle?: (mediaItemId: string) => void;
+  /** Where a person tapped inside an award's breakdown goes. */
+  onPressProfile?: (username: string) => void;
   /**
    * The heading's size: `large` on the reader's own Profile tab only (founder final
    * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
@@ -65,7 +75,14 @@ export type ProfileAwardsProps = {
  * **See all opens the sheet that already exists.** There is one awards catalogue and
  * this is not it.
  */
-export function ProfileAwards({ viewerId, userId, onSeeAll, headingSize }: ProfileAwardsProps) {
+export function ProfileAwards({
+  viewerId,
+  userId,
+  onSeeAll,
+  onPressTitle,
+  onPressProfile,
+  headingSize,
+}: ProfileAwardsProps) {
   const isSelf = viewerId === userId;
   const { width } = useWindowDimensions();
   /**
@@ -90,6 +107,24 @@ export function ProfileAwards({ viewerId, userId, onSeeAll, headingSize }: Profi
   const unlocks = useAwardUnlocks(userId, { enabled: isSelf });
 
   const featured = featuredAwards(awards.data?.awards ?? [], unlockTimes(unlocks.data));
+
+  /**
+   * **An award on the shelf opens what it means** (founder spec §7, 2026-11-13).
+   *
+   * The badge alone said a person had earned *something called Sob Lord*; what it is for
+   * and how far along they are was a See all and a scan away. A tap opens the award's own
+   * criteria-and-progress sheet — the drill-down the full Awards sheet opens from its row,
+   * from the same read, so the count cannot disagree with it. One sheet, opened from the
+   * profile, rather than the full list with a second sheet stacked on top of it.
+   *
+   * Presentation only: which awards are featured, their counts and their unlock logic are
+   * all untouched.
+   */
+  const [inspecting, setInspecting] = useState<string | null>(null);
+  const open = inspecting ? featured.find((award) => award.trackKey === inspecting) : null;
+  const openTrack = open ? AWARD_TRACKS.find((track) => track.key === open.trackKey) : null;
+  const openBreakdown =
+    open && openTrack && awards.data ? breakdownFor(openTrack, awards.data.facts, open) : null;
 
   /**
    * **Nothing at all while the read is in flight or after it failed.**
@@ -121,30 +156,68 @@ export function ProfileAwards({ viewerId, userId, onSeeAll, headingSize }: Profi
           {Array.from({ length: PROFILE_AWARD_SLOTS }, (_, index) => {
             const award = featured[index];
             return award ? (
-              <Slot key={award.trackKey} award={award} size={badgeSize} />
+              <Slot
+                key={award.trackKey}
+                award={award}
+                size={badgeSize}
+                // A number that could not be read has nothing behind it: the full sheet's
+                // rule for its rows, kept here.
+                onPress={award.unavailable ? undefined : () => setInspecting(award.trackKey)}
+              />
             ) : (
               <EmptySlot key={`empty-${index}`} dim={!isSelf} size={badgeSize} />
             );
           })}
         </View>
       )}
+
+      {open && openBreakdown ? (
+        <AwardBreakdownSheet
+          // Remounts per award, so one award's "Show 50 more" does not carry to the next.
+          key={open.trackKey}
+          award={open}
+          breakdown={openBreakdown}
+          showBadge
+          onPressTitle={
+            onPressTitle
+              ? (mediaItemId) => {
+                  setInspecting(null);
+                  onPressTitle(mediaItemId);
+                }
+              : undefined
+          }
+          onPressProfile={
+            onPressProfile
+              ? (username) => {
+                  setInspecting(null);
+                  onPressProfile(username);
+                }
+              : undefined
+          }
+          onClose={() => setInspecting(null)}
+        />
+      ) : null}
     </View>
   );
 }
 
 /** One earned award: badge, its tier dots, and what it is called. */
-function Slot({ award, size }: { award: AwardProgress; size: number }) {
-  return (
-    <View
-      testID="award-slot"
-      style={styles.slot}
-      accessible
-      accessibilityRole="image"
-      // The row's own words, in the order it reads. `title` is the tier's name on a
-      // creative track and the family name on a metal one, so `badgeTierLabel` is what
-      // carries "Gold" in the cases where the title does not.
-      accessibilityLabel={`${award.title}. ${award.badgeTierLabel} earned.`}
-    >
+function Slot({
+  award,
+  size,
+  onPress,
+}: {
+  award: AwardProgress;
+  size: number;
+  /** Opens the award's criteria and progress. Absent where there is nothing behind it. */
+  onPress?: () => void;
+}) {
+  // The row's own words, in the order it reads. `title` is the tier's name on a
+  // creative track and the family name on a metal one, so `badgeTierLabel` is what
+  // carries "Gold" in the cases where the title does not.
+  const label = `${award.title}. ${award.badgeTierLabel} earned.`;
+  const content = (
+    <>
       <View style={[styles.badge, { width: size, height: size }]}>
         <AwardBadge badge={award.badge} earned size={size} />
         <TierDots earnedTierIndex={award.earnedTierIndex} />
@@ -152,6 +225,27 @@ function Slot({ award, size }: { award: AwardProgress; size: number }) {
       <Text variant="caption" numberOfLines={2} style={styles.name}>
         {award.title}
       </Text>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        testID="award-slot"
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint="Shows what this award means and how it is earned"
+        onPress={onPress}
+        style={({ pressed }) => [styles.slot, pressed && styles.pressed]}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return (
+    <View testID="award-slot" style={styles.slot} accessible accessibilityRole="image" accessibilityLabel={label}>
+      {content}
     </View>
   );
 }
@@ -218,4 +312,5 @@ const styles = StyleSheet.create({
   // quiet, so their profile does not read as a list of things they have not done.
   emptyDim: { opacity: 0.4 },
   name: { textAlign: 'center' },
+  pressed: { opacity: 0.7 },
 });

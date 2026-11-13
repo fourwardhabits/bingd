@@ -2,7 +2,7 @@ import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
-import { brand } from '@/ui/tokens';
+import { brand, theme } from '@/ui/tokens';
 
 import { ImmersiveScores } from './ImmersiveScores';
 import { TitleActions } from './TitleActions';
@@ -47,6 +47,64 @@ describe('the immersive score strip', () => {
     // The count is a rating count, and is said as one.
     expect(view.getByLabelText('bingd score. 8.7 out of 10. 4 ratings')).toBeTruthy();
     expect(view.getByLabelText('People you follow. 7.9 out of 10. 3 ratings')).toBeTruthy();
+  });
+
+  /**
+   * **Founder spec §8 (2026-11-13)**: yours filled Maroon with Parchment numerals; bingd and
+   * Following outlined Maroon with Maroon numerals; nothing drawn as a circle without a
+   * number in it. The circle is found from its numerals — the badge's own `View` is its
+   * text's parent.
+   */
+  it('fills your score, and rings the community and Following scores in Maroon', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={{ score: 9.2 }}
+        bingd={{ score: 8.7, ratingCount: 4 }}
+        following={{ score: 7.9, ratingCount: 3 }}
+      />,
+    );
+    const circleOf = (value: string) => {
+      const text = view.getByText(value);
+      return {
+        ring: StyleSheet.flatten(text.parent?.props.style),
+        ink: StyleSheet.flatten(text.props.style).color,
+      };
+    };
+
+    const mine = circleOf('9.2');
+    expect(mine.ring.backgroundColor).toBe(theme.semantic.score);
+    expect(mine.ink).toBe(theme.semantic.scoreInk);
+
+    for (const value of ['8.7', '7.9']) {
+      const other = circleOf(value);
+      expect(other.ring.backgroundColor).toBeUndefined();
+      expect(other.ring.borderColor).toBe(theme.semantic.score);
+      expect(other.ring.borderWidth).toBeGreaterThan(0);
+      expect(other.ink).toBe(theme.semantic.score);
+    }
+  });
+
+  it('draws a dash, never an empty circle, where a score is unavailable', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={{ score: null }}
+        bingd={{ score: null, ratingCount: 1 }}
+        following={{ score: null, ratingCount: 0 }}
+      />,
+    );
+    const strip = within(view.getByTestId('immersive-scores'));
+    expect(strip.getAllByText('—')).toHaveLength(3);
+    // No ring and no disc anywhere in the strip.
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const circles: unknown[] = [];
+    const walk = (node: Node) => {
+      if (!node || typeof node === 'string') return;
+      const style = StyleSheet.flatten(node.props?.style as never) as { borderRadius?: number } | undefined;
+      if (style?.borderRadius === theme.radius.full) circles.push(node);
+      for (const child of node.children ?? []) walk(child as Node);
+    };
+    walk(view.toJSON() as Node);
+    expect(circles).toHaveLength(0);
   });
 
   it('shows a dash for a missing score and keeps the reason for screen readers', async () => {
