@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Recommendation Engine V2, A1 (20261111000100): the engine switch and the catalogue
+ * Recommendation Engine V2, A1 (20261116000100): the engine switch and the catalogue
  * source.
  *
  * The switch is the thing to get right first. Every new behaviour hangs off it, it
@@ -120,7 +120,7 @@ describe('the engine switch', () => {
     assert.equal(await engineFor(other), 'v1');
   });
 
-  it('serves the hybrid engine (A2, 20261111000200) through the same switch', async () => {
+  it('serves the hybrid engine (A2, 20261116000200) through the same switch', async () => {
     await setConfig('recommendations.v2_engine', 'v2_hybrid');
     await setConfig('recommendations.v2_allowlist', [reader]);
     assert.equal(await engineFor(reader), 'v2_hybrid');
@@ -286,7 +286,7 @@ describe('catalogue_candidates', () => {
   it('reads a decade window as one ordered index range, not a sort of the decade', async () => {
     // The plan of the window's own query shape. Seq and bitmap scans are switched off so the
     // small fixture table cannot hide the question: can the index hand back a decade in
-    // popularity order? Before 20261111000100 used a decade expression it could not, and
+    // popularity order? Before 20261116000100 used a decade expression it could not, and
     // every call sorted the whole decade (independent review, 2026-11-11).
     await t.actAs(null);
     await t.sql(`set enable_seqscan = off`);

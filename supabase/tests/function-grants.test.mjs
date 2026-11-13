@@ -561,13 +561,13 @@ const ALLOWED = {
   // window, capped server-side; still only the caller's own rows, still `auth.uid()` only.
   'recommendation_exposure_within(integer)': ['authenticated'],
   'social_candidates(integer)': ['authenticated'],
-  // 20261111000100, Engine V2 A1. Both are about the caller only. `recommendation_engine`
+  // 20261116000100, Engine V2 A1. Both are about the caller only. `recommendation_engine`
   // takes no argument; `catalogue_candidates` reads the public catalogue and excludes the
   // caller's own collection, and answers empty while the caller's engine is v1.
   // `_recommendation_cohort` takes an identity and is granted to nobody.
   'recommendation_engine()': ['authenticated'],
   'catalogue_candidates(text,text[],integer[],integer,integer)': ['authenticated'],
-  // 20261111000200, Engine V2 A2. About the caller only; returns ids, an aggregate and a
+  // 20261116000200, Engine V2 A2. About the caller only; returns ids, an aggregate and a
   // count, never a person. `_scored_rankings`, `_taste_matches`, `_taste_neighbour_weight`
   // and `_refresh_taste_neighbours` take identities and are granted to nobody.
   'collaborative_candidates(text,integer)': ['authenticated'],

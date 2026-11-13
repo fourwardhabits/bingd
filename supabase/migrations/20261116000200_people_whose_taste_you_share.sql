@@ -78,7 +78,7 @@ begin
   select value into v_allow
     from app_config where key = 'recommendations.v2_allowlist';
   if jsonb_typeof(v_allow) = 'array' and v_allow ? v_me::text then
-    -- 20261111000100's allowlist override, with the engines this schema now knows: e.g.
+    -- 20261116000100's allowlist override, with the engines this schema now knows: e.g.
     -- `v2_metadata` on a small percentage while `v2_hybrid` is dogfooded on the allowlist.
     select value #>> '{}' into v_override
       from app_config where key = 'recommendations.v2_allowlist_engine';

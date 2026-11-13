@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Recommendation Engine V2, A2 (20261111000200): taste-compatible collaborative evidence.
+ * Recommendation Engine V2, A2 (20261116000200): taste-compatible collaborative evidence.
  *
  * Three things matter more than the ranking quality, and are asserted here:
  *
