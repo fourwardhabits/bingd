@@ -98,7 +98,9 @@ describe('what Movies counts', () => {
       [ana, s1, s2],
     );
     await importWatched(ana, await movie('Beside The Seasons'));
-    assert.deepEqual(await counts(ana, ana), { movies: 1, tv: 2 });
+    // 20261120000100 (WS-TVC, Design A6): TV is one per series, the number of posters the
+    // TV Collection draws, so two seasons of one series count once.
+    assert.deepEqual(await counts(ana, ana), { movies: 1, tv: 1 });
   });
 });
 
