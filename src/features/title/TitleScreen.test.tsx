@@ -2487,7 +2487,7 @@ describe('a season, and its episodes', () => {
       '/w780/still2.jpg',
     );
 
-    await fireEvent.press(view.getByText('Done'));
+    await fireEvent.press(view.getByText('Close'));
     expect(view.queryByTestId('episode-sheet')).toBeNull();
     // Reading an episode navigates nowhere and writes nothing.
     expect(mockPush).not.toHaveBeenCalled();
@@ -3982,7 +3982,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => view.getByRole('button', { name: 'See all 6 cast members' })),
       );
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
-      await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+      await fireEvent.press(view.getByRole('button', { name: 'Close' }));
       await waitFor(() => expect(view.queryByTestId('cast-sheet')).toBeNull());
     });
 
@@ -5124,7 +5124,7 @@ describe('the immersive title page (experiment)', () => {
         expect(reviewsCalledWith('following')).toBe(false);
       });
 
-      it('lists every review in the sheet, once, Most Helpful first, and closes on Done', async () => {
+      it('lists every review in the sheet, once, Most Helpful first, and closes on Close', async () => {
         mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
         mockRpcResults.title_review_count = 3;
         const view = await open();
@@ -5138,7 +5138,7 @@ describe('the immersive title page (experiment)', () => {
         expect(sheet.getByLabelText(/^Mark Reader 1's review helpful/)).toBeTruthy();
         expect(sheet.getByLabelText("Report Reader 1's review")).toBeTruthy();
 
-        await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+        await fireEvent.press(view.getByRole('button', { name: 'Close' }));
         await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
       });
 

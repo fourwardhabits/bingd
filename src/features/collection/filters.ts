@@ -773,6 +773,25 @@ function mulberry32(seed: number) {
  */
 export type CollectionSegment = 'watched' | 'watchlist' | 'unranked';
 
+/**
+ * **The orders that are facts about the titles themselves**: release year, runtime, title.
+ *
+ * Shared because they are the axes that mean the same thing on anybody's collection —
+ * nothing in them reads the owner's history — so a profile's Collection sheet offers
+ * exactly these, from this one definition, beside its own Rank and Recently ranked
+ * (founder spec §4, 2026-11-13). `runtime: false` is a list made only of seasons, which
+ * have no runtime to order by.
+ */
+export function titleFactSortAxes({
+  runtime = true,
+}: { runtime?: boolean } = {}): SortAxisSpec<'year' | 'runtime' | 'title'>[] {
+  return [
+    COLLECTION_SORT_AXES.year,
+    ...(runtime ? [COLLECTION_SORT_AXES.runtime] : []),
+    COLLECTION_SORT_AXES.title,
+  ];
+}
+
 export function sortAxesFor(
   segment: CollectionSegment,
   { runtime = true }: { runtime?: boolean } = {},
@@ -781,9 +800,7 @@ export function sortAxesFor(
   // about the reader's history with it. `runtime: false` is a list made only of seasons,
   // which have no runtime to order by ({@link offersRuntime}).
   const tail: SortAxisSpec<SortAxis>[] = [
-    COLLECTION_SORT_AXES.year,
-    ...(runtime ? [COLLECTION_SORT_AXES.runtime] : []),
-    COLLECTION_SORT_AXES.title,
+    ...titleFactSortAxes({ runtime }),
     COLLECTION_SORT_AXES.shuffle,
   ];
 
