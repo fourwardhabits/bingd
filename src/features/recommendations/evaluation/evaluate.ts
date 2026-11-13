@@ -1,6 +1,14 @@
 import { SLATE_SIZE } from '../rank';
 
-import { EXTENDED, indexOfId, metOf, wallFor, type CollaborativeRows, type TvShape, type Variant } from './pipeline';
+import {
+  EXTENDED,
+  indexOfId,
+  metOf,
+  wallFor,
+  type CollaborativeRows,
+  type TvShape,
+  type Variant,
+} from './pipeline';
 import { EVAL_CONFIG_VERSION, LAUNCH_SEEDS } from './variants';
 import { decadeOfYear, isColdStart, rng, utility, type TestReader, type World } from './world';
 
@@ -127,7 +135,11 @@ const percentile = (sorted: readonly number[], value: number) => {
   return sorted.length ? lo / sorted.length : 0;
 };
 
-function contextFor(world: World, reader: TestReader, collaborative: CollaborativeRows): ReaderContext {
+function contextFor(
+  world: World,
+  reader: TestReader,
+  collaborative: CollaborativeRows,
+): ReaderContext {
   const person = world.people[reader.person]!;
   const met = metOf(reader);
   const utilityOf = new Map<number, number>();
@@ -135,24 +147,34 @@ function contextFor(world: World, reader: TestReader, collaborative: Collaborati
   for (const title of world.titles) {
     if (met.has(title.index)) continue;
     utilityOf.set(title.index, utility(world, person, title));
-    if (person.eraDecade != null && decadeOfYear(title.year) === person.eraDecade) eraCount += 1;
+    if (person.eraDecade != null && decadeOfYear(title.year) === person.eraDecade)
+      eraCount += 1;
   }
   const strongEra = person.eraDecade != null && person.eraStrength >= 0.8;
   return {
     reader,
     sortedUtility: [...utilityOf.values()].sort((a, b) => a - b),
     utilityOf,
-    hiddenLoved: new Set(reader.hidden.filter((row) => row.bucket === 'loved').map((row) => row.title)),
+    hiddenLoved: new Set(
+      reader.hidden.filter((row) => row.bucket === 'loved').map((row) => row.title),
+    ),
     openLanguages: Object.entries(person.openness)
       .filter(([code, open]) => code !== 'en' && open >= 0.6)
       .map(([code]) => code),
     eraDecade: strongEra ? person.eraDecade : null,
     eraBase: strongEra ? eraCount / Math.max(1, utilityOf.size) : null,
     collaborative,
-    hiddenNegative: new Set(reader.hidden.filter((row) => row.bucket === 'not_for_me').map((row) => row.title)),
-    ownNonEnglish: met.size > 0 ? [...met].filter((t) => world.titles[t]!.language !== 'en').length / met.size : null,
+    hiddenNegative: new Set(
+      reader.hidden.filter((row) => row.bucket === 'not_for_me').map((row) => row.title),
+    ),
+    ownNonEnglish:
+      met.size > 0
+        ? [...met].filter((t) => world.titles[t]!.language !== 'en').length / met.size
+        : null,
     lovedDecades: shareMap(
-      person.ranked.filter((row) => row.bucket === 'loved').map((row) => decadeOfYear(world.titles[row.title]!.year)),
+      person.ranked
+        .filter((row) => row.bucket === 'loved')
+        .map((row) => decadeOfYear(world.titles[row.title]!.year)),
     ),
   };
 }
@@ -216,7 +238,10 @@ function measure(
     });
     const items = wall.map((item) => indexOfId(item.mediaItemId));
     walls.push(items);
-    add('ordering', orderingAuc(scoreTitles(hiddenTitles), ctx.hiddenLoved, ctx.hiddenNegative));
+    add(
+      'ordering',
+      orderingAuc(scoreTitles(hiddenTitles), ctx.hiddenLoved, ctx.hiddenNegative),
+    );
     const relevant = ctx.hiddenLoved.size;
     if (relevant > 0) {
       let dcg = 0;
@@ -230,7 +255,9 @@ function measure(
       let ideal = 0;
       for (let i = 0; i < Math.min(relevant, SLATE_SIZE); i += 1) ideal += 1 / Math.log2(i + 2);
       add('recall', hits / Math.min(relevant, SLATE_SIZE));
-      const longHits = extended.filter((item) => ctx.hiddenLoved.has(indexOfId(item.mediaItemId))).length;
+      const longHits = extended.filter((item) =>
+        ctx.hiddenLoved.has(indexOfId(item.mediaItemId)),
+      ).length;
       add('recall50', longHits / Math.min(relevant, EXTENDED));
       add('ndcg', dcg / ideal);
       add('hit', hits > 0 ? 1 : 0);
@@ -238,29 +265,45 @@ function measure(
       add('poolRecall', [...ctx.hiddenLoved].filter((t) => pool.has(t)).length / relevant);
     }
     const n = Math.max(1, items.length);
-    add('utility', items.reduce((sum, t) => sum + percentile(ctx.sortedUtility, ctx.utilityOf.get(t) ?? 0), 0) / n);
+    add(
+      'utility',
+      items.reduce(
+        (sum, t) => sum + percentile(ctx.sortedUtility, ctx.utilityOf.get(t) ?? 0),
+        0,
+      ) / n,
+    );
     const langs = items.map((t) => world.titles[t]!.language);
     const nonEnglish = langs.filter((code) => code !== 'en').length / n;
     add('nonEnglishShare', nonEnglish);
     if (scored.length > 0) {
       add(
         'poolNonEnglish',
-        scored.filter((item) => world.titles[indexOfId(item.mediaItemId)]!.language !== 'en').length / scored.length,
+        scored.filter((item) => world.titles[indexOfId(item.mediaItemId)]!.language !== 'en')
+          .length / scored.length,
       );
     }
     add('ownNonEnglish', ctx.ownNonEnglish);
     add('languageGap', ctx.ownNonEnglish == null ? null : nonEnglish - ctx.ownNonEnglish);
     add('languages', new Set(langs).size);
     if (ctx.openLanguages.length > 0) {
-      add('servedLanguages', ctx.openLanguages.filter((code) => langs.includes(code)).length / ctx.openLanguages.length);
+      add(
+        'servedLanguages',
+        ctx.openLanguages.filter((code) => langs.includes(code)).length /
+          ctx.openLanguages.length,
+      );
     }
     if (ctx.eraDecade != null) {
-      add('eraShare', items.filter((t) => decadeOfYear(world.titles[t]!.year) === ctx.eraDecade).length / n);
+      add(
+        'eraShare',
+        items.filter((t) => decadeOfYear(world.titles[t]!.year) === ctx.eraDecade).length / n,
+      );
       add('eraBase', ctx.eraBase);
     }
     add(
       'dislikedShare',
-      items.filter((t) => world.titles[t]!.genres.some((g) => person.dislikedGenres.includes(g))).length / n,
+      items.filter((t) =>
+        world.titles[t]!.genres.some((g) => person.dislikedGenres.includes(g)),
+      ).length / n,
     );
     add('genres', new Set(items.flatMap((t) => world.titles[t]!.genres)).size);
     add('genreEntropy', genreEntropy(items.map((t) => world.titles[t]!.genres)));
@@ -273,7 +316,10 @@ function measure(
       add('eraFit', 1 - tvd / 2);
     }
     add('seenShare', items.filter((t) => met.has(t)).length / n);
-    add('popularityPercentile', items.reduce((sum, t) => sum + (popularityRank.get(t) ?? 0), 0) / n);
+    add(
+      'popularityPercentile',
+      items.reduce((sum, t) => sum + (popularityRank.get(t) ?? 0), 0) / n,
+    );
     add('fromCollaborative', sources.collaborative / n);
     add('fromCatalogue', sources.catalogue / n);
     add('fromSocial', sources.social / n);
@@ -289,9 +335,12 @@ function measure(
   const overlaps: number[] = [];
   for (let i = 0; i + 1 < walls.length; i += 1) {
     const next = new Set(walls[i + 1]);
-    if (walls[i]!.length > 0) overlaps.push(walls[i]!.filter((t) => next.has(t)).length / walls[i]!.length);
+    if (walls[i]!.length > 0)
+      overlaps.push(walls[i]!.filter((t) => next.has(t)).length / walls[i]!.length);
   }
-  out.repeatNext = overlaps.length ? overlaps.reduce((a, b) => a + b, 0) / overlaps.length : null;
+  out.repeatNext = overlaps.length
+    ? overlaps.reduce((a, b) => a + b, 0) / overlaps.length
+    : null;
   return out;
 }
 
@@ -310,7 +359,8 @@ export const summarise = (values: readonly (number | null)[]): Summary | null =>
   const xs = values.filter((v): v is number => v != null && Number.isFinite(v));
   if (xs.length === 0) return null;
   const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
-  const variance = xs.length > 1 ? xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1) : 0;
+  const variance =
+    xs.length > 1 ? xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1) : 0;
   return { mean, ci: 1.96 * Math.sqrt(variance / xs.length), n: xs.length };
 };
 
@@ -328,15 +378,26 @@ export type Report = {
   results: Record<string, Record<string, Partial<Record<keyof ReaderMetrics, Summary | null>>>>;
   /** variant → stratum → metric → paired delta against the reference */
   versusV1: Record<string, Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>>;
-  versusMetadata: Record<string, Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>>;
+  versusMetadata: Record<
+    string,
+    Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>
+  >;
   /** Activity slices (non-cold readers by visible ranked titles) → reader count. */
   activity: Record<string, number>;
   following: { v2WallsChanged: number; v1WallsChanged: number; readers: number };
   catalogueCoverage: Record<string, number>;
-  collaborative: { readersWithEvidence: number; meanRows: number; meanNeighbours: number | null; sqlMsMean: number | null };
+  collaborative: {
+    readersWithEvidence: number;
+    meanRows: number;
+    meanNeighbours: number | null;
+    sqlMsMean: number | null;
+  };
 };
 
-export type CollaborativeInput = Map<number, { rows: CollaborativeRows; neighbours: number | null; ms: number | null }>;
+export type CollaborativeInput = Map<
+  number,
+  { rows: CollaborativeRows; neighbours: number | null; ms: number | null }
+>;
 
 export function evaluate(
   world: World,
@@ -345,7 +406,9 @@ export function evaluate(
   variants: readonly Variant[],
 ): Report {
   const byPopularity = [...world.titles].sort((a, b) => a.popularity - b.popularity);
-  const popularityRank = new Map(byPopularity.map((t, i) => [t.index, i / byPopularity.length]));
+  const popularityRank = new Map(
+    byPopularity.map((t, i) => [t.index, i / byPopularity.length]),
+  );
   const empty: CollaborativeRows = new Map();
   const contexts = readers.map((reader) =>
     contextFor(world, reader, collaborative.get(reader.person)?.rows ?? empty),
@@ -353,7 +416,11 @@ export function evaluate(
   const activityKeys = (['sparse', 'medium', 'heavy'] as const)
     .filter((a) => readers.some((r) => activityOf(r) === a))
     .map((a) => `activity:${a}`);
-  const strata = ['all', ...new Set(readers.map((r) => r.stratum)), ...activityKeys] as string[];
+  const strata = [
+    'all',
+    ...new Set(readers.map((r) => r.stratum)),
+    ...activityKeys,
+  ] as string[];
 
   const perVariant = new Map<string, ReaderMetrics[]>();
   const shown = new Map<string, Set<number>>();
@@ -362,7 +429,14 @@ export function evaluate(
     perVariant.set(variant.id, metrics);
     const titles = new Set<number>();
     for (const ctx of contexts) {
-      const { wall } = wallFor({ world, reader: ctx.reader, variant, collaborative: ctx.collaborative, anchorSeed: LAUNCH_SEEDS[0], drawSeed: LAUNCH_SEEDS[0] * 7919 });
+      const { wall } = wallFor({
+        world,
+        reader: ctx.reader,
+        variant,
+        collaborative: ctx.collaborative,
+        anchorSeed: LAUNCH_SEEDS[0],
+        drawSeed: LAUNCH_SEEDS[0] * 7919,
+      });
       for (const item of wall) titles.add(indexOfId(item.mediaItemId));
     }
     shown.set(variant.id, titles);
@@ -397,8 +471,16 @@ export function evaluate(
         row[key] = summarise(values);
         const v1 = perVariant.get('v1');
         const meta = perVariant.get('v2_metadata');
-        if (v1 && variant.id !== 'v1') d1[key] = paired(values, idx.map((i) => v1[i]![key]));
-        if (meta && variant.id !== 'v2_metadata') dm[key] = paired(values, idx.map((i) => meta[i]![key]));
+        if (v1 && variant.id !== 'v1')
+          d1[key] = paired(
+            values,
+            idx.map((i) => v1[i]![key]),
+          );
+        if (meta && variant.id !== 'v2_metadata')
+          dm[key] = paired(
+            values,
+            idx.map((i) => meta[i]![key]),
+          );
       }
       results[variant.id]![stratum] = row;
       versusV1[variant.id]![stratum] = d1;
@@ -411,11 +493,22 @@ export function evaluate(
   let v2Changed = 0;
   let v1Changed = 0;
   const v1 = variants.find((v) => v.id === 'v1');
-  const v2 = variants.find((v) => v.id === 'v2_hybrid') ?? variants.find((v) => v.engine === 'v2');
+  const v2 =
+    variants.find((v) => v.id === 'v2_hybrid') ?? variants.find((v) => v.engine === 'v2');
   for (const ctx of contexts) {
-    const shuffled = Array.from({ length: 15 }, () => Math.floor(r.next() * world.people.length));
+    const shuffled = Array.from({ length: 15 }, () =>
+      Math.floor(r.next() * world.people.length),
+    );
     const wallIds = (variant: Variant, follows?: number[]) =>
-      wallFor({ world, reader: ctx.reader, variant, collaborative: ctx.collaborative, follows, anchorSeed: 5, drawSeed: 5 })
+      wallFor({
+        world,
+        reader: ctx.reader,
+        variant,
+        collaborative: ctx.collaborative,
+        follows,
+        anchorSeed: 5,
+        drawSeed: 5,
+      })
         .wall.map((item) => item.mediaItemId)
         .join(',');
     if (v2 && wallIds(v2) !== wallIds(v2, shuffled)) v2Changed += 1;
@@ -423,7 +516,9 @@ export function evaluate(
   }
 
   const rowsPerReader = contexts.map((ctx) => ctx.collaborative.size);
-  const neighbours = readers.map((reader) => collaborative.get(reader.person)?.neighbours ?? null);
+  const neighbours = readers.map(
+    (reader) => collaborative.get(reader.person)?.neighbours ?? null,
+  );
   const sqlMs = readers.map((reader) => collaborative.get(reader.person)?.ms ?? null);
   return {
     configVersion: EVAL_CONFIG_VERSION,
@@ -431,15 +526,23 @@ export function evaluate(
     seed: world.config.seed,
     readers: readers.length,
     strata: Object.fromEntries(
-      strata.filter((s) => s !== 'all' && !s.startsWith('activity:')).map((s) => [s, inStratum(s).length]),
+      strata
+        .filter((s) => s !== 'all' && !s.startsWith('activity:'))
+        .map((s) => [s, inStratum(s).length]),
     ),
     activity: Object.fromEntries(activityKeys.map((s) => [s, inStratum(s).length])),
     variants: variants.map(({ id, label, group }) => ({ id, label, group })),
     results,
     versusV1,
     versusMetadata,
-    following: { v2WallsChanged: v2Changed, v1WallsChanged: v1Changed, readers: contexts.length },
-    catalogueCoverage: Object.fromEntries([...shown].map(([id, set]) => [id, set.size / world.titles.length])),
+    following: {
+      v2WallsChanged: v2Changed,
+      v1WallsChanged: v1Changed,
+      readers: contexts.length,
+    },
+    catalogueCoverage: Object.fromEntries(
+      [...shown].map(([id, set]) => [id, set.size / world.titles.length]),
+    ),
     collaborative: {
       readersWithEvidence: rowsPerReader.filter((n) => n > 0).length,
       meanRows: rowsPerReader.reduce((a, b) => a + b, 0) / Math.max(1, rowsPerReader.length),
@@ -462,7 +565,10 @@ export type TvReport = {
   /** shape → variant → metric → paired delta against V1 */
   versusV1: Record<string, Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>>;
   /** shape → variant → metric → paired delta against `reference` (the pre-reconcile V2 profile) */
-  versusReference: Record<string, Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>>;
+  versusReference: Record<
+    string,
+    Record<string, Partial<Record<keyof ReaderMetrics, Delta | null>>>
+  >;
   reference: string;
 };
 
@@ -485,10 +591,14 @@ export function evaluateTv(
   reference = 'v2m-pre-ws5',
 ): TvReport {
   const byPopularity = [...world.titles].sort((a, b) => a.popularity - b.popularity);
-  const popularityRank = new Map(byPopularity.map((t, i) => [t.index, i / byPopularity.length]));
+  const popularityRank = new Map(
+    byPopularity.map((t, i) => [t.index, i / byPopularity.length]),
+  );
   const empty: CollaborativeRows = new Map();
   const tvReaders = readers.filter((r) => !isColdStart(r.stratum));
-  const contexts = tvReaders.map((reader) => contextFor(world, reader, collaborative.get(reader.person)?.rows ?? empty));
+  const contexts = tvReaders.map((reader) =>
+    contextFor(world, reader, collaborative.get(reader.person)?.rows ?? empty),
+  );
   const out: TvReport = {
     readers: tvReaders.length,
     shapes: [...shapes],
@@ -501,7 +611,10 @@ export function evaluateTv(
   for (const shape of shapes) {
     const per = new Map<string, ReaderMetrics[]>();
     for (const variant of variants) {
-      per.set(variant.id, contexts.map((ctx) => measure(world, ctx, variant, popularityRank, shape)));
+      per.set(
+        variant.id,
+        contexts.map((ctx) => measure(world, ctx, variant, popularityRank, shape)),
+      );
     }
     out.results[shape] = {};
     out.versusV1[shape] = {};
@@ -516,8 +629,16 @@ export function evaluateTv(
         row[key] = summarise(values);
         const v1 = per.get('v1');
         const ref = per.get(reference);
-        if (v1 && variant.id !== 'v1') d1[key] = paired(values, v1.map((m) => m[key]));
-        if (ref && variant.id !== reference) dr[key] = paired(values, ref.map((m) => m[key]));
+        if (v1 && variant.id !== 'v1')
+          d1[key] = paired(
+            values,
+            v1.map((m) => m[key]),
+          );
+        if (ref && variant.id !== reference)
+          dr[key] = paired(
+            values,
+            ref.map((m) => m[key]),
+          );
       }
       out.results[shape]![variant.id] = row;
       out.versusV1[shape]![variant.id] = d1;
@@ -532,7 +653,9 @@ export function evaluateTv(
 // ---------------------------------------------------------------------------
 
 const fmt = (s: Summary | Delta | null | undefined, digits = 3, signed = false) =>
-  s == null ? '—' : `${signed && s.mean >= 0 ? '+' : ''}${s.mean.toFixed(digits)} ± ${s.ci.toFixed(digits)}`;
+  s == null
+    ? '—'
+    : `${signed && s.mean >= 0 ? '+' : ''}${s.mean.toFixed(digits)} ± ${s.ci.toFixed(digits)}`;
 
 const HEADLINE: [keyof ReaderMetrics, string][] = [
   ['recall', 'Held-out recall@20'],
@@ -577,13 +700,27 @@ const SLICE: [keyof ReaderMetrics, string][] = [
 
 export function renderReport(report: Report, tv?: TvReport): string {
   const lines: string[] = [];
-  lines.push('> **SYNTHETIC DATA.** Every number below comes from a generated world whose people, tastes and');
-  lines.push('> rankings are assumptions (`evaluation/world.ts`). It shows how the engines behave under that');
-  lines.push('> model. It is **not** evidence that any engine is better for real bingd readers.');
+  lines.push(
+    '> **SYNTHETIC DATA.** Every number below comes from a generated world whose people, tastes and',
+  );
+  lines.push(
+    '> rankings are assumptions (`evaluation/world.ts`). It shows how the engines behave under that',
+  );
+  lines.push(
+    '> model. It is **not** evidence that any engine is better for real bingd readers.',
+  );
   lines.push('');
-  lines.push(`Config \`${report.configVersion}\`, world \`${report.worldVersion}\`, seed ${report.seed}, ${report.readers} test readers.`);
-  lines.push(`Strata: ${Object.entries(report.strata).map(([s, n]) => `${s} ${n}`).join(', ')}.`);
-  lines.push('Each cell is a mean over readers ± a 95% normal-approximation interval; wall metrics average three launch seeds per reader.');
+  lines.push(
+    `Config \`${report.configVersion}\`, world \`${report.worldVersion}\`, seed ${report.seed}, ${report.readers} test readers.`,
+  );
+  lines.push(
+    `Strata: ${Object.entries(report.strata)
+      .map(([s, n]) => `${s} ${n}`)
+      .join(', ')}.`,
+  );
+  lines.push(
+    'Each cell is a mean over readers ± a 95% normal-approximation interval; wall metrics average three launch seeds per reader.',
+  );
   lines.push('');
 
   const table = (
@@ -602,7 +739,9 @@ export function renderReport(report: Report, tv?: TvReport): string {
       const row = rows[id]?.[stratum];
       if (!row) continue;
       const label = report.variants.find((v) => v.id === id)?.label ?? id;
-      lines.push(`| ${label} | ${columns.map(([key]) => fmt(row[key] as Summary | null, key === 'genres' ? 2 : 3, signed)).join(' | ')} |`);
+      lines.push(
+        `| ${label} | ${columns.map(([key]) => fmt(row[key] as Summary | null, key === 'genres' ? 2 : 3, signed)).join(' | ')} |`,
+      );
     }
     lines.push('');
   };
@@ -610,39 +749,92 @@ export function renderReport(report: Report, tv?: TvReport): string {
   const engines = report.variants.filter((v) => v.group === 'engine').map((v) => v.id);
   const others = report.variants.filter((v) => v.group !== 'engine').map((v) => v.id);
   table('Engines, all readers', report.results, 'all', engines, false);
-  table('Engines, all readers: reconcile metrics', report.results, 'all', engines, false, EXTRA);
-  table('Engines vs V1, paired differences, all readers', report.versusV1, 'all', engines.filter((id) => id !== 'v1'), true);
-  table('Engines vs V1, paired differences, all readers: reconcile metrics', report.versusV1, 'all', engines.filter((id) => id !== 'v1'), true, EXTRA);
+  table(
+    'Engines, all readers: reconcile metrics',
+    report.results,
+    'all',
+    engines,
+    false,
+    EXTRA,
+  );
+  table(
+    'Engines vs V1, paired differences, all readers',
+    report.versusV1,
+    'all',
+    engines.filter((id) => id !== 'v1'),
+    true,
+  );
+  table(
+    'Engines vs V1, paired differences, all readers: reconcile metrics',
+    report.versusV1,
+    'all',
+    engines.filter((id) => id !== 'v1'),
+    true,
+    EXTRA,
+  );
 
   // Every slice in one table per engine pair: absolute V1, then each engine's paired delta.
   const slices = [...Object.keys(report.strata), ...Object.keys(report.activity ?? {})];
   const count = (slice: string) => report.strata[slice] ?? report.activity?.[slice] ?? 0;
   lines.push('### By slice: V1 absolute, then each V2 engine minus V1 (paired)');
   lines.push('');
-  lines.push('Activity slices are non-cold-start readers by *visible* ranked titles: sparse ≤ 10, medium 11–30, heavy > 30.');
+  lines.push(
+    'Activity slices are non-cold-start readers by *visible* ranked titles: sparse ≤ 10, medium 11–30, heavy > 30.',
+  );
   lines.push('');
   lines.push(`| Slice (n) | Engine | ${SLICE.map(([, label]) => label).join(' | ')} |`);
   lines.push(`|---|---|${SLICE.map(() => '---').join('|')}|`);
   for (const slice of slices) {
     const v1 = report.results.v1?.[slice];
-    if (v1) lines.push(`| ${slice} (${count(slice)}) | V1 | ${SLICE.map(([key]) => fmt(v1[key] as Summary | null)).join(' | ')} |`);
+    if (v1)
+      lines.push(
+        `| ${slice} (${count(slice)}) | V1 | ${SLICE.map(([key]) => fmt(v1[key] as Summary | null)).join(' | ')} |`,
+      );
     for (const id of engines.filter((e) => e !== 'v1')) {
       const d = report.versusV1[id]?.[slice];
       if (!d) continue;
-      lines.push(`| ${slice} | ${id} − V1 | ${SLICE.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`);
+      lines.push(
+        `| ${slice} | ${id} − V1 | ${SLICE.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`,
+      );
     }
   }
   lines.push('');
   for (const stratum of Object.keys(report.strata)) {
-    table(`Engines vs V1, paired, stratum \`${stratum}\``, report.versusV1, stratum, engines.filter((id) => id !== 'v1'), true);
+    table(
+      `Engines vs V1, paired, stratum \`${stratum}\``,
+      report.versusV1,
+      stratum,
+      engines.filter((id) => id !== 'v1'),
+      true,
+    );
   }
-  table('Ablations and sweeps vs V2 metadata, paired, all readers', report.versusMetadata, 'all', others, true);
+  table(
+    'Ablations and sweeps vs V2 metadata, paired, all readers',
+    report.versusMetadata,
+    'all',
+    others,
+    true,
+  );
   const diagnostics = report.variants.filter((v) => v.group === 'diagnostic').map((v) => v.id);
   if (diagnostics.length > 0) {
-    table('Diagnostics vs V1, paired, all readers (not shipped configurations)', report.versusV1, 'all', diagnostics, true, SLICE);
+    table(
+      'Diagnostics vs V1, paired, all readers (not shipped configurations)',
+      report.versusV1,
+      'all',
+      diagnostics,
+      true,
+      SLICE,
+    );
     for (const stratum of ['cold_start_0', 'cold_start_3', 'cold_start']) {
       if (report.strata[stratum]) {
-        table(`Diagnostics vs V1, paired, stratum \`${stratum}\``, report.versusV1, stratum, diagnostics, true, SLICE);
+        table(
+          `Diagnostics vs V1, paired, stratum \`${stratum}\``,
+          report.versusV1,
+          stratum,
+          diagnostics,
+          true,
+          SLICE,
+        );
       }
     }
   }
@@ -657,7 +849,8 @@ export function renderReport(report: Report, tv?: TvReport): string {
   lines.push('');
   lines.push(`| Variant | Coverage |`);
   lines.push(`|---|---|`);
-  for (const [id, value] of Object.entries(report.catalogueCoverage)) lines.push(`| ${id} | ${value.toFixed(3)} |`);
+  for (const [id, value] of Object.entries(report.catalogueCoverage))
+    lines.push(`| ${id} | ${value.toFixed(3)} |`);
   lines.push('');
   lines.push('### Collaborative source (real SQL in PGlite)');
   lines.push('');
@@ -667,7 +860,9 @@ export function renderReport(report: Report, tv?: TvReport): string {
   );
   lines.push('');
   const ms = (id: string) => report.results[id]?.all?.ms;
-  lines.push(`Client scoring cost per slate (JS, this machine): ${engines.map((id) => `${id} ${fmt(ms(id), 1)} ms`).join('; ')}.`);
+  lines.push(
+    `Client scoring cost per slate (JS, this machine): ${engines.map((id) => `${id} ${fmt(ms(id), 1)} ms`).join('; ')}.`,
+  );
   if (tv) lines.push('', renderTv(tv));
   return lines.join('\n');
 }
@@ -699,17 +894,26 @@ export function renderTv(tv: TvReport): string {
     lines.push(`|---|${TV_COLUMNS.map(() => '---').join('|')}|`);
     for (const { id } of tv.variants) {
       const row = tv.results[shape]?.[id];
-      if (row) lines.push(`| ${label(id)} | ${TV_COLUMNS.map(([key]) => fmt(row[key] as Summary | null)).join(' | ')} |`);
+      if (row)
+        lines.push(
+          `| ${label(id)} | ${TV_COLUMNS.map(([key]) => fmt(row[key] as Summary | null)).join(' | ')} |`,
+        );
     }
     for (const { id } of tv.variants) {
       if (id === 'v1') continue;
       const d = tv.versusV1[shape]?.[id];
-      if (d) lines.push(`| ${label(id)} − V1 | ${TV_COLUMNS.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`);
+      if (d)
+        lines.push(
+          `| ${label(id)} − V1 | ${TV_COLUMNS.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`,
+        );
     }
     for (const { id } of tv.variants) {
       if (id === tv.reference || id === 'v1') continue;
       const d = tv.versusReference[shape]?.[id];
-      if (d) lines.push(`| ${label(id)} − pre-reconcile | ${TV_COLUMNS.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`);
+      if (d)
+        lines.push(
+          `| ${label(id)} − pre-reconcile | ${TV_COLUMNS.map(([key]) => fmt(d[key] as Delta | null, 3, true)).join(' | ')} |`,
+        );
     }
     lines.push('');
   }

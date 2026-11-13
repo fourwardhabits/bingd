@@ -2,7 +2,13 @@ import { bandSizes, scoreFor } from '@/features/collection/score';
 
 import type { LoggedEntry, RankedEntry } from '@/features/collection/use-collection';
 
-import { ANCHOR_BUDGET, candidateIdsFrom, selectAnchors, seriesUnitWeights, type LikedTitle } from '../anchors';
+import {
+  ANCHOR_BUDGET,
+  candidateIdsFrom,
+  selectAnchors,
+  seriesUnitWeights,
+  type LikedTitle,
+} from '../anchors';
 import { coverageFill } from '../coverage';
 import { profileFrom, sourceDecades, sourceLanguages, type ProfileEntry } from '../profile';
 import {
@@ -80,7 +86,13 @@ export type Wall = {
   /** The first `EXTENDED` titles of the same draw (pages are drawn in sequence, so `wall` is its prefix). */
   extended: Scored[];
   scored: Scored[];
-  sources: { anchored: number; social: number; collaborative: number; catalogue: number; trending: number };
+  sources: {
+    anchored: number;
+    social: number;
+    collaborative: number;
+    catalogue: number;
+    trending: number;
+  };
   /** Scores arbitrary titles exactly as this wall scored its pool, for ordering metrics. */
   scoreTitles: (titles: readonly Title[]) => Map<number, number>;
   ms: number;
@@ -89,7 +101,11 @@ export type Wall = {
 /** Titles drawn for recall@50. */
 export const EXTENDED = 50;
 
-const toCandidate = (title: Title, collaborative?: Collaborative, kind: 'movie' | 'series' = 'movie'): Candidate => ({
+const toCandidate = (
+  title: Title,
+  collaborative?: Collaborative,
+  kind: 'movie' | 'series' = 'movie',
+): Candidate => ({
   mediaItemId: title.id,
   title: title.title,
   year: title.year,
@@ -113,7 +129,11 @@ export function metOf(reader: TestReader): Set<number> {
 }
 
 /** `social_candidates`, mirrored: followees' loved titles, most-endorsed first, 40. */
-export function socialMirror(world: World, reader: TestReader, follows: readonly number[]): number[] {
+export function socialMirror(
+  world: World,
+  reader: TestReader,
+  follows: readonly number[],
+): number[] {
   const met = metOf(reader);
   const counts = new Map<number, number>();
   for (const followee of follows) {
@@ -156,36 +176,54 @@ export function catalogueMirror(
     }
   }
   for (const decade of decades.slice(0, 3)) {
-    for (const t of draw(world.titles.filter((title) => title.year >= decade && title.year < decade + 10))) {
+    for (const t of draw(
+      world.titles.filter((title) => title.year >= decade && title.year < decade + 10),
+    )) {
       out.set(t.id, toCandidate(t, undefined, kind));
     }
   }
   return [...out.values()];
 }
 
-export function profileEntriesOf(world: World, reader: TestReader, negativeEvidence = true): ProfileEntry[] {
+export function profileEntriesOf(
+  world: World,
+  reader: TestReader,
+  negativeEvidence = true,
+): ProfileEntry[] {
   const sizes = bandSizes(reader.ranked);
   const meta = (index: number) => {
     const title = world.titles[index]!;
-    return { mediaItemId: title.id, language: title.language, year: title.year, kind: 'movie' as const, genres: title.genres };
+    return {
+      mediaItemId: title.id,
+      language: title.language,
+      year: title.year,
+      kind: 'movie' as const,
+      genres: title.genres,
+    };
   };
   const entries: ProfileEntry[] = [];
   for (const row of reader.ranked) {
     if (!negativeEvidence && row.bucket === 'not_for_me') {
       entries.push({ ...meta(row.title), score: null, bucket: null });
     } else {
-      entries.push({ ...meta(row.title), score: scoreFor(row.bucket, row.position, sizes), bucket: row.bucket });
+      entries.push({
+        ...meta(row.title),
+        score: scoreFor(row.bucket, row.position, sizes),
+        bucket: row.bucket,
+      });
     }
   }
   for (const row of reader.bucketed) {
     const bucket = !negativeEvidence && row.bucket === 'not_for_me' ? null : row.bucket;
     entries.push({ ...meta(row.title), score: null, bucket });
   }
-  for (const title of reader.logged) entries.push({ ...meta(title), score: null, bucket: null });
+  for (const title of reader.logged)
+    entries.push({ ...meta(title), score: null, bucket: null });
   return entries;
 }
 
-const seasonsOf = (world: World, title: number) => 1 + Math.floor(hashUnit(world.config.seed ^ 0x7e, title, 0) * 3);
+const seasonsOf = (world: World, title: number) =>
+  1 + Math.floor(hashUnit(world.config.seed ^ 0x7e, title, 0) * 3);
 
 /**
  * A reader's collection as the TV wall's client reads it: ranked entries in the `tv_seasons`
@@ -210,7 +248,11 @@ export function tvCollectionOf(
       rankedAt: null,
     };
   };
-  const show = (index: number, bucket: RankedEntry['bucket'], position: number): RankedEntry => ({
+  const show = (
+    index: number,
+    bucket: RankedEntry['bucket'],
+    position: number,
+  ): RankedEntry => ({
     ...base(index),
     mediaItemId: world.titles[index]!.id,
     year: world.titles[index]!.year,
@@ -221,7 +263,12 @@ export function tvCollectionOf(
     position,
     category: 'tv_shows',
   });
-  const season = (index: number, n: number, bucket: RankedEntry['bucket'], position: number): RankedEntry => ({
+  const season = (
+    index: number,
+    n: number,
+    bucket: RankedEntry['bucket'],
+    position: number,
+  ): RankedEntry => ({
     ...base(index),
     mediaItemId: `${world.titles[index]!.id}#s${n}`,
     year: world.titles[index]!.year + n - 1,
@@ -257,18 +304,28 @@ export function tvCollectionOf(
       continue;
     }
     if (shape !== 'by_season') shows.push(show(row.title, row.bucket, shows.length + 1));
-    const count = shape === 'whole_show' ? 0 : shape === 'show_and_seasons' ? 2 : seasonsOf(world, row.title);
-    for (let n = 1; n <= count; n += 1) seasons.push(season(row.title, n, row.bucket, seasons.length + 1));
+    const count =
+      shape === 'whole_show'
+        ? 0
+        : shape === 'show_and_seasons'
+          ? 2
+          : seasonsOf(world, row.title);
+    for (let n = 1; n <= count; n += 1)
+      seasons.push(season(row.title, n, row.bucket, seasons.length + 1));
   }
   const loggedShape = (index: number, bucket: LoggedEntry['bucket']) => {
     if (shape === 'by_season') {
-      for (let n = 1; n <= seasonsOf(world, index); n += 1) logged.push(toLogged(season(index, n, 'fine', 0), bucket));
+      for (let n = 1; n <= seasonsOf(world, index); n += 1)
+        logged.push(toLogged(season(index, n, 'fine', 0), bucket));
     } else {
       logged.push(toLogged(show(index, 'fine', 0), bucket));
     }
   };
   for (const row of reader.bucketed) {
-    loggedShape(row.title, !negativeEvidence && row.bucket === 'not_for_me' ? null : row.bucket);
+    loggedShape(
+      row.title,
+      !negativeEvidence && row.bucket === 'not_for_me' ? null : row.bucket,
+    );
   }
   for (const title of reader.logged) loggedShape(title, null);
   return { seasons, shows, logged };
@@ -292,13 +349,22 @@ export type WallInput = {
  * profile through `profileEntriesFrom`, and anchors through `likedFrom(…, 'tv')`.
  */
 function tvInputs(world: World, reader: TestReader, variant: Variant, shape: TvShape) {
-  const { seasons, shows, logged } = tvCollectionOf(world, reader, shape, variant.negativeEvidence);
+  const { seasons, shows, logged } = tvCollectionOf(
+    world,
+    reader,
+    shape,
+    variant.negativeEvidence,
+  );
   const signals = [...seasons, ...shows];
   const weights = seriesUnitWeights(signals);
   const sizes = { tv_seasons: bandSizes(seasons), tv_shows: bandSizes(shows) };
   const taste = tasteFrom(
     signals.map((entry) => ({
-      score: scoreFor(entry.bucket, entry.position, sizes[entry.category as 'tv_seasons' | 'tv_shows']),
+      score: scoreFor(
+        entry.bucket,
+        entry.position,
+        sizes[entry.category as 'tv_seasons' | 'tv_shows'],
+      ),
       genres: entry.genres,
       language: entry.language,
       weight: weights.get(entry.mediaItemId) ?? 1,
@@ -315,7 +381,16 @@ function tvInputs(world: World, reader: TestReader, variant: Variant, shape: TvS
   return { taste, profile, liked: likedFrom(signals, 'tv') };
 }
 
-export function wallFor({ world, reader, variant, collaborative, follows, anchorSeed, drawSeed, tv }: WallInput): Wall {
+export function wallFor({
+  world,
+  reader,
+  variant,
+  collaborative,
+  follows,
+  anchorSeed,
+  drawSeed,
+  tv,
+}: WallInput): Wall {
   const started = performance.now();
   const titles = world.titles;
   const kind = tv ? ('series' as const) : ('movie' as const);
@@ -327,7 +402,10 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
     ({ taste, profile, liked } = tvInputs(world, reader, variant, tv));
   } else {
     const sizes = bandSizes(reader.ranked);
-    const scoredRanked = reader.ranked.map((row) => ({ row, score: scoreFor(row.bucket, row.position, sizes) }));
+    const scoredRanked = reader.ranked.map((row) => ({
+      row,
+      score: scoreFor(row.bucket, row.position, sizes),
+    }));
     taste = tasteFrom(
       scoredRanked.map(({ row, score }) => ({
         score,
@@ -335,7 +413,9 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
         language: titles[row.title]!.language,
       })),
     );
-    profile = v2 ? profileFrom(profileEntriesOf(world, reader, variant.negativeEvidence)) : undefined;
+    profile = v2
+      ? profileFrom(profileEntriesOf(world, reader, variant.negativeEvidence))
+      : undefined;
     liked = scoredRanked
       .filter(({ row }) => row.bucket === 'loved')
       .map(({ row, score }) => ({
@@ -361,11 +441,15 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
 
   const useSocial = variant.social ?? !v2;
   const social = useSocial
-    ? socialMirror(world, reader, follows ?? world.people[reader.person]!.follows).map((t) => titles[t]!.id)
+    ? socialMirror(world, reader, follows ?? world.people[reader.person]!.follows).map(
+        (t) => titles[t]!.id,
+      )
     : [];
   // As the hook: only endorsed rows (support > 0) are a source; disputed rows are evidence.
   const collaborativeIds = variant.collaborativeSource
-    ? [...collaborative].filter(([, evidence]) => evidence.support > 0).map(([t]) => titles[t]!.id)
+    ? [...collaborative]
+        .filter(([, evidence]) => evidence.support > 0)
+        .map(([t]) => titles[t]!.id)
     : [];
   const trending = world.trending.map((t) => titles[t]!.id);
   const ids = candidateIdsFrom(anchors, [...social, ...collaborativeIds], trending);
@@ -374,7 +458,11 @@ export function wallFor({ world, reader, variant, collaborative, follows, anchor
   const exclude = new Set([...metOf(reader)].map((t) => titles[t]!.id));
   let filled: Candidate[] = [];
   if (profile && variant.catalogue) {
-    const request = { kind, languages: sourceLanguages(profile), decades: sourceDecades(profile, kind) };
+    const request = {
+      kind,
+      languages: sourceLanguages(profile),
+      decades: sourceDecades(profile, kind),
+    };
     filled = coverageFill(
       listed,
       catalogueMirror(world, reader, request.languages, request.decades, anchorSeed, 20, kind),
@@ -443,7 +531,10 @@ export function scoreWith(
   const seen = new Set<string>();
   const anchorIds = new Set(anchors.map((anchor) => anchor.mediaItemId));
   const out: Scored[] = [];
-  const config = { version: variant.id, weights: variant.weights ?? ENGINES.v2_metadata.weights };
+  const config = {
+    version: variant.id,
+    weights: variant.weights ?? ENGINES.v2_metadata.weights,
+  };
   for (const candidate of candidates) {
     if (exclude.has(candidate.mediaItemId) || seen.has(candidate.mediaItemId)) continue;
     seen.add(candidate.mediaItemId);
