@@ -169,7 +169,19 @@ const heroUri = (view: View) => {
 };
 
 describe('the person hero', () => {
-  it('shows a backdrop from their latest released film, not the newest announced one', async () => {
+  /**
+   * **Highest-rated first since founder spec §6 (2026-11-13)**: Inception (TMDB 8.4) over
+   * the newer Killers of the Flower Moon (7.5), and never the announced project.
+   */
+  it('shows a backdrop from their highest-rated released film, not the newest one', async () => {
+    const view = await open();
+    expect(heroUri(view)).toBe(`${HERO}/inception-bd.jpg`);
+  });
+
+  it('falls back to their latest released film when none of it is reliably rated', async () => {
+    tableRows.person_cache = [
+      person(ACTOR.map((entry) => ({ ...entry, tmdb_score: null }))),
+    ];
     const view = await open();
     expect(heroUri(view)).toBe(`${HERO}/killers-bd.jpg`);
   });
@@ -230,12 +242,12 @@ describe('the person hero', () => {
     expect(heroUri(view)).toBeNull();
   });
 
-  it('keeps the first picture when a refresh brings a newer film, so it never flickers', async () => {
+  it('keeps the first picture when a refresh brings a better-rated film, so it never flickers', async () => {
     const view = await open();
-    expect(heroUri(view)).toBe(`${HERO}/killers-bd.jpg`);
+    expect(heroUri(view)).toBe(`${HERO}/inception-bd.jpg`);
 
     tableRows.person_cache = [
-      person([{ id: 'newer', kind: 'movie', role: 'Lead', as: 'cast' }, ...ACTOR]),
+      person([{ id: 'newer', kind: 'movie', role: 'Lead', as: 'cast', tmdb_score: 9.1 }, ...ACTOR]),
     ];
     tableRows.media_items = [
       item('newer', 'A Newer Film', '2025-12-25', '/newer-bd.jpg'),
@@ -244,7 +256,7 @@ describe('the person hero', () => {
     await act(() => view.client.invalidateQueries({ queryKey: ['person', 6193] }));
     // The refresh landed — its new film is listed — and the hero did not change.
     await waitFor(() => expect(view.getByText('A Newer Film (2025)')).toBeTruthy());
-    expect(heroUri(view)).toBe(`${HERO}/killers-bd.jpg`);
+    expect(heroUri(view)).toBe(`${HERO}/inception-bd.jpg`);
   });
 
   it('still offers Popular, Release date and Highest rated (TMDB)', async () => {
