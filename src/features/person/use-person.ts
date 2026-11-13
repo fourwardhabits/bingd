@@ -11,6 +11,12 @@ export type PersonCredit = {
   kind: 'movie' | 'series';
   year: number | null;
   posterPath: string | null;
+  /**
+   * The catalogue row's `backdrop_path`, or null. Written by the adapter with every
+   * credited title (`fromSearchResult`), so reading it costs no provider request. Only the
+   * page's hero uses it (`pickPersonBackdrop`).
+   */
+  backdropPath: string | null;
   /** What they did in it — a character, or a crew job. */
   role: string | null;
   /** Which list TMDB had them in, which is the difference between acting and crew. */
@@ -316,7 +322,7 @@ export function usePerson(personId: string | null) {
       const rows = ids.length
         ? await supabase
             .from('media_items')
-            .select('id, kind, title, release_date, poster_path')
+            .select('id, kind, title, release_date, poster_path, backdrop_path')
             .in('id', ids)
         : { data: [], error: null };
       if (rows.error) throw rows.error;
@@ -329,6 +335,7 @@ export function usePerson(personId: string | null) {
             title: string;
             release_date: string | null;
             poster_path: string | null;
+            backdrop_path?: string | null;
           }[]
         ).map((item) => [item.id, item]),
       );
@@ -356,6 +363,7 @@ export function usePerson(personId: string | null) {
                 : null,
             order,
             posterPath: item.poster_path,
+            backdropPath: item.backdrop_path ?? null,
             role: credit.role,
             as: credit.as,
             // A crew credit cached before `crew_role` existed still names its job.

@@ -392,7 +392,7 @@ export default function WatchHistoryScreen() {
             </View>
           </View>
         }
-        renderItem={({ item, index }) => {
+        renderItem={({ item }) => {
           // The year header belongs to the first row of its group, so the list stays one
           // flat array — a SectionList would give the same result and give up the
           // virtualisation tuning this screen is sized for.
@@ -402,8 +402,10 @@ export default function WatchHistoryScreen() {
           const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 
+          // Cards, spaced rather than ruled: the gap below each card is the only separator
+          // (UI wave, 2026-11-12), and the last card's is the list's bottom air.
           return (
-            <View>
+            <View style={styles.item}>
               {showYear ? (
                 <Text variant="sectionHeader" tone="action" style={styles.year}>
                   {String(group?.year)}
@@ -427,7 +429,6 @@ export default function WatchHistoryScreen() {
                 onEditRanking={canEditRanking ? editRanking : undefined}
                 busy={busy}
               />
-              {index === ordered.length - 1 ? null : <View style={styles.rule} />}
             </View>
           );
         }}
@@ -486,14 +487,17 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
   },
   loading: { paddingTop: theme.space[3] },
+  // Above its first card; `space[2]` under it so the label does not sit on the card's edge.
   year: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
-    paddingBottom: theme.space[1],
+    paddingBottom: theme.space[2],
   },
-  rule: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.border.hairline,
-    marginHorizontal: theme.layout.gutter,
-  },
+  /**
+   * The seam between two cards. `space[2]`, the compact interval, rather than a section
+   * seam: the card's own padding already gives each watch the air the ruled row had, so a
+   * card costs about ten points more than the row it replaced and a thirty-watch history
+   * stays a scroll of dates rather than of gaps.
+   */
+  item: { paddingBottom: theme.space[2] },
 });
