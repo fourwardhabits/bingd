@@ -430,7 +430,15 @@ export default function WatchHistoryScreen() {
                 onDismissEdit={() => setEditingId(null)}
                 onSave={(edit) => saveEdit(item.id, edit)}
                 onRemove={() => void remove(item.id, count <= 1)}
-                onEditRanking={canEditRanking ? editRanking : undefined}
+                // Rerank sits on every collapsed card now (founder spec §5), so while one
+                // card's editor is open the others offer none: reranking from another card
+                // would close that editor and drop its unsaved date or companions without
+                // asking. The open card's own Rerank asks first.
+                onEditRanking={
+                  canEditRanking && (editingId === null || editingId === item.id)
+                    ? editRanking
+                    : undefined
+                }
                 busy={busy}
               />
             </View>
