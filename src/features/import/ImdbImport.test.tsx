@@ -10,6 +10,7 @@ import {
   imdbSyntheticBytes,
 } from './__fixtures__/imdb-synthetic';
 import { ImportScreen } from './ImportScreen';
+import { forgetSessionImport } from './session-outcomes';
 
 /**
  * The IMDb import and the choice of service, on screen (founder spec 2026-11-10, §7, §8, §10).
@@ -99,6 +100,9 @@ beforeEach(() => {
   mockPicked = null;
   mockLiveJob = { data: null, error: null };
   mockSelected = [];
+  // The parse an import leaves in memory for its summary is per process. Each test is a
+  // fresh app, so one test's file is never another's (`session-outcomes.ts`).
+  forgetSessionImport();
 });
 
 const calls = (name: string) =>
