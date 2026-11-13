@@ -400,7 +400,8 @@ const words = (value) =>
  * How far the row's title and a verified candidate's title agree, for the report only:
  *
  *   exact    a squashed title or original title in common (what `identityAgrees` needs)
- *   variant  `&`/"and", one title containing the other (a franchise prefix or subtitle),
+ *   variant  `&`/"and", one title's words all inside the other's (a franchise prefix or
+ *            subtitle),
  *            or most words in common (a regional word: Sorcerer's/Philosopher's,
  *            Pajamas/Pyjamas)
  *   none     nothing in common that this can see
@@ -421,11 +422,11 @@ export function titleCorroboration(claim, candidate) {
     const y = squashAnd(b);
     if (x === '' || y === '') continue;
     if (x === y) return 'variant';
-    const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-    if (short.length >= 4 && long.includes(short)) return 'variant';
     const wx = new Set(words(a));
     const wy = new Set(words(b));
     const shared = [...wx].filter((w) => wy.has(w)).length;
+    // Whole words, never a substring: "Alien" is not a variant of "Aliens".
+    if (shared > 0 && shared === Math.min(wx.size, wy.size)) return 'variant';
     if (shared >= 2 && shared / Math.max(wx.size, wy.size) >= 0.5) return 'variant';
   }
   return 'none';
@@ -440,7 +441,8 @@ const list = (value) => (Array.isArray(value) ? value : []);
  *   unsupported  the id names an episode or a season, or the IMDb type has no destination
  *   conflict     the id names a title of the OTHER kind (`reason: 'kind'`), or the one
  *                result of the kind is dated out of tolerance (`reason: 'year'`)
- *   ambiguous    more than one result of the expected kind
+ *   ambiguous    more than one result of the expected kind, or one of each kind (two TMDB
+ *                titles claim the id; Tier 1 calls the same catalogue state ambiguous)
  *   none         TMDB has nothing for the id; a title search may still find it
  *
  * Every outcome but `match` and `none` is final: asking again returns the same answer.
@@ -461,6 +463,9 @@ export function decideFind(claim, body) {
   const other = expected === 'movie' ? shows : movies;
 
   if (own.length > 1) return { outcome: 'ambiguous' };
+  // A movie AND a show claiming one tt id is a duplicate, not a choice to make by kind:
+  // `_import_match_batch_imdb` counts both kinds and calls it ambiguous, so this must too.
+  if (own.length === 1 && other.length > 0) return { outcome: 'ambiguous' };
   if (own.length === 1) {
     return verifiedIdentityAgrees(claim, own[0])
       ? {

@@ -293,6 +293,47 @@ describe('what still contradicts a verified id, on both sides', () => {
   });
 });
 
+describe('tt8503618 Hamilton (2020), the control case, in SQL', () => {
+  let fe;
+  before(async () => {
+    fe = await t.createUser({ username: 'imdb_verified_fe' });
+  });
+
+  it('the publicly known shape (one movie, same title and year) is accepted on both sides', async () => {
+    await t.sql(`delete from import_jobs`);
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: 'tt8503618' });
+    const hit = film(556574, 'Hamilton', '2020-07-03');
+    assert.equal(decideFind(row, found({ movie_results: [hit] })).outcome, 'match');
+    const item = await catalogue(hit, 'movie');
+    const job = await stage(fe, [rowOf(row)]);
+    const [claimed] = await matchAndClaim(job);
+    await t.sql(`select _import_provider_resolve($1, $2, false, $3)`, [
+      claimed.row_id,
+      item,
+      row.imdb_id,
+    ]);
+    assert.equal((await statusOf(claimed.row_id)).status, 'matched');
+  });
+
+  it('a movie and a show claiming the id: Edge ambiguous, Tier 1 ambiguous', async () => {
+    await t.sql(`delete from import_jobs`);
+    const id = tt();
+    const row = claim({ name: 'Hamilton', year: 2020, imdb_id: id });
+    const asFilm = film(900700, 'Hamilton', '2020-07-03');
+    const asShow = show(900701, 'Hamilton', '2020-07-03');
+    assert.equal(
+      decideFind(row, found({ movie_results: [asFilm], tv_results: [asShow] })).outcome,
+      'ambiguous',
+    );
+    await catalogue(asFilm, 'movie', { imdbId: id });
+    await catalogue(asShow, 'series', { imdbId: id });
+    const job = await stage(fe, [rowOf(row)]);
+    await runToEnd(job);
+    assert.equal((await countsOf(job)).ambiguous, 1);
+    assert.equal(await count('user_media', 'user_id = $1', [fe]), 0);
+  });
+});
+
 describe('the title-search path stays strict in SQL, and agrees with the Edge', () => {
   let di;
   before(async () => {

@@ -148,6 +148,15 @@ describe('what still contradicts a verified id', () => {
     assert.equal(decision.outcome, 'ambiguous');
   });
 
+  it('a movie and a show both claiming the id are ambiguous, as Tier 1 calls them', () => {
+    const both = found({
+      movie_results: [film(949, 'Heat', '1995-12-15')],
+      tv_results: [show(1396, 'Heat', '1995-12-15')],
+    });
+    assert.equal(decideFind(claim(), both).outcome, 'ambiguous');
+    assert.equal(decideFind(claim({ title_type: 'TV Series' }), both).outcome, 'ambiguous');
+  });
+
   it('two /find shows for a TV row are ambiguous too', () => {
     const decision = decideFind(
       claim({ title_type: 'TV Series' }),
@@ -286,6 +295,10 @@ describe('titleCorroboration (support only)', () => {
       c('Star Wars: Episode VII - The Force Awakens', 'Star Wars: The Force Awakens'),
       'variant',
     );
+  });
+
+  it('never counts a substring as a variant: Alien is not Aliens', () => {
+    assert.equal(c('Alien', 'Aliens'), 'none');
   });
 
   it('says exact for squash-equal titles and none for unrelated ones', () => {
