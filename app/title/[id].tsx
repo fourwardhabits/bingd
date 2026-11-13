@@ -749,13 +749,23 @@ export default function TitleScreen() {
    * that does nothing while the tab is closed, so a pull from Cast still spends nothing —
    * the gate stays inside the hook that owns it rather than being restated here.
    */
+  // Also gates the series-only reads below (`rankedSeasons`, `myScores`, ...).
+  const isSeriesTitle = data?.title?.kind === 'series';
   const pull = usePullRefresh(
     // Memoised, because the hook's callback depends on it: a new array-builder every
     // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
     // page.
+    // Seasons only on a whole-show page. Anywhere else `useSeasons` was handed no series
+    // and its queryFn is `skipToken`, and refetching that would only put it in an error
+    // state (React Query v5's `refetch()` ignores `enabled`).
     useCallback(
-      () => [refetch(), seasons.refetch(), personal.refetch(), similar.refetch()],
-      [refetch, seasons, personal, similar],
+      () => [
+        refetch(),
+        ...(isSeriesTitle ? [seasons.refetch()] : []),
+        personal.refetch(),
+        similar.refetch(),
+      ],
+      [refetch, seasons, personal, similar, isSeriesTitle],
     ),
   );
   // The score is derived from the band, so this needs the whole category's
@@ -787,7 +797,6 @@ export default function TitleScreen() {
    * these seasons this person has already ranked. Fetched only for a series, so a film
    * page does not pay for a list it has no use for.
    */
-  const isSeriesTitle = data?.title?.kind === 'series';
   const rankedSeasons = useRankedCollection(profile.id, 'tv_seasons', {
     enabled: isSeriesTitle,
   });

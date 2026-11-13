@@ -60,6 +60,11 @@ const mockSelects: [string, string][] = [];
  * `media_items` filtered to `kind = 'season'` by `parent_id` (`useSeasons`).
  */
 let mockSeasonListError: unknown = null;
+/**
+ * The `parent_id` of every season-list read that was sent, in order. A season or movie
+ * page has no series, and a read with `parent_id = null` is one Postgres refuses (22P02).
+ */
+const mockSeasonListReads: unknown[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -109,6 +114,17 @@ jest.mock('@/lib/supabase', () => ({
         // the call, which is exactly why a page that only misbehaves during a fetch had
         // no test until now.
         then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          if (table === 'media_items' && filters.kind === 'season' && 'parent_id' in filters) {
+            mockSeasonListReads.push(filters.parent_id);
+            // What PostgREST answers for `parent_id=eq.null` on a uuid column.
+            if (filters.parent_id === null) {
+              void Promise.resolve({
+                data: null,
+                error: { code: '22P02', message: 'invalid input syntax for type uuid: "null"' },
+              }).then(resolve, reject);
+              return;
+            }
+          }
           if (
             mockSeasonListError &&
             table === 'media_items' &&
@@ -340,6 +356,7 @@ beforeEach(() => {
   mockRpcResults = {};
   mockRpcErrors = {};
   mockSeasonListError = null;
+  mockSeasonListReads.length = 0;
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   mockSelects.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
@@ -3501,6 +3518,105 @@ describe('the page behind an open sheet', () => {
     await act(async () => {
       releaseReadsOf('user_media');
     });
+  });
+});
+
+/**
+ * **Pull to refresh asks for seasons only where there is a series** (2026-11-12).
+ *
+ * The page hands `useSeasons` no series on a season or movie page, and pull-to-refresh
+ * called `seasons.refetch()` regardless. In React Query v5 `refetch()` ignores `enabled`,
+ * so the queryFn ran with `seriesId === null`: `parent_id=eq.null`, a 22P02 from Postgres,
+ * and two retries holding the spinner for about three seconds (22 such requests in seven
+ * days of production logs). `useSeasons` now has a `skipToken` queryFn with no series, and
+ * the page refetches seasons only on a whole-show page.
+ */
+describe('pull to refresh and the season list', () => {
+  /** The page's own `RefreshControl`, read off the scroll view that carries it. */
+  const refreshControl = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    view
+      .root!.queryAll(() => true)
+      .map((node) => node as never as { props?: Record<string, any> })
+      .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
+  const pull = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await act(async () => {
+      refreshControl(view).props.onRefresh();
+    });
+    // Promptly: the test client does not retry, so anything still spinning here is
+    // waiting on a request, not on a back-off.
+    await waitFor(() => expect(refreshControl(view).props.refreshing).toBe(false));
+  };
+
+  /** The season list's own cache entry for "no series": never run, so never failed. */
+  const expectNoSeriesQueryUntouched = (
+    view: Awaited<ReturnType<typeof renderWithProviders>>,
+  ) => {
+    const state = view.client.getQueryState(['seasons', '']);
+    expect(state?.status).not.toBe('error');
+    expect(state?.fetchFailureCount ?? 0).toBe(0);
+  };
+
+  it('on a movie page, sends no season-list read with a null series', async () => {
+    const view = await open();
+    await pull(view);
+
+    expect(mockSeasonListReads).not.toContain(null);
+    expectNoSeriesQueryUntouched(view);
+  });
+
+  it('on a season page, sends no season-list read with a null series', async () => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: {
+          id: 'series-1',
+          title: 'Breaking Bad',
+          poster_path: null,
+          backdrop_path: null,
+        },
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() =>
+      expect(view.getByTestId('title-name')).toHaveTextContent(/^Breaking Bad$/),
+    );
+
+    await pull(view);
+
+    expect(mockSeasonListReads).not.toContain(null);
+    expectNoSeriesQueryUntouched(view);
+  });
+
+  it('on a whole-show page, still refetches the seasons, once', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+      {
+        id: 'season-1',
+        parent_id: 'series-1',
+        kind: 'season',
+        season_number: 1,
+        title: 'Season 1',
+        release_date: '2008-01-20',
+        poster_path: null,
+        fetched_at: new Date().toISOString(),
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
+    const before = mockSeasonListReads.length;
+    expect(mockSeasonListReads).toEqual(Array(before).fill('series-1'));
+
+    await pull(view);
+
+    expect(mockSeasonListReads.slice(before)).toEqual(['series-1']);
   });
 });
 
