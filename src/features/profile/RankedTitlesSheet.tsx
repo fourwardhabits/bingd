@@ -15,7 +15,12 @@ import {
 } from '@/features/collection/filters';
 import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
-import { standaloneShows } from '@/features/collection/watched-rows';
+import {
+  averageCaption,
+  compareShowProjections,
+  projectShows,
+  type ShowProjection,
+} from '@/features/collection/show-projection';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -271,8 +276,8 @@ export function RankedTitlesSheet({
   const seasons = useRankedCollection(userId, 'tv_seasons', {
     enabled: category === 'tv_seasons',
   });
-  // TV is two rankings since 2026-11-14: the seasons, and the whole shows that stand alone
-  // beside them under Candidate A's precedence. Read only while TV is open.
+  // TV is two rankings since 2026-11-14: the seasons, and the whole shows
+  // beside them, which together make one row per series (WS-TVC). Read only while TV is open.
   const shows = useRankedCollection(userId, 'tv_shows', { enabled: category === 'tv_seasons' });
   const list = category === 'tv_seasons' ? seasons : movies;
 
@@ -303,30 +308,67 @@ export function RankedTitlesSheet({
   }
   const scroll = useRef<ScrollView>(null);
 
-  const pooled = useMemo(() => {
+  /**
+   * Every row this category can draw, before any filter or order.
+   *
+   * **Movies** as before: each ranked film against the whole movie band. **TV is one row
+   * per series** (WS-TVC, founder spec t168u §2, replacing Candidate A): the owner's
+   * effective score for each series they ranked a season or the show of — the explicit
+   * show score, else the mean of their ranked seasons (`projectShows`) — over the owner's
+   * two whole pools, which RLS already scopes for a visitor. Seasons are never rows here.
+   */
+  const pooled = useMemo<Pooled[]>(() => {
+    if (category === 'tv_seasons') {
+      return projectShows(list.data ?? [], shows.data ?? []).map((p) => ({
+        id: p.seriesId,
+        item: seriesItem(p),
+        rankedAt: p.rankedAt,
+        position: p.tiePosition,
+        projection: p,
+        projected: p.score,
+        score: p.display,
+        bucket: p.bucket,
+        title: p.title,
+        year: p.year,
+        posterPath: p.posterPath,
+        ordinal: null,
+      }));
+    }
     const own = list.data ?? [];
-    const showRows = category === 'tv_seasons' ? standaloneShows(own, shows.data ?? []) : [];
     // **The band is measured over the whole category, the slice is what gets drawn.**
     // Scoring against the visible slice would give the top row a 10 whatever it is
     // (`TopRanked` records the same rule), so `bandSizes` sees everything and the cap is
-    // applied afterwards. Each pool against its own bands: a show among shows.
+    // applied afterwards.
     const sizes = bandSizes(own);
-    const showSizes = bandSizes(shows.data ?? []);
-    return [
-      ...own.map((entry) => ({ entry, sizes, pool: 0 })),
-      ...showRows.map((entry) => ({ entry, sizes: showSizes, pool: 1 })),
-    ].map((item) => ({
-      ...item,
-      projected: projectedScore(item.entry.bucket, item.entry.position, item.sizes),
-      score: scoreFor(item.entry.bucket, item.entry.position, item.sizes),
-    }));
+    return own.map((entry) => {
+      const score = scoreFor(entry.bucket, entry.position, sizes);
+      return {
+        id: entry.mediaItemId,
+        item: asCollectionItem(entry, score),
+        rankedAt: entry.rankedAt,
+        position: entry.position,
+        projection: null,
+        projected: projectedScore(entry.bucket, entry.position, sizes),
+        score,
+        bucket: entry.bucket,
+        // The canonical compact form, so a title reads here exactly as it does on the
+        // wall, in the feed and in search.
+        title:
+          compactName({
+            kind: entry.kind,
+            title: entry.title,
+            seriesTitle: entry.seriesTitle,
+            seasonNumber: entry.seasonNumber,
+          }) ?? entry.title,
+        year: entry.year,
+        posterPath: entry.posterPath,
+        ordinal: entry.position,
+      };
+    });
   }, [category, list.data, shows.data]);
 
   /** Each row as the main Collection's item, for its filters and its title-fact orders. */
-  const items = useMemo(
-    () => pooled.map(({ entry, score }) => asCollectionItem(entry, score)),
-    [pooled],
-  );
+  const items = useMemo(() => pooled.map((row) => row.item), [pooled]);
   const axes = useMemo(() => sortAxesForRanked({ runtime: offersRuntime(items) }), [items]);
   // A list made only of seasons offers no Runtime; an order chosen over films falls back to
   // the first axis rather than silently sorting by a field every row lacks (the Collection
@@ -337,30 +379,25 @@ export function RankedTitlesSheet({
     const kept = isFiltered(filters)
       ? new Set(applyFilters(items, filters).map((item) => item.mediaItemId))
       : null;
-    const filtered = kept ? pooled.filter((item) => kept.has(item.entry.mediaItemId)) : pooled;
-    const byItem = new Map(items.map((item) => [item.mediaItemId, item]));
+    const filtered = kept ? pooled.filter((row) => kept.has(row.id)) : pooled;
 
-    // **Two pools are ordered by score, never by ordinal.** A show's #2 and a season's #2
-    // are different lists, so the rank order of a mixed TV list is the score each row
-    // prints (unrounded, so each pool keeps its own order), then a fixed pool order, then
-    // the id. One pool keeps `compareBySort` exactly as before.
     const bySort = compareBySort(order);
     const byFact =
       order.axis === 'year' || order.axis === 'runtime' || order.axis === 'title'
         ? compareItems({ axis: order.axis, direction: order.direction })
         : null;
-    const mixed = filtered.some((item) => item.pool === 1);
-    const compare = (a: (typeof pooled)[number], b: (typeof pooled)[number]) => {
-      if (byFact) {
-        const left = byItem.get(a.entry.mediaItemId);
-        const right = byItem.get(b.entry.mediaItemId);
-        return left && right ? byFact(left, right) : 0;
+    const compare = (a: Pooled, b: Pooled) => {
+      if (byFact) return byFact(a.item, b.item);
+      // A series' rank order is its effective score at full precision, then explicit
+      // before average, then position, title and id (`compareShowProjections`).
+      if (order.axis === 'rank' && a.projection && b.projection) {
+        const best = compareShowProjections(a.projection, b.projection);
+        return order.direction === 'desc' ? best : -best;
       }
-      return mixed && order.axis === 'rank'
-        ? (order.direction === 'desc' ? b.projected - a.projected : a.projected - b.projected) ||
-            a.pool - b.pool ||
-            a.entry.mediaItemId.localeCompare(b.entry.mediaItemId)
-        : bySort(a.entry, b.entry);
+      return bySort(
+        { position: a.position, rankedAt: a.rankedAt, mediaItemId: a.id },
+        { position: b.position, rankedAt: b.rankedAt, mediaItemId: b.id },
+      );
     };
     // **Sorted before the cap, never after.** A cap applied first would make each order a
     // re-arrangement of the same two hundred titles rather than the first two hundred of
@@ -369,24 +406,16 @@ export function RankedTitlesSheet({
     const drawn = [...filtered]
       .sort(compare)
       .slice(0, VISIBLE_CAP)
-      .map(({ entry, score }) => ({
-        mediaItemId: entry.mediaItemId,
-        // The canonical compact form, so a season reads "The Bear, S2" here exactly as it
-        // does on the wall, in the feed and in search.
-        title:
-          compactName({
-            kind: entry.kind,
-            title: entry.title,
-            seriesTitle: entry.seriesTitle,
-            seasonNumber: entry.seasonNumber,
-          }) ?? entry.title,
-        year: entry.year,
-        posterUri: posterUri(entry.posterPath),
-        position: entry.position,
-        /** A whole show's ordinal counts among shows, and its row says so. */
-        isShow: entry.kind === 'series',
-        score,
-        bucket: entry.bucket,
+      .map((row) => ({
+        mediaItemId: row.id,
+        title: row.title,
+        year: row.year,
+        posterUri: posterUri(row.posterPath),
+        ordinal: row.ordinal,
+        score: row.score,
+        bucket: row.bucket,
+        average:
+          row.projection?.source === 'average' ? row.projection.rankedSeasonCount : null,
       }));
     return { rows: drawn, matching: filtered.length };
   }, [filters, items, order, pooled]);
@@ -522,27 +551,31 @@ export function RankedTitlesSheet({
                 title={row.title}
                 year={row.year}
                 posterUri={row.posterUri}
-                // The ordinal leads the row, because it is what the order means.
+                // The ordinal leads a film's row, because it is what the order means.
                 // Tertiary ink and caption weight: it labels the row rather than
-                // competing with the score, which is the number a reader is scanning for.
+                // competing with the score. A series row has none: its place comes from an
+                // effective score over two ladders, not from one ladder's ordinal.
                 leading={
-                  <View style={styles.ordinal}>
-                    <Text variant="caption" tone="tertiary">
-                      {`#${row.position}`}
-                    </Text>
-                    {/* A show's place is among shows, never among the seasons around it. */}
-                    {row.isShow ? (
+                  row.ordinal != null ? (
+                    <View style={styles.ordinal}>
                       <Text variant="caption" tone="tertiary">
-                        show
+                        {`#${row.ordinal}`}
                       </Text>
-                    ) : null}
-                  </View>
+                    </View>
+                  ) : undefined
                 }
-                // The owner's score, in the badge every other list in the app uses. No
-                // `onPress` of its own: on the Collection tab that badge opens the log
-                // sheet, which is an owner action and has no meaning on somebody else's
-                // ranking — the row's own tap goes to the title page instead.
-                trailing={<ScoreBadge score={row.score} bucket={row.bucket} />}
+                // A season-derived score says so in words, under the title, as the show
+                // page does (founder spec t168u §2).
+                secondary={row.average != null ? averageCaption(row.average) : undefined}
+                // The owner's score, in the badge every other list in the app uses —
+                // filled for an explicit ranking, a Maroon ring for a season average.
+                trailing={
+                  <ScoreBadge
+                    score={row.score}
+                    bucket={row.bucket}
+                    variant={row.average != null ? 'outlined' : 'filled'}
+                  />
+                }
                 divided
                 onPress={() => onPressTitle(row.mediaItemId)}
               />
@@ -593,6 +626,52 @@ export function RankedTitlesSheet({
       ) : null}
     </Sheet>
   );
+}
+
+/** One row of the sheet before filters and order: a film, or a series (WS-TVC). */
+type Pooled = {
+  id: string;
+  item: CollectionItem;
+  rankedAt: string | null;
+  position: number;
+  /** The series' effective score, for a TV row; null for a film. */
+  projection: ShowProjection | null;
+  projected: number;
+  score: number;
+  bucket: CollectionItem['bucket'];
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  /** A film's place in the owner's ladder; null for a series. */
+  ordinal: number | null;
+};
+
+/** One series in the main Collection's shape, so its filters and title-fact orders apply. */
+function seriesItem(p: ShowProjection): CollectionItem {
+  return {
+    mediaItemId: p.seriesId,
+    title: p.title,
+    seriesTitle: null,
+    seasonNumber: null,
+    kind: 'series',
+    year: p.year,
+    posterPath: p.posterPath,
+    genres: p.genres,
+    language: p.language,
+    runtimeMinutes: null,
+    score: p.display,
+    position: p.tiePosition,
+    category: 'tv_shows',
+    bucket: p.bucket,
+    watchedOn: null,
+    addedAt: null,
+    showScore: {
+      sumTenths: p.sumTenths,
+      n: p.n,
+      source: p.source,
+      rankedSeasonCount: p.rankedSeasonCount,
+    },
+  };
 }
 
 /** One ranked entry in the main Collection's shape, so its filters and orders apply as-is. */

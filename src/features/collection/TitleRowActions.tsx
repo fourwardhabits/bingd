@@ -10,7 +10,15 @@ export type TitleRowActionsProps = {
   name: string;
   kind: 'movie' | 'season' | 'series';
   /** The reader's own score, when the title is currently ranked — the only thing that changes what is drawn. */
-  score: { score: number; bucket: Bucket | null } | null;
+  score: {
+    score: number;
+    bucket: Bucket | null;
+    /**
+     * `outlined` for a series' season average on the TV Collection list (WS-TVC); the
+     * reader's own explicit score is `filled`, the default.
+     */
+    variant?: 'filled' | 'outlined';
+  } | null;
   /** On the reader's Watchlist. Null when unknown, which hides the bookmark. */
   saved: boolean | null;
   busy?: boolean;
@@ -61,7 +69,13 @@ export function TitleRowActions({
   if (score) {
     return (
       <View style={styles.actions} testID="title-row-actions-ranked">
-        <ScoreBadge score={score.score} bucket={score.bucket} size="sm" onPress={onRank} />
+        <ScoreBadge
+          score={score.score}
+          bucket={score.bucket}
+          size="sm"
+          variant={score.variant ?? 'filled'}
+          onPress={onRank}
+        />
       </View>
     );
   }

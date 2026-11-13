@@ -1065,3 +1065,12 @@ describe('Shuffle', () => {
     });
   });
 });
+
+/** WS-TVC: the Watched TV half is series posters now, and still offers no Runtime. */
+describe('offersRuntime on the one-poster TV Collection', () => {
+  it('skips series posters, scored or not, and keeps a Watchlist series', () => {
+    const poster = { kind: 'series' as const, showScore: { sumTenths: 85, n: 1, source: 'explicit' as const, rankedSeasonCount: 0 } };
+    expect(offersRuntime([poster, { kind: 'series', showScore: null }])).toBe(false);
+    expect(offersRuntime([{ kind: 'series' }])).toBe(true);
+  });
+});
