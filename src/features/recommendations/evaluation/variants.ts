@@ -1,4 +1,4 @@
-import { ENGINES, type EngineWeights } from '../rank';
+import { ENGINES, SOCIAL_SOURCE, type EngineWeights } from '../rank';
 
 import type { Variant } from './pipeline';
 
@@ -8,7 +8,7 @@ import type { Variant } from './pipeline';
  * Bump `EVAL_CONFIG_VERSION` whenever a variant, a metric or a default here changes. The world
  * has its own version (`WORLD_VERSION`); a report names both, plus the seed.
  */
-export const EVAL_CONFIG_VERSION = 'rec-eval-config-2026-11-13.1';
+export const EVAL_CONFIG_VERSION = 'rec-eval-config-2026-11-13.2';
 
 const base = {
   languageAnchors: true,
@@ -65,6 +65,15 @@ export const ENGINE_VARIANTS: Variant[] = [
     ...base,
     collaborativeSource: true,
     collaborativeTerm: true,
+  },
+  {
+    id: 'v2_metadata_social',
+    label: 'V2 metadata + Films social (prototype)',
+    group: 'engine',
+    engine: 'v2',
+    weights: ENGINES.v2_metadata_social.weights,
+    ...base,
+    socialWalls: SOCIAL_SOURCE.v2_metadata_social,
   },
 ];
 

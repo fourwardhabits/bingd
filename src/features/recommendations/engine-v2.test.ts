@@ -17,6 +17,7 @@ import {
   COLLABORATIVE_FULL,
   COLLABORATIVE_NAMED_AT,
   ENGINES,
+  asksSocial,
   engineFrom,
   headlineFor,
   scoreCandidate,
@@ -284,6 +285,20 @@ describe('the V2 scorer', () => {
     expect(engineFrom(undefined)).toBe('v1');
     expect(engineFrom('toString')).toBe('v1');
     expect(engineFrom('__proto__')).toBe('v1');
+  });
+
+  it('asks the follow graph on both walls under V1, never under V2, and on Films only in the prototype', () => {
+    expect(asksSocial('v1', 'movies')).toBe(true);
+    expect(asksSocial('v1', 'tv')).toBe(true);
+    for (const engine of ['v2_metadata', 'v2_hybrid'] as const) {
+      expect(asksSocial(engine, 'movies')).toBe(false);
+      expect(asksSocial(engine, 'tv')).toBe(false);
+    }
+    expect(asksSocial('v2_metadata_social', 'movies')).toBe(true);
+    expect(asksSocial('v2_metadata_social', 'tv')).toBe(false);
+    // Scored exactly as V2 metadata: the prototype changes the pool, never the weights.
+    expect(ENGINES.v2_metadata_social.weights).toEqual(ENGINES.v2_metadata.weights);
+    expect(engineFrom('v2_metadata_social')).toBe('v2_metadata_social');
   });
 
   it('reads a malformed engine answer as v1 (rec/v2-reconcile flag proof)', () => {

@@ -2,10 +2,12 @@ import { SLATE_SIZE } from '../rank';
 
 import {
   EXTENDED,
+  POOL_SOURCES,
   indexOfId,
   metOf,
   wallFor,
   type CollaborativeRows,
+  type PoolSource,
   type TvShape,
   type Variant,
 } from './pipeline';
@@ -70,8 +72,20 @@ export type ReaderMetrics = {
   fromCollaborative: number;
   fromCatalogue: number;
   fromSocial: number;
+  /**
+   * Pool recall split by the source that put each held-out title in the pool (anchors' lists,
+   * social, collaborative, catalogue, trending, in that precedence). The five sum to poolRecall.
+   */
+  poolViaAnchored: number | null;
+  poolViaSocial: number | null;
+  poolViaCollaborative: number | null;
+  poolViaCatalogue: number | null;
+  poolViaTrending: number | null;
   ms: number;
 };
+
+const viaKey = (source: PoolSource) =>
+  `poolVia${source[0]!.toUpperCase()}${source.slice(1)}` as `poolVia${Capitalize<PoolSource>}`;
 
 export const METRIC_KEYS: (keyof ReaderMetrics)[] = [
   'recall',
@@ -99,6 +113,11 @@ export const METRIC_KEYS: (keyof ReaderMetrics)[] = [
   'fromCollaborative',
   'fromCatalogue',
   'fromSocial',
+  'poolViaAnchored',
+  'poolViaSocial',
+  'poolViaCollaborative',
+  'poolViaCatalogue',
+  'poolViaTrending',
   'ms',
 ];
 
@@ -227,7 +246,7 @@ function measure(
   const hiddenTitles = ctx.reader.hidden.map((row) => world.titles[row.title]!);
   const walls: number[][] = [];
   for (const seed of LAUNCH_SEEDS) {
-    const { wall, extended, scored, sources, scoreTitles, ms } = wallFor({
+    const { wall, extended, scored, sources, scoreTitles, poolSource, ms } = wallFor({
       world,
       reader: ctx.reader,
       variant,
@@ -262,7 +281,11 @@ function measure(
       add('ndcg', dcg / ideal);
       add('hit', hits > 0 ? 1 : 0);
       const pool = new Set(scored.map((item) => indexOfId(item.mediaItemId)));
-      add('poolRecall', [...ctx.hiddenLoved].filter((t) => pool.has(t)).length / relevant);
+      const found = [...ctx.hiddenLoved].filter((t) => pool.has(t));
+      add('poolRecall', found.length / relevant);
+      for (const source of POOL_SOURCES) {
+        add(viaKey(source), found.filter((t) => poolSource(t) === source).length / relevant);
+      }
     }
     const n = Math.max(1, items.length);
     add(
@@ -684,6 +707,16 @@ const EXTRA: [keyof ReaderMetrics, string][] = [
   ['seenShare', 'Seen on wall'],
 ];
 
+/** Pool recall by the source that reached each held-out title (reconcile follow-up, 2026-11-13). */
+const POOL_BY_SOURCE: [keyof ReaderMetrics, string][] = [
+  ['poolRecall', 'Pool recall'],
+  ['poolViaAnchored', 'via anchors’ lists'],
+  ['poolViaSocial', 'via social'],
+  ['poolViaCollaborative', 'via collaborative'],
+  ['poolViaCatalogue', 'via catalogue fill'],
+  ['poolViaTrending', 'via trending'],
+];
+
 /** One compact row per slice: the questions the reconcile brief asks of every slice. */
 const SLICE: [keyof ReaderMetrics, string][] = [
   ['recall', 'R@20'],
@@ -771,6 +804,23 @@ export function renderReport(report: Report, tv?: TvReport): string {
     engines.filter((id) => id !== 'v1'),
     true,
     EXTRA,
+  );
+
+  table(
+    'Pool recall by source, all readers (parts sum to pool recall)',
+    report.results,
+    'all',
+    engines,
+    false,
+    POOL_BY_SOURCE,
+  );
+  table(
+    'Pool recall by source, paired vs V1, all readers',
+    report.versusV1,
+    'all',
+    engines.filter((id) => id !== 'v1'),
+    true,
+    POOL_BY_SOURCE,
   );
 
   // Every slice in one table per engine pair: absolute V1, then each engine's paired delta.

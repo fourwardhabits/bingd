@@ -91,8 +91,31 @@ describe('Recommendation V2 replay', () => {
         expect(report.results[medium]!.all![engine]!.seenShare?.mean).toBe(0);
       }
     }
+    // Pool recall splits by source into parts that sum to it.
+    for (const medium of ['movies', 'tv']) {
+      for (const engine of ['v1', 'v2_metadata', 'v2_metadata_social']) {
+        const row = report.results[medium]!.all![engine]!;
+        const parts =
+          (row.poolViaAnchors?.mean ?? 0) +
+          (row.poolViaSocial?.mean ?? 0) +
+          (row.poolViaTrending?.mean ?? 0) +
+          (row.poolViaCatalogue?.mean ?? 0);
+        expect(parts).toBeCloseTo(row.poolRecall?.mean ?? 0, 10);
+      }
+    }
+    // The prototype's TV wall is V2 metadata's, metric for metric; only its Films wall differs.
+    const tvMeta = report.results.tv!.all!.v2_metadata!;
+    const tvProto = report.results.tv!.all!.v2_metadata_social!;
+    for (const key of Object.keys(tvMeta) as (keyof typeof tvMeta)[]) {
+      expect(tvProto[key]?.mean).toBe(tvMeta[key]?.mean);
+    }
+    expect(report.results.movies!.all!.v2_metadata!.poolViaSocial?.mean).toBe(0);
+    expect(report.results.movies!.all!.v2_metadata_social!.poolViaSocial?.mean).toBeGreaterThan(
+      0,
+    );
     const text = renderReplay(report, 'synthetic smoke');
     expect(text).toMatch(/Not measurable at current scale/);
+    expect(text).toMatch(/Pool recall by source/);
     // No id of any kind in the report.
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
   });

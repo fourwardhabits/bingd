@@ -490,7 +490,7 @@ function leadOf(terms: {
  * (`recommendation_engine`), defaulting to `v1`; an unrecognised value is `v1`, so a
  * client that predates an engine never guesses at it.
  */
-export type EngineId = 'v1' | 'v2_metadata' | 'v2_hybrid';
+export type EngineId = 'v1' | 'v2_metadata' | 'v2_hybrid' | 'v2_metadata_social';
 
 export type EngineWeights = {
   anchor: number;
@@ -535,7 +535,39 @@ export const ENGINES: Record<EngineId, { version: string; weights: EngineWeights
     version: 'foryou-v2-hybrid-2026-11-11',
     weights: { anchor: 0.48, genre: 0.14, language: 0.09, era: 0.06, popularity: 0.08, collaborative: 0.15 },
   },
+  /**
+   * **Prototype (rec/v2-reconcile, 2026-11-13), allowlist-only on the server.** `v2_metadata`
+   * exactly — same weights, profile, anchors, catalogue fill and scorer — plus V1's
+   * follow-graph candidate source on the **Films** wall only (`SOCIAL_SOURCE`). The real
+   * replay found V2's Films pool recall well below V1's while its TV wall improved; this
+   * engine tests whether the films loss is the dropped source, without touching TV.
+   *
+   * Following still adds nothing to any title's *score*: social ids only join the pool, and
+   * the V2 scorer decides on the reader's own evidence. Whether that reading of "following
+   * alone has no effect" is acceptable is a founder decision, which is why this is separate.
+   */
+  v2_metadata_social: {
+    version: 'foryou-v2-metadata-social-2026-11-13-prototype',
+    weights: { anchor: 0.56, genre: 0.17, language: 0.11, era: 0.07, popularity: 0.09, collaborative: 0 },
+  },
 };
+
+/**
+ * Which walls ask `social_candidates` (what the accounts the reader follows loved), by engine.
+ *
+ * V1 asks on both walls. V2 metadata and hybrid never ask: following is not evidence about
+ * taste. The `v2_metadata_social` prototype asks on the Films wall only, so its TV wall is
+ * `v2_metadata`'s exactly.
+ */
+export const SOCIAL_SOURCE: Record<EngineId, readonly ('movies' | 'tv')[]> = {
+  v1: ['movies', 'tv'],
+  v2_metadata: [],
+  v2_hybrid: [],
+  v2_metadata_social: ['movies'],
+};
+
+export const asksSocial = (engine: EngineId, medium: 'movies' | 'tv') =>
+  SOCIAL_SOURCE[engine].includes(medium);
 
 /**
  * The neighbours' support at which the collaborative term is full strength: a cohort whose

@@ -14,6 +14,7 @@ import {
 } from '@/features/recommendations/profile';
 import {
   SLATE_SIZE,
+  asksSocial,
   scoreSlate,
   tasteFrom,
   unitRandom,
@@ -70,12 +71,30 @@ export const MIN_COMMON = 5;
 export const SHRINK_PRIOR = 5;
 
 /**
- * `v2_metadata+social` is a **diagnostic, not a shipped configuration**: V2 metadata with the
- * follow-graph source V2 removes by design put back, so a gap between V1 and V2 can be
- * attributed to that decision (or not). It is scored exactly as V2 metadata.
+ * The engines replayed.
+ *
+ * - `v1`, `v2_metadata`: as shipped.
+ * - `v2_metadata_social`: the allowlist-only **prototype** engine (`rank.ts`), V2 metadata plus
+ *   the follow-graph source on the Films wall only, through the shipped `asksSocial`.
+ * - `v2_metadata+social`: a **diagnostic, not a shipped configuration**: the follow-graph
+ *   source back on both walls.
+ * - `v2_metadata+v1_anchors`: a **diagnostic**: V2 metadata choosing anchors as V1 does (no
+ *   language coverage), to rule anchor selection in or out as the cause of a pool gap.
+ *
+ * Every V2 variant is scored exactly as V2 metadata.
  */
-type Engine = 'v1' | 'v2_metadata' | 'v2_metadata+social';
-export const ENGINES: Engine[] = ['v1', 'v2_metadata', 'v2_metadata+social'];
+type Engine =
+  'v1' | 'v2_metadata' | 'v2_metadata_social' | 'v2_metadata+social' | 'v2_metadata+v1_anchors';
+export const ENGINES: Engine[] = [
+  'v1',
+  'v2_metadata',
+  'v2_metadata_social',
+  'v2_metadata+social',
+  'v2_metadata+v1_anchors',
+];
+const socialFor = (engine: Engine, medium: Medium) =>
+  engine === 'v2_metadata+social' ||
+  asksSocial(engine === 'v2_metadata+v1_anchors' ? 'v2_metadata' : engine, medium);
 
 export type Metrics = {
   recall20: number | null;
@@ -87,6 +106,15 @@ export type Metrics = {
   genreEntropy: number;
   seenShare: number;
   poolSize: number;
+  /**
+   * Pool recall split by the source that put the held-out title in the pool (precedence:
+   * anchors' lists, social, trending, catalogue fill). The four sum to `poolRecall`. Answers
+   * "which source is a pool-recall gap made of" without guessing.
+   */
+  poolViaAnchors: number | null;
+  poolViaSocial: number | null;
+  poolViaTrending: number | null;
+  poolViaCatalogue: number | null;
 };
 const KEYS: (keyof Metrics)[] = [
   'recall20',
@@ -98,6 +126,10 @@ const KEYS: (keyof Metrics)[] = [
   'genreEntropy',
   'seenShare',
   'poolSize',
+  'poolViaAnchors',
+  'poolViaSocial',
+  'poolViaTrending',
+  'poolViaCatalogue',
 ];
 
 type Account = {
@@ -399,7 +431,7 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     seed,
     budget: ANCHOR_BUDGET,
     cached: withLists,
-    languages: v2,
+    languages: v2 && engine !== 'v2_metadata+v1_anchors',
   });
   const anchors: Anchor[] = chosen.map((a) => ({
     mediaItemId: a.mediaItemId,
@@ -408,7 +440,7 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     similarIds: w.similar.get(a.mediaItemId) ?? [],
   }));
   const met = metOf(account, w);
-  const social = engine === 'v2_metadata' ? [] : socialMirror(account, w, medium, met);
+  const social = socialFor(engine, medium) ? socialMirror(account, w, medium, met) : [];
   const anchored = anchors.filter((a) => a.similarIds.length > 0).length;
   const lists = medium === 'tv' && anchored > 0 ? TRENDING.tv.slice(0, 1) : TRENDING[medium];
   const trending = [...new Set(lists.flatMap((key) => w.trending.get(key) ?? []))];
@@ -446,8 +478,33 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     seed: seed * 7919,
     now: 0,
   });
-  return { scored, extended: drawn.slice(0, EXTENDED), wall: drawn.slice(0, SLATE_SIZE), met };
+  // Which source put each scored title in the pool, in `candidateIdsFrom`'s precedence (the
+  // anchors' lists, then social, then trending), then the catalogue fill: so the parts of pool
+  // recall below sum to pool recall.
+  const anchoredSet = new Set(anchors.flatMap((a) => a.similarIds));
+  const socialSet = new Set(social);
+  const trendingSet = new Set(trending);
+  const via = (id: string): Source =>
+    anchoredSet.has(id)
+      ? 'anchors'
+      : socialSet.has(id)
+        ? 'social'
+        : trendingSet.has(id)
+          ? 'trending'
+          : 'catalogue';
+  return {
+    scored,
+    extended: drawn.slice(0, EXTENDED),
+    wall: drawn.slice(0, SLATE_SIZE),
+    met,
+    via,
+  };
 }
+
+type Source = 'anchors' | 'social' | 'trending' | 'catalogue';
+const SOURCES: Source[] = ['anchors', 'social', 'trending', 'catalogue'];
+const viaKey = (source: Source) =>
+  `poolVia${source[0]!.toUpperCase()}${source.slice(1)}` as `poolVia${Capitalize<Source>}`;
 
 const entropy = (lists: readonly (readonly string[])[]) => {
   const mass = new Map<string, number>();
@@ -475,7 +532,7 @@ function measure(account: Account, w: World, medium: Medium, engine: Engine): Me
     ? own.filter((m) => m.lang && m.lang !== 'en').length / own.length
     : null;
   for (const seed of LAUNCH_SEEDS) {
-    const { scored, extended, wall: items, met } = wall(account, w, medium, engine, seed);
+    const { scored, extended, wall: items, met, via } = wall(account, w, medium, engine, seed);
     const n = Math.max(1, items.length);
     if (relevant.size > 0) {
       add(
@@ -489,7 +546,11 @@ function measure(account: Account, w: World, medium: Medium, engine: Engine): Me
           Math.min(relevant.size, EXTENDED),
       );
       const pool = new Set(scored.map((s) => s.mediaItemId));
-      add('poolRecall', [...relevant].filter((id) => pool.has(id)).length / relevant.size);
+      const found = [...relevant].filter((id) => pool.has(id));
+      add('poolRecall', found.length / relevant.size);
+      for (const source of SOURCES) {
+        add(viaKey(source), found.filter((id) => via(id) === source).length / relevant.size);
+      }
     }
     const langs = items.map((s) => w.media.get(s.mediaItemId)?.lang ?? null);
     add('nonEnglishShare', langs.filter((l) => l && l !== 'en').length / n);
@@ -717,6 +778,15 @@ const COLUMNS: [keyof Metrics, string][] = [
   ['poolSize', 'Pool size'],
 ];
 
+/** Pool recall by source; the four sum to pool recall (precedence in `wall`). */
+const SOURCE_COLUMNS: [keyof Metrics, string][] = [
+  ['poolRecall', 'Pool recall'],
+  ['poolViaAnchors', 'via anchors’ lists'],
+  ['poolViaSocial', 'via social'],
+  ['poolViaTrending', 'via trending'],
+  ['poolViaCatalogue', 'via catalogue fill'],
+];
+
 /** Every value, sorted, when there are few (today's cohort); otherwise quantiles. Never a key. */
 function distribution(sorted: readonly number[]): string {
   if (sorted.length === 0) return 'no values';
@@ -760,6 +830,27 @@ export function renderReplay(report: ReplayReport, label: string): string {
       }
     }
     lines.push('');
+    lines.push(
+      `### Pool recall by source, ${medium === 'movies' ? 'Films' : 'TV'} wall, all accounts`,
+    );
+    lines.push('');
+    lines.push(
+      'Which source put each held-out positive in the pool (anchors’ TMDB lists first, then followees, then trending, then the catalogue fill). The parts sum to pool recall, so a V1 − V2 gap reads off by source.',
+    );
+    lines.push('');
+    lines.push(`| Engine | ${SOURCE_COLUMNS.map(([, l]) => l).join(' | ')} |`);
+    lines.push(`|---|${SOURCE_COLUMNS.map(() => '---').join('|')}|`);
+    for (const [engine, row] of Object.entries(report.results[medium]!.all ?? {})) {
+      lines.push(
+        `| ${engine} | ${SOURCE_COLUMNS.map(([k]) => fmt(row[k] ?? null)).join(' | ')} |`,
+      );
+    }
+    for (const [engine, d] of Object.entries(report.deltas[medium]!.all ?? {})) {
+      lines.push(
+        `| ${engine} − v1 | ${SOURCE_COLUMNS.map(([k]) => fmt(d[k] ?? null, true)).join(' | ')} |`,
+      );
+    }
+    lines.push('');
     const xs = report.perAccount[medium]!;
     lines.push(
       `Per-account V2 − V1 recall@50 (no keys; n=${xs.length}): worse ${xs.filter((x) => x < 0).length}, same ${xs.filter((x) => x === 0).length}, better ${xs.filter((x) => x > 0).length}. ${distribution(xs)}.`,
@@ -774,7 +865,7 @@ export function renderReplay(report: ReplayReport, label: string): string {
   );
   lines.push('');
   lines.push(
-    '`v2_metadata+social` is a diagnostic, not a shipped configuration: V2 metadata with the follow-graph source put back, to attribute a V1 − V2 gap.',
+    '`v2_metadata_social` is the allowlist-only prototype engine (V2 metadata plus the follow-graph source on the Films wall only; its TV wall is `v2_metadata`). `v2_metadata+social` (follow-graph source on both walls) and `v2_metadata+v1_anchors` (V1 anchor selection) are diagnostics, not shipped configurations, to attribute a V1 − V2 gap.',
   );
   lines.push('');
   lines.push(

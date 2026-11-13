@@ -63,6 +63,11 @@ export type Variant = {
    * read films and seasons and ignored whole-show rankings. Absent means as shipped.
    */
   social?: boolean;
+  /**
+   * Which walls ask the follow-graph source, overriding `social`. The `v2_metadata_social`
+   * prototype engine asks on the Films wall only (`SOCIAL_SOURCE` in `rank.ts`).
+   */
+  socialWalls?: readonly ('movies' | 'tv')[];
   showsInProfile?: boolean;
 };
 
@@ -81,6 +86,15 @@ export type TvShape = 'whole_show' | 'by_season' | 'show_and_seasons';
 
 export type CollaborativeRows = ReadonlyMap<number, Collaborative>;
 
+export type PoolSource = 'anchored' | 'social' | 'collaborative' | 'catalogue' | 'trending';
+export const POOL_SOURCES: PoolSource[] = [
+  'anchored',
+  'social',
+  'collaborative',
+  'catalogue',
+  'trending',
+];
+
 export type Wall = {
   wall: Scored[];
   /** The first `EXTENDED` titles of the same draw (pages are drawn in sequence, so `wall` is its prefix). */
@@ -95,6 +109,8 @@ export type Wall = {
   };
   /** Scores arbitrary titles exactly as this wall scored its pool, for ordering metrics. */
   scoreTitles: (titles: readonly Title[]) => Map<number, number>;
+  /** The source that put a pooled title in the pool, in the precedence `sources` uses. */
+  poolSource: (index: number) => PoolSource;
   ms: number;
 };
 
@@ -439,7 +455,9 @@ export function wallFor({
     similarIds: world.similar[indexOfId(entry.mediaItemId)]!.map((t) => titles[t]!.id),
   }));
 
-  const useSocial = variant.social ?? !v2;
+  const useSocial = variant.socialWalls
+    ? variant.socialWalls.includes(tv ? 'tv' : 'movies')
+    : (variant.social ?? !v2);
   const social = useSocial
     ? socialMirror(world, reader, follows ?? world.people[reader.person]!.follows).map(
         (t) => titles[t]!.id,
@@ -504,16 +522,28 @@ export function wallFor({
   const socialIds = new Set(social);
   const collaborativeSet = new Set(collaborativeIds);
   const catalogueIds = new Set(filled.map((c) => c.mediaItemId));
+  const sourceOf = (id: string): PoolSource =>
+    anchoredIds.has(id)
+      ? 'anchored'
+      : socialIds.has(id)
+        ? 'social'
+        : collaborativeSet.has(id)
+          ? 'collaborative'
+          : catalogueIds.has(id)
+            ? 'catalogue'
+            : 'trending';
   const sources = { anchored: 0, social: 0, collaborative: 0, catalogue: 0, trending: 0 };
-  for (const item of wall) {
-    const id = item.mediaItemId;
-    if (anchoredIds.has(id)) sources.anchored += 1;
-    else if (socialIds.has(id)) sources.social += 1;
-    else if (collaborativeSet.has(id)) sources.collaborative += 1;
-    else if (catalogueIds.has(id)) sources.catalogue += 1;
-    else sources.trending += 1;
-  }
-  return { wall, extended, scored, sources, scoreTitles, ms: performance.now() - started };
+  for (const item of wall) sources[sourceOf(item.mediaItemId)] += 1;
+  const poolSource = (index: number) => sourceOf(titles[index]!.id);
+  return {
+    wall,
+    extended,
+    scored,
+    sources,
+    scoreTitles,
+    poolSource,
+    ms: performance.now() - started,
+  };
 }
 
 /** `scoreSlate`, with the engine's weights replaceable for ablations and sweeps. */

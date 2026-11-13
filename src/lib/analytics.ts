@@ -799,10 +799,11 @@ export type AnalyticsEvent =
         /** How many candidates survived eligibility — the universe the wall is drawn from. */
         pool_size: number;
         /**
-         * Which For You engine drew the wall (2026-11-10, Engine V2): `v1`, `v2_metadata` or `v2_hybrid`.
+         * Which For You engine drew the wall (2026-11-10, Engine V2): `v1`, `v2_metadata`,
+         * `v2_hybrid`, or the allowlist-only prototype `v2_metadata_social` (2026-11-13).
          * One of a closed set of server-chosen words; never anything about the reader.
          */
-        engine: 'v1' | 'v2_metadata' | 'v2_hybrid';
+        engine: 'v1' | 'v2_metadata' | 'v2_hybrid' | 'v2_metadata_social';
         /** How many distinct original languages are on the wall. A count, never a code. */
         wall_languages: number;
       };

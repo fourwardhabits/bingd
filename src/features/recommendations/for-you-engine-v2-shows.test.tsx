@@ -98,7 +98,7 @@ const rankedShow = (id: string, position: number) => ({
 const englishShows = Array.from({ length: 24 }, (_, index) => show(`en-show-${index}`, 'en'));
 const koreanShows = Array.from({ length: 8 }, (_, index) => show(`ko-show-${index}`, 'ko'));
 
-const setup = (engine: 'v1' | 'v2_metadata') => {
+const setup = (engine: 'v1' | 'v2_metadata' | 'v2_metadata_social') => {
   const ranked = ['kr-1', 'kr-2', 'kr-3'];
   mockTables.rankings = ranked.map((id, i) => rankedShow(id, i + 1));
   mockTables.user_media = [];
@@ -114,7 +114,8 @@ const setup = (engine: 'v1' | 'v2_metadata') => {
   mockRpcResults = {
     recommendation_engine: engine,
     catalogue_candidates: koreanShows.map((row) => ({ ...row, source: 'language:ko' })),
-    social_candidates: [],
+    // Somebody the reader follows loved a show. Only V1 may ask for it on the TV wall.
+    social_candidates: [{ media_item_id: 'followed-show', endorsers: 2 }],
   };
 };
 
@@ -148,5 +149,30 @@ describe('Engine V2 for a reader who ranks shows whole', () => {
     await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
     expect(result.current.data?.engine).toBe('v1');
     expect(mockRpcCalls.some((call) => call.name === 'catalogue_candidates')).toBe(false);
+  });
+
+  it('under the v2_metadata_social prototype, draws the TV wall exactly as v2_metadata does', async () => {
+    const pool = async (engine: 'v2_metadata' | 'v2_metadata_social') => {
+      mockRpcCalls.length = 0;
+      resetRecommendationSession();
+      resetImpressions();
+      setup(engine);
+      mockTables.media_items = [...englishShows, show('followed-show', 'en')];
+      const { result } = await render();
+      await waitFor(() => expect(result.current.data?.engine).toBe(engine));
+      const data = result.current.data!;
+      const out = {
+        askedSocial: mockRpcCalls.some((call) => call.name === 'social_candidates'),
+        scored: data.scored.map((item) => [item.mediaItemId, item.explanation.total]),
+      };
+      return out;
+    };
+    const metadata = await pool('v2_metadata');
+    const prototype = await pool('v2_metadata_social');
+    expect(metadata.askedSocial).toBe(false);
+    expect(prototype.askedSocial).toBe(false);
+    // Same pool, same scores, title for title: the prototype changes nothing on TV.
+    expect(prototype.scored).toEqual(metadata.scored);
+    expect(prototype.scored.some(([id]) => id === 'followed-show')).toBe(false);
   });
 });

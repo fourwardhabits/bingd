@@ -222,6 +222,41 @@ describe('the engine switch', () => {
       await t.actAs(null);
     });
 
+    it('serves the v2_metadata_social prototype to the allowlist only, never to a percentage', async () => {
+      // As the allowlist's engine: the allowlist gets it; the cohort keeps v2_engine.
+      await setConfig('recommendations.v2_engine', 'v2_metadata');
+      await setConfig('recommendations.v2_allowlist', [reader]);
+      await setConfig('recommendations.v2_allowlist_engine', 'v2_metadata_social');
+      await setConfig('recommendations.v2_rollout_percent', 100);
+      assert.equal(await engineFor(reader), 'v2_metadata_social');
+      assert.equal(await engineFor(other), 'v2_metadata');
+      await t.actAs(null);
+      // As v2_engine it is unknown, so v1 for everybody, allowlist included: the master switch
+      // cannot hand the prototype to a rollout percentage.
+      await setConfig('recommendations.v2_engine', 'v2_metadata_social');
+      await setConfig('recommendations.v2_allowlist_engine', null);
+      assert.equal(await engineFor(reader), 'v1');
+      assert.equal(await engineFor(other), 'v1');
+      await t.actAs(null);
+      // And v2_engine = v1 still turns it off for the allowlist too.
+      await setConfig('recommendations.v2_engine', 'v1');
+      await setConfig('recommendations.v2_allowlist_engine', 'v2_metadata_social');
+      assert.equal(await engineFor(reader), 'v1');
+      await t.actAs(null);
+    });
+
+    it('gives the prototype the catalogue source and no collaborative evidence', async () => {
+      await setConfig('recommendations.v2_engine', 'v2_metadata');
+      await setConfig('recommendations.v2_allowlist', [reader]);
+      await setConfig('recommendations.v2_allowlist_engine', 'v2_metadata_social');
+      const ja = await title({ language: 'ja' });
+      const rows = await candidates(reader, { kind: 'movie', languages: ['ja'] });
+      assert.ok(rows.some((row) => row.id === ja), 'catalogue_candidates serves it like v2_metadata');
+      await t.actAs(reader);
+      assert.deepEqual((await t.sql(`select * from collaborative_candidates('movie', 10)`)).rows, []);
+      await t.actAs(null);
+    });
+
     it('is v1 for an account outside the allowlist at 0%, even with hybrid configured', async () => {
       await setConfig('recommendations.v2_engine', 'v2_hybrid');
       await setConfig('recommendations.v2_allowlist', [reader]);

@@ -101,7 +101,7 @@ const loggedFilm = (id: string, language: string, bucket: 'loved' | 'fine' | 'no
 const english = Array.from({ length: 24 }, (_, index) => film(`en-${index}`, 'en', 300));
 const japanese = Array.from({ length: 8 }, (_, index) => film(`ja-${index}`, 'ja', 300));
 
-const setup = (engine: 'v1' | 'v2_metadata' | 'v2_hybrid') => {
+const setup = (engine: 'v1' | 'v2_metadata' | 'v2_hybrid' | 'v2_metadata_social') => {
   mockTables.user_media = ['seen-1', 'seen-2', 'seen-3', 'seen-4'].map((id) => loggedFilm(id, 'ja', 'loved'));
   // The popularity fallback is all English, which is the pool V1 builds for this reader.
   mockTables.provider_list_cache = [{ payload: { ids: english.map((row) => row.id) } }];
@@ -179,6 +179,28 @@ describe('Engine V2 on the For You wall', () => {
     expect(called('social_candidates')).toBe(false);
     expect(result.current.data?.socialIds).toEqual([]);
     expect(result.current.data?.scored.some((item) => item.mediaItemId === 'followed-1')).toBe(false);
+  });
+
+  it('under the v2_metadata_social prototype, asks the follow graph on the Films wall and scores it as V2', async () => {
+    setup('v2_metadata_social');
+    mockTables.media_items = [...english, film('followed-1', 'en', 300)];
+    const { result } = await render();
+    await waitFor(() => expect(result.current.data?.engine).toBe('v2_metadata_social'));
+    const data = result.current.data!;
+
+    expect(called('social_candidates')).toBe(true);
+    expect(data.socialIds).toEqual(['followed-1']);
+    const followed = data.scored.find((item) => item.mediaItemId === 'followed-1');
+    expect(followed).toBeDefined();
+    // The V2 profile and catalogue fill are kept: Japanese titles still reach the pool.
+    expect(called('catalogue_candidates')).toBe(true);
+    expect(data.items.map((item) => item.language)).toContain('ja');
+    // Following added a candidate, not a score: it is scored by the V2 engine on the reader's
+    // own evidence, below the Japanese titles this reader's history points at.
+    expect(followed!.explanation.engine).toBe('foryou-v2-metadata-social-2026-11-13-prototype');
+    const japanese = data.scored.filter((item) => item.language === 'ja').map((item) => item.explanation.total);
+    expect(followed!.explanation.total).toBeLessThan(Math.min(...japanese));
+    expect(called('collaborative_candidates')).toBe(false);
   });
 
   it('falls back to V1 when the engine read fails, as on a server that predates it', async () => {

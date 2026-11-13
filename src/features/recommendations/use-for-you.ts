@@ -22,6 +22,7 @@ import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
   SLATE_SIZE,
+  asksSocial,
   scoreSlate,
   tasteFrom,
   type Anchor,
@@ -1103,7 +1104,10 @@ export function useForYou(
        */
       const trendingReads = Promise.all(TRENDING_FOR[medium].map(trendingFallback));
       // Under V2 the follow graph is not a candidate source: following alone has no effect.
-      const socialRead = v2 ? Promise.resolve<string[]>([]) : socialCandidates(medium);
+      // The allowlist-only `v2_metadata_social` prototype asks on the Films wall (`SOCIAL_SOURCE`).
+      const socialRead = asksSocial(engine, medium)
+        ? socialCandidates(medium)
+        : Promise.resolve<string[]>([]);
       const catalogueRead = catalogueRequest
         ? catalogueCandidates(medium, catalogueRequest.languages, catalogueRequest.decades, anchorSeed)
         : Promise.resolve<Candidate[]>([]);
