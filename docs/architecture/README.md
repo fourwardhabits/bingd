@@ -22,6 +22,7 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 | [`recommendations.md`](./recommendations.md) | Candidate generation through delivery, and how each guardrail is enforced |
 | [`recommendations-v2.md`](./recommendations-v2.md) | Engine V2 (off by default): behavioural language/era profile, catalogue coverage, the engine switch |
 | [`recommendations-v2-evaluation.md`](./recommendations-v2-evaluation.md) | A3: reproducible offline comparison of V1, V2 metadata and V2 hybrid (synthetic data), and rollout readiness |
+| [`recommendations-v2-reconcile-2026-11-13.md`](./recommendations-v2-reconcile-2026-11-13.md) | V2 reconciled with main's whole-show rankings: renumbered migrations, the three WS5 fixes, flag proof, evaluation and benchmark deltas, regression attribution, staged rollout plan |
 | [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md) | A3: the V2 server functions on real PostgreSQL with up to 1M synthetic accounts — latencies, concurrency, index builds, plans, capacity boundaries |
 | [`taste-affinity-v2-gap-analysis.md`](./taste-affinity-v2-gap-analysis.md) | Taste Score / Engine V2 / Affinity notifications against the 2026-11-10 founder spec |
 | [`client.md`](./client.md) | App structure, navigation, state, device cache |

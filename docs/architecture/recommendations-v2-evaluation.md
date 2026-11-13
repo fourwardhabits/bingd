@@ -9,7 +9,11 @@ Founder spec 2026-11-10, §4 A3. Code: `src/features/recommendations/evaluation/
 `scripts/rec-eval/collaborative.mjs`. Results of the run recorded here:
 [`recommendations-v2-evaluation-results-2026-11-11.md`](./recommendations-v2-evaluation-results-2026-11-11.md)
 (the engines as fixed after the 2026-11-11 independent review; the 2026-11-10 run on the
-first submission is kept beside it). Server capacity on real PostgreSQL is a separate
+first submission is kept beside it), and, after the reconcile onto main with whole-show
+rankings, [`recommendations-v2-evaluation-results-2026-11-13.md`](./recommendations-v2-evaluation-results-2026-11-13.md),
+which adds cold start at 0/3/5 rankings, activity slices, recall@50, loved-over-disliked
+ordering, genre entropy, era fit, consecutive-launch repeats, a TV whole-show slice and
+source diagnostics (read with [`recommendations-v2-reconcile-2026-11-13.md`](./recommendations-v2-reconcile-2026-11-13.md)). Server capacity on real PostgreSQL is a separate
 document: [`recommendations-v2-scale-benchmark.md`](./recommendations-v2-scale-benchmark.md).
 
 ## 1. Why synthetic
