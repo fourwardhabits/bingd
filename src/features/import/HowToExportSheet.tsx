@@ -84,10 +84,14 @@ export const HOW_TO_STEPS = [
  * **CSV**, and recent IMDb prepares it and offers the download on an exports page rather than
  * immediately. The button opens the ratings page, which is where the control is in both.
  * Recorded as open for the founder in `docs/product/imdb-import.md`.
+ *
+ * Step 2 is no longer soft (2026-11-13): IMDb Help's Ratings FAQ (updated 9 Feb 2026) puts
+ * the Export icon at the top right of Your Ratings, not in a menu. Taken from the founder's
+ * brief, which checked the page; this environment still cannot reach imdb.com.
  */
 export const IMDB_HOW_TO_STEPS = [
   'On imdb.com, sign in and open Your Ratings.',
-  'Open the page’s menu and choose Export.',
+  'Tap Export at the top right of Your Ratings.',
   'IMDb prepares a CSV file. When it’s ready, download it (IMDb may list it under Your exports).',
   'Come back to bingd and choose that CSV.',
 ] as const;
