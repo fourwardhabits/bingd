@@ -50,3 +50,16 @@ verify_jwt = true
 # account. So `index.ts` refuses anything that is not the service role outright, and the
 # only caller is `_drain_import_jobs` posting with the key from the vault.
 verify_jwt = true
+
+[functions.username-sign-in]
+# NOT DEPLOYED (2026-11-13): groundwork behind the client constant
+# USERNAME_SIGN_IN_ENABLED = false. See docs/architecture/username-sign-in.md.
+#
+# Called *before* there is a session, with the anon key, so this flag proves only that the
+# caller holds the anon key — and that is all it is for: it keeps traffic that does not even
+# have the app's public key off the function before it starts. Unlike the three functions
+# above, `index.ts` trusts **no** claim from the token: it never reads a role or a subject,
+# and every privileged step uses the service role key the platform injects. Setting this to
+# false would make nothing forgeable; it would only widen who can spend the per-IP budgets.
+# Leave it true.
+verify_jwt = true
