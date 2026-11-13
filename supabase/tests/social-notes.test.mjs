@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { createTestDb, createTestDbBefore } from './harness.mjs';
+import { qualifyFor, qualifyForMovies } from './helpers/qualify.mjs';
 
 /**
  * Notes as social content, and the community score.
@@ -419,7 +420,14 @@ describe('community_score', () => {
                   where key = 'score.community_min_ratings'`);
   });
 
-  /** Ranks the same title for `count` fresh public users, incumbent always winning. */
+  /**
+   * Ranks the same title for `count` fresh public users, incumbent always winning.
+   *
+   * 20261119000100: each rater is then made an eligible contributor (ten rankings in the
+   * title's category) with not_for_me fillers below the subject, so the population this
+   * block is about is exactly what it was. A not_for_me subject stays rank 1 of its band,
+   * so its 3.4 is unchanged too.
+   */
   let raterSeq = 0;
   const rankedBy = async (mediaItemId, count, bucket = 'loved') => {
     const ids = [];
@@ -429,6 +437,7 @@ describe('community_score', () => {
       ids.push(user);
       await t.actAs(user);
       await t.rankToCompletion(mediaItemId, bucket, async (pivot) => pivot);
+      await qualifyFor(t, user, mediaItemId);
     }
     await t.actAs(alice);
     return ids;
@@ -474,9 +483,14 @@ describe('community_score', () => {
 
     assert.equal(Number((await scoreOf(one)).score), 10);
     assert.equal(Number((await scoreOf(two)).score), 3.4);
-    // A series is not rankable at all, so its own aggregate is empty rather than
-    // the mean of its seasons.
-    assert.equal((await scoreOf(series)).rating_count, 0);
+    // 20261119000100 (founder spec t168u §4F) supersedes "a series aggregate is empty".
+    // A whole show now aggregates one effective score per person: here nobody ranked the
+    // show itself, so each rater contributes the mean of their own ranked seasons (10.0
+    // for the three who ranked Season 1, 3.4 for the three who ranked Season 2), and the
+    // show is the mean of those six people, not of the two season averages.
+    const whole = await scoreOf(series);
+    assert.equal(whole.rating_count, 6);
+    assert.equal(Number(whole.score), 6.7);
   });
 
   /**
@@ -501,6 +515,7 @@ describe('community_score', () => {
     const decoy = await movie('subtraction_decoy');
     await t.rankToCompletion(decoy, 'loved', async (pivot) => pivot);
     await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    await qualifyForMovies(t, blocker); // 20261119000100: an eligible contributor
     await t.actAs(alice);
 
     const open = await scoreOf(id);
@@ -532,6 +547,7 @@ describe('community_score', () => {
     const blocked = await t.createUser({ username: 'cs_blocked' });
     await t.actAs(blocked);
     await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    await qualifyForMovies(t, blocked); // 20261119000100: an eligible contributor
     await t.actAs(alice);
 
     assert.equal((await scoreOf(id)).rating_count, 3);
@@ -607,13 +623,17 @@ describe('community_score', () => {
 describe('the bingd. score from the first rating', () => {
   let firstSeq = 0;
 
-  /** Ranks one title for `count` fresh public accounts, incumbent always winning. */
+  /**
+   * Ranks one title for `count` fresh public accounts, incumbent always winning, each
+   * then made an eligible contributor (20261119000100) with not_for_me fillers.
+   */
   const rankedBy = async (mediaItemId, count) => {
     for (let i = 0; i < count; i += 1) {
       firstSeq += 1;
       const user = await t.createUser({ username: `first_rater_${firstSeq}` });
       await t.actAs(user);
       await t.rankToCompletion(mediaItemId, 'loved', async (pivot) => pivot);
+      await qualifyFor(t, user, mediaItemId);
     }
     await t.actAs(alice);
   };
@@ -674,6 +694,9 @@ describe('the bingd. score from the first rating', () => {
     // exactly one.
     const id = await movie('first_self');
     await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    // 20261119000100: the reader counts once they are an eligible contributor themselves.
+    await qualifyForMovies(t, alice);
+    await t.actAs(alice);
 
     const mine = await scoreOf(id);
     assert.equal(mine.rating_count, 1, 'the reader is inside their own community score');

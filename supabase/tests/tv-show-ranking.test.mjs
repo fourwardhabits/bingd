@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { createTestDb, one } from './harness.mjs';
+import { qualifyForTv } from './helpers/qualify.mjs';
 import { tvRanking } from './tv-ranking-support.mjs';
 
 /**
@@ -261,9 +262,21 @@ describe('re-ranking a show', () => {
 });
 
 describe('scores a reader sees for a show', () => {
-  it('come from explicit show rankings only, never from seasons', async () => {
+  /**
+   * 20261119000100 (founder spec t168u §4F) supersedes "come from explicit show rankings
+   * only, never from seasons". A whole show's community score is the equal-weight mean of
+   * one effective score per TV-eligible reader: their explicit show ranking if they have
+   * one, otherwise the mean of their own ranked seasons. A season's community score is
+   * still that season's rankings only, never derived from a show ranking.
+   */
+  it('counts each eligible reader once: the explicit show score, else their season average', async () => {
     const main = await series('Community');
     const s1 = await ctx.t.createSeason(main, 1, 'Season 1');
+    const s2 = await ctx.t.createSeason(main, 2, 'Season 2');
+    const read = async (item) => {
+      const row = (await ctx.t.sql(`select * from community_score($1)`, [item])).rows[0];
+      return [row.score == null ? null : Number(row.score), row.rating_count];
+    };
     const readers = [];
     for (let i = 0; i < 3; i += 1) {
       const id = await ctx.t.createUser({ username: `tvcommunity_${ctx.seq}_${i}` });
@@ -271,23 +284,31 @@ describe('scores a reader sees for a show', () => {
       await ctx.t.actAs(id);
       await rank(s1, 'loved', 1);
     }
-    let community = (await ctx.t.sql(`select * from community_score($1)`, [main])).rows[0];
-    assert.equal(community.rating_count, 0, 'three season rankings are not a show rating');
-    assert.equal(community.score, null);
+    assert.deepEqual(await read(s1), [null, 0], 'one TV ranking each: nobody contributes yet');
+    assert.deepEqual(await read(main), [null, 0]);
 
+    // Ten TV rankings each (not_for_me filler seasons, below S1): all three now count.
+    for (const id of readers) await qualifyForTv(ctx.t, id);
+    assert.deepEqual(await read(s1), [10, 3], 'the season keeps its own score');
+    assert.deepEqual(await read(main), [10, 3], 'each reader’s season average, once each');
+
+    // A second season for one reader moves that reader’s average, not the head count.
+    await ctx.t.actAs(readers[0]);
+    await rank(s2, 'loved', 0);
+    assert.deepEqual(await read(main), [9.5, 3], '(8.5 + 10 + 10) / 3, three people');
+    assert.deepEqual(await read(s2), [7, 1]);
+
+    // An explicit show ranking replaces each reader’s season average.
     for (const id of readers) {
       await ctx.t.actAs(id);
       await rank(main, 'fine', 1);
     }
-    community = (await ctx.t.sql(`select * from community_score($1)`, [main])).rows[0];
-    assert.equal(community.rating_count, 3);
-    assert.equal(
-      Number(community.score),
-      6.9,
+    assert.deepEqual(
+      await read(main),
+      [6.9, 3],
       'each reader’s one fine show scores the fine high',
     );
-    const season = (await ctx.t.sql(`select * from community_score($1)`, [s1])).rows[0];
-    assert.equal(Number(season.score), 10, 'and the season keeps its own');
+    assert.deepEqual(await read(s1), [10, 3], 'and the season still keeps its own');
     await ctx.t.actAs(ctx.user);
   });
 });
