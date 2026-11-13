@@ -81,9 +81,9 @@ export function useStarterMovies(userId: string) {
      * Re-read when the flow moves it. Every completed ranking removes a row from this
      * list, so a stale entry would offer back a movie the reader has just placed — which
      * `starter_movies` excludes precisely because picking it again is a step that cannot
-     * advance. `invalidateAfterCollectionChange` does not name this key (it is not a
-     * collection read), so the screen invalidates it itself; a short staleness is the
-     * belt to that brace.
+     * advance. `invalidateAfterCollectionChange` names this key since 20261119000100
+     * (contributor eligibility moves its community scores), and the screen also
+     * invalidates it itself; a short staleness is the belt to those braces.
      */
     staleTime: 60_000,
     queryFn: async (): Promise<StarterMovie[]> => {

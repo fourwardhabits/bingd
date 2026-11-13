@@ -1,5 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query';
+import { groupPicksKey } from '@/features/recommendations/use-group-picks';
+import { topRatedKey } from '@/features/recommendations/use-top-rated';
 
 import {
   invalidateAfterCollectionChange,
@@ -176,6 +178,69 @@ describe('after a ranking completes', () => {
 
   it('refreshes this title’s community score, which now includes the new rating', async () => {
     expect(has(touched(), KEYS.community)).toBe(true);
+  });
+
+  /**
+   * 20261119000100 (founder spec t168u §4G, §4K-14). A reader counts toward community
+   * scores only from their tenth ranking in a category, so the ranking that crosses the
+   * line moves every title they have ranked in it — and a season moves its show. A
+   * different title's cached score must go stale too, and so must every other surface
+   * that averages strangers' rankings with the same rule. Keys are the real hook shapes.
+   */
+  describe('community scores across the category (contributor eligibility)', () => {
+    const OTHER_TITLE = 'film-9';
+    const eligibilityKeys = {
+      otherTitleCommunity: ['community-score', USER, OTHER_TITLE],
+      parentShowCommunity: ['community-score', USER, 'show-1'],
+      topRatedMovies: topRatedKey(USER, 'movies'),
+      topRatedTv: topRatedKey(USER, 'tv'),
+      groupPicks: groupPicksKey(USER, ['user-3', USER], 'movies'),
+      starterMovies: ['onboarding-starter-movies', USER],
+      // Somebody else's caches, which this reader's write cannot reach.
+      otherUserCommunity: ['community-score', OTHER, OTHER_TITLE],
+      otherUserTopRated: topRatedKey(OTHER, 'movies'),
+      otherUserGroupPicks: groupPicksKey(OTHER, ['user-3', OTHER], 'movies'),
+      otherUserStarter: ['onboarding-starter-movies', OTHER],
+    } as const;
+    const crossing = () =>
+      invalidatedBy([...all, ...Object.values(eligibilityKeys)], (client) =>
+        invalidateAfterCollectionChange(client, USER, TITLE, { category: 'movies' }),
+      );
+
+    it('invalidates the reader’s community score for a different title too', () => {
+      const set = crossing();
+      expect(has(set, eligibilityKeys.otherTitleCommunity)).toBe(true);
+      expect(has(set, eligibilityKeys.parentShowCommunity)).toBe(true);
+    });
+
+    it('invalidates Top Rated, group picks and the starter list for the reader', () => {
+      const set = crossing();
+      expect(has(set, eligibilityKeys.topRatedMovies)).toBe(true);
+      expect(has(set, eligibilityKeys.topRatedTv)).toBe(true);
+      expect(has(set, eligibilityKeys.groupPicks)).toBe(true);
+      expect(has(set, eligibilityKeys.starterMovies)).toBe(true);
+    });
+
+    it('leaves another account’s community surfaces alone', () => {
+      const set = crossing();
+      for (const key of [
+        eligibilityKeys.otherUserCommunity,
+        eligibilityKeys.otherUserTopRated,
+        eligibilityKeys.otherUserGroupPicks,
+        eligibilityKeys.otherUserStarter,
+      ]) {
+        expect(has(set, key)).toBe(false);
+      }
+    });
+
+    it('does the same after a removal or a rerank with no category', () => {
+      const set = invalidatedBy(Object.values(eligibilityKeys), (client) =>
+        invalidateAfterCollectionChange(client, USER, TITLE),
+      );
+      expect(has(set, eligibilityKeys.otherTitleCommunity)).toBe(true);
+      expect(has(set, eligibilityKeys.topRatedMovies)).toBe(true);
+      expect(has(set, eligibilityKeys.otherUserCommunity)).toBe(false);
+    });
   });
 
   it('refreshes bingd. Awards, which thirteen tracks read the collection for', async () => {
