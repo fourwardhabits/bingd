@@ -31,7 +31,7 @@ import {
   Text,
   TitleRow,
 } from '@/ui/components';
-import type { SortAxisSpec, SortState } from '@/ui/sort';
+import { coerceSortState, type SortAxisSpec, type SortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 export type RankedCategory = 'movies' | 'tv_seasons';
@@ -287,6 +287,20 @@ export function RankedTitlesSheet({
    */
   const [filters, setFilters] = useState<CollectionFilters>(emptyFilters);
   const [filtering, setFiltering] = useState(false);
+  /**
+   * **Filters belong to one list, opened once** (independent review, 2026-11-13). The
+   * profile keeps this sheet mounted while it is closed, so without this a genre chosen
+   * over somebody's films would still be applied when their TV list is opened from the
+   * wall — possibly straight into "Nothing matches". Reset whenever the category changes,
+   * which includes closing (null) and the sheet's own Movies / TV switch. Adjusted during
+   * render, React's answer for state that follows a prop.
+   */
+  const [filtersFor, setFiltersFor] = useState(category);
+  if (filtersFor !== category) {
+    setFiltersFor(category);
+    setFilters(emptyFilters());
+    setFiltering(false);
+  }
   const scroll = useRef<ScrollView>(null);
 
   const pooled = useMemo(() => {
@@ -314,6 +328,10 @@ export function RankedTitlesSheet({
     [pooled],
   );
   const axes = useMemo(() => sortAxesForRanked({ runtime: offersRuntime(items) }), [items]);
+  // A list made only of seasons offers no Runtime; an order chosen over films falls back to
+  // the first axis rather than silently sorting by a field every row lacks (the Collection
+  // tab's own rule, `CollectionView`).
+  const order = coerceSortState(sort, axes);
 
   const { rows, matching } = useMemo(() => {
     const kept = isFiltered(filters)
@@ -326,10 +344,10 @@ export function RankedTitlesSheet({
     // are different lists, so the rank order of a mixed TV list is the score each row
     // prints (unrounded, so each pool keeps its own order), then a fixed pool order, then
     // the id. One pool keeps `compareBySort` exactly as before.
-    const bySort = compareBySort(sort);
+    const bySort = compareBySort(order);
     const byFact =
-      sort.axis === 'year' || sort.axis === 'runtime' || sort.axis === 'title'
-        ? compareItems({ axis: sort.axis, direction: sort.direction })
+      order.axis === 'year' || order.axis === 'runtime' || order.axis === 'title'
+        ? compareItems({ axis: order.axis, direction: order.direction })
         : null;
     const mixed = filtered.some((item) => item.pool === 1);
     const compare = (a: (typeof pooled)[number], b: (typeof pooled)[number]) => {
@@ -338,8 +356,8 @@ export function RankedTitlesSheet({
         const right = byItem.get(b.entry.mediaItemId);
         return left && right ? byFact(left, right) : 0;
       }
-      return mixed && sort.axis === 'rank'
-        ? (sort.direction === 'desc' ? b.projected - a.projected : a.projected - b.projected) ||
+      return mixed && order.axis === 'rank'
+        ? (order.direction === 'desc' ? b.projected - a.projected : a.projected - b.projected) ||
             a.pool - b.pool ||
             a.entry.mediaItemId.localeCompare(b.entry.mediaItemId)
         : bySort(a.entry, b.entry);
@@ -371,7 +389,7 @@ export function RankedTitlesSheet({
         bucket: entry.bucket,
       }));
     return { rows: drawn, matching: filtered.length };
-  }, [filters, items, pooled, sort]);
+  }, [filters, items, order, pooled]);
 
   /** How many the category actually holds, for the count and the cap's disclosure. */
   const total = pooled.length;
@@ -404,12 +422,9 @@ export function RankedTitlesSheet({
             { id: 'tv_seasons' as const, label: 'TV Shows' },
           ]}
           value={category}
-          onChange={(next) => {
-            // A filter chosen over films is not a filter over seasons: a genre or a
-            // decade may not exist in the other list at all.
-            setFilters(emptyFilters());
-            onChangeCategory(next);
-          }}
+          // A filter chosen over films is not a filter over seasons — a genre or a decade
+          // may not exist in the other list at all — so the switch clears them (above).
+          onChange={onChangeCategory}
         />
       </SheetHeader>
 
@@ -441,7 +456,7 @@ export function RankedTitlesSheet({
           <FiltersAction
             label="Filters & Sort"
             activeCount={activeCount}
-            accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+            accessibilityLabel={filterSortSpoken(axes, order, activeCount)}
             accessibilityHint="Opens filters and the sort order"
             onPress={() => setFiltering(true)}
             testID="ranked-filter-sort"
@@ -556,6 +571,7 @@ export function RankedTitlesSheet({
           items={items}
           value={filters}
           showBuckets
+          label={isSelf ? undefined : `Filter and sort ${name}'s collection`}
           onApply={(next) => {
             setFilters(next);
             setFiltering(false);
@@ -564,7 +580,7 @@ export function RankedTitlesSheet({
           onClose={() => setFiltering(false)}
           sort={{
             axes,
-            value: sort,
+            value: order,
             onChange: (next) => {
               setSort(next);
               // **Back to the top on every change.** A `ScrollView` keeps its offset when

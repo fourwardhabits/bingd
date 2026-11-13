@@ -51,6 +51,11 @@ export type CollectionFilterSheetProps<Axis extends string = string> = {
     /** Pressing Shuffle while on it reshuffles; it stays enabled, with a hint saying so. */
     onRepeatUndirected?: () => void;
   };
+  /**
+   * What the sheet is announced as. Defaults to the reader's own collection; a profile's
+   * Collection sheet over somebody else's ranking names theirs instead.
+   */
+  label?: string;
 };
 
 const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
@@ -81,6 +86,7 @@ export function CollectionFilterSheet<Axis extends string = string>({
   onApply,
   onClose,
   sort,
+  label,
 }: CollectionFilterSheetProps<Axis>) {
   const [draft, setDraft] = useState<CollectionFilters>(value);
 
@@ -93,7 +99,7 @@ export function CollectionFilterSheet<Axis extends string = string>({
     <Sheet
       visible
       onClose={onClose}
-      label={sort ? 'Filter and sort your collection' : 'Filter your collection'}
+      label={label ?? (sort ? 'Filter and sort your collection' : 'Filter your collection')}
     >
       {/**
        * **Sort and Filter scroll together** (independent review, UI cohesion pass). Sort was

@@ -448,8 +448,9 @@ const styles = StyleSheet.create({
   // A height rather than only a ceiling: the list gets the room whether it holds four rows
   // or four hundred, and the sheet keeps its size while its content changes.
   dense: { height: '90%' },
-  // `minHeight: 0` is what lets a column child shrink below its content's height in Yoga;
-  // without it the scroll region would push the footer off the bottom of the sheet.
+  // `flexShrink: 1` is what lets the content give way to the footer when the list is taller
+  // than the sheet. `minHeight: 0` is belt and braces: Yoga applies no automatic minimum
+  // size today, but a flex item that may shrink should say it may shrink to nothing.
   content: { flexShrink: 1, minHeight: 0 },
   contentDense: { flex: 1, minHeight: 0 },
   handle: {

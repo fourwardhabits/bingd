@@ -152,13 +152,8 @@ function Cell({
             variant={prominent ? 'filled' : 'outlined'}
           />
         ) : (
-          <Text
-            variant="headline"
-            tone={value ? 'primary' : 'tertiary'}
-            style={value ? styles.value : null}
-            numberOfLines={1}
-          >
-            {value ?? DASH}
+          <Text variant="headline" tone="tertiary" numberOfLines={1}>
+            {DASH}
           </Text>
         )}
       </View>
@@ -243,7 +238,6 @@ const styles = StyleSheet.create({
   },
   /** Every value sits in a slot the badge's height, so the three labels share a baseline. */
   valueSlot: { height: BADGE, alignItems: 'center', justifyContent: 'center' },
-  value: { fontVariant: ['tabular-nums'] },
   label: { textAlign: 'center', alignSelf: 'stretch' },
   stripStacked: { flexDirection: 'column' },
   cellStacked: {
