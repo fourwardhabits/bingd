@@ -765,6 +765,15 @@ describe('the guard is wired in, not merely present', () => {
     // server-capped window. A read, so a suspended account may still see its own history.
     'recommendation_exposure_within',
     'social_candidates',
+    // 20261116000100, Engine V2 A1. Both read and write nothing: which engine the caller
+    // gets, and public catalogue rows minus the caller's own collection. A suspended
+    // account reaches no other person through either.
+    'recommendation_engine',
+    'catalogue_candidates',
+    // 20261116000200. Writes only `taste_neighbours`, a server-side cache about the caller,
+    // and returns ids and aggregates. A suspended account reaches nobody through it, and a
+    // suspended *neighbour* is dropped by `can_discover_profile` at read time.
+    'collaborative_candidates',
 
     // 20260907000100. Group Picks, a pure read and security invoker: the caller's own
     // RLS is the whole reach it has. The suspension question resolves in both

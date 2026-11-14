@@ -47,6 +47,8 @@ export type LikedTitle = {
   title: string;
   score: number;
   genres: readonly string[];
+  /** ISO 639-1. Read only when language coverage is on (Engine V2). */
+  language?: string | null;
 };
 
 /** How many anchors a slate reasons from. See `recommendations.md` §10 for the comparison. */
@@ -84,6 +86,30 @@ export function meaningfulGenres(liked: readonly LikedTitle[]): Map<string, numb
   return new Map([...counts].filter(([, count]) => count >= floor));
 }
 
+/**
+ * Engine V2: liked languages that earn an anchor, most-carried first.
+ *
+ * **Two liked titles, with no share requirement**, and that asymmetry with
+ * {@link meaningfulGenres} is the point. A genre needs 10% of the band because genres are
+ * many and overlapping; a language is one per title, and the reader this exists for is the
+ * one whose four loved Japanese films are 8% of a band of fifty. Under a share rule
+ * they never anchor, TMDB is never asked what is like them, and the candidate pool stays
+ * English however the scorer weighs language.
+ */
+export function meaningfulLanguages(liked: readonly LikedTitle[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const entry of liked) {
+    if (entry.language) counts.set(entry.language, (counts.get(entry.language) ?? 0) + 1);
+  }
+  return new Map([...counts].filter(([, count]) => count >= 2).sort((a, b) => b[1] - a[1]));
+}
+
+/**
+ * At most this many anchors are spent on language coverage, so genre coverage and rotation
+ * keep at least three of the eight.
+ */
+export const MAX_LANGUAGE_ANCHORS = 3;
+
 /** Efraimidis–Spirakis: `log(u) / w` orders like `u^(1/w)` and cannot underflow. */
 const drawKey = (seed: number, id: string, weight: number) =>
   Math.log(unitRandom(seed, id)) / Math.max(1e-6, weight);
@@ -102,7 +128,14 @@ export function selectAnchors<T extends LikedTitle>(
     seed,
     budget = ANCHOR_BUDGET,
     cached,
-  }: { seed: number; budget?: number; cached?: ReadonlySet<string> },
+    languages = false,
+  }: {
+    seed: number;
+    budget?: number;
+    cached?: ReadonlySet<string>;
+    /** Engine V2: cover liked languages before genres. Off is exactly the V1 selection. */
+    languages?: boolean;
+  },
 ): T[] {
   if (liked.length <= budget) return [...liked];
 
@@ -110,6 +143,26 @@ export function selectAnchors<T extends LikedTitle>(
     Math.max(0.1, entry.score / 10) * (cached?.has(entry.mediaItemId) ? CACHED_WEIGHT : 1);
 
   const chosen = new Set<T>(liked.slice(0, Math.min(STABLE_ANCHORS, budget)));
+
+  // Language coverage (Engine V2): one seeded draw per uncovered liked language, before
+  // genre coverage can spend the budget on the majority language's titles.
+  if (languages) {
+    const uncoveredLanguages = new Set(meaningfulLanguages(liked).keys());
+    for (const entry of chosen) if (entry.language) uncoveredLanguages.delete(entry.language);
+    let spent = 0;
+    for (const language of [...uncoveredLanguages]) {
+      if (chosen.size >= budget || spent >= MAX_LANGUAGE_ANCHORS) break;
+      let best: { entry: T; key: number } | null = null;
+      for (const entry of liked) {
+        if (chosen.has(entry) || entry.language !== language) continue;
+        const key = drawKey(seed, entry.mediaItemId, weightOf(entry));
+        if (!best || key > best.key) best = { entry, key };
+      }
+      if (!best) continue;
+      chosen.add(best.entry);
+      spent += 1;
+    }
+  }
 
   // Coverage: one seeded draw per round among titles that add an uncovered genre.
   const meaningful = meaningfulGenres(liked);
