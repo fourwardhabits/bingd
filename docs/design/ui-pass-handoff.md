@@ -1,5 +1,9 @@
 # UI pass — handoff
 
+> **Historical — superseded by [Design System v3](./design-system.md) where they disagree**
+> (2026-11-14). Kept for its record of why screens are shaped as they are. For component rules,
+> tokens and review, use `design-system.md` and the [UI review checklist](./ui-review-checklist.md).
+
 Read this instead of re-exploring the repo. Full rationale, screen by screen, is in
 `ui-pass-plan.md`; this file is the short version for picking up device-review fixes.
 

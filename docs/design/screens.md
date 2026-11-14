@@ -1,5 +1,9 @@
 # Bingd — Screen Specification
 
+> **Historical — superseded by [Design System v3](./design-system.md) where they disagree**
+> (2026-11-14). Kept for its record of why screens are shaped as they are. For component rules,
+> tokens and review, use `design-system.md` and the [UI review checklist](./ui-review-checklist.md).
+
 **Version:** v2
 **Status:** Draft for review
 **Date:** 2026-08-15 (v1 was 2026-08-13)
