@@ -79,6 +79,7 @@ export function NoteClaims({
     <>
       <View style={styles.noteClaims}>
         <ToggleChip
+          verticalSlop={FIRST_CHIP_SLOP}
           icon={spoilers ? 'eye-off' : 'eye-off-outline'}
           label="Contains spoilers"
           on={spoilers}
@@ -86,6 +87,7 @@ export function NoteClaims({
           onToggle={() => onSpoilers(!spoilers)}
         />
         <ToggleChip
+          verticalSlop={SECOND_CHIP_SLOP}
           icon={visibility === 'public' ? 'people' : 'people-outline'}
           label="Share as a review"
           on={visibility === 'public'}
@@ -104,8 +106,35 @@ export function NoteClaims({
   );
 }
 
+/**
+ * **Each claim answers 44pt, on one line or two, and nothing on screen moves** (A11Y-44,
+ * design-system v3 A.2 #12).
+ *
+ * The chips are 32pt and sat in a row with no vertical padding, so RN clipped their slop
+ * to the row and they answered 32. Both callers (LogSheet's note and Watch details) put
+ * this row in a column with `space[2]` between the field, the row and the caption, and
+ * that space was empty. The row now takes it as its own box: `space[2]` of padding above
+ * and below, handed back by the same negative margin, so the chips are drawn exactly where
+ * they were and the row's box reaches the field above and the caption below without
+ * covering either. Requires a parent `gap` of at least `space[2]`, which both have.
+ *
+ * At 320 and 360pt the two chips do not fit on one line (about 334pt for 328) and wrap,
+ * `space[2]` apart. Symmetric slop would cross in that gap, so it is split by place: the
+ * first chip takes the row's top padding and half the gap below it, the second half the
+ * gap above it and the row's bottom padding. That is 8 + 32 + 4 and 4 + 32 + 8, 44pt each,
+ * on one line or two; wrapped, the two meet in the middle of the gap and never cross.
+ */
+const FIRST_CHIP_SLOP = { top: theme.space[2], bottom: theme.space[1] };
+const SECOND_CHIP_SLOP = { top: theme.space[1], bottom: theme.space[2] };
+
 const styles = StyleSheet.create({
-  noteClaims: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
+  noteClaims: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space[2],
+    paddingVertical: theme.space[2],
+    marginVertical: -theme.space[2],
+  },
   noteInput: {
     minHeight: 88,
     borderRadius: theme.radius.control,

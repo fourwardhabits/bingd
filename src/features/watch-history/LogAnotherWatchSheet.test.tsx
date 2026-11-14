@@ -1,6 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
+import { controlRowSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { LogAnotherWatchSheet } from './LogAnotherWatchSheet';
 
@@ -90,6 +92,32 @@ it('offers the same two claims as the log sheet', async () => {
 
   expect(view.getByLabelText('This note contains spoilers')).toBeTruthy();
   expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
+});
+
+/**
+ * **Both claims answer 44pt in the composer, and nothing in it moves** (A11Y-44,
+ * design-system v3 A.2 #12). Measured in the real note box (gutter padding, `space[2]`
+ * gap) at 360pt, where the two chips wrap, and at a width where they share a line; the
+ * chips stay `space[2]` from the field above and the caption below (`hit-rect.ts`).
+ */
+it('gives both claims a 44pt target without moving the chips or the gaps', async () => {
+  const sheet = await draw();
+  await fireEvent.press(sheet.getByLabelText(/^Note/));
+  const chips = [
+    sheet.getByLabelText('This note contains spoilers'),
+    sheet.getByLabelText('Share this note as a public review'),
+  ] as unknown as Host[];
+  for (const width of [360, 1000]) {
+    const site = controlRowSite(chips, width);
+    expect(site.wrapped).toBe(width === 360);
+    for (const [index, hit] of site.hits.entries()) {
+      expect(site.chips[index]!.height).toBe(theme.layout.control.chipHeight);
+      expect(hit.height).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    }
+    if (site.wrapped) expect(site.hits[0]!.bottom).toBeLessThanOrEqual(site.hits[1]!.top);
+    expect(site.spaceAbove).toBe(theme.space[2]);
+    expect(site.spaceBelow).toBe(theme.space[2]);
+  }
 });
 
 it('opens a first-ever note private, the same as the log sheet', async () => {

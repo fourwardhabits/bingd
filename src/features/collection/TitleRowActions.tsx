@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { formatScore, type Bucket } from '@/features/collection/score';
-import { ScoreBadge, SeasonAverageBadge } from '@/ui/components';
+import { type Bucket } from '@/features/collection/score';
+import { ScoreBadge, SeasonAverageBadge, seasonAverageLabel } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 export type TitleRowActionsProps = {
@@ -77,7 +77,7 @@ export function TitleRowActions({
         <SeasonAverageBadge
           score={score.score}
           onPress={onRank}
-          accessibilityLabel={`${name}, season average, ${formatScore(score.score)} out of 10`}
+          accessibilityLabel={seasonAverageLabel(score.score, name)}
           testID="title-row-average-badge"
         />
       </View>

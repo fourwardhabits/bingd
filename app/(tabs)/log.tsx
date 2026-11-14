@@ -1403,9 +1403,17 @@ const styles = StyleSheet.create({
    */
   // The field's own row under the brand row — the cross-tab second-row position the
   // category selector holds elsewhere. Gutter-aligned with the content below it.
+  /**
+   * The field sits where it did, flush under the header seam with `space[2]` below it.
+   * `SearchField`'s 44pt box is 2pt taller than the drawn field above and below, for its
+   * clear button's target (A11Y-44, A.2 #11): the top 2pt overlaps the foot of the seam's
+   * shade, which draws nothing over it and takes no touches (`pointerEvents="none"`), and
+   * the bottom 2pt comes out of the padding.
+   */
   searchRow: {
     paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[2],
+    marginTop: -2,
+    paddingBottom: theme.space[2] - 2,
   },
   // Its own height only. A horizontal ScrollView in a column otherwise grows to fill the
   // screen and pushes the results below the fold.

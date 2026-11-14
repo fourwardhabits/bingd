@@ -170,7 +170,13 @@ export function EditListSheet({ list, profilePrivate, onClose, onChanged }: Edit
           </Text>
         ) : null}
 
-        <Button label={busy ? 'Saving…' : 'Save'} onPress={save} disabled={busy} />
+        {/* The reason matches `SaveButton`'s busy hint (design-system v3 A.2 #9). */}
+        <Button
+          label={busy ? 'Saving…' : 'Save'}
+          onPress={save}
+          disabled={busy}
+          disabledReason="Saving your changes"
+        />
       </ScrollView>
     </Sheet>
   );

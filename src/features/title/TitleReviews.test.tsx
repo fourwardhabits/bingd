@@ -1,6 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { EDIT_ICON_NAME } from '@/ui/components';
 
 import { REVIEWS_PREVIEW_COUNT, ReviewsPreview, TitleReviews } from './TitleReviews';
 import type { ReviewOrder, TitleReview } from './use-title-reviews';
@@ -477,5 +479,74 @@ describe('the reviews preview', () => {
     expect(view.getByTestId('review-preview-body').props.accessibilityLabel).toMatch(
       /Contains spoilers$/,
     );
+  });
+});
+
+/**
+ * **The write-review action's glyph follows what it says** (design-system v3 A.2 #6).
+ * _Write a review_ takes the shared Edit glyph; _Rank to leave a review_ is the first Rank and
+ * takes Rank's `star-outline`, never the edit glyph (rule 4). Both places it is drawn: the
+ * editorial sheet's compose slot and the preview's empty state.
+ */
+describe('the write-review glyph', () => {
+  const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+    String.fromCodePoint(Ionicons.glyphMap[name] as number);
+
+  const editorial = (viewerRanked: boolean) =>
+    renderWithProviders(
+      <TitleReviews
+        reviews={[]}
+        loading={false}
+        sort="top_desc"
+        onChangeSort={() => {}}
+        onToggleHelpful={() => {}}
+        maskedFor={() => false}
+        onPressAuthor={() => {}}
+        viewerRanked={viewerRanked}
+        viewerHasReview={false}
+        onWrite={() => {}}
+        noun="film"
+        viewerId={VIEWER}
+        variant="editorial"
+      />,
+    );
+
+  const preview = (viewerRanked: boolean) =>
+    renderWithProviders(
+      <ReviewsPreview
+        reviews={[]}
+        loading={false}
+        maskedFor={() => false}
+        viewerId={VIEWER}
+        viewerRanked={viewerRanked}
+        ownReview={null}
+        onWrite={() => {}}
+        onSeeAll={() => {}}
+        noun="movie"
+      />,
+    );
+
+  it.each([
+    ['the editorial sheet', editorial],
+    ['the preview', preview],
+  ])('is the Edit glyph on Write a review in %s', async (_, render) => {
+    const view = await render(true);
+    const action = view.getByTestId('write-review');
+
+    expect(within(action).getByText('Write a review')).toBeTruthy();
+    expect(within(action).getByText(glyph(EDIT_ICON_NAME))).toBeTruthy();
+    expect(within(action).queryByText(glyph('star-outline'))).toBeNull();
+  });
+
+  it.each([
+    ['the editorial sheet', editorial],
+    ['the preview', preview],
+  ])('is the Rank star, never the Edit glyph, on Rank to leave a review in %s', async (_, render) => {
+    const view = await render(false);
+    const action = view.getByTestId('write-review');
+
+    expect(within(action).getByText('Rank to leave a review')).toBeTruthy();
+    expect(within(action).getByText(glyph('star-outline'))).toBeTruthy();
+    expect(within(action).queryByText(glyph(EDIT_ICON_NAME))).toBeNull();
   });
 });

@@ -129,6 +129,7 @@ function FilterChip({
       accessibilityState={{ selected }}
       accessibilityLabel={`${label}, ${count}`}
       onPress={onPress}
+      hitSlop={CHIP_SLOP}
       style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.pressed]}
     >
       {glyph ? (
@@ -151,6 +152,23 @@ const glyphOf = (kind: ReactionKind) =>
   REACTIONS.find((reaction) => reaction.kind === kind)?.glyph ?? '';
 const labelOf = (kind: ReactionKind) =>
   REACTIONS.find((reaction) => reaction.kind === kind)?.label ?? kind;
+
+/**
+ * **What lifts a 32pt reaction chip to 44pt, inside its row** (design-system v3 A.2 #13).
+ *
+ * Slop only answers inside the parent's bounds, and the filter row has no padding above its
+ * first line (the sheet's handle sits right over it) but `space[3]` below its last. So the
+ * whole 12pt goes below: 32 + 12 = 44 without drawing anything larger. When the chips wrap,
+ * a first-line chip's slop crosses the 8pt line gap into the second line's band, where the
+ * second line's chips are later siblings and are hit-tested first, so a chip's own drawn
+ * area is never taken. Horizontally, half the `space[2]` gap each side, like `chipHitSlop`.
+ */
+const CHIP_SLOP = {
+  top: 0,
+  bottom: theme.layout.minTapTarget - theme.layout.control.chipHeight,
+  left: theme.space[1],
+  right: theme.space[1],
+};
 
 const styles = StyleSheet.create({
   filters: {

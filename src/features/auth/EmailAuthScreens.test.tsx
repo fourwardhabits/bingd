@@ -1,7 +1,9 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Keyboard } from 'react-native';
+import { Keyboard, StyleSheet } from 'react-native';
 
+import { closest, hitRect, parentView, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 /**
  * The three auth screens, under the founder's final 2026-08-26 decision.
@@ -100,6 +102,44 @@ describe('Sign in', () => {
     expect(view.queryByText('Sign in without a password')).toBeNull();
   });
 
+  /**
+   * **Sign in with password answers a full 44pt, and the column has not moved** (A11Y-44,
+   * design-system v3 A.2 #7). It is an `sm` button, 36pt with 4pt of slop either side; the
+   * gap above it held the top 4, but nothing was below it inside its column, so RN clipped
+   * the bottom 4 and it answered 40. Laid out from the rendered styles at 360pt with the
+   * slop clipped by every box up to the screen's content (`hit-rect.ts`).
+   */
+  it('gives the password button a 44pt target without moving the column', async () => {
+    const view = await renderWithProviders(<SignInScreen />);
+    await waitFor(() => expect(view.getByText('Continue with Apple')).toBeTruthy());
+
+    const button = view.getByRole('button', {
+      name: 'Sign in with password',
+    }) as unknown as Host;
+    const more = parentView(button);
+    // The airy screen's content: the column that centres the four blocks.
+    const content = closest(
+      more,
+      (node) =>
+        (StyleSheet.flatten(node.props.style as never) as { justifyContent?: string } | undefined)
+          ?.justifyContent === 'center',
+    );
+    const hit = hitRect(content, button, 360);
+
+    expect(hit.box.height).toBe(theme.layout.control.compactAction.visibleHeight);
+    expect(hit.height).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    // The 4pt under the button is the column's own, and the column takes no more room for
+    // it: what it adds as padding it gives back as margin, so nothing in the centred stack
+    // moves. That 4pt lies in the screen's bottom padding, inside the content's bounds.
+    const moreStyle = StyleSheet.flatten(more.props.style as never) as {
+      paddingBottom: number;
+      marginBottom: number;
+    };
+    expect(moreStyle.paddingBottom + moreStyle.marginBottom).toBe(0);
+    const moreBox = hit.boxes.get(more)!;
+    expect(moreBox.top + moreBox.height).toBeLessThanOrEqual(hit.boxes.get(content)!.height);
+  });
+
   it('keeps password sign-in as a secondary option, under a heading that says so', async () => {
     const view = await renderWithProviders(<SignInScreen />);
 
@@ -169,7 +209,9 @@ describe('Sign in', () => {
       fireEvent.press(view.getByText('Continue with email'));
     });
 
-    await waitFor(() => expect(view.getByText(/cannot send codes right now/)).toBeTruthy());
+    // A Field's error/hint caption is drawn but hidden from the a11y tree (the input speaks
+    // it), so queries for it include hidden elements (design-system v3 A.2 #26).
+    await waitFor(() => expect(view.getByText(/cannot send codes right now/, { includeHiddenElements: true })).toBeTruthy());
     expect(mockNav.pushed).toEqual([]);
   });
 
@@ -290,7 +332,7 @@ describe('Password sign-in', () => {
     });
 
     await waitFor(() =>
-      expect(view.getByText('We could not sign you in with that email and password.')).toBeTruthy(),
+      expect(view.getByText('We could not sign you in with that email and password.', { includeHiddenElements: true })).toBeTruthy(),
     );
     expect(mockNav.pushed).toEqual([]);
     // Not routed anywhere to "finish" or "verify" an account: there is no such state on
@@ -400,7 +442,7 @@ describe('The code screen', () => {
 
       expect(mockAuth.sendCode).toHaveBeenCalledWith('ada@bingd.app');
       expect(mockAuth.sendCode).toHaveBeenCalledTimes(1);
-      expect(view.getByText(/New code sent/)).toBeTruthy();
+      expect(view.getByText(/New code sent/, { includeHiddenElements: true })).toBeTruthy();
       // And straight back into a cooldown, so the next tap cannot be immediate.
       expect(view.getByText(/^Resend code in/)).toBeTruthy();
     } finally {
@@ -447,7 +489,7 @@ describe('The code screen', () => {
       await act(async () => {
         fireEvent.press(view.getByText('Continue'));
       });
-      expect(view.getByText(/That code did not work/)).toBeTruthy();
+      expect(view.getByText(/That code did not work/, { includeHiddenElements: true })).toBeTruthy();
 
       await act(async () => {
         jest.advanceTimersByTime(61_000);
@@ -458,9 +500,9 @@ describe('The code screen', () => {
 
       // The rejection was about a code that has just been superseded, so it goes with
       // it — and the digits go too, because they belong to that code.
-      expect(view.queryByText(/That code did not work/)).toBeNull();
+      expect(view.queryByText(/That code did not work/, { includeHiddenElements: true })).toBeNull();
       expect(view.getByLabelText('Six-digit code').props.value).toBe('');
-      expect(view.getByText(/New code sent/)).toBeTruthy();
+      expect(view.getByText(/New code sent/, { includeHiddenElements: true })).toBeTruthy();
     } finally {
       jest.useRealTimers();
     }
@@ -498,8 +540,8 @@ describe('The code screen', () => {
 
       // Not an error, and not the lie that a new code went out.
       expect(view.queryByText(/cannot send/i)).toBeNull();
-      expect(view.queryByText(/New code sent/)).toBeNull();
-      expect(view.getByText(/already on its way/)).toBeTruthy();
+      expect(view.queryByText(/New code sent/, { includeHiddenElements: true })).toBeNull();
+      expect(view.getByText(/already on its way/, { includeHiddenElements: true })).toBeTruthy();
 
       // Re-armed to the server's 5 seconds, not to a fresh 60.
       expect(view.getByText(/^Resend code in 0:0\d$/)).toBeTruthy();
@@ -532,7 +574,7 @@ describe('The code screen', () => {
 
       // Whatever GoTrue said, as `sendEmailCode` maps it — and nothing about whether
       // this address has an account.
-      expect(view.getByText(/cannot send codes right now/)).toBeTruthy();
+      expect(view.getByText(/cannot send codes right now/, { includeHiddenElements: true })).toBeTruthy();
       expect(view.queryByText(/no account/i)).toBeNull();
 
       // The screen is not permanently disabled by one failure: the same countdown runs
@@ -593,7 +635,7 @@ describe('The code screen', () => {
       fireEvent.press(view.getByText('Continue'));
     });
 
-    await waitFor(() => expect(view.getByText(/That code did not work/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/That code did not work/, { includeHiddenElements: true })).toBeTruthy());
   });
 
   it('will not submit a code that is not six digits', async () => {
