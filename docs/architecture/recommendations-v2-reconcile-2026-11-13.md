@@ -21,10 +21,10 @@ merge; everything after it is a separate commit.
 Both V2 migrations sorted before production's latest (`20261115000100`), so `db push` would
 have refused them. Neither was ever applied anywhere.
 
-| Before | After |
-|---|---|
-| `20261111000100_a_wall_in_every_language_you_love.sql` | `20261116000100_a_wall_in_every_language_you_love.sql` |
-| `20261111000200_people_whose_taste_you_share.sql` | `20261116000200_people_whose_taste_you_share.sql` |
+| Before | After (2026-11-13) | After wave-2 (2026-11-14, §11) |
+|---|---|---|
+| `20261111000100_a_wall_in_every_language_you_love.sql` | `20261116000100_a_wall_in_every_language_you_love.sql` | `20261122000100_a_wall_in_every_language_you_love.sql` |
+| `20261111000200_people_whose_taste_you_share.sql` | `20261116000200_people_whose_taste_you_share.sql` | `20261122000200_people_whose_taste_you_share.sql` |
 
 Neither file defines a function that any `20261112*`–`20261115*` migration defines, so moving
 them after WS5 changes nothing either side creates. `20261117*` is left to the username-login
@@ -32,7 +32,7 @@ branch. References updated in the A2 migration, `recommendation-engine`, `taste-
 `function-grants`, `moderation` and the race test, `recommendations-v2.md`, and two release
 notes on main that named the old versions.
 
-The tail of the ordered list on the branch (191 files):
+The tail of the ordered list on the branch as of 2026-11-13 (191 files; superseded by §11):
 
 ```
 20261112000100_affinity_ends_at_a_block.sql

@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import { raceContext } from './_shared.mjs';
 
 /**
- * The taste-neighbour cache under concurrent reads (20261116000200, Engine V2 A2).
+ * The taste-neighbour cache under concurrent reads (20261122000200, Engine V2 A2).
  *
  * **N1. Two stale reads refresh once.** `collaborative_candidates` refreshes a stale
  * reader's neighbours inside the read. Two tabs, or a retry, arriving together must not

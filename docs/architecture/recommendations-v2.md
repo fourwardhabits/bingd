@@ -134,7 +134,7 @@ needed in either direction. Telemetry: `for_you_slate_shown.engine`, `.wall_lang
 
 ## 2. A2 — collaborative evidence from taste-compatible people
 
-Migration `20261116000200_people_whose_taste_you_share.sql`; client in `rank.ts`
+Migration `20261122000200_people_whose_taste_you_share.sql`; client in `rank.ts`
 (`ENGINES.v2_hybrid`) and `use-for-you.ts` (`collaborative_candidates`). Engine
 `v2_hybrid` is everything `v2_metadata` does plus one source and one scoring term.
 

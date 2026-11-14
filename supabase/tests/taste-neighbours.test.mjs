@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { createTestDb } from './harness.mjs';
+import { createTestDb, one } from './harness.mjs';
+import { tvRanking } from './tv-ranking-support.mjs';
 
 /**
- * Recommendation Engine V2, A2 (20261116000200): taste-compatible collaborative evidence.
+ * Recommendation Engine V2, A2 (20261122000200): taste-compatible collaborative evidence.
  *
  * Three things matter more than the ranking quality, and are asserted here:
  *
@@ -528,5 +529,111 @@ describe('television', () => {
     assert.ok(hit, 'a disputed row: evidence against the show');
     assert.ok(hit.support < 0, `support ${hit.support}`);
     assert.equal(hit.endorsers, 0);
+  });
+});
+
+/**
+ * A kept show (Keep Show, 20261120000100; wave-2 reconcile 2026-11-14).
+ *
+ * After ranking a season the reader may answer "my whole-show ranking stands". That writes
+ * `show_reaffirmations` and nothing else, so the show's score input is still its explicit
+ * `tv_shows` ranking. V1 reads that ranking directly — the client's `scoreFor` over the
+ * `tv_shows` pool (`use-for-you.ts`), `public_scores`, `taste_match` — and
+ * `_effective_show_score` (20261119000100, read only by `community_score`) answers the same
+ * number with source `explicit`. V2 must agree: `_scored_rankings` (the input of
+ * `_taste_matches` and the collaborative roll-up) gives the show the same score, the batch
+ * Taste equals `taste_match`, and a kept neighbour's opinion of the series is the show, not
+ * the season they just ranked.
+ *
+ * Rankings go through the real ranking flow (`rank_start` / `rank_answer`), so the season
+ * placement `keep_show` takes is a real one.
+ */
+describe('a kept show (season ranked, show kept)', () => {
+  const ctx = { t: null, user: null, seq: 0 };
+  const tv = tvRanking(ctx);
+
+  /** Ranks three other shows, the main show in `showBucket`, one season Loved, then keeps. */
+  const keptShow = async (who, showBucket) => {
+    ctx.t = t;
+    ctx.user = who;
+    ctx.seq += 1;
+    await t.actAs(who);
+    const { main, seasons } = await tv.fixture();
+    await tv.rank(main, showBucket, showBucket === 'loved' ? 60 : 10);
+    const before = (await t.sql(`select bucket, position from rankings where user_id = $1 and media_item_id = $2`, [who, main])).rows[0];
+    const season = await tv.rank(seasons[1], 'loved', 50);
+    const kept = await one(t.db, `select keep_show($1) as r`, [season.placement_id]);
+    assert.equal(kept.status, 'kept');
+    const after = (await t.sql(`select bucket, position from rankings where user_id = $1 and media_item_id = $2`, [who, main])).rows[0];
+    assert.deepEqual(after, before, 'keeping moves nothing');
+    await t.actAs(null);
+    return { main, season: seasons[1] };
+  };
+
+  it('gives V1 and V2 the same score input for the show: the explicit whole-show ranking', async () => {
+    const keeper = await twin('kept_keeper');
+    const { main, season } = await keptShow(keeper, 'fine');
+
+    // V2: the scored rows `_taste_matches` and `collaborative_candidates` read.
+    const v2 = (await t.sql(`select media_item_id, category, score from _scored_rankings($1::uuid[], null, $2::uuid[])`, [[keeper], [main, season]])).rows;
+    const v2Show = v2.find((r) => r.media_item_id === main);
+    const v2Season = v2.find((r) => r.media_item_id === season);
+    assert.equal(v2Show.category, 'tv_shows');
+    assert.equal(v2Season.category, 'tv_seasons');
+
+    // V1: the canonical score of the same row (the arithmetic the client's `scoreFor` runs
+    // over the `tv_shows` pool), and the WS-COMM/WS-TVC effective score.
+    await t.actAs(keeper);
+    const v1 = (await t.sql(`select media_item_id, category, score from public_scores($1::uuid[], $2::uuid[])`, [[keeper], [main, season]])).rows;
+    await t.actAs(null);
+    const v1Show = v1.find((r) => r.media_item_id === main);
+    const effective = (await t.sql(`select * from _effective_show_score($1, $2)`, [keeper, main])).rows[0];
+
+    assert.equal(effective.source, 'explicit', 'a ranked show is its own score, kept or not');
+    assert.equal(effective.season_count, 1);
+    assert.equal(Number(v2Show.score), Number(v1Show.score), 'V2 reads the show score V1 reads');
+    assert.equal(Number(v2Show.score), Number(effective.score), 'and the one community_score reads');
+    assert.ok(Number(v2Season.score) > Number(v2Show.score), 'the fixture tells the season from the show');
+  });
+
+  it('keeps the batch Taste equal to taste_match for a reader and a neighbour who kept the show', async () => {
+    const keeper = await twin('kept_tm');
+    const { main, season } = await keptShow(keeper, 'fine');
+    const me = await twin('kept_tm_reader');
+    await rank(me, [[main, 'loved']], 'tv_shows');
+    await rank(me, [[season, 'fine']], 'tv_seasons');
+
+    const batch = (await t.sql(`select * from _taste_matches($1, $2::uuid[])`, [me, [keeper]])).rows[0];
+    await t.actAs(me);
+    const single = (await t.sql(`select * from taste_match($1)`, [keeper])).rows[0];
+    await t.actAs(null);
+    assert.equal(batch?.common_count ?? 0, single.common_count, 'same unit count');
+    assert.equal(batch?.score ?? null, single.score, 'same score');
+    assert.ok(single.score != null, 'a real score');
+  });
+
+  it("takes a kept neighbour's whole-show ranking as their opinion, not the season they just ranked", async () => {
+    const shows = [];
+    for (const name of ['kept_nb_a', 'kept_nb_b']) {
+      const who = await twin(name);
+      shows.push((await keptShow(who, 'not_for_me')).main);
+    }
+    // Two neighbours, two different `Shameless` rows (each fixture makes its own), so make
+    // the second neighbour rank the first's show and season the same way, through the flow.
+    const [show] = shows;
+    const second = (await t.sql(`select user_id from rankings where media_item_id = $1`, [shows[1]])).rows[0].user_id;
+    ctx.user = second;
+    await t.actAs(second);
+    const seasonOfShow = (await t.sql(`select id from media_items where parent_id = $1 and kind = 'season' order by id limit 1`, [show])).rows[0].id;
+    await tv.rank(show, 'not_for_me', 5);
+    const placed = await tv.rank(seasonOfShow, 'loved', 55);
+    assert.equal((await one(t.db, `select keep_show($1) as r`, [placed.placement_id])).status, 'kept');
+    await t.actAs(null);
+
+    await enable();
+    const hit = (await collaborative(reader, 'series')).find((row) => row.media_item_id === show);
+    assert.ok(hit, 'two kept neighbours: a disputed row, evidence against the show');
+    assert.ok(hit.support < 0, `support ${hit.support}`);
+    assert.equal(hit.endorsers, 0, 'the Loved season is not an endorsement of a show ranked Not for me');
   });
 });

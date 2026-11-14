@@ -882,8 +882,8 @@ biased towards the oldest follows (independent review of B1, 2026-11-11).
 **Migration order with the other open work (2026-11-11).** This branch's migrations are
 `20261028000100`, `20261028000200`, `20261031000100`, `20261101000100` (from #220, dated when
 they were written) and `20261112000100`. The open Engine V2 PRs add `20261111000100` (#250)
-and `20261111000200` (#251) (renumbered to `20261116000100` / `20261116000200` on
-`rec/v2-reconcile-1112`; neither was ever applied), the reaction-summary draft #249 adds `20261110000100`, and the
+and `20261111000200` (#251) (renumbered to `20261116000100` / `20261116000200` on `rec/v2-reconcile-1112`, then to
+`20261122000100` / `20261122000200` on the wave-2 staging line; neither was ever applied), the reaction-summary draft #249 adds `20261110000100`, and the
 IMDb import (rebuilt on this branch as `claude/imdb-import-on-254`) adds `20261113000100`.
 The Engine V2 migrations define nothing this branch defines, so with them a fresh database
 applies everything correctly in file order (checked: the A stack and this branch merged
