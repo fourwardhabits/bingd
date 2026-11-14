@@ -1,7 +1,9 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Keyboard } from 'react-native';
+import { Keyboard, StyleSheet } from 'react-native';
 
+import { closest, hitRect, parentView, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 /**
  * The three auth screens, under the founder's final 2026-08-26 decision.
@@ -98,6 +100,44 @@ describe('Sign in', () => {
     expect(view.queryByLabelText('Password')).toBeNull();
     expect(view.queryByText('Create account')).toBeNull();
     expect(view.queryByText('Sign in without a password')).toBeNull();
+  });
+
+  /**
+   * **Sign in with password answers a full 44pt, and the column has not moved** (A11Y-44,
+   * design-system v3 A.2 #7). It is an `sm` button, 36pt with 4pt of slop either side; the
+   * gap above it held the top 4, but nothing was below it inside its column, so RN clipped
+   * the bottom 4 and it answered 40. Laid out from the rendered styles at 360pt with the
+   * slop clipped by every box up to the screen's content (`hit-rect.ts`).
+   */
+  it('gives the password button a 44pt target without moving the column', async () => {
+    const view = await renderWithProviders(<SignInScreen />);
+    await waitFor(() => expect(view.getByText('Continue with Apple')).toBeTruthy());
+
+    const button = view.getByRole('button', {
+      name: 'Sign in with password',
+    }) as unknown as Host;
+    const more = parentView(button);
+    // The airy screen's content: the column that centres the four blocks.
+    const content = closest(
+      more,
+      (node) =>
+        (StyleSheet.flatten(node.props.style as never) as { justifyContent?: string } | undefined)
+          ?.justifyContent === 'center',
+    );
+    const hit = hitRect(content, button, 360);
+
+    expect(hit.box.height).toBe(theme.layout.control.compactAction.visibleHeight);
+    expect(hit.height).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    // The 4pt under the button is the column's own, and the column takes no more room for
+    // it: what it adds as padding it gives back as margin, so nothing in the centred stack
+    // moves. That 4pt lies in the screen's bottom padding, inside the content's bounds.
+    const moreStyle = StyleSheet.flatten(more.props.style as never) as {
+      paddingBottom: number;
+      marginBottom: number;
+    };
+    expect(moreStyle.paddingBottom + moreStyle.marginBottom).toBe(0);
+    const moreBox = hit.boxes.get(more)!;
+    expect(moreBox.top + moreBox.height).toBeLessThanOrEqual(hit.boxes.get(content)!.height);
   });
 
   it('keeps password sign-in as a secondary option, under a heading that says so', async () => {

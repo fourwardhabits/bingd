@@ -1,6 +1,7 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
+import { hitRect, parentView, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 import { fontFamily, theme } from '@/ui/tokens';
 
@@ -1223,6 +1224,90 @@ describe('the backlog and Refine cards', () => {
     );
     await fireEvent.press(view.getByRole('button', { name: 'Refine rankings' }));
     expect(mockPush).toHaveBeenCalledWith('/rank-session?medium=movies&start=refine');
+  });
+
+  /**
+   * **Every card's `sm` buttons answer a full 44pt, and the card is the size it was**
+   * (A11Y-44, design-system v3 A.2 #7). `Button` gives `sm` 4pt of slop above and below,
+   * but RN delivers no touch outside a parent's bounds: `nudgeActions` had nothing under
+   * the buttons, so the bottom 4pt was clipped and all seven answered 40. Measured, not
+   * added up: the card is laid out from its rendered styles and each button's slop is
+   * clipped by every box it sits in (`hit-rect.ts`).
+   */
+  describe('touch targets', () => {
+    const TARGET = theme.layout.minTapTarget;
+    // The card at 360pt: the screen less the gutter either side.
+    const CARD_WIDTH = 360 - theme.layout.gutter * 2;
+    type Padded = {
+      paddingTop: number;
+      paddingBottom: number;
+      borderWidth?: number;
+    };
+    const padded = (node: Host) => StyleSheet.flatten(node.props.style as never) as Padded;
+
+    const check = (view: Awaited<ReturnType<typeof open>>, names: string[]) => {
+      const buttons = names.map((name) => view.getByRole('button', { name }) as unknown as Host);
+      const actions = parentView(buttons[0]!);
+      const card = parentView(actions);
+      for (const button of buttons) {
+        expect(parentView(button)).toBe(actions);
+        const hit = hitRect(card, button, CARD_WIDTH);
+        // The chrome is still the 36pt `sm` button; what a finger can hit is 44.
+        expect(hit.box.height).toBe(theme.layout.control.compactAction.visibleHeight);
+        expect(hit.height).toBeGreaterThanOrEqual(TARGET);
+      }
+
+      // The card is the size it was: the same vertical padding in total (12 + 12 around
+      // the copy and buttons, 4 above the buttons), and still 12 from the buttons' chrome
+      // to the card's edge below.
+      const cardStyle = padded(card);
+      const actionsStyle = padded(actions);
+      expect(
+        cardStyle.paddingTop +
+          cardStyle.paddingBottom +
+          actionsStyle.paddingTop +
+          actionsStyle.paddingBottom,
+      ).toBe(theme.space[3] * 2 + theme.space[1]);
+      const boxes = hitRect(card, buttons[0]!, CARD_WIDTH).boxes;
+      const cardBox = boxes.get(card)!;
+      const chrome = boxes.get(buttons[0]!)!;
+      const border = cardStyle.borderWidth ?? 0;
+      expect(cardBox.height - border - (chrome.top + chrome.height)).toBe(theme.space[3]);
+      expect(boxes.get(actions)!.height).toBe(TARGET);
+    };
+
+    it('the unranked card (backlog on): View unranked and Dismiss', async () => {
+      mockTables.user_media = [watched('m1', 'movie'), watched('m2', 'movie')];
+      mockRpcAnswers.ranking_backlog = backlog(3);
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('collection-unranked-card')).toBeTruthy());
+      check(view, ['View unranked', 'Dismiss']);
+    });
+
+    it('the unranked card (backlog off): Rank and Dismiss', async () => {
+      mockTables.user_media = [watched('m1', 'movie')];
+      const view = await open();
+      await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+      check(view, ['Rank', 'Dismiss']);
+    });
+
+    it('Start ranking on Unranked', async () => {
+      mockTables.user_media = [watched('m1', 'movie')];
+      mockRpcAnswers.ranking_backlog = backlog(2);
+      mockParams.show = 'unranked';
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('collection-start-ranking-card')).toBeTruthy());
+      check(view, ['Start ranking']);
+    });
+
+    it('the Refine card: Refine rankings and Not now', async () => {
+      mockTables.user_media = [watched('m1', 'movie')];
+      mockRpcAnswers.ranking_backlog = backlog(0);
+      mockRpcAnswers.refine_candidates = strongRefine();
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('collection-refine-card')).toBeTruthy());
+      check(view, ['Refine rankings', 'Not now']);
+    });
   });
 
   it('one card slot: the unranked card wins over Refine', async () => {

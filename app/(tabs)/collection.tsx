@@ -981,14 +981,29 @@ const styles = StyleSheet.create({
     marginTop: theme.space[3],
     marginBottom: theme.space[2],
     paddingHorizontal: theme.space[3],
-    paddingVertical: theme.space[3],
+    paddingTop: theme.space[3],
+    // `space[3]` below the buttons, as above the heading: `space[2]` here plus the
+    // `space[1]` that `nudgeActions` holds under them (A11Y-44).
+    paddingBottom: theme.space[2],
     borderRadius: theme.radius.control,
     backgroundColor: theme.surface.raised,
     borderColor: theme.border.hairline,
     borderWidth: StyleSheet.hairlineWidth * 2,
     gap: theme.space[2],
   },
-  nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
+  /**
+   * **`space[1]` above and below, so the `sm` buttons' own 4pt slop is inside this row**
+   * (A11Y-44, design-system v3 A.2 #7). RN delivers no touch outside a parent's bounds, so
+   * with nothing below the buttons the bottom 4pt of slop was clipped and every card's
+   * buttons answered 40pt. The 4pt below came out of the card's bottom padding, so the card,
+   * the buttons and the space under them are all the size they were.
+   */
+  nudgeActions: {
+    flexDirection: 'row',
+    gap: theme.space[2],
+    paddingTop: theme.space[1],
+    paddingBottom: theme.space[1],
+  },
 
   count: {
     paddingHorizontal: theme.layout.gutter,
