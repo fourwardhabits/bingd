@@ -27,15 +27,18 @@ const MODES = [
  * `MediumSelector`'s selected treatment — sunken ground, Maroon ink (`MEDIUM_SELECTED`) —
  * so a browse row's two choosers read as one family; the other cell is secondary ink.
  *
- * Each cell is a full 44pt target wide, and drawn 8pt shorter with the vertical slop
- * giving it back, so the pair sits on a 44pt row without towering over a heading. The
- * cells only ever touch each other side to side, where no slop is added, so neither can
- * take a press from the other.
+ * **Each cell is a real 44pt target** (Codex review, #288). The pill is drawn 36pt tall so
+ * it does not tower over a heading, and used to get its 44 back from vertical `hitSlop` —
+ * which React Native does not honour past the parent's bounds, and the parent was the
+ * 36pt pill. So each `Pressable` is now 44 × 44 and the pill is inset inside the group:
+ * its outline (`frame`) sits behind the cells, and each cell draws its 36pt segment
+ * (`segment`) centred in its own target. Nothing on screen moves; the touch area is real.
  *
  * `radiogroup` / `radio`: neither choice is "off"; one is always the view in force.
  * `IconToggle` and the Feed's control are untouched by this.
  */
 export function ViewModeToggle({ value, onChange, label = 'View', testID }: ViewModeToggleProps) {
+  const base = testID ?? 'view-mode';
   return (
     <View
       style={styles.group}
@@ -43,6 +46,8 @@ export function ViewModeToggle({ value, onChange, label = 'View', testID }: View
       accessibilityLabel={label}
       testID={testID}
     >
+      {/* The pill's outline and ground, behind the cells and never pressed. */}
+      <View pointerEvents="none" style={styles.frame} testID={`${base}-frame`} />
       {MODES.map((mode, index) => {
         const selected = mode.value === value;
         return (
@@ -54,20 +59,27 @@ export function ViewModeToggle({ value, onChange, label = 'View', testID }: View
             onPress={() => {
               if (!selected) onChange(mode.value);
             }}
-            hitSlop={{ top: SLOP, bottom: SLOP }}
-            testID={testID ? `${testID}-${mode.value}` : `view-mode-${mode.value}`}
-            style={({ pressed }) => [
-              styles.cell,
-              index > 0 && styles.divider,
-              selected && styles.cellOn,
-              pressed && styles.pressed,
-            ]}
+            testID={`${base}-${mode.value}`}
+            style={styles.cell}
           >
-            <Ionicons
-              name={mode.icon}
-              size={theme.layout.icon.sm}
-              color={selected ? MEDIUM_SELECTED.ink : theme.text.secondary}
-            />
+            {({ pressed }) => (
+              <View
+                testID={`${base}-${mode.value}-segment`}
+                style={[
+                  styles.segment,
+                  index === 0 ? styles.first : styles.divider,
+                  index === MODES.length - 1 && styles.last,
+                  selected && styles.segmentOn,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Ionicons
+                  name={mode.icon}
+                  size={theme.layout.icon.sm}
+                  color={selected ? MEDIUM_SELECTED.ink : theme.text.secondary}
+                />
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -75,29 +87,49 @@ export function ViewModeToggle({ value, onChange, label = 'View', testID }: View
   );
 }
 
-/** The cells are drawn this much shorter than 44 on each side; slop gives it back. */
-const SLOP = theme.space[1];
+/** The pill's height inside each 44pt cell: 8pt shorter, 4pt above and below. */
+const INSET = theme.space[1];
+const BORDER = StyleSheet.hairlineWidth * 2;
+/** The pill's inner corner, which the end segments' ground follows (was `overflow`). */
+const INNER_RADIUS = Math.max(0, theme.radius.control - BORDER);
 
 const styles = StyleSheet.create({
+  // The group is the targets' height; the border's width either side keeps the cells
+  // where they sat inside the old pill's outline.
   group: {
     flexDirection: 'row',
     flexShrink: 0,
+    height: theme.layout.minTapTarget,
+    paddingHorizontal: BORDER,
+  },
+  // The pill exactly as it was drawn: outline, raised ground, 36pt inside its border.
+  frame: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: INSET - BORDER,
+    bottom: INSET - BORDER,
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderWidth: BORDER,
     borderColor: theme.border.hairline,
-    overflow: 'hidden',
     backgroundColor: theme.surface.raised,
   },
   cell: {
     width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget - SLOP * 2,
+    height: theme.layout.minTapTarget,
+    paddingVertical: INSET,
+  },
+  segment: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  first: { borderTopLeftRadius: INNER_RADIUS, borderBottomLeftRadius: INNER_RADIUS },
+  last: { borderTopRightRadius: INNER_RADIUS, borderBottomRightRadius: INNER_RADIUS },
   divider: {
-    borderLeftWidth: StyleSheet.hairlineWidth * 2,
+    borderLeftWidth: BORDER,
     borderLeftColor: theme.border.hairline,
   },
-  cellOn: { backgroundColor: MEDIUM_SELECTED.background },
+  segmentOn: { backgroundColor: MEDIUM_SELECTED.background },
   pressed: { opacity: 0.7 },
 });

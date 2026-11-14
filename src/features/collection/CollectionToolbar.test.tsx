@@ -151,16 +151,13 @@ describe('the toolbar', () => {
       const style = StyleSheet.flatten(
         typeof cell.props.style === 'function' ? cell.props.style({ pressed: false }) : cell.props.style,
       );
-      // 44 wide; drawn 8pt shorter, with the vertical slop giving the 44 back.
+      // A real 44 × 44 target (Codex review, #288): no slop, the pill drawn inside it.
       expect(style.width).toBe(theme.layout.minTapTarget);
-      expect(style.height + cell.props.hitSlop.top + cell.props.hitSlop.bottom).toBe(
-        theme.layout.minTapTarget,
-      );
+      expect(style.height).toBe(theme.layout.minTapTarget);
+      expect(cell.props.hitSlop).toBeUndefined();
     }
-    const chosen = view.getByRole('radio', { name: 'List view' });
     expect(
-      StyleSheet.flatten(typeof chosen.props.style === 'function' ? chosen.props.style({ pressed: false }) : chosen.props.style)
-        .backgroundColor,
+      StyleSheet.flatten(view.getByTestId('collection-view-mode-list-segment').props.style).backgroundColor,
     ).toBe(theme.surface.sunken);
     expect(view.getByRole('radio', { name: 'List view' }).props.accessibilityState).toMatchObject({
       selected: true,
