@@ -635,3 +635,95 @@ changed, skipped or loosened.
 | `v2_metadata_social`: "following adds candidates but never score" under the spec's "following alone has no effect" | **Founder's call** (§10.5) |
 | Re-run the real-history replay on this base | **Needs the founder's go-ahead**: the export reads production. Not run here; only `--synthetic` ran |
 | Collaborative roll-up for season-only neighbours: best season (A2 today) or season mean (`community_score`) | Keep best season until the real replay can compare them (§11.3) |
+
+## 12. Wave-2 fix (2026-11-14): two Codex P2s on #301
+
+No migration changed. The two Rec V2 migrations (`20261122000100`, `20261122000200`) are
+byte-identical to what staging has applied; nothing was applied to any database.
+
+### 12.1 An engine rollback reaches a mounted reader
+
+**Before.** `useRecommendationEngine` had a 30-minute `staleTime` and nothing else, and stale
+data is only re-read on a mount, a focus or a reconnect. A For You tab left open kept the
+engine it launched with for as long as it stayed open. Try again refetched the slate under the
+old key, which re-ran the old engine's `queryFn`: under a rolled-back `v2_metadata` that is a
+`catalogue_candidates` call for a wall the server no longer wants.
+
+**After.**
+
+- `use-engine.ts`: `refetchInterval: 30 * 60_000` (`ENGINE_REREAD_MS`), the same window as the
+  `staleTime`, so a mounted reader re-reads the engine once per For You staleness window. Any
+  error is still V1, and a request that throws rather than returning an error is now V1 too.
+- `use-for-you.ts` `refetch()` (Try again, and the pull on a failed wall) re-asks the engine
+  first. If the answer differs from the engine the wall was drawn with, the slate key changes
+  with it and the new engine's slate draws on its own; the old key is not refetched. If it is the
+  same, the slate is refetched as before.
+- Tests (`for-you-engine-rollback.test.tsx`, through the real hook with the Supabase boundary
+  mocked; all three fail on the previous code):
+  1. engine cached as `v2_metadata`, server flipped to `v1`, `refetch()`: the slate key and
+     `data.engine` become `v1`, `recommendation_engine` is asked once, `catalogue_candidates`
+     is not called, V1's `social_candidates` is;
+  2. with the engine unchanged, `refetch()` still refetches the slate;
+  3. with fake timers, nothing is re-read a minute before the window; at the window the engine
+     is re-read and the wall follows the rollback with no catalogue call.
+
+**Not changed.** Pull-to-refresh on a populated wall goes through `refreshRecommendations()`,
+which rearranges from the cache and calls no `refetch()`, so it does not re-ask the engine
+(open decision, §12.4). The interval covers that reader within one window.
+
+### 12.2 The replay mirrors `social_candidates` as the SQL does
+
+**Before.** `socialMirror` filtered to the wall's medium and rolled seasons up to their show
+*before* counting and limiting, so each wall got its own 40 and a show's seasons counted as one
+title once per followee.
+
+**After.** The SQL first: every Liked ranking by a followee, counted per **raw media id**
+(films, seasons and whole shows together), less what the reader has ranked or logged by raw
+id, ordered by count desc then id, **one global limit of 40**. Then the client: the Films wall
+keeps films, the TV wall maps through `socialSeriesFrom`. Watchlist and dismissal exclusions
+are not mirrored (the export has neither). New test in `replay.test.ts` with mixed film/TV
+followees where the per-wall and global limits disagree on both walls (old: 40 films and two
+shows; SQL: 25 films and one show).
+
+Synthetic replay (`node eval/rec-v2-replay/run.mjs --synthetic`, 1,196 accounts). The pre-fix
+code on the same base reproduces the earlier figures exactly, so the change below is the mirror
+alone. §7, §10.1 and §10.3 now carry the new figures.
+
+| Synthetic, all accounts | Before | After |
+|---|---|---|
+| Films, V1 pool recall (via social) | 0.200 (0.080) | 0.191 (0.070) |
+| Films, V2 metadata − V1: pool recall / R@50 | −0.067 / +0.003 | −0.058 / +0.001 |
+| Films, prototype − V1: pool recall / non-English | +0.005 / +0.027 | +0.006 / +0.028 |
+| TV, V1 R@50 / pool recall (via social) / pool size | 0.320 / 0.342 (0.259) / 43.0 | 0.216 / 0.216 (0.105) / 22.7 |
+| TV, V2 metadata − V1: R@50 | −0.161 ± 0.043 | −0.058 ± 0.032 |
+| TV, `v2_metadata+social` − V1: R@50 | +0.006 ± 0.015 | +0.016 ± 0.011 |
+
+The TV wall moved most: the old mirror gave it 40 shows of its own, where the shipped server
+shares 40 rows between both media and counts each season separately. The synthetic TV gap the
+coordinator was asked to watch (§7) is about a third of what it read. The real replay was not
+re-run (it reads production and needs the founder's go-ahead).
+
+### 12.3 Gates (this section's head)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | 0 errors |
+| `eslint .` | 0 errors, 78 warnings (all pre-existing; 0 in changed files) |
+| `npm run test:db` | **3215 / 3215** |
+| `test:race` (`--test-timeout=300000`) | **200 / 200** |
+| `npm run test:race:mutants` | 23 / 23 mutations detected, 2 / 2 controls held |
+| `jest --maxWorkers=2` (full, after the DB gates) | 347 suites passed, 1 skipped; **6624 passed**, 4 skipped |
+| Rec V2 evaluation (`evaluation/`, `engine-v2`, `for-you-engine-v2*`, `for-you-engine-rollback`, `tv-shows`, `eval/rec-v2-replay`) | 7 suites, 83 passed, 2 skipped; `export.test.mjs` 3 / 3 |
+| `node eval/rec-v2-replay/run.mjs --synthetic` | exit 0 (synthetic only) |
+| `expo export --platform all --clear` (placeholder `EXPO_PUBLIC_SUPABASE_URL` / `_ANON_KEY`) | exit 0: iOS 2567, Android 2693, web 2291 modules |
+| `@expo/fingerprint` | **unchanged**: iOS `bf0ce597…`, Android `f4062003…` on both `fd9eb09` and head |
+
+Race and mutant suites ran as an unprivileged local user (embedded `initdb` refuses root), as
+in §11.5.
+
+### 12.4 Open decisions
+
+| Decision | Recommended default |
+|---|---|
+| Should pull-to-refresh on a populated wall also re-ask the engine? (It adds a network read to a gesture that makes none today; the interval already bounds a rollback to 30 min) | **No**, unless a faster rollback than one window is wanted |
+| A transient engine-read failure on the 30-minute re-read now drops a V2 reader to V1 until the next read, because "any error → V1" | Keep (it is the fail-safe direction); revisit if telemetry shows engine flapping |
