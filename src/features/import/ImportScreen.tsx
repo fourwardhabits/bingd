@@ -448,6 +448,7 @@ function Body({
           onRank={onRank}
           onDone={onLeave}
           onContinue={carryOn}
+          onReset={onReset}
         />
       );
 

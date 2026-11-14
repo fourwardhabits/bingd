@@ -619,10 +619,10 @@ describe('an import that is already happening', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    // And a way on. *Import another file* was removed by IMP1113-UI (founder): the way on
-    // is ranking what arrived, or Done.
+    // And a way on: ranking what arrived, or Done, and (Codex review, #289) a way back to
+    // a fresh import, because this summary is restored for a day.
     expect(screen.getByText('Rank titles')).toBeTruthy();
-    expect(screen.queryByText('Import another file')).toBeNull();
+    expect(screen.getByText('Import another file')).toBeTruthy();
   });
 
   /**
@@ -873,7 +873,6 @@ describe('the way on', () => {
 
     await waitFor(() => expect(screen.getByText('Rank titles')).toBeTruthy());
     expect(screen.getByText('Done')).toBeTruthy();
-    expect(screen.queryByText('Import another file')).toBeNull();
 
     await fireEvent.press(screen.getByText('Rank titles'));
     expect(mockDismissTo).toHaveBeenCalledWith({
