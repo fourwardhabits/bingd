@@ -123,13 +123,36 @@ const rowTitles = (view: Awaited<ReturnType<typeof open>>) =>
         .replace(/^Remove (.+) from Watchlist$/, '$1'),
     );
 
-const chooseSort = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
-  await fireEvent.press(view.getByLabelText(/^Sort\./));
-  await fireEvent.press(
-    within(view.getByTestId('filmography-sort-menu')).getByLabelText(
-      new RegExp(`^${label.replace(/[()]/g, '\\$&')}`),
-    ),
-  );
+type View = Awaited<ReturnType<typeof open>>;
+
+/** The Filmography's Filters & Sort sheet (FU1113-C): open it from the icon. */
+const openSheet = async (view: View) => {
+  await fireEvent.press(view.getByTestId('filmography-filter-sort'));
+  await waitFor(() => expect(view.getByTestId('filmography-sort-section')).toBeTruthy());
+  return within(view.getByTestId('filmography-sort-section'));
+};
+
+/** Close it with its quiet Close, so the rows behind it are back in front of the reader. */
+const closeSheet = async (view: View) => {
+  await fireEvent.press(view.getByTestId('filmography-filter-close-press'));
+  await waitFor(() => expect(view.queryByTestId('filmography-sort-section')).toBeNull());
+};
+
+/** Open the sheet, press one order (pressed again, it reverses), and close it. */
+const chooseSort = async (view: View, label: string) => {
+  const menu = await openSheet(view);
+  await fireEvent.press(menu.getByLabelText(new RegExp(`^${label.replace(/[()]/g, '\\$&')}`)));
+  await closeSheet(view);
+};
+
+/** What the Filters & Sort icon says: the order in force, in words. */
+const spokenSort = (view: View) =>
+  String(view.getByTestId('filmography-filter-sort').props.accessibilityLabel);
+
+/** Movies or TV, from the header row's selector. */
+const chooseMedium = async (view: View, name: 'Movies' | 'TV') => {
+  await fireEvent.press(view.getByTestId('filmography-medium'));
+  await fireEvent.press(await view.findByRole('menuitem', { name }));
 };
 
 describe('the refreshed page', () => {
@@ -219,7 +242,7 @@ describe('a biography the cache shortened', () => {
 describe('sorting a filmography', () => {
   it('opens on Popular, in the cache’s order', async () => {
     const view = await open();
-    expect(view.getByLabelText('Sort. Popular')).toBeTruthy();
+    expect(spokenSort(view)).toMatch(/Sorted by Popular\./);
     expect(rowTitles(view).slice(0, 3)).toEqual([
       'Fight Club',
       'Once Upon a Time… in Hollywood',
@@ -229,8 +252,7 @@ describe('sorting a filmography', () => {
 
   it('offers Popular, Release date and the TMDB rating, with the current one selected', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
-    const menu = within(view.getByTestId('filmography-sort-menu'));
+    const menu = await openSheet(view);
     const options = menu.getAllByRole('radio').map((node) => node.props.accessibilityLabel);
     expect(options).toEqual(['Popular', 'Release date', 'Highest rated (TMDB)']);
     expect(menu.getByLabelText('Popular').props.accessibilityState).toEqual({ selected: true });
@@ -239,17 +261,19 @@ describe('sorting a filmography', () => {
   it('sorts newest first, and flips to oldest first on a second press', async () => {
     const view = await open();
     await chooseSort(view, 'Release date');
-    expect(view.getByLabelText('Sort. Release date, newest first')).toBeTruthy();
+    expect(spokenSort(view)).toMatch(/Sorted by Release date, newest first/);
     expect(rowTitles(view).slice(0, 4)).toEqual(['F1', 'Wolfs', 'Bullet Train', 'Babylon']);
 
     await chooseSort(view, 'Release date');
-    expect(view.getByLabelText('Sort. Release date, oldest first')).toBeTruthy();
-    expect(rowTitles(view).slice(0, 3)).toEqual(['Dallas', 'Cutting Class', 'Thelma & Louise']);
+    expect(spokenSort(view)).toMatch(/Sorted by Release date, oldest first/);
+    // Movies only (FU1113-C): Dallas, his oldest credit, is television.
+    expect(rowTitles(view).slice(0, 2)).toEqual(['Cutting Class', 'Thelma & Louise']);
+    expect(rowTitles(view)).not.toContain('Dallas');
   });
 
   it('says where a newest-first list over a capped career stops being complete', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
+    // Movies is where the page opens (FU1113-C): no All any more.
     await chooseSort(view, 'Release date');
     expect(view.getByTestId('coverage-note')).toHaveTextContent(
       'From here on, not every one of their older credits is listed.',
@@ -269,7 +293,7 @@ describe('sorting a filmography', () => {
 
   it('puts undated credits last in both directions, under their own label', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
+    // Movies is where the page opens (FU1113-C): no All any more.
     await chooseSort(view, 'Release date');
     await fireEvent.press(view.getByLabelText(/^Show more of/));
     expect(rowTitles(view).at(-1)).toBe('Untitled Brad Pitt Project');
@@ -282,9 +306,9 @@ describe('sorting a filmography', () => {
 
   it('orders by the TMDB rating with the thinly voted last', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
+    // Movies is where the page opens (FU1113-C): no All any more.
     await chooseSort(view, 'Highest rated (TMDB)');
-    expect(view.getByLabelText('Sort. Highest rated (TMDB)')).toBeTruthy();
+    expect(spokenSort(view)).toMatch(/Sorted by Highest rated \(TMDB\)/);
     expect(rowTitles(view).slice(0, 3)).toEqual([
       'Fight Club',
       'Se7en',
@@ -298,8 +322,8 @@ describe('sorting a filmography', () => {
   it('keeps the order across Movies and TV, and sorts within the filter', async () => {
     const view = await open();
     await chooseSort(view, 'Release date');
-    await fireEvent.press(view.getByRole('tab', { name: 'TV' }));
-    expect(view.getByLabelText('Sort. Release date, newest first')).toBeTruthy();
+    await chooseMedium(view, 'TV');
+    expect(spokenSort(view)).toMatch(/Sorted by Release date, newest first/);
     expect(rowTitles(view)).toEqual(['Friends', 'Dallas']);
   });
 
@@ -323,7 +347,8 @@ describe('sorting a filmography', () => {
     expect(rowTitles(view)).toHaveLength(12);
 
     await fireEvent.press(view.getByLabelText(/^Show more of/));
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
+    await chooseMedium(view, 'TV');
+    await chooseMedium(view, 'Movies');
     expect(rowTitles(view)).toHaveLength(12);
   });
 
@@ -375,8 +400,7 @@ describe('a row cached before scores and coverage were stored', () => {
 
   it('offers no TMDB rating it does not have', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
-    const options = within(view.getByTestId('filmography-sort-menu'))
+    const options = (await openSheet(view))
       .getAllByRole('radio')
       .map((node) => node.props.accessibilityLabel);
     expect(options).toEqual(['Popular', 'Release date']);
@@ -448,9 +472,11 @@ describe('the other three kinds of person', () => {
     use(BRYAN_CRANSTON);
     const view = await open('Bryan Cranston');
     await chooseSort(view, 'Release date');
+    // He has a film, so the page opens on Movies; his television is one choice away.
+    expect(rowTitles(view)).toEqual(['Argo']);
+    await chooseMedium(view, 'TV');
     expect(rowTitles(view)).toEqual([
       'Your Honor',
-      'Argo',
       'Breaking Bad',
       'Malcolm in the Middle',
       'Seinfeld',
@@ -474,15 +500,16 @@ describe('the other three kinds of person', () => {
     expect(view.queryByTestId('person-meta')).toBeNull();
     expect(view.queryByLabelText('Expand biography')).toBeNull();
     // Two credits are still worth ordering; no rating axis without any scores.
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
+    await openSheet(view);
     expect(
-      within(view.getByTestId('filmography-sort-menu')).queryByLabelText(
+      within(view.getByTestId('filmography-sort-section')).queryByLabelText(
         'Highest rated (TMDB)',
       ),
     ).toBeNull();
     await fireEvent.press(
-      within(view.getByTestId('filmography-sort-menu')).getByLabelText('Release date'),
+      within(view.getByTestId('filmography-sort-section')).getByLabelText('Release date'),
     );
+    await closeSheet(view);
     expect(rowTitles(view)).toEqual(['Harbour', 'First Light']);
     expect(view.queryByText(/^Showing/)).toBeNull();
   });
@@ -499,6 +526,6 @@ describe('the other three kinds of person', () => {
       },
     });
     const view = await open('Ada Okafor');
-    expect(view.queryByLabelText(/^Sort\./)).toBeNull();
+    expect(view.queryByTestId('filmography-filter-sort')).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { decadeOf, facetOptions, type CollectionItem, type Decade } from '@/features/collection/filters';
 import type { SortAxisSpec, SortState } from '@/ui/sort';
 
 import type { PersonCoverage, PersonCredit, KindCoverage } from './use-person';
@@ -204,3 +205,49 @@ export function tailStart(
   // A list that is all tail has nothing above it to set the tail apart from.
   return index > 0 ? index : null;
 }
+
+/**
+ * **The filters a filmography can honestly offer** (FU1113-C): Decade, and only Decade.
+ *
+ * A credit carries a year and a release date, so the Collection's decade facet applies as
+ * it is. It carries no genres and no language — the adapter stores neither on a credit —
+ * so Genre and Language are not offered rather than offered empty, and there is no Rating
+ * facet because these are not the reader's rankings.
+ *
+ * The options are the Collection's own (`facetOptions`): chronological, oldest first, each
+ * with its count, and only decades this list has something in.
+ */
+export function filmographyDecades(
+  credits: readonly PersonCredit[],
+): { value: Decade; count: number }[] {
+  return facetOptions(credits.map(asFacetItem)).decades;
+}
+
+/** The credits in any of `decades`; every credit when none is chosen. Order is kept. */
+export function filterByDecades(
+  credits: readonly PersonCredit[],
+  decades: readonly Decade[],
+): PersonCredit[] {
+  if (!decades.length) return [...credits];
+  return credits.filter((credit) => {
+    const decade = decadeOf(credit.year);
+    return decade !== null && decades.includes(decade);
+  });
+}
+
+/** A credit in the Collection's item shape, carrying only the facts a credit has. */
+const asFacetItem = (credit: PersonCredit): CollectionItem => ({
+  mediaItemId: credit.mediaItemId,
+  title: credit.title,
+  seriesTitle: null,
+  kind: credit.kind,
+  year: credit.year,
+  posterPath: credit.posterPath,
+  genres: [],
+  language: null,
+  runtimeMinutes: null,
+  score: null,
+  bucket: null,
+  watchedOn: null,
+  addedAt: null,
+});

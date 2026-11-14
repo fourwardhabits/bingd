@@ -25,18 +25,23 @@ import {
   useRankedCollection,
   useWatchlist,
 } from '@/features/collection/use-collection';
+import { useMyScores } from '@/features/collection/use-score';
 import { useWatched } from '@/features/collection/use-watched';
 import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
+import type { Decade } from '@/features/collection/filters';
 import { mustReconcile } from '@/features/collection/writes';
 import {
   INITIAL_FILMOGRAPHY_SORT,
   filmographyAxes,
+  filmographyDecades,
+  filterByDecades,
   sortCoverage,
   sortFilmography,
   tailStart,
   type CoverageGroup,
   type FilmographySort,
 } from '@/features/person/filmography';
+import { FilmographyFilterSheet } from '@/features/person/FilmographyFilterSheet';
 import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
 import { birthLine } from '@/features/person/identity';
@@ -48,21 +53,24 @@ import { backdropUri, posterUri, profileUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
   Avatar,
+  BrowseControlsRow,
   EmptyState,
+  FilterIconButton,
+  MediumSelector,
   Screen,
   SegmentedTabs,
   SkeletonRow,
-  SortChip,
-  SortMenu,
   Text,
   TitleHero,
   TitleRow,
   useDetailHeader,
+  type MediumSelectorOption,
 } from '@/ui/components';
-import { coerceSortState } from '@/ui/sort';
+import { coerceSortState, filterSortSpoken } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
-type Filter = 'all' | 'movie' | 'series';
+/** Which kind of work is listed. There is no All since FU1113-C: one medium at a time. */
+type FilmMedium = 'movie' | 'series';
 type Role = 'cast' | 'crew';
 
 const ROLE_TABS = [
@@ -70,10 +78,9 @@ const ROLE_TABS = [
   { id: 'crew' as const, label: 'Crew' },
 ];
 
-const KIND_TABS = [
-  { id: 'all' as const, label: 'All' },
-  { id: 'movie' as const, label: 'Movies' },
-  { id: 'series' as const, label: 'TV' },
+const MEDIUM_CHOICES: readonly MediumSelectorOption<FilmMedium>[] = [
+  { id: 'movie', label: 'Movies' },
+  { id: 'series', label: 'TV' },
 ];
 
 /**
@@ -106,8 +113,8 @@ const KIND_TABS = [
  * - **Left-aligned identity**, as on the title and list pages, which also gave the
  *   biography back the vertical space a centred stack spent.
  * - **"Filmography"** rather than "Known for": the list is everything kept, and it can now
- *   be ordered — `filmography.ts` — with the shared sort control in the section's own
- *   header row.
+ *   be ordered — `filmography.ts` — from the Filters & Sort sheet behind the section's
+ *   filter icon (FU1113-C; it was a sort chip in the header row until then).
  * - **Honest sorting.** A date or rating sort over a capped filmography says where it
  *   stops being complete, at the row where it does (`sortCoverage`).
  * - **The biography says when it was shortened**, once opened (`Biography`).
@@ -156,11 +163,17 @@ export default function PersonScreen() {
     void person.refetch();
   };
 
-  const [filter, setFilter] = useState<Filter>('all');
   // Null until the reader chooses, so the page opens on whichever half they have work in.
   const [role, setRole] = useState<Role | null>(null);
+  /**
+   * Movies or TV, null until the reader chooses (FU1113-C). Per visit and never stored: the
+   * page opens on Movies when the half on screen has films, and on TV otherwise.
+   */
+  const [medium, setMedium] = useState<FilmMedium | null>(null);
+  /** The Decade filter, the one a credit supports (`filmographyDecades`). */
+  const [decades, setDecades] = useState<Decade[]>([]);
   const [sort, setSort] = useState<FilmographySort>(INITIAL_FILMOGRAPHY_SORT);
-  const [sortOpen, setSortOpen] = useState(false);
+  const [filtering, setFiltering] = useState(false);
   const [shown, setShown] = useState(PAGE);
 
   const hero = usePersonHero(id ?? null, detail?.credits ?? null);
@@ -182,6 +195,11 @@ export default function PersonScreen() {
   const watched = useWatched(viewer.id);
   const rankedMovies = useRankedCollection(viewer.id, 'movies');
   const rankedShows = useRankedCollection(viewer.id, 'tv_shows');
+  /**
+   * The reader's score per title: **Search's own read** (`useMyScores`, `app/(tabs)/log.tsx`),
+   * so a filmography row draws exactly the score circle Search draws for the same title.
+   */
+  const myScores = useMyScores(viewer.id);
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
@@ -230,20 +248,17 @@ export default function PersonScreen() {
   const group: CoverageGroup =
     shownRole === 'crew' ? 'crew' : performances.length ? 'cast' : 'self';
 
-  const counts = {
-    movie: roleCredits.filter((credit) => credit.kind === 'movie').length,
-    series: roleCredits.filter((credit) => credit.kind === 'series').length,
-  };
-  // Offered only where both kinds have something in them. A director with no
-  // television is not asked to choose between Movies and TV — a filter with one
-  // populated option is a control that can only ever narrow to what is already there.
-  const filterable = counts.movie > 0 && counts.series > 0;
-  // A filter left on a kind this half has none of (after a refresh, say) reads as All.
-  const activeFilter: Filter = filterable ? filter : 'all';
-  const filtered =
-    activeFilter === 'all'
-      ? roleCredits
-      : roleCredits.filter((credit) => credit.kind === activeFilter);
+  const movieCount = roleCredits.filter((credit) => credit.kind === 'movie').length;
+  /**
+   * **One medium at a time, Movies first** (FU1113-C, replacing All / Movies / TV). The
+   * reader's choice is kept for the visit; until there is one, Movies when this half has
+   * any films and TV otherwise — so a television actor opens on their television, and a
+   * director with no TV is never shown an empty Movies list by default.
+   */
+  const shownMedium: FilmMedium = medium ?? (movieCount > 0 ? 'movie' : 'series');
+  const mediumCredits = roleCredits.filter((credit) => credit.kind === shownMedium);
+  const decadeOptions = filmographyDecades(mediumCredits);
+  const filtered = filterByDecades(mediumCredits, decades);
 
   /**
    * The order, and what it can promise.
@@ -273,12 +288,14 @@ export default function PersonScreen() {
         ? 'acting credits'
         : 'crew credits';
 
+  // Per credit, so it stays true of a decade-filtered list: a row is vouched for by its own
+  // date or score, whichever other rows are on screen.
   const coverage = sortCoverage(
     sorted,
     activeSort,
     detail?.coverage ?? null,
     group,
-    activeFilter,
+    shownMedium,
   );
   // A row cached before coverage existed is complete only if it says it kept everything.
   // Not for a Cast half made of appearances: its count is of performances, which says
@@ -346,7 +363,8 @@ export default function PersonScreen() {
    * might resume or restart a ranking that already exists (independent review). Only the
    * `+` waits on this; the bookmark waits on the watchlist alone, as before.
    */
-  const rankingsKnown = rankedMovies.isSuccess && rankedShows.isSuccess && logged.isSuccess;
+  const rankingsKnown =
+    rankedMovies.isSuccess && rankedShows.isSuccess && logged.isSuccess && myScores.isSuccess;
   const openRank = (credit: PersonCredit) => {
     // One flow at a time: a second tap while a sheet is up opens nothing new.
     if (logging || ranking || !rankingsKnown) return;
@@ -366,6 +384,28 @@ export default function PersonScreen() {
       return;
     }
     setLogging(title);
+  };
+
+  /** A credit row's trailing controls: `TitleRowActions` with Search's inputs. */
+  const rowActions = (credit: PersonCredit) => {
+    const mine = myScores.data?.get(credit.mediaItemId) ?? null;
+    // Ranked by either read: the score circle's own, or the rankings behind "Ranked".
+    const isRanked = mine !== null || ranked.has(credit.mediaItemId);
+    return (
+      <TitleRowActions
+        name={credit.title}
+        kind={credit.kind}
+        score={mine}
+        // Never a `+` on a ranked title, and none until the rankings are read.
+        rankable={!isRanked && rankingsKnown}
+        // A ranked row is its score alone, as in Search; until that score is read it draws
+        // nothing rather than a Bookmark that would vanish a moment later.
+        saved={isRanked ? null : watchlistToggle.isSaved(credit.mediaItemId)}
+        busy={watchlistToggle.busy === credit.mediaItemId}
+        onRank={() => openRank(credit)}
+        onToggleWatchlist={() => void toggleWatchlist(credit)}
+      />
+    );
   };
 
   // `claimed` counts as loading, and that is the point of carrying it up here: somebody
@@ -470,91 +510,90 @@ export default function PersonScreen() {
                   this is their work, all of it that was kept, in an order the reader can
                   choose. */}
               {/**
-               * **The filmography, modernised** (founder spec §6, 2026-11-13).
+               * **The filmography's two control rows** (FU1113-C).
                *
-               *     FILMOGRAPHY                                  ← the large section heading
-               *     [      Cast      |      Crew      ]           ← which work: navigation
-               *     All  Movies  TV                ⇅ Popular     ← narrow it, and order it
+               *     FILMOGRAPHY                                  Movies ▾   ← what kind of work
+               *     Cast   Crew                                        ⚙    ← whose half, and how
                *
-               * Cast / Crew is "take me to this content", so it is the segmented `nav`
-               * control across the gutters; All / Movies / TV narrows what is shown, so it
-               * stays the quiet underline tabs, on one line with the sort chip — the
-               * filters and the order together, where the Collection tab puts them. The
-               * three orders (Popular, Release date, Highest rated) and every note about
-               * what TMDB kept are unchanged.
+               * Row 1 is the large section heading with the Movies / TV selector opposite;
+               * row 2 is Cast / Crew as quiet text tabs with the Filters & Sort icon
+               * opposite. Both are `BrowseControlsRow`, so on a 320pt phone at the largest
+               * text size the controls keep their targets and the left side gives way.
+               * There is no All: one medium at a time. The sort (Popular, Release date,
+               * Highest rated (TMDB)) and the Decade filter live in the icon's sheet; every
+               * note about what TMDB kept is unchanged.
                */}
-              <View style={styles.filmographyHead} testID="filmography-header">
-                <Text
-                  variant="sectionHeaderLarge"
-                  tone="action"
-                  accessibilityRole="header"
-                  accessibilityLabel="Filmography"
-                >
-                  Filmography
-                </Text>
-              </View>
-
-              {hasCast && hasCrew ? (
-                <View style={styles.roleTabs}>
-                  <SegmentedTabs
-                    variant="nav"
-                    options={ROLE_TABS}
-                    value={shownRole}
-                    accessibilityLabel="Cast or crew"
-                    onChange={(next) => {
-                      setRole(next);
-                      // A different list: its first page, unfiltered. A Movies filter kept
-                      // across the switch could narrow the other half to nothing and read
-                      // as a person with no work there. The order is kept: it is the
-                      // reader's question, and it means the same thing in either half.
-                      setFilter('all');
-                      setShown(PAGE);
-                    }}
-                  />
-                </View>
-              ) : null}
-
-              {filterable || roleCredits.length > 1 ? (
-                <View style={styles.controls} testID="filmography-controls">
-                  <View style={styles.kindTabs}>
-                    {filterable ? (
-                      <SegmentedTabs
-                        options={KIND_TABS}
-                        value={activeFilter}
-                        accessibilityLabel="Movies or TV"
-                        onChange={(next) => {
-                          setFilter(next);
-                          // Back to the first page. Keeping the count across a filter
-                          // change means switching to TV on somebody with four TV credits
-                          // silently shows all four and hides the See more that explains
-                          // why the list is short.
-                          setShown(PAGE);
-                        }}
-                      />
-                    ) : null}
-                  </View>
-                  {roleCredits.length > 1 ? (
-                    <SortChip
-                      axes={axes}
-                      value={activeSort}
-                      onPress={() => setSortOpen((open) => !open)}
+              <BrowseControlsRow
+                testID="filmography-header"
+                leading={
+                  <Text
+                    variant="sectionHeaderLarge"
+                    tone="action"
+                    accessibilityRole="header"
+                    accessibilityLabel="Filmography"
+                    numberOfLines={1}
+                  >
+                    Filmography
+                  </Text>
+                }
+                trailing={
+                  roleCredits.length ? (
+                    <MediumSelector
+                      size="filter"
+                      value={shownMedium}
+                      options={MEDIUM_CHOICES}
+                      accessibilityHint="Choose Movies or TV"
+                      testID="filmography-medium"
+                      onChange={(next) => {
+                        setMedium(next);
+                        // A different list: its first page, and no decade chosen over the
+                        // other medium (it may have nothing in it here). The order is kept.
+                        setDecades([]);
+                        setShown(PAGE);
+                      }}
                     />
-                  ) : null}
-                </View>
-              ) : null}
+                  ) : undefined
+                }
+              />
 
-              {sortOpen && roleCredits.length > 1 ? (
-                <View testID="filmography-sort-menu">
-                  <SortMenu
-                    axes={axes}
-                    value={activeSort}
-                    onChange={(next) => {
-                      setSort(next);
-                      // A different order: its first page. Keeping the count would drop
-                      // the reader into the middle of an order they have not seen the start of.
-                      setShown(PAGE);
-                    }}
-                    onClose={() => setSortOpen(false)}
+              {(hasCast && hasCrew) || roleCredits.length > 1 ? (
+                <View style={styles.controls}>
+                  <BrowseControlsRow
+                    testID="filmography-controls"
+                    leading={
+                      hasCast && hasCrew ? (
+                        // `SegmentedTabs` sets itself on the gutter, which the row already
+                        // pads; the margin hands that gutter back so Cast sits on it once.
+                        <View style={styles.roleTabs}>
+                          <SegmentedTabs
+                            options={ROLE_TABS}
+                            value={shownRole}
+                            accessibilityLabel="Cast or crew"
+                            onChange={(next) => {
+                              setRole(next);
+                              // A different list: its first page, its own default medium,
+                              // no decade. The order is kept: it is the reader's question,
+                              // and it means the same thing in either half.
+                              setMedium(null);
+                              setDecades([]);
+                              setShown(PAGE);
+                            }}
+                          />
+                        </View>
+                      ) : undefined
+                    }
+                    trailing={
+                      roleCredits.length > 1 ? (
+                        <FilterIconButton
+                          activeCount={decades.length ? 1 : 0}
+                          accessibilityLabel={filterSortSpoken(axes, activeSort, decades.length ? 1 : 0)}
+                          announceCount={false}
+                          accessibilityHint="Opens the sort order and filters"
+                          onPress={() => setFiltering(true)}
+                          testID="filmography-filter-sort"
+                        />
+                      ) : undefined
+                    }
                   />
                 </View>
               ) : null}
@@ -600,33 +639,29 @@ export default function PersonScreen() {
                         }
                         onPress={() => router.push(`/title/${credit.mediaItemId}`)}
                         /**
-                         * **+ Rank and the bookmark, Search's own row controls**
-                         * (`TitleRowActions`, founder spec §6). A title the reader has
-                         * already ranked draws **the bookmark only** (founder t171u §1.4):
-                         * no `+`, because its "Ranked" line says so and a `+` there would
-                         * be a second way into a ranking that exists, and no score badge
-                         * either (no badges on these rows in this pass), but the
-                         * watchlist is independent of ranking, so its bookmark stays. The
-                         * bookmark shows the watchlist as it is, and hides until the
-                         * watchlist has been read rather than guessing.
+                         * **Search's row controls, exactly** (`TitleRowActions`, FU1113-C;
+                         * `app/(tabs)/log.tsx` builds the same props): a title the reader has
+                         * ranked draws their score circle and nothing else, so its trailing
+                         * area is never blank; an unranked one draws the compact `+` and the
+                         * Bookmark, filled when it is on the watchlist. The score is Search's
+                         * read (`useMyScores`), and tapping it opens the same log sheet Search
+                         * opens, for a rebucket or a rerank; the title page still offers both
+                         * and the watchlist. No `+` until the reader's rankings are known; the
+                         * Bookmark waits on the watchlist alone, and nothing here writes the
+                         * watchlist except a tap.
                          */
-                        trailing={
-                          <TitleRowActions
-                            name={credit.title}
-                            kind={credit.kind}
-                            score={null}
-                            // No `+` on a ranked row, and none until the reader's rankings
-                            // are read; the bookmark waits on neither (independent review).
-                            rankable={!ranked.has(credit.mediaItemId) && rankingsKnown}
-                            saved={watchlistToggle.isSaved(credit.mediaItemId)}
-                            busy={watchlistToggle.busy === credit.mediaItemId}
-                            onRank={() => openRank(credit)}
-                            onToggleWatchlist={() => void toggleWatchlist(credit)}
-                          />
-                        }
+                        trailing={rowActions(credit)}
                       />
                     </Fragment>
                   ))
+                ) : decades.length && mediumCredits.length ? (
+                  <EmptyState
+                    kind="nothingMatches"
+                    compact
+                    title="Nothing matches"
+                    body="Try another decade."
+                    action={{ label: 'Clear all', onPress: () => setDecades([]) }}
+                  />
                 ) : (
                   <EmptyState
                     kind="nothingYet"
@@ -681,6 +716,27 @@ export default function PersonScreen() {
           </>
         )}
       </Animated.ScrollView>
+
+      {/* Mounted only while open. Sort and Decade apply on the press; Close closes. */}
+      {filtering ? (
+        <FilmographyFilterSheet
+          axes={axes}
+          sort={activeSort}
+          onSort={(next) => {
+            setSort(next);
+            // A different order: its first page. Keeping the count would drop the reader
+            // into the middle of an order they have not seen the start of.
+            setShown(PAGE);
+          }}
+          decadeOptions={decadeOptions}
+          decades={decades}
+          onDecades={(next) => {
+            setDecades(next);
+            setShown(PAGE);
+          }}
+          onClose={() => setFiltering(false)}
+        />
+      ) : null}
 
       {/* Search's pair, wired exactly as Search wires them (`app/(tabs)/log.tsx`). */}
       <LogSheet
@@ -1016,27 +1072,19 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   shortened: { paddingTop: theme.space[1] },
-  // Identity → the work: a major section seam (design-system.md §5, `space[6]`).
-  section: { paddingTop: theme.space[6] },
-  // The heading on the gutter, at the large section-heading size.
-  filmographyHead: {
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.layout.gutter,
-  },
-  // Cast | Crew across the gutters; then the filters and the order on one line.
-  roleTabs: { paddingTop: theme.space[1] },
-  controls: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: theme.space[2],
-    paddingTop: theme.space[2],
-    paddingRight: theme.layout.gutter,
-  },
-  // Takes what the sort chip leaves; its own row scrolls sideways if it ever has to.
-  kindTabs: { flex: 1, minWidth: 0 },
-  list: { paddingTop: theme.space[2] },
+  /**
+   * **The filmography's vertical rhythm, by name** (`theme.layout.section`, FU1113-C):
+   * the biography (or the identity, with none) to FILMOGRAPHY is `above`, a section's top
+   * edge to the page's previous block; the heading row to the Cast / Crew row is
+   * `headingToControls`; and
+   * those controls to the first credit is `controlsToContent`. The same three whether the
+   * biography is long, short or absent, because nothing here depends on it.
+   */
+  section: { paddingTop: theme.layout.section.above },
+  controls: { paddingTop: theme.layout.section.headingToControls },
+  // `SegmentedTabs` pads itself by the gutter; the row has already paid it.
+  roleTabs: { marginLeft: -theme.layout.gutter },
+  list: { paddingTop: theme.layout.section.controlsToContent },
   note: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],

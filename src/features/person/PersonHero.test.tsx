@@ -261,8 +261,9 @@ describe('the person hero', () => {
 
   it('still offers Popular, Release date and Highest rated (TMDB)', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText('Sort. Popular'));
-    const menu = within(view.getByTestId('filmography-sort-menu'));
+    // In the Filmography's Filters & Sort sheet since FU1113-C.
+    await fireEvent.press(view.getByTestId('filmography-filter-sort'));
+    const menu = within(await view.findByTestId('filmography-sort-section'));
     const options = menu.getAllByRole('radio').map((node) => node.props.accessibilityLabel);
     expect(options).toEqual(['Popular', 'Release date', 'Highest rated (TMDB)']);
   });
