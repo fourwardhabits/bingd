@@ -2,7 +2,15 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { SENT_LIMIT, unopenedCount, unopenedIsAtLeast, useSentToYou } from './use-sent-to-you';
+import {
+  SENT_LIMIT,
+  isUnread,
+  unopenedCount,
+  unopenedIsAtLeast,
+  unreadCount,
+  unreadIsAtLeast,
+  useSentToYou,
+} from './use-sent-to-you';
 
 import type { SentRecommendation } from './use-sent-to-you';
 
@@ -14,6 +22,7 @@ jest.mock('@/lib/supabase', () => ({
     from: () => {
       const chain = {
         select: () => chain,
+        eq: () => chain,
         in: () => chain,
         then: (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null }),
       };
@@ -62,6 +71,7 @@ const row = (over: Partial<SentRecommendation> = {}): SentRecommendation =>
     runtimeMinutes: null,
     recommendedAt: '2026-01-01T00:00:00Z',
     openedAt: null,
+    seenAt: null,
     ...over,
   }) as SentRecommendation;
 
@@ -102,6 +112,72 @@ describe('whether that number is the whole truth', () => {
     expect(unopenedCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
   });
 
+});
+
+/**
+ * **Unread is neither opened nor seen** (FU1113-E, 20261121000100). The dot counts unread;
+ * the floor test still reads `openedAt`, because the server's order is still unopened first.
+ */
+describe('unread', () => {
+  const seen = '2026-01-03T00:00:00Z';
+
+  it('is neither opened nor seen', () => {
+    expect(isUnread(row())).toBe(true);
+    expect(isUnread(row({ seenAt: seen }))).toBe(false);
+    expect(isUnread(row({ openedAt: seen }))).toBe(false);
+  });
+
+  it('is what the dot counts, under both names the screen may import', () => {
+    const rows = [row({ id: 'a' }), row({ id: 'b', seenAt: seen }), ...list(0, 2)];
+    expect(unreadCount(rows)).toBe(1);
+    expect(unopenedCount(rows)).toBe(1);
+  });
+
+  it('is a floor only when the whole full page is unopened, seen or not', () => {
+    // 200 unopened, some of them seen: there may be unread ones beyond the cap.
+    const full = list(SENT_LIMIT).map((r, i) => (i < 50 ? { ...r, seenAt: seen } : r));
+    expect(unreadCount(full)).toBe(SENT_LIMIT - 50);
+    expect(unreadIsAtLeast(full)).toBe(true);
+    expect(unopenedIsAtLeast(full)).toBe(true);
+
+    // An opened row on the page ends the unopened prefix, so the count is exact.
+    expect(unreadIsAtLeast(list(SENT_LIMIT - 1, 1))).toBe(false);
+  });
+
+  it('reads seen_at from the server, and treats an older backend without it as unseen', async () => {
+    mockRpc.mockResolvedValue({
+      data: [
+        { ...serverRow('r1'), seen_at: seen },
+        serverRow('r2'), // no seen_at at all: a backend before 20261121000100
+      ],
+      error: null,
+    });
+    const { result } = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(result.current.data?.map((r) => r.seenAt)).toEqual([seen, null]);
+    expect(unreadCount(result.current.data)).toBe(1);
+  });
+});
+
+const serverRow = (id: string) => ({
+  id,
+  sender_id: 's1',
+  sender_username: 'ada',
+  sender_display_name: 'Ada',
+  sender_avatar_path: null,
+  media_item_id: `film-${id}`,
+  media_kind: 'movie',
+  media_title: 'Heat',
+  series_title: null,
+  poster_path: null,
+  release_date: '1995-12-15',
+  genres: [],
+  original_language: 'en',
+  runtime_minutes: 170,
+  recommended_at: '2026-01-01T00:00:00Z',
+  opened_at: null,
+  message: null,
 });
 
 /**
