@@ -238,13 +238,15 @@ stay in single-digit milliseconds.
 - **Synthetic proof:** `node eval/rec-v2-replay/run.mjs --synthetic` (1,200 generated accounts
   from `world.ts`, every fourth title a show, a third of accounts ranking shows whole) ran end to
   end. It is a pipeline proof only; its numbers are not evidence. One pattern in it is
-  worth the coordinator's attention on the real run: on the **TV wall** V2 metadata was well
-  below V1 (recall@50 −0.161 ± 0.043, pool 20 vs 43 titles), and `v2_metadata+social` erased
-  the gap (+0.006 ± 0.015). The synthetic export gives each show a thin TMDB list (only the
-  shows among a title's 20 similar titles, about five), so the follow-graph source carried most
-  of V1's TV pool. Whether real TV walls look like that depends on how full real TMDB show lists
-  are, which is what the real replay measures. On the Films wall V2 matched V1 on recall
-  (+0.003 ± 0.011 R@50) with +0.048 non-English share.
+  worth the coordinator's attention on the real run: on the **TV wall** V2 metadata was
+  below V1 (recall@50 −0.058 ± 0.032, pool 20 vs 23 titles), and `v2_metadata+social` erased
+  the gap (+0.016 ± 0.011). The synthetic export gives each show a thin TMDB list (only the
+  shows among a title's 20 similar titles, about five), so the follow-graph source carried about
+  half of V1's TV pool recall (0.105 of 0.216). Whether real TV walls look like that depends on
+  how full real TMDB show lists are, which is what the real replay measures. On the Films wall
+  V2 matched V1 on recall (+0.001 ± 0.011 R@50) with +0.046 non-English share. *(Re-run
+  2026-11-14 with the corrected `socialMirror`, §12.2; before it the TV gap read
+  −0.161 ± 0.043 on a 43-title V1 pool.)*
 
 ## 8. Risks
 
@@ -303,19 +305,20 @@ sum to pool recall and a gap reads off by source. Two diagnostics rule the other
 or out: `v2_metadata+social` (follow graph on both walls) and `v2_metadata+v1_anchors` (V2 with
 V1's anchor selection).
 
-**Synthetic replay** (1,196 generated accounts; a pipeline result, not evidence):
+**Synthetic replay** (1,196 generated accounts; a pipeline result, not evidence; re-run
+2026-11-14 with the corrected `socialMirror`, §12.2):
 
 | Films wall, all accounts | Pool recall | via anchors' lists | via social | via trending | via catalogue |
 |---|---|---|---|---|---|
-| V1 | 0.200 ± 0.020 | 0.088 ± 0.014 | 0.080 ± 0.014 | 0.032 ± 0.009 | 0.000 |
-| V2 metadata − V1 | −0.067 ± 0.014 | −0.000 ± 0.000 | **−0.080 ± 0.014** | +0.007 ± 0.004 | +0.006 ± 0.003 |
-| V2 metadata + V1 anchor selection − V1 | −0.067 ± 0.014 | +0.000 | −0.080 ± 0.014 | +0.007 | +0.006 |
-| **`v2_metadata_social` (prototype) − V1** | **+0.005 ± 0.002** | −0.000 | +0.000 | +0.000 | +0.005 ± 0.002 |
+| V1 | 0.191 ± 0.020 | 0.088 ± 0.014 | 0.070 ± 0.014 | 0.033 ± 0.009 | 0.000 |
+| V2 metadata − V1 | −0.058 ± 0.013 | −0.000 ± 0.000 | **−0.070 ± 0.014** | +0.006 ± 0.004 | +0.006 ± 0.003 |
+| V2 metadata + V1 anchor selection − V1 | −0.058 ± 0.013 | +0.000 | −0.070 ± 0.014 | +0.006 | +0.006 |
+| **`v2_metadata_social` (prototype) − V1** | **+0.006 ± 0.003** | −0.000 | +0.000 | +0.000 | +0.006 ± 0.003 |
 
 The whole Films gap is the social source: the anchors' lists reach exactly the same held-out
 films under both engines, and V1-style anchor selection changes nothing (most collections are
 smaller than the anchor budget, so both selections take every liked title). The catalogue fill
-and trending recover a little (+0.013). **The real export will say whether production looks the
+and trending recover a little (+0.012). **The real export will say whether production looks the
 same**: the coordinator's next run prints this table on the 44 accounts (§10.4).
 
 A3 (synthetic, 480 readers, follows weakly homophilous):
@@ -358,16 +361,16 @@ A separate engine id, so nothing about `v2_metadata` changes:
 
 ### 10.3 What it may cost: part of V2's multilingual gain on films
 
-In A3 nothing (§10.1). In the synthetic replay, Films wall, paired against V1:
+In A3 nothing (§10.1). In the synthetic replay (re-run 2026-11-14, §12.2), Films wall, paired against V1:
 
 | Slice | Engine | R@50 | Pool recall | Non-English | Languages on wall | Genre entropy |
 |---|---|---|---|---|---|---|
-| all | V2 metadata | +0.003 ± 0.011 | −0.067 ± 0.014 | +0.048 ± 0.003 | +0.68 ± 0.05 | +0.063 ± 0.008 |
-| all | **prototype** | +0.005 ± 0.008 | +0.005 ± 0.002 | +0.027 ± 0.003 | +0.33 ± 0.03 | +0.047 ± 0.006 |
-| sparse ≤ 10 | V2 metadata | +0.012 ± 0.043 | −0.055 ± 0.042 | +0.085 ± 0.009 | +1.45 ± 0.13 | +0.108 ± 0.026 |
-| sparse ≤ 10 | **prototype** | +0.017 ± 0.028 | +0.000 | +0.016 ± 0.005 | +0.25 ± 0.07 | +0.102 ± 0.013 |
-| heavy > 30 | V2 metadata | +0.006 ± 0.009 | −0.054 ± 0.017 | +0.039 ± 0.005 | +0.45 ± 0.06 | +0.043 ± 0.009 |
-| heavy > 30 | **prototype** | +0.005 ± 0.009 | +0.008 ± 0.004 | +0.037 ± 0.005 | +0.42 ± 0.05 | +0.039 ± 0.008 |
+| all | V2 metadata | +0.001 ± 0.011 | −0.058 ± 0.013 | +0.046 ± 0.003 | +0.65 ± 0.04 | +0.051 ± 0.007 |
+| all | **prototype** | +0.003 ± 0.007 | +0.006 ± 0.003 | +0.028 ± 0.003 | +0.33 ± 0.03 | +0.040 ± 0.005 |
+| sparse ≤ 10 | V2 metadata | −0.007 ± 0.045 | −0.055 ± 0.042 | +0.077 ± 0.009 | +1.31 ± 0.13 | +0.068 ± 0.024 |
+| sparse ≤ 10 | **prototype** | +0.010 ± 0.024 | +0.005 ± 0.010 | +0.018 ± 0.004 | +0.26 ± 0.06 | +0.073 ± 0.012 |
+| heavy > 30 | V2 metadata | +0.005 ± 0.009 | −0.043 ± 0.016 | +0.038 ± 0.005 | +0.44 ± 0.06 | +0.042 ± 0.009 |
+| heavy > 30 | **prototype** | +0.005 ± 0.008 | +0.009 ± 0.004 | +0.037 ± 0.005 | +0.43 ± 0.05 | +0.039 ± 0.008 |
 
 Followees' loves are mostly popular English films, and they compete for the same wall. Heavy
 readers keep almost all of V2's language gain (their own evidence outweighs the extra
