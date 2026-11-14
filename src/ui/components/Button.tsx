@@ -26,10 +26,18 @@ type Kind = 'primary' | 'secondary' | 'tertiary' | 'outline';
  * A notification offering Follow back was using `md`, which is the same physical
  * control a screen uses for its primary act — 48pt tall with 20pt of padding either
  * side, sitting under a 56pt row and very nearly doubling its height. `sm` is 36pt
- * and still clears the 44pt target with the `hitSlop` its caller passes, because slop
- * is the right tool for a control inside a list and a taller box is not.
+ * and clears the 44pt target with vertical `hitSlop`, because slop is the right tool
+ * for a control inside a list and a taller box is not. `Button` applies that slop
+ * itself (`SM_SLOP`) when the caller passes none (design-system v3 A.2 #7); a caller's
+ * own `hitSlop` still wins. Slop only answers inside the parent's bounds, so a parent
+ * with no room above or below the button clips it (see the A.2 #7 PR for the sites).
  */
 type Size = 'md' | 'sm';
+
+/** `(44 - 36) / 2` above and below: what lifts an `sm` button to the tap target. */
+const SM_VERTICAL_SLOP =
+  (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2;
+const SM_SLOP = { top: SM_VERTICAL_SLOP, bottom: SM_VERTICAL_SLOP };
 
 /**
  * How loudly the label reads, where the default is wrong.
@@ -126,6 +134,7 @@ export function Button({
       accessibilityHint={
         disabled ? (disabledReason ?? rest.accessibilityHint) : rest.accessibilityHint
       }
+      hitSlop={rest.hitSlop ?? (size === 'sm' ? SM_SLOP : undefined)}
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,

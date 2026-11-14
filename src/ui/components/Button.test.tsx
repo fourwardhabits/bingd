@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
+import { theme } from '../tokens';
 import { Button } from './Button';
 
 /**
@@ -83,6 +85,50 @@ describe('Button accessibility', () => {
 
     expect(screen.getByRole('button', { name: 'Save' }).props.accessibilityState).toEqual({
       disabled: true,
+    });
+  });
+});
+
+/**
+ * **`sm` reaches the 44pt target by default** (design-system v3 A.2 #7). It draws 36pt and
+ * gives 4pt of vertical slop above and below unless the caller passes its own.
+ */
+describe('Button size="sm" slop', () => {
+  const TARGET = theme.layout.minTapTarget;
+
+  it('draws 36pt and answers 44 with no slop from the caller', async () => {
+    await render(<Button label="Try again" kind="tertiary" size="sm" onPress={() => {}} />);
+    const button = screen.getByRole('button', { name: 'Try again' });
+    const drawn = StyleSheet.flatten(button.props.style);
+
+    expect(drawn.minHeight).toBe(36);
+    expect(button.props.hitSlop).toEqual({ top: 4, bottom: 4 });
+    expect(drawn.minHeight + button.props.hitSlop.top + button.props.hitSlop.bottom).toBe(
+      TARGET,
+    );
+    // Vertical only: horizontal slop would cross into a neighbour in a row of two.
+    expect(button.props.hitSlop.left).toBeUndefined();
+    expect(button.props.hitSlop.right).toBeUndefined();
+  });
+
+  it('adds none to md, which is already 48pt', async () => {
+    await render(<Button label="Save" onPress={() => {}} />);
+    const button = screen.getByRole('button', { name: 'Save' });
+
+    expect(StyleSheet.flatten(button.props.style).minHeight).toBe(48);
+    expect(button.props.hitSlop).toBeUndefined();
+  });
+
+  it('lets a caller’s slop win', async () => {
+    await render(<Button label="Undo" size="sm" hitSlop={8} onPress={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Undo' }).props.hitSlop).toBe(8);
+
+    await render(
+      <Button label="Keep" size="sm" hitSlop={{ top: 6, bottom: 2 }} onPress={() => {}} />,
+    );
+    expect(screen.getByRole('button', { name: 'Keep' }).props.hitSlop).toEqual({
+      top: 6,
+      bottom: 2,
     });
   });
 });
