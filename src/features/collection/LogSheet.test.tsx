@@ -1,8 +1,9 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { AppState, StyleSheet } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { addDays, addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
@@ -3552,7 +3553,8 @@ describe('the show decision a season ranking left open', () => {
     kind: 'season',
   };
 
-  it('offers Update Show and Keep Show with the show score, in place of Done', async () => {
+  /** FU1113-D D3/D4: the act's own words, no score, the eligible flow has no Done. */
+  it('offers full-width Update Show Ranking and centred Keep Show Ranking, no score, in place of Done', async () => {
     const sheet = await open(season, {
       postRank: placed,
       showDecision: decision,
@@ -3560,12 +3562,30 @@ describe('the show decision a season ranking left open', () => {
     });
 
     await waitFor(() => expect(sheet.getByTestId('log-show-decision')).toBeTruthy());
-    expect(sheet.getByRole('button', { name: 'Update Show 9.5' })).toBeTruthy();
-    expect(sheet.getByRole('button', { name: 'Keep Show 9.5' })).toBeTruthy();
+    const update = sheet.getByRole('button', { name: 'Update Show Ranking' });
+    const keep = sheet.getByRole('button', { name: 'Keep Show Ranking' });
+    expect(update).toBe(sheet.getByTestId('log-update-show'));
+    expect(keep).toBe(sheet.getByTestId('log-keep-show'));
     expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(sheet.queryByText(/Show 9\.5/)).toBeNull();
+    expect(sheet.queryByText(/Show \d/)).toBeNull();
+
+    // Update: the filled primary, standard size, stretched across the form (its column
+    // centres nothing). Keep: its own row, centred across the same width, under it.
+    const updateStyle = StyleSheet.flatten(update.props.style);
+    expect(updateStyle.backgroundColor).toBe(theme.semantic.action);
+    expect(updateStyle.minHeight).toBe(theme.layout.buttonMinHeight);
+    expect(updateStyle.alignSelf).toBeUndefined();
+    const column = StyleSheet.flatten(sheet.getByTestId('log-show-decision').props.style);
+    expect(column.alignItems).toBeUndefined();
+    expect(column.flexDirection).toBeUndefined();
+    const keepRow = sheet.getByTestId('log-keep-row');
+    expect(StyleSheet.flatten(keepRow.props.style).alignItems).toBe('center');
+    expect(within(keepRow).getByRole('button', { name: 'Keep Show Ranking' })).toBe(keep);
+    expect(StyleSheet.flatten(keep.props.style).backgroundColor).toBe('transparent');
   });
 
-  it('drops the number when the show score is not known', async () => {
+  it('keeps the same labels when the show score is not known', async () => {
     const sheet = await open(season, {
       postRank: placed,
       showDecision: { ...decision, showScore: null },
@@ -3573,9 +3593,9 @@ describe('the show decision a season ranking left open', () => {
     });
 
     await waitFor(() =>
-      expect(sheet.getByRole('button', { name: 'Update Show' })).toBeTruthy(),
+      expect(sheet.getByRole('button', { name: 'Update Show Ranking' })).toBeTruthy(),
     );
-    expect(sheet.getByRole('button', { name: 'Keep Show' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Keep Show Ranking' })).toBeTruthy();
   });
 
   it('keeps the ordinary Done when no decision was carried', async () => {

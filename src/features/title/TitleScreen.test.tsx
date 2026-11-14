@@ -1825,9 +1825,9 @@ describe('a series', () => {
     await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('I liked it'));
 
-    // WS-TVC (t168u §3A): the reveal's primary exit carries the show's score once it is
-    // known ("Update Show 6.9"), so it is found by its id rather than its exact words.
+    // FU1113-D: the reveal's primary exit is "Update Show Ranking", with no score.
     const update = await view.findByTestId('reveal-update-show');
+    expect(view.getByRole('button', { name: 'Update Show Ranking' })).toBe(update);
     await fireEvent.press(update);
 
     // The show's band chooser, on the band it already has: the same band re-ranks it

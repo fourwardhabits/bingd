@@ -88,6 +88,15 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
    * short label, and shrinking type is a thing to do deliberately.
    */
   fit?: boolean;
+  /**
+   * **`snug`: the side inset for a pair that shares one row** (FU1113-D, founder spec
+   * 2026-11-13). Same height, type and radius as the size; only the minimum padding either
+   * side drops to `space[2]`. For a button that fills a width its caller has already
+   * proven holds the label on one line (the season reveal's Add details | Update Show
+   * Ranking at 360pt), so the extra width is the button's, not padding's. Never shrinks
+   * type, never sets a line cap. Default `standard` is exactly what every caller gets.
+   */
+  inset?: 'standard' | 'snug';
 };
 
 export function Button({
@@ -98,6 +107,7 @@ export function Button({
   disabled,
   disabledReason,
   fit = false,
+  inset = 'standard',
   ...rest
 }: ButtonProps) {
   if (disabled && !disabledReason && __DEV__) {
@@ -115,6 +125,7 @@ export function Button({
         styles[size],
         styles[kind],
         fit && styles.fit,
+        inset === 'snug' && styles.snug,
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
@@ -171,6 +182,7 @@ const styles = StyleSheet.create({
   },
   // Applied after the size, so it overrides whichever one is in play.
   fit: { paddingHorizontal: theme.space[3] },
+  snug: { paddingHorizontal: theme.space[2] },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
 });

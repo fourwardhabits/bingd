@@ -11,9 +11,8 @@ import {
   offersUpdateShow,
   RankingSheet,
   REVEAL_LABEL_EM,
-  COMPACT_EXIT_CHAR_EM,
-  compactExitsFitRow,
-  compactLabelWidth,
+  decisionExitsFitRow,
+  decisionLabelWidth,
   revealExitsFitRow,
   type RankingSheetProps,
 } from './RankingSheet';
@@ -2815,14 +2814,14 @@ describe('Update Show on a season reveal', () => {
     const onUpdateShow = jest.fn();
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow });
 
-    const update = await sheet.findByText('Update Show');
+    const update = await sheet.findByText('Update Show Ranking');
     expect(sheet.getByText('Add details')).toBeTruthy();
     expect(sheet.getByTestId('reveal-keep-show')).toBeTruthy();
     expect(sheet.queryByTestId('reveal-done')).toBeNull();
     expect(sheet.queryByText('Done')).toBeNull();
     const labels = visibleText(sheet.toJSON());
-    expect(labels.indexOf('Add details')).toBeLessThan(labels.indexOf('Update Show'));
-    expect(labels.indexOf('Update Show')).toBeLessThan(labels.indexOf('Keep Show'));
+    expect(labels.indexOf('Add details')).toBeLessThan(labels.indexOf('Update Show Ranking'));
+    expect(labels.indexOf('Update Show Ranking')).toBeLessThan(labels.indexOf('Keep Show Ranking'));
 
     await fireEvent.press(update);
     expect(onUpdateShow).toHaveBeenCalledWith({
@@ -2833,15 +2832,22 @@ describe('Update Show on a season reveal', () => {
     expect(sheet.onClose).toHaveBeenCalled();
   });
 
-  it('names the reader’s whole-show score, never the season’s, and none until it is known', async () => {
+  /** FU1113-D D3: the labels name the act, never a score — known or not. */
+  it('puts no score on any decision label, even when the show’s score is known', async () => {
     answering(seasonPlaced(ranked));
     mockMyScores = new Map([['shameless', { score: 9.5 }]]);
     try {
       const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
-      expect(await sheet.findByText('Update Show 9.5')).toBeTruthy();
-      expect(sheet.getByText('Keep Show 9.5')).toBeTruthy();
-      // The season's own score is 8.7 in this fixture: never on these labels.
+      expect(await sheet.findByText('Update Show Ranking')).toBeTruthy();
+      expect(sheet.getByText('Keep Show Ranking')).toBeTruthy();
+      expect(sheet.queryByText(/Show 9\.5/)).toBeNull();
       expect(sheet.queryByText(/Show 8\.7/)).toBeNull();
+      const controls = within(sheet.getByTestId('reveal-controls'));
+      for (const button of controls.getAllByRole('button')) {
+        const label = String(within(button).getByText(/.+/).props.children);
+        expect(label).not.toMatch(/\d/);
+        expect(button.props.accessibilityLabel ?? label).not.toMatch(/\d/);
+      }
     } finally {
       mockMyScores = new Map();
     }
@@ -2850,7 +2856,7 @@ describe('Update Show on a season reveal', () => {
   it('keeps the show once for a double tap, then leaves as Done did', async () => {
     answering(seasonPlaced(ranked));
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
-    await sheet.findByText('Update Show');
+    await sheet.findByText('Update Show Ranking');
     let land!: (value: unknown) => void;
     mockRpc.mockImplementation((fn: string) =>
       fn === 'keep_show'
@@ -2872,7 +2878,7 @@ describe('Update Show on a season reveal', () => {
     answering(seasonPlaced(ranked));
     const onUpdateShow = jest.fn();
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow });
-    await sheet.findByText('Update Show');
+    await sheet.findByText('Update Show Ranking');
     mockRpc.mockImplementation((fn: string) =>
       Promise.resolve(
         fn === 'keep_show'
@@ -2883,7 +2889,7 @@ describe('Update Show on a season reveal', () => {
     await fireEvent.press(sheet.getByTestId('reveal-keep-show'));
     await waitFor(() => expect(sheet.getByTestId('reveal-keep-error')).toBeTruthy());
     expect(sheet.onClose).not.toHaveBeenCalled();
-    expect(sheet.getByRole('button', { name: 'Update Show' })).not.toBeDisabled();
+    expect(sheet.getByRole('button', { name: 'Update Show Ranking' })).not.toBeDisabled();
     expect(sheet.getByTestId('reveal-keep-show')).not.toBeDisabled();
     // A retry is one more call, and safe: the server keeps one row per season placement.
     await fireEvent.press(sheet.getByTestId('reveal-keep-show'));
@@ -2893,7 +2899,7 @@ describe('Update Show on a season reveal', () => {
   it('records nothing when dismissed without choosing', async () => {
     answering(seasonPlaced(ranked));
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
-    await sheet.findByText('Update Show');
+    await sheet.findByText('Update Show Ranking');
     const modal = sheet.root!.queryAll((node) => node.type === 'Modal')[0];
     await fireEvent(modal!, 'requestClose');
     await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
@@ -2931,7 +2937,7 @@ describe('Update Show on a season reveal', () => {
       onUpdateShow: jest.fn(),
     });
     await sheet.findByText('Add details');
-    expect(sheet.queryByText('Update Show')).toBeNull();
+    expect(sheet.queryByText('Update Show Ranking')).toBeNull();
     expect(sheet.getByText('Done')).toBeTruthy();
   });
 
@@ -2943,14 +2949,14 @@ describe('Update Show on a season reveal', () => {
       onUpdateShow: jest.fn(),
     });
     await sheet.findByText('Add details');
-    expect(sheet.queryByText('Update Show')).toBeNull();
+    expect(sheet.queryByText('Update Show Ranking')).toBeNull();
   });
 
   it('is not offered by a screen that does not ask for it', async () => {
     answering(seasonPlaced(ranked));
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn() });
     await sheet.findByText('Add details');
-    expect(sheet.queryByText('Update Show')).toBeNull();
+    expect(sheet.queryByText('Update Show Ranking')).toBeNull();
   });
 
   it('opens a linked correction with the link, and offers nothing further from it', async () => {
@@ -2974,7 +2980,7 @@ describe('Update Show on a season reveal', () => {
       p_new_watch: false,
       p_linked_placement_id: 'placement-s4',
     });
-    expect(sheet.queryByText('Update Show')).toBeNull();
+    expect(sheet.queryByText('Update Show Ranking')).toBeNull();
   });
 });
 
@@ -3088,7 +3094,7 @@ describe('the reveal’s exits', () => {
       expect(pairLabels(sheet)).toEqual(['Done', 'Add details']);
       expect(kindOf(sheet, 'Done')).toBe('secondary');
       expect(kindOf(sheet, 'Add details')).toBe('primary');
-      expect(sheet.queryByText('Update Show')).toBeNull();
+      expect(sheet.queryByText('Update Show Ranking')).toBeNull();
       expect(sheet.queryByRole('button', { name: 'Rank another' })).toBeNull();
       expectNaturalSize(sheet, ['Done', 'Add details']);
       expect(isRow(sheet)).toBe(true);
@@ -3120,40 +3126,76 @@ describe('the reveal’s exits', () => {
     expect(mockRpc.mock.calls.length).toBe(before);
   });
 
-  /** The compact exits: `Button sm`, the slimmer Rank height, slop to 44pt, never shrunk. */
-  const expectCompact = (sheet: Sheet, labels: string[]) => {
-    for (const label of labels) {
+  /**
+   * FU1113-D: the decision pair is the standard button — 48pt, `headline`, never shrunk —
+   * with the same snug inset on both; Keep Show Ranking is the quiet `sm` text action,
+   * slopped to the 44pt target.
+   */
+  const expectStandardPair = (sheet: Sheet, labels: string[]) => {
+    const styles = labels.map((label) => {
       const text = sheet.getByText(label);
       expect(text.props.numberOfLines).toBeUndefined();
       expect(text.props.adjustsFontSizeToFit).toBeFalsy();
-      const button = sheet.getByRole('button', { name: label });
-      const style = StyleSheet.flatten(button.props.style);
-      expect(style.minHeight).toBe(theme.layout.control.compactAction.visibleHeight);
-      const slop = button.props.hitSlop as { top: number; bottom: number };
-      expect(style.minHeight + slop.top + slop.bottom).toBeGreaterThanOrEqual(
-        theme.layout.minTapTarget,
-      );
+      expect(StyleSheet.flatten(text.props.style).fontSize).toBe(typography.headline.fontSize);
+      return StyleSheet.flatten(sheet.getByRole('button', { name: label }).props.style);
+    });
+    for (const style of styles) {
+      expect(style.minHeight).toBe(theme.layout.buttonMinHeight);
+      expect(style.paddingHorizontal).toBe(theme.space[2]);
+      expect(style.borderRadius).toBe(theme.radius.control);
     }
   };
+  const expectQuietKeep = (sheet: Sheet, label = 'Keep Show Ranking') => {
+    expect(kindOf(sheet, label)).toBe('tertiary');
+    const button = sheet.getByRole('button', { name: label });
+    const style = StyleSheet.flatten(button.props.style);
+    const slop = button.props.hitSlop as { top: number; bottom: number };
+    expect(style.minHeight + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+      theme.layout.minTapTarget,
+    );
+    // Outside the pair, centred across the controls' full width — not under one column.
+    expect(within(sheet.getByTestId('reveal-exits')).queryByText(label)).toBeNull();
+    expect(StyleSheet.flatten(sheet.getByTestId('reveal-keep').props.style).alignItems).toBe(
+      'center',
+    );
+    expect(
+      StyleSheet.flatten(sheet.getByTestId('reveal-controls').props.style).alignSelf,
+    ).toBe('stretch');
+  };
 
-  it('a season with Update Show: Add details (secondary) | Update Show (accent), Keep Show quiet under them', async () => {
-    await withWindow(412, 1, async () => {
+  /** FU1113-D D1. */
+  it('a season with Update Show Ranking at 390pt: Add details | Update Show Ranking in one row, Keep Show Ranking centred under them', async () => {
+    await withWindow(390, 1, async () => {
       answering(seasonPlaced);
       const onUpdateShow = jest.fn();
       const onFinishLog = jest.fn();
       const sheet = await openSheet({ subject: season, onFinishLog, onUpdateShow });
-      await sheet.findByText('Update Show');
+      await sheet.findByText('Update Show Ranking');
 
-      expect(pairLabels(sheet)).toEqual(['Add details', 'Update Show']);
+      expect(pairLabels(sheet)).toEqual(['Add details', 'Update Show Ranking']);
+      expect(sheet.getByTestId('reveal-add-details')).toBe(
+        sheet.getByRole('button', { name: 'Add details' }),
+      );
+      expect(sheet.getByTestId('reveal-update-show')).toBe(
+        sheet.getByRole('button', { name: 'Update Show Ranking' }),
+      );
+      expect(sheet.getByTestId('reveal-keep-show')).toBe(
+        sheet.getByRole('button', { name: 'Keep Show Ranking' }),
+      );
       expect(kindOf(sheet, 'Add details')).toBe('secondary');
-      expect(kindOf(sheet, 'Update Show')).toBe('primary');
-      expect(kindOf(sheet, 'Keep Show')).toBe('tertiary');
+      expect(kindOf(sheet, 'Update Show Ranking')).toBe('primary');
       expect(isRow(sheet)).toBe(true);
-      expectCompact(sheet, ['Add details', 'Update Show', 'Keep Show']);
-      // Keep Show is outside the pair, after it, centred across the width.
-      expect(within(sheet.getByTestId('reveal-exits')).queryByText('Keep Show')).toBeNull();
+      expectStandardPair(sheet, ['Add details', 'Update Show Ranking']);
+      expectQuietKeep(sheet);
+      // Each fills a share of the row in proportion to its label: both grow, the longer
+      // label more, and neither is below its natural width.
+      const secondary = StyleSheet.flatten(sheet.getByTestId('reveal-exit-secondary').props.style);
+      const primary = StyleSheet.flatten(sheet.getByTestId('reveal-exit-primary').props.style);
+      expect(secondary.flex).toBe(decisionLabelWidth('Add details', 1));
+      expect(primary.flex).toBe(decisionLabelWidth('Update Show Ranking', 1));
+      expect(primary.flex).toBeGreaterThan(secondary.flex as number);
       expect(sheet.queryByText('Done')).toBeNull();
-      expect(sheet.getByRole('button', { name: 'Update Show' }).props.accessibilityHint).toBe(
+      expect(sheet.getByRole('button', { name: 'Update Show Ranking' }).props.accessibilityHint).toBe(
         'Re-ranks the show this season belongs to',
       );
 
@@ -3165,14 +3207,34 @@ describe('the reveal’s exits', () => {
 
   it.each([
     [360, 1],
+    [375, 1],
+    [390, 1],
     [393, 1],
     [412, 1],
-  ])('keeps the Update Show pair side by side at %ipt and text size %fx', async (width, scale) => {
+    [430, 1],
+  ])('keeps the Update Show Ranking pair side by side at %ipt and text size %fx', async (width, scale) => {
     await withWindow(width, scale, async () => {
       answering(seasonPlaced);
       const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
-      await sheet.findByText('Update Show');
+      await sheet.findByText('Update Show Ranking');
       expect(isRow(sheet)).toBe(true);
+      expect(pairLabels(sheet)).toEqual(['Add details', 'Update Show Ranking']);
+    });
+  });
+
+  it('Update Show Ranking alone, full width, when there is no Add details; Keep centred under it', async () => {
+    await withWindow(390, 1, async () => {
+      answering(seasonPlaced);
+      const sheet = await openSheet({ subject: season, onUpdateShow: jest.fn() });
+      await sheet.findByText('Update Show Ranking');
+      expect(pairLabels(sheet)).toEqual(['Update Show Ranking']);
+      expect(kindOf(sheet, 'Update Show Ranking')).toBe('primary');
+      expect(sheet.queryByText('Add details')).toBeNull();
+      expect(
+        StyleSheet.flatten(sheet.getByTestId('reveal-exit-primary').props.style).flex,
+      ).toBeGreaterThan(0);
+      expectStandardPair(sheet, ['Update Show Ranking']);
+      expectQuietKeep(sheet);
     });
   });
 
@@ -3187,15 +3249,16 @@ describe('the reveal’s exits', () => {
     await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
   });
 
+  /** FU1113-D D2. */
   it.each([
     [320, 1],
+    [320, 2],
     [360, 1.3],
     [360, 2],
     [412, 2],
   ])(
-    'stacks the Update Show pair primary first at %ipt and text size %fx, Keep Show under it',
+    'stacks Update Show Ranking, Add details, then Keep Show Ranking at %ipt and text size %fx',
     async (width, scale) => {
-      // The widest real label, a show at 10.0.
       mockMyScores = new Map([['shameless', { score: 10 }]]);
       try {
         await withWindow(width, scale, async () => {
@@ -3205,16 +3268,20 @@ describe('the reveal’s exits', () => {
             onFinishLog: jest.fn(),
             onUpdateShow: jest.fn(),
           });
-          await sheet.findByText('Update Show 10.0');
+          await sheet.findByText('Update Show Ranking');
           expect(isRow(sheet)).toBe(false);
-          expect(pairLabels(sheet)).toEqual(['Update Show 10.0', 'Add details']);
+          expect(pairLabels(sheet)).toEqual(['Update Show Ranking', 'Add details']);
           for (const kind of ['secondary', 'primary']) {
             expect(
               StyleSheet.flatten(sheet.getByTestId(`reveal-exit-${kind}`).props.style ?? {}).flex,
             ).toBeUndefined();
           }
-          expectCompact(sheet, ['Update Show 10.0', 'Add details', 'Keep Show 10.0']);
-          expect(within(sheet.getByTestId('reveal-exits')).queryByText('Keep Show 10.0')).toBeNull();
+          expectStandardPair(sheet, ['Update Show Ranking', 'Add details']);
+          expectQuietKeep(sheet);
+          // Visual order, top to bottom, as a screen reader meets it.
+          const labels = visibleText(sheet.toJSON());
+          expect(labels.indexOf('Update Show Ranking')).toBeLessThan(labels.indexOf('Add details'));
+          expect(labels.indexOf('Add details')).toBeLessThan(labels.indexOf('Keep Show Ranking'));
         });
       } finally {
         mockMyScores = new Map();
@@ -3230,7 +3297,7 @@ describe('the reveal’s exits', () => {
         onFinishLog: jest.fn(),
         onUpdateShow: jest.fn(),
       });
-      await sheet.findByText('Update Show');
+      await sheet.findByText('Update Show Ranking');
       const maxHeight = StyleSheet.flatten(sheet.getByTestId('reveal-body').props.style)
         .maxHeight as number;
       expect(maxHeight).toBeLessThanOrEqual(Math.max(220, 800 * 0.9 - 120 - 60 * 3 * 2));
@@ -3306,10 +3373,7 @@ describe('the reveal’s exits', () => {
     });
 
     it('chooses a row only when both labels fit their halves, and never squeezes a stacked one', () => {
-      const pairs = [
-        ['Done', 'Add details'],
-        ['Update Show', 'Add details'],
-      ];
+      const pairs = [['Done', 'Add details']];
       for (let width = 320; width <= 430; width += 2) {
         for (const scale of [0.85, 1, 1.1, 1.15, 1.235, 1.3, 1.5, 1.75, 2]) {
           const row = width - 4 * theme.layout.gutter;
@@ -3329,93 +3393,38 @@ describe('the reveal’s exits', () => {
       for (const width of [360, 375, 390, 393, 412, 430]) {
         expect(revealExitsFitRow(['Done', 'Add details'], width, 1)).toBe(true);
       }
-      expect(revealExitsFitRow(['Update Show', 'Add details'], 390, 1)).toBe(true);
-      expect(revealExitsFitRow(['Update Show', 'Add details'], 330, 1)).toBe(false);
     });
-  });
-});
 
-/**
- * **The Update Show pair's fit rule, against the font** (WS-TVC, founder spec t168u §3A):
- * natural widths across the sheet's own gutter, measured from Inter Medium — the face
- * `Button sm` sets its label in — so the table cannot drift from what is drawn.
- */
-describe('the Update Show pair, measured from the font', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('fs') as typeof import('fs');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const path = require('path') as typeof import('path');
-  const font = fs.readFileSync(
-    path.join(process.cwd(), 'node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
-  );
-  const em = (() => {
-    const u16 = (o: number) => font.readUInt16BE(o);
-    const tables: Record<string, number> = {};
-    for (let i = 0; i < u16(4); i++) {
-      tables[font.toString('latin1', 12 + 16 * i, 16 + 16 * i)] = font.readUInt32BE(20 + 16 * i);
-    }
-    const unitsPerEm = u16(tables.head! + 18);
-    const metrics = u16(tables.hhea! + 34);
-    const advance = (glyph: number) => u16(tables.hmtx! + 4 * Math.min(glyph, metrics - 1));
-    const cmap = tables.cmap!;
-    let format4 = -1;
-    for (let i = 0; i < u16(cmap + 2) && format4 < 0; i++) {
-      const sub = cmap + font.readUInt32BE(cmap + 8 + 8 * i);
-      if (u16(sub) === 4) format4 = sub;
-    }
-    const segments = u16(format4 + 6) / 2;
-    return (ch: string) => {
-      const code = ch.charCodeAt(0);
-      for (let k = 0; k < segments; k++) {
-        const end = u16(format4 + 14 + 2 * k);
-        if (code > end) continue;
-        const start = u16(format4 + 16 + 2 * segments + 2 * k);
-        if (code < start) return 0;
-        const delta = font.readInt16BE(format4 + 16 + 4 * segments + 2 * k);
-        const rangeAt = format4 + 16 + 6 * segments + 2 * k;
-        const range = u16(rangeAt);
-        const glyph =
-          range === 0 ? (code + delta) & 0xffff : u16(rangeAt + range + 2 * (code - start));
-        return advance(range === 0 ? glyph : glyph ? (glyph + delta) & 0xffff : 0) / unitsPerEm;
+    /**
+     * **FU1113-D: Add details | Update Show Ranking, against Inter SemiBold.** A row only
+     * when both labels at their exact advance, the snug inset and the gap fit the sheet's
+     * row; side by side on every standard phone at default text.
+     */
+    const decisionNatural = (label: string, scale: number) =>
+      ems(label) * 17 * scale + 2 * theme.space[2] + 2;
+    const decisionPair = ['Add details', 'Update Show Ranking'];
+
+    it('sits Add details | Update Show Ranking side by side from 360pt to 430pt at default text', () => {
+      for (const width of [360, 375, 390, 393, 412, 430]) {
+        expect(decisionExitsFitRow(decisionPair, width, 1)).toBe(true);
       }
-      return 0;
-    };
-  })();
+    });
 
-  it('agrees with the table the layout uses, and the face is callout’s', () => {
-    for (const [ch, value] of Object.entries(COMPACT_EXIT_CHAR_EM)) {
-      expect(Math.abs(em(ch) - value)).toBeLessThan(0.001);
-    }
-    expect(typography.callout.fontSize).toBe(15);
-  });
-
-  it('sits side by side at 360pt and up at default text, whatever the show scores', () => {
-    for (const width of [360, 375, 390, 393, 412, 430]) {
-      for (const score of ['0.0', '7.4', '9.5', '10.0']) {
-        expect(
-          compactExitsFitRow([`Update Show ${score}`, 'Add details'], width, 1),
-        ).toBe(true);
+    it('chooses a row for the decision pair only when both labels genuinely fit it', () => {
+      for (let width = 320; width <= 430; width += 2) {
+        for (const scale of [0.85, 1, 1.1, 1.15, 1.235, 1.3, 1.5, 1.75, 2]) {
+          const row = width - 2 * theme.layout.gutter;
+          if (decisionExitsFitRow(decisionPair, width, scale)) {
+            const total = decisionPair.reduce((sum, l) => sum + decisionNatural(l, scale), 0);
+            expect(total + theme.space[2]).toBeLessThanOrEqual(row);
+          }
+        }
       }
-    }
-  });
-
-  it('stacks only where the row genuinely runs out, and a stacked label fits its row', () => {
-    for (let width = 320; width <= 430; width += 2) {
-      for (const scale of [1, 1.15, 1.3, 1.5, 2]) {
-        const pair = ['Update Show 10.0', 'Add details'];
-        const row = width - 2 * theme.layout.gutter;
-        const natural = pair.map((label) => compactLabelWidth(label, scale));
-        expect(compactExitsFitRow(pair, width, scale)).toBe(
-          natural[0]! + natural[1]! + theme.space[2] <= row,
-        );
-        // Full width when stacked: each label alone fits on one line from 340pt at every
-        // text size. Below that, at 2x, the widest label (`Update Show 10.0`) wraps to a
-        // second line inside its button — it is never shrunk, clipped or truncated.
-        if (width >= 340) for (const w of natural) expect(w).toBeLessThanOrEqual(row);
-      }
-    }
-    expect(compactExitsFitRow(['Update Show 10.0', 'Add details'], 320, 1)).toBe(false);
-    expect(compactExitsFitRow(['Update Show 10.0', 'Add details'], 360, 2)).toBe(false);
+      expect(decisionExitsFitRow(decisionPair, 320, 1)).toBe(false);
+      expect(decisionExitsFitRow(decisionPair, 320, 2)).toBe(false);
+      expect(decisionExitsFitRow(decisionPair, 360, 2)).toBe(false);
+      expect(decisionExitsFitRow(['Update Show Ranking'], 320, 2)).toBe(true);
+    });
   });
 });
 
