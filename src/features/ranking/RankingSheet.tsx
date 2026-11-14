@@ -29,6 +29,7 @@ import {
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useMyScores } from '@/features/collection/use-score';
+import { KEEP_SHOW_RANKING, UPDATE_SHOW_RANKING } from './show-decision-labels';
 import {
   asRankingCategory,
   CATEGORY_NAME,
@@ -147,7 +148,7 @@ export type UpdateShowLink = {
  * §3). Carried out of the reveal by *Add details*, so the post-rank details sheet can offer
  * Update Show and Keep Show in place of Done: the show, its band, the season placement that
  * offered the choice, and the reader's current whole-show score — null when it is not known
- * yet, in which case the labels carry no number rather than a guessed one.
+ * yet. No label draws the score (FU1113-D: "Update Show Ranking" / "Keep Show Ranking").
  */
 export type ShowDecision = UpdateShowLink & { showScore: number | null };
 
@@ -376,10 +377,9 @@ function Session({
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
   /**
-   * The reader's current scores, for the show a season's Update Show / Keep Show names
-   * (WS-TVC, founder spec t168u §3A): the whole-show score, never the season's. Read only
-   * for a season, the one subject that can offer them, from the cache the Collection
-   * already fills; until it answers the labels carry no number.
+   * The reader's current scores, for the whole-show score a season's `ShowDecision`
+   * carries (WS-TVC, founder spec t168u §3A): never the season's. Read only for a season,
+   * from the cache the Collection already fills. Since FU1113-D no label draws it.
    */
   const myScores = useMyScores(profile.id, subject.kind === 'season');
   /**
@@ -948,11 +948,6 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
-            showScore={
-              step.parent?.mediaItemId
-                ? (myScores.data?.get(step.parent.mediaItemId)?.score ?? null)
-                : null
-            }
             keeping={keeping}
             keepError={keepError}
             onKeepShow={
@@ -1783,14 +1778,11 @@ function Reveal({
   onFinishLog,
   onUpdateShow,
   onKeepShow,
-  showScore = null,
   keeping = false,
   keepError = null,
 }: {
   /** Keep Show (WS-TVC): present exactly when Update Show is. */
   onKeepShow?: () => void;
-  /** The reader's current whole-show score for the labels, or null while unknown. */
-  showScore?: number | null;
   keeping?: boolean;
   keepError?: string | null;
   /**
@@ -1948,17 +1940,16 @@ function Reveal({
    * The reveal's exits, secondary first and the accent last — left to right in a row,
    * top to bottom when stacked, and in that order for a screen reader either way. Each
    * keeps exactly the handler it had: Done is `onDone`, Add details `onFinishLog`, Update
-   * Show `onUpdateShow`. Done joins the pair unless Update Show is offered, in which case
-   * it is the quiet control under it (drawn below).
+   * Show Ranking `onUpdateShow`. Done joins the pair unless Update Show Ranking is offered.
    */
-  const showLabel = (verb: string) =>
-    showScore != null ? `${verb} ${formatScore(showScore)}` : verb;
   /**
-   * **When the show is the open question** (WS-TVC, founder spec t168u §3A): Add details
-   * (secondary) on the left, `Update Show 9.5` (the filled primary) on the right, at the
-   * compact size, with `Keep Show 9.5` quiet and centred under the pair. Done is not
-   * drawn: the sheet's close and system Back are the dismissal, and they record nothing.
-   * Stacked, the primary leads. Everywhere else the exits are exactly as they were.
+   * **When the show is the open question** (FU1113-D, founder spec 2026-11-13; behaviour
+   * WS-TVC t168u §3A): Add details (outlined secondary) on the left, Update Show Ranking
+   * (filled primary) on the right, both at the standard button height and type, each
+   * filling a share of the row in proportion to its label. Keep Show Ranking is the quiet
+   * grey text action centred under the pair across the full width. No score in any label.
+   * Done is not drawn: the sheet's close and system Back are the dismissal, and they
+   * record nothing. Stacked, the primary leads. Everywhere else the exits are as they were.
    */
   const deciding = Boolean(onUpdateShow);
   const exitPair: RevealExit[] = deciding
@@ -1974,7 +1965,7 @@ function Reveal({
             ]
           : []),
         {
-          label: showLabel('Update Show'),
+          label: UPDATE_SHOW_RANKING,
           kind: 'primary',
           onPress: onUpdateShow!,
           hint: 'Re-ranks the show this season belongs to',
@@ -1988,7 +1979,7 @@ function Reveal({
           : []),
       ];
   const exitsStacked = deciding
-    ? !compactExitsFitRow(
+    ? !decisionExitsFitRow(
         exitPair.map((exit) => exit.label),
         windowWidth,
         fontScale,
@@ -2402,24 +2393,20 @@ function Reveal({
        * nothing here reorders at paint.
        */}
       {/**
-       * **Update Show** (founder brief §5, 2026-11-11): a season that was just watched, of
-       * a show the reader has ranked. Two rows, and no new modal, card or confirmation:
+       * **Update Show Ranking** (FU1113-D, founder spec 2026-11-13): a season that was just
+       * watched, of a show the reader has ranked. No new modal, card or confirmation:
        *
-       *   [ Update Show ] [ Add details ]
-       *               Done
+       *   [ Add details ] [ Update Show Ranking ]     standard height, filled right
+       *          Keep Show Ranking                    quiet grey, centred, 44pt target
        *
-       * Add details keeps the filled treatment and the trailing place (P0-3, 2026-11-12:
-       * it used to lead this row, the one reveal where the accent was on the left);
-       * Update Show is the outlined second act; Done is a quiet text control across the
-       * full width, still one tap and always reachable. Anywhere Update Show is not
-       * offered, the row is the unchanged Done | Add details pair.
+       * Too narrow for both labels at the reader's width and text size, it stacks with the
+       * primary first: Update Show Ranking, Add details, then Keep Show Ranking.
        */}
       {/**
        * **One row, one set of rules, on every reveal** (founder QA P0-3, Android, 2026-11-12).
        *
        *   movie / show / season, Edit ranking:   [ Done ]        [ Add details ]
-       *   season with Update Show:               [ Update Show ] [ Add details ]
-       *                                                     Done
+       *   season with Update Show Ranking:      (above)
        *   no log sheet to return to (onboarding): [            Done            ]
        *
        * Secondary on the left, the accent on the right; Done is the quiet exit, and the
@@ -2445,15 +2432,23 @@ function Reveal({
           {shownExits.map((exit) => (
             <View
               key={exit.label}
-              style={exitsStacked ? undefined : deciding ? styles.revealExitNatural : styles.revealExit}
+              style={
+                exitsStacked
+                  ? undefined
+                  : deciding
+                    ? // A share of the row in proportion to the label's natural width, so
+                      // both fill the row and each is at least its natural width.
+                      { flex: decisionLabelWidth(exit.label, fontScale) }
+                    : styles.revealExit
+              }
               testID={`reveal-exit-${exit.kind}`}
             >
               <Button
                 label={exit.label}
                 kind={exit.kind}
-                // The slimmer Rank button's height, slop back to 44pt (WS-TVC §3A).
-                size={deciding ? 'sm' : 'md'}
-                hitSlop={deciding ? COMPACT_EXIT_SLOP : undefined}
+                // The standard size (48pt, `headline`) on every reveal; the decision pair
+                // keeps a snug minimum inset so it shares a 360pt row (FU1113-D).
+                inset={deciding ? 'snug' : 'standard'}
                 onPress={exit.onPress}
                 disabled={deciding && keeping}
                 disabledReason={deciding && keeping ? 'Keeping your show score' : undefined}
@@ -2464,9 +2459,9 @@ function Reveal({
           ))}
         </View>
         {deciding && onKeepShow ? (
-          <View style={styles.revealKeep}>
+          <View style={styles.revealKeep} testID="reveal-keep">
             <Button
-              label={keeping ? 'Keeping…' : showLabel('Keep Show')}
+              label={keeping ? 'Keeping…' : KEEP_SHOW_RANKING}
               kind="tertiary"
               tone="secondary"
               size="sm"
@@ -2631,7 +2626,7 @@ export function revealExitsFitRow(labels: string[], windowWidth: number, fontSca
 export const REVEAL_LABEL_EM: Record<string, number> = {
   Done: 2.534,
   'Add details': 5.443,
-  'Update Show': 6.465,
+  'Update Show Ranking': 10.624,
 };
 
 /**
@@ -2654,37 +2649,29 @@ const COMPACT_EXIT_SLOP = {
 } as const;
 
 /**
- * Inter Medium advances, in em, for every character the compact exits draw: `Button`'s
- * small size sets its label in `callout` (Inter Medium 15pt). Measured from the font file
- * (`RankingSheet.test.tsx` re-measures them), so a score's digits are counted exactly.
+ * One decision exit's natural width: its label in `headline` (Inter SemiBold 17pt) at the
+ * reader's text size, plus `Button`'s snug inset either side and 1pt of border allowance
+ * either side (the outline is `hairlineWidth * 2`, at most 1pt on any device).
+ *
+ * 1.03 over the measured advance, not the 1.04 the equal-halves rule uses: the advance is
+ * already an upper bound (it ignores Inter's negative kerning), and 1.04 would stack
+ * this pair at 360pt by 0.06pt, which the founder spec rules out for standard phones.
  */
-export const COMPACT_EXIT_CHAR_EM: Record<string, number> = {
-  '0': 0.6455, '1': 0.415, '2': 0.6162, '3': 0.627, '4': 0.6563, '5': 0.603, '6': 0.6299,
-  '7': 0.5713, '8': 0.6294, '9': 0.6299, ' ': 0.2666, '.': 0.3032, A: 0.709, K: 0.6875,
-  S: 0.646, U: 0.7402, a: 0.5679, d: 0.6182, e: 0.5874, h: 0.6016, i: 0.252, l: 0.252,
-  o: 0.604, p: 0.6182, s: 0.5386, t: 0.3403, w: 0.8291,
-};
-
-/**
- * One compact exit's natural width: the label in Inter Medium at `callout`'s 15pt and the
- * reader's text size, 4% over the measured advance, plus `Button sm`'s 16pt of padding and
- * the border either side. A character not in the table counts at 0.75em, above any here.
- */
-export function compactLabelWidth(label: string, fontScale: number) {
-  const em = [...label].reduce((sum, ch) => sum + (COMPACT_EXIT_CHAR_EM[ch] ?? 0.75), 0);
-  return em * 15 * fontScale * 1.04 + 2 * theme.space[4] + 4;
+export function decisionLabelWidth(label: string, fontScale: number) {
+  const em = REVEAL_LABEL_EM[label] ?? label.length * 0.62;
+  return em * theme.typography.headline.fontSize * fontScale * 1.03 + 2 * theme.space[2] + 2;
 }
 
 /**
- * **Whether the Update Show pair sits side by side** (WS-TVC §3A): at their natural widths,
- * not equal halves, across the sheet's own gutter — the controls block steps out of the
- * reveal's padding for this (`revealControlsWide`). Side by side at 360pt and up at default
+ * **Whether Add details | Update Show Ranking sit side by side** (FU1113-D): both natural
+ * widths and the gap within the sheet's own gutter — the controls block steps out of the
+ * reveal's padding for this (`revealControlsWide`). Side by side from 360pt at default
  * text; stacked only when the width or the reader's text size genuinely forbids it.
  */
-export function compactExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
+export function decisionExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
   if (labels.length < 2) return true;
   const row = windowWidth - 2 * theme.layout.gutter;
-  const total = labels.reduce((sum, label) => sum + compactLabelWidth(label, fontScale), 0);
+  const total = labels.reduce((sum, label) => sum + decisionLabelWidth(label, fontScale), 0);
   return total + theme.space[2] * (labels.length - 1) <= row;
 }
 
@@ -2775,18 +2762,16 @@ const styles = StyleSheet.create({
   // Equal halves. Two controls of the same rank should be the same size, and letting
   // each hug its own label makes "Skip" visibly smaller than "Undo" for no reason.
   control: { flex: 1 },
-  // Every reveal's exits: the pair, then (under Update Show) the quiet Done, each
-  // across the reveal's full width.
+  // Every reveal's exits: the pair, then (under Update Show Ranking) the quiet Keep Show
+  // Ranking, each across the reveal's full width.
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   // The two ways out, side by side under the one way on. Equal halves, so neither
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
-  // The Update Show pair at its labels' own widths, centred as a group (WS-TVC).
-  revealExitNatural: { flexGrow: 0 },
   // Across the sheet's own gutter rather than inside the reveal's padding as well.
   revealControlsWide: { marginHorizontal: -theme.layout.gutter, paddingHorizontal: theme.layout.gutter },
-  // Keep Show: quiet, centred across the whole width, under the pair.
+  // Keep Show Ranking: quiet, centred across the whole width, under the pair.
   revealKeep: { alignItems: 'center', gap: theme.space[1] },
   /** The same exits, full width and in the same order, when the halves are too narrow. */
   revealExitsStacked: { gap: theme.space[2] },

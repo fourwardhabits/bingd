@@ -56,8 +56,11 @@ import {
 import { logTitle, setWatchDate } from '@/features/watch-history/writes';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { watchCountLabel } from '@/features/watch-history/watch-history';
-import { formatScore } from './score';
 import { keepShow } from '@/features/ranking/session';
+import {
+  KEEP_SHOW_RANKING,
+  UPDATE_SHOW_RANKING,
+} from '@/features/ranking/show-decision-labels';
 import type { ShowDecision, UpdateShowLink } from '@/features/ranking/RankingSheet';
 
 export type LoggableTitle = {
@@ -80,8 +83,8 @@ export type LogSheetProps = {
   /**
    * **The parent-show decision a season's ranking left open** (WS-TVC, founder spec t168u
    * §3B). Present only on the post-rank sheet a season's *Add details* opened while Update
-   * Show was on offer: the completion area is then `Update Show 9.5` and `Keep Show 9.5`
-   * instead of Done, and both wait for the details to land first. Dismissing the sheet
+   * Show was on offer: the completion area is then `Update Show Ranking` and `Keep Show
+   * Ranking` instead of Done, and both wait for the details to land first. Dismissing the sheet
    * records nothing.
    */
   showDecision?: ShowDecision | null;
@@ -1930,33 +1933,23 @@ function Body({
          */}
         {postRank && showDecision ? (
           /**
-           * **Update Show or Keep Show, in place of Done** (WS-TVC, founder spec t168u §3B):
-           * the filled primary across the form, the quiet grey Keep centred under it. The
-           * number is the reader's whole-show score, or none while it is unknown. The
-           * header's Close and Back still leave, recording no decision.
+           * **Update Show Ranking or Keep Show Ranking, in place of Done** (WS-TVC, founder
+           * spec t168u §3B; labels FU1113-D): the filled primary across the form, the quiet
+           * grey Keep centred under it on its own, across the full width. No score in either
+           * label. The header's Close and Back still leave, recording no decision.
            */
           <View style={styles.done} testID="log-show-decision">
             <Button
-              label={
-                showDecision.showScore != null
-                  ? `Update Show ${formatScore(showDecision.showScore)}`
-                  : 'Update Show'
-              }
+              label={UPDATE_SHOW_RANKING}
               onPress={() => void updateShowFromDetails()}
               disabled={keepingShow}
               disabledReason={keepingShow ? 'Keeping your show score' : undefined}
               accessibilityHint="Saves your details, then re-ranks the show"
               testID="log-update-show"
             />
-            <View style={styles.keepShow}>
+            <View style={styles.keepShow} testID="log-keep-row">
               <Button
-                label={
-                  keepingShow
-                    ? 'Keeping…'
-                    : showDecision.showScore != null
-                      ? `Keep Show ${formatScore(showDecision.showScore)}`
-                      : 'Keep Show'
-                }
+                label={keepingShow ? 'Keeping…' : KEEP_SHOW_RANKING}
                 kind="tertiary"
                 tone="secondary"
                 size="sm"
