@@ -1462,8 +1462,15 @@ export function useForYou(
      * not this query at all. Refetching the slate would re-run a `queryFn` whose inputs
      * are still missing; refetching the sources flips `enabled` and the slate follows on
      * its own, which is the same path a first successful launch takes.
+     *
+     * The engine is re-asked on every retry as well (Codex P2 on #301), so an operator's
+     * rollback reaches a reader the moment they ask for the wall again. Its answer decides
+     * what is refetched: when the engine has **moved**, the slate's key moves with it and
+     * the new engine's slate draws on its own — refetching the old key here would run the
+     * old engine's `queryFn` once more, catalogue fill and all, for a wall nobody will see.
      */
-    refetch: () => {
+    refetch: async () => {
+      const asked = userId ? engineQuery.refetch() : null;
       if (sourceError) {
         void movies.refetch();
         void seasons.refetch();
@@ -1471,6 +1478,8 @@ export function useForYou(
         if (needsLogged) void logged.refetch();
         return;
       }
+      const next = asked ? (await asked).data : engine;
+      if ((next ?? 'v1') !== engine) return;
       void slate.refetch();
     },
   };

@@ -5,6 +5,7 @@ import {
   candidateIdsFrom,
   selectAnchors,
   seriesUnitWeights,
+  socialSeriesFrom,
 } from '@/features/recommendations/anchors';
 import { coverageFill } from '@/features/recommendations/coverage';
 import {
@@ -309,39 +310,52 @@ function metOf(account: Account, w: World): Set<string> {
   return met;
 }
 
-/** `social_candidates`, mirrored: followees' Liked titles (seasons as their show), most endorsed first. */
-function socialMirror(
-  account: Account,
-  w: World,
-  medium: Medium,
-  met: ReadonlySet<string>,
-): string[] {
+/** What `social_candidates` returns at its default limit (`socialCandidates` asks for 40). */
+export const SOCIAL_LIMIT = 40;
+
+/**
+ * `social_candidates`, mirrored — the SQL first, then the client (Codex P2 on #301).
+ *
+ * **The server** (`20260828000500`): every Liked ranking by an account the reader follows,
+ * counted per **raw media id** — films, seasons and whole shows together, since the RPC has no
+ * medium — less any id the reader has ranked or logged, ordered by count desc then id, with
+ * **one global limit** of {@link SOCIAL_LIMIT}. The reader's own exclusions are by raw id too: a
+ * season of a show they are part-way through is not excluded by the server (the wall's `exclude`
+ * catches it later). The export has no watchlist or dismissals, so those two exclusions are not
+ * mirrored.
+ *
+ * **Then the client** (`use-for-you.ts` `socialCandidates`): the Films wall keeps what is a
+ * film (its `kind = 'movie'` read), the TV wall rolls each season up to its show and keeps whole
+ * shows through {@link socialSeriesFrom}, first appearance wins.
+ *
+ * The earlier mirror filtered by medium and rolled seasons up *before* counting and limiting,
+ * per wall — so a reader whose followees loved more than forty titles across both media got a
+ * Films wall and a TV wall each with up to forty, where the shipped client gets forty between
+ * them and a show's seasons counted separately.
+ *
+ * The tie order is the code-point order of the ids, which is Postgres's `uuid` order for the
+ * lowercase hex ids the export carries.
+ */
+export function socialMirror(account: Account, w: World, medium: Medium): string[] {
+  const mine = new Set([...account.visible.map((r) => r.m), ...account.logged.map((l) => l.m)]);
   const counts = new Map<string, number>();
-  for (const followee of w.follows.get(account.key) ?? []) {
-    const seen = new Set<string>();
+  for (const followee of new Set(w.follows.get(account.key) ?? [])) {
     for (const r of w.rankingsBy.get(followee) ?? []) {
-      if (r.b !== 'loved') continue;
-      const m = w.media.get(r.m);
-      if (!m) continue;
-      const id =
-        medium === 'movies'
-          ? m.kind === 'movie'
-            ? m.m
-            : null
-          : m.kind === 'season'
-            ? m.parent
-            : m.kind === 'series'
-              ? m.m
-              : null;
-      if (!id || met.has(id) || seen.has(id)) continue;
-      seen.add(id);
-      counts.set(id, (counts.get(id) ?? 0) + 1);
+      if (r.b !== 'loved' || mine.has(r.m)) continue;
+      counts.set(r.m, (counts.get(r.m) ?? 0) + 1);
     }
   }
-  return [...counts]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 40)
+  const ids = [...counts]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, SOCIAL_LIMIT)
     .map(([id]) => id);
+
+  if (medium === 'movies') return ids.filter((id) => w.media.get(id)?.kind === 'movie');
+  const rows = ids
+    .map((id) => w.media.get(id))
+    .filter((m): m is ReplayMedia => m != null && (m.kind === 'season' || m.kind === 'series'))
+    .map((m) => ({ id: m.m, kind: m.kind, parent_id: m.parent }));
+  return socialSeriesFrom(ids, rows);
 }
 
 /** `catalogue_candidates`, mirrored: per language and decade, `per` drawn by seed from the top `3 × per`. */
@@ -440,7 +454,7 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     similarIds: w.similar.get(a.mediaItemId) ?? [],
   }));
   const met = metOf(account, w);
-  const social = socialFor(engine, medium) ? socialMirror(account, w, medium, met) : [];
+  const social = socialFor(engine, medium) ? socialMirror(account, w, medium) : [];
   const anchored = anchors.filter((a) => a.similarIds.length > 0).length;
   const lists = medium === 'tv' && anchored > 0 ? TRENDING.tv.slice(0, 1) : TRENDING[medium];
   const trending = [...new Set(lists.flatMap((key) => w.trending.get(key) ?? []))];

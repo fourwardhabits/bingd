@@ -3,8 +3,21 @@ import { join } from 'node:path';
 
 import { DEFAULT_WORLD, generateWorld } from '@/features/recommendations/evaluation/world';
 
-import { validateExport } from './format';
-import { holdOut, renderReplay, replay, tasteMatch } from './replay';
+import {
+  validateExport,
+  type ReplayExport,
+  type ReplayMedia,
+  type ReplayRanking,
+} from './format';
+import {
+  SOCIAL_LIMIT,
+  holdOut,
+  renderReplay,
+  replay,
+  socialMirror,
+  tasteMatch,
+  worldOf,
+} from './replay';
 import { syntheticExport } from './synthetic';
 
 /**
@@ -118,6 +131,92 @@ describe('Recommendation V2 replay', () => {
     expect(text).toMatch(/Pool recall by source/);
     // No id of any kind in the report.
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+
+  it('mirrors social_candidates as the SQL does: raw ids, one global limit, then the wall', () => {
+    /**
+     * Followees whose Liked rankings span both media, sized so the earlier per-wall mirror and
+     * the server's one global limit of 40 disagree on **both** walls:
+     *
+     *   - 15 seasons of show X, each Liked by followees 4 and 5 (count 2, ids `a…`);
+     *   - 30 films, each Liked by followees 2 and 3 (count 2, ids `b…`);
+     *   - 15 films Liked by followee 2 alone (count 1, ids `d…`);
+     *   - one season of show Y, Liked by followee 6 alone (count 1, id `9…`).
+     *
+     * The server ranks 45 rows at count 2 — seasons first on the id tie-break — and keeps 40: all
+     * 15 seasons and the first 25 `b…` films. The old mirror filtered by medium first, so its
+     * Films wall took all 30 `b…` films and 10 `d…` films (40), and its TV wall rolled seasons up
+     * before counting and kept Y beside X.
+     */
+    const id = (prefix: string, n: number) =>
+      `${prefix}${n.toString(16).padStart(7, '0')}-0000-4000-8000-000000000000`;
+    const media = (
+      m: string,
+      kind: ReplayMedia['kind'],
+      parent: string | null = null,
+    ): ReplayMedia => ({
+      m,
+      tmdb: null,
+      kind,
+      parent,
+      season: kind === 'season' ? 1 : null,
+      genres: ['Drama'],
+      lang: 'en',
+      year: 2016,
+      popularity: 100,
+      tile: kind !== 'season',
+    });
+    const showX = id('e', 1);
+    const showY = id('f', 1);
+    const seasonsX = Array.from({ length: 15 }, (_, i) => id('a', i));
+    const seasonY = id('9', 0);
+    const shared = Array.from({ length: 30 }, (_, i) => id('b', i));
+    const single = Array.from({ length: 15 }, (_, i) => id('d', i));
+    const own = [id('c', 1), id('c', 2)];
+
+    const rankings: ReplayRanking[] = [];
+    const love = (u: number, ids: readonly string[], c: ReplayRanking['c']) =>
+      ids.forEach((m, i) => rankings.push({ u, m, c, b: 'loved', p: i + 1, day: 1, seq: i }));
+    // The reader: two Liked films, the later held out.
+    rankings.push({ u: 1, m: own[0]!, c: 'movies', b: 'loved', p: 1, day: 1, seq: 0 });
+    rankings.push({ u: 1, m: own[1]!, c: 'movies', b: 'loved', p: 2, day: 2, seq: 0 });
+    love(2, [...shared, ...single, own[0]!], 'movies');
+    love(3, [...shared, own[0]!], 'movies');
+    love(4, seasonsX, 'tv_seasons');
+    love(5, seasonsX, 'tv_seasons');
+    love(6, [seasonY], 'tv_seasons');
+
+    const doc: ReplayExport = validateExport({
+      format: 'bingd-rec-v2-replay-export',
+      version: 1,
+      exported_day: 3,
+      users: [1, 2, 3, 4, 5, 6].map((u) => ({ u, visibility: 'public' })),
+      rankings,
+      logged: [],
+      follows: [2, 3, 4, 5, 6].map((followee) => ({ follower: 1, followee })),
+      media: [
+        media(showX, 'series'),
+        media(showY, 'series'),
+        ...seasonsX.map((m) => media(m, 'season', showX)),
+        media(seasonY, 'season', showY),
+        ...[...shared, ...single, ...own].map((m) => media(m, 'movie')),
+      ],
+      similar: [],
+      trending: [],
+    });
+    const w = worldOf(doc);
+    const reader = holdOut(doc).accounts.find((a) => a.key === 1)!;
+    expect(reader.visible.map((r) => r.m)).toEqual([own[0]]);
+
+    const films = socialMirror(reader, w, 'movies');
+    // 25, not 40: the seasons took fifteen of the server's forty.
+    expect(films).toEqual(shared.slice(0, SOCIAL_LIMIT - seasonsX.length));
+    expect(films.some((m) => single.includes(m))).toBe(false);
+    // What the reader has visibly ranked is excluded by the server, however many endorse it.
+    expect(films).not.toContain(own[0]);
+
+    // One show, not two: Y's lone season was below the global cut.
+    expect(socialMirror(reader, w, 'tv')).toEqual([showX]);
   });
 
   (process.env.REC_V2_REPLAY === '1' ? it : it.skip)(
