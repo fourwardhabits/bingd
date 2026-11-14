@@ -1,5 +1,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Alert, Share, type ShareAction } from 'react-native';
+import { Alert, Share, StyleSheet, type ShareAction } from 'react-native';
+
+import { theme } from '@/ui/tokens';
 
 import { InviteFriendsButton } from './InviteFriendsButton';
 
@@ -34,6 +36,34 @@ function deferred<T>() {
 }
 
 const INVITE_URL = 'https://bingd.app/i/tok123';
+
+/**
+ * `kind` (Onboarding 2.0, OB-6): the People step's footer outlines it so Continue is the
+ * one Maroon fill. The default is the fill it has always been, so Profile is unchanged.
+ */
+// Ahead of the share cases: the double-tap case below deliberately overlaps two act
+// scopes, and a render after it in the same file can be left unqueryable.
+describe('its kind', () => {
+  type Node = { props: { style?: unknown }; children?: (Node | string)[] };
+  const fills = (node: Node): boolean =>
+    (StyleSheet.flatten(node.props.style as never) as { backgroundColor?: string } | undefined)
+      ?.backgroundColor === theme.semantic.action ||
+    (node.children ?? []).some((child) => typeof child !== 'string' && fills(child));
+
+  it('is the filled primary by default', async () => {
+    const view = await render(<InviteFriendsButton />);
+    expect(fills(view.getByRole('button', { name: 'Invite friends' }) as unknown as Node)).toBe(
+      true,
+    );
+  });
+
+  it('is outlined when asked to be secondary', async () => {
+    const view = await render(<InviteFriendsButton kind="secondary" />);
+    expect(fills(view.getByRole('button', { name: 'Invite friends' }) as unknown as Node)).toBe(
+      false,
+    );
+  });
+});
 
 describe('Invite friends', () => {
   it('shares the canonical invite URL from the existing creation path', async () => {
@@ -217,3 +247,4 @@ describe('the label while the share is under way', () => {
     share.mockRestore();
   });
 });
+
