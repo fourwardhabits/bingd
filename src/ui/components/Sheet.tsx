@@ -199,10 +199,11 @@ export function Sheet({
    * found that twice on one device, on Collection Filters and on Bingd Awards, which
    * are simply the two sheets whose last element is a button rather than a list.
    *
-   * `Math.max` rather than a sum: the home indicator’s inset is already breathing
-   * room, and adding a gutter on top of it would lift the buttons off a modern iPhone
-   * for no reason. Whichever is larger, never less than a gutter — the same rule
-   * `Screen` applies to the bottom of a page.
+   * A sum, not `Math.max` (founder, physical-device QA, 2026-09-25; `Sheet.test.tsx`,
+   * "the bottom edge"): the inset says how much room the hardware takes and the gutter how
+   * much the design wants, so they add. With `Math.max`, a phone reporting a 48pt
+   * navigation bar gave the last row 48pt of system clearance and none of the app's own
+   * spacing. Never less than a gutter, even where the system reports no inset.
    */
   const bottomPadding = bottomInset + theme.space[4];
   /**
