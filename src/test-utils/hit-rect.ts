@@ -390,3 +390,34 @@ export function searchFieldSite(root: Host, input: Host, width: number) {
     })(),
   };
 }
+
+/**
+ * A wrapping row of controls in a column, measured from that column at `width`.
+ *
+ * Returns each control's usable rect (`hits`, clipped by every box up to the column), its
+ * drawn box (`chips`), the drawn distance from the block above the row to the first line
+ * of controls (`spaceAbove`, to the bottom of that block) and from the last line to the
+ * block below (`spaceBelow`), whether the row wrapped, and the row's own box.
+ */
+export function controlRowSite(controls: Host[], width: number) {
+  const row = parentView(controls[0]!);
+  const column = parentView(row);
+  const results = controls.map((control) => hitRect(column, control, width));
+  const { boxes } = results[0]!;
+  const chips = controls.map((control) => boxes.get(control)!);
+  const flow = kids(column).filter((k) => !hidden(k) && !absolute(k) && boxes.has(k));
+  const at = flow.indexOf(row);
+  const above = boxes.get(flow[at - 1]!)!;
+  const below = boxes.get(flow[at + 1]!)!;
+  const firstTop = Math.min(...chips.map((c) => c.top));
+  const lastBottom = Math.max(...chips.map((c) => c.top + c.height));
+  return {
+    row: boxes.get(row)!,
+    column: boxes.get(column)!,
+    chips,
+    hits: results,
+    wrapped: new Set(chips.map((c) => c.top)).size > 1,
+    spaceAbove: firstTop - (above.top + above.height),
+    spaceBelow: below.top - lastBottom,
+  };
+}

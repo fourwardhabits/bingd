@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { AppState, StyleSheet } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
+import { controlRowSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
@@ -936,7 +937,6 @@ describe('a successful autosave says nothing', () => {
   it('mounts no status at all before anything is being saved', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     expect(sheet.queryByText('Saving…')).toBeNull();
     // And no reserved box either. It existed only to stop the label moving the rows,
     // and a blank slot for a label that never comes is dead space on every open.
@@ -958,7 +958,6 @@ describe('a successful autosave says nothing', () => {
 
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
 
     // The debounce is real — see the lane's own note on why fake timers poison this
@@ -979,7 +978,6 @@ describe('a successful autosave says nothing', () => {
     // carrying the text, exactly as before.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
     expect(callsTo('log_watched')[0][1].p_note).toBe('a thought worth keeping');
@@ -991,7 +989,6 @@ describe('a successful autosave says nothing', () => {
     // screen or take one away.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     for (const text of ['o', 'on', 'one', 'one t', 'one tw', 'one two']) {
       await fireEvent.changeText(sheet.note(), text);
       expect(sheet.queryByText('Saving…')).toBeNull();
@@ -1032,7 +1029,6 @@ describe('the autosave lane', () => {
     // the strand outlives the test. 1200ms of real waiting is the honest version.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'one');
     await fireEvent.changeText(sheet.note(), 'one two');
     await fireEvent.changeText(sheet.note(), 'one two three');
@@ -1063,7 +1059,6 @@ describe('the autosave lane', () => {
   it('moves to the assigning writer the moment its own write has created the row', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'first thought');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1085,7 +1080,6 @@ describe('the autosave lane', () => {
     // it last sent, and a clear against that is a change.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a passing thought');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1110,7 +1104,6 @@ describe('the autosave lane', () => {
     // is the contract: typing, however continuous, cannot stay unsaved.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     const started = Date.now();
     let draft = 'no';
     while (callsTo('log_watched').length === 0 && Date.now() - started < 10_000) {
@@ -1134,7 +1127,6 @@ describe('the autosave lane', () => {
     failing('log_watched', { code: '08007', message: 'connection lost' });
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'the first attempt');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1301,6 +1293,32 @@ describe('what a note says about itself', () => {
   const reviewToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
     sheet.getByLabelText('Share this note as a public review');
 
+  /**
+   * **Both claims answer 44pt in the composer, and nothing in it moves** (A11Y-44,
+   * design-system v3 A.2 #12). Measured in the real note box (gutter padding, `space[2]`
+   * gap) at 360pt, where the two chips wrap, and at a width where they share a line; the
+   * chips stay `space[2]` from the field above and the caption below (`hit-rect.ts`).
+   */
+  it('gives both claims a 44pt target without moving the chips or the gaps', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    const chips = [
+      sheet.getByLabelText('This note contains spoilers'),
+      sheet.getByLabelText('Share this note as a public review'),
+    ] as unknown as Host[];
+    for (const width of [360, 1000]) {
+      const site = controlRowSite(chips, width);
+      expect(site.wrapped).toBe(width === 360);
+      for (const [index, hit] of site.hits.entries()) {
+        expect(site.chips[index]!.height).toBe(theme.layout.control.chipHeight);
+        expect(hit.height).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      }
+      if (site.wrapped) expect(site.hits[0]!.bottom).toBeLessThanOrEqual(site.hits[1]!.top);
+      expect(site.spaceAbove).toBe(theme.space[2]);
+      expect(site.spaceBelow).toBe(theme.space[2]);
+    }
+  });
+
   it('opens a first-ever note private: publishing is the reader’s own act', async () => {
     /**
      * **Private again, by the founder's rule of 2026-11-04.** It opened shared from
@@ -1310,7 +1328,6 @@ describe('what a note says about itself', () => {
      */
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() =>
       expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false),
     );
@@ -1394,7 +1411,6 @@ describe('what a note says about itself', () => {
     );
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() =>
       expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false),
     );
@@ -2829,7 +2845,6 @@ describe('the remembered share choice', () => {
   it('opens a first-ever note private', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() => expect(shareOn(sheet)).toBe(false));
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
   });
@@ -2838,7 +2853,6 @@ describe('the remembered share choice', () => {
     mockPrefs.set('user-1.notes.share-default', 'public');
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() => expect(shareOn(sheet)).toBe(false));
   });
 
