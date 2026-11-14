@@ -493,7 +493,7 @@ describe('the picker', () => {
   it('asks for one movie at a time, in the founder’s words', async () => {
     const view = await open();
 
-    expect(view.getByText('Pick a movie you have seen')).toBeTruthy();
+    expect(view.getByText("Pick a movie you've seen")).toBeTruthy();
     // `film` was the app's own word and `movie` is the founder's.
     expect(view.queryByText(/five films/i)).toBeNull();
     // The old flow's instruction, which asked for all five up front.
@@ -598,7 +598,7 @@ describe('the picker', () => {
     const view = await open();
     await fireEvent.changeText(view.getByLabelText('Search for a movie'), 'inception');
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.queryByLabelText(/Inception, 2010/)).toBeNull();
   });
 });
@@ -671,7 +671,7 @@ describe('one turn of the loop', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -773,7 +773,7 @@ describe('one turn of the loop', () => {
     await releaseDismissals();
 
     // Gone, and the picker is live again at the number the placement moved it to.
-    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy());
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -843,13 +843,13 @@ describe('one turn of the loop', () => {
     // Closed, and still arriving. Nothing has asked UIKit to take it away yet.
     expect(shows().refused).toBe(0);
     expect(dismissals().pending).toHaveLength(0);
-    expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
+    expect(view.queryByLabelText('1 of 5 movies ranked, 4 to go')).toBeNull();
 
     await releaseShows();
     await waitFor(() => expect(dismissals().pending).toHaveLength(1));
     await releaseDismissals();
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -865,7 +865,7 @@ describe('one turn of the loop', () => {
     expect(view.queryAllByText('How was it?', { includeHiddenElements: true })).toHaveLength(0);
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.queryAllByText('How was it?')).toHaveLength(0);
   });
 
@@ -881,7 +881,9 @@ describe('one turn of the loop', () => {
     await closeReveal(view);
 
     await waitFor(() =>
-      expect(view.getByLabelText(`${already + 1} of 5 movies ranked`)).toBeTruthy(),
+      expect(
+        view.getByLabelText(`${already + 1} of 5 movies ranked, ${4 - already} to go`),
+      ).toBeTruthy(),
     );
     expect(view.queryByText('Your First Five')).toBeNull();
   });
@@ -1077,7 +1079,7 @@ describe('the reveal after every placement', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
+    expect(view.queryByLabelText('1 of 5 movies ranked, 4 to go')).toBeNull();
   });
 
   it('ends a comparison on the reveal, not on the last pair', async () => {
@@ -1110,7 +1112,7 @@ describe('the reveal after every placement', () => {
     await chooseBucket(view);
     await closeReveal(view);
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     // Inception is not offered again, from the same fact.
     expect(view.queryByLabelText('Inception')).toBeNull();
     releaseReadsOf('rankings');
@@ -1201,7 +1203,7 @@ describe('resuming', () => {
     alreadyRanked(3);
     const view = await renderWithProviders(<TasteScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('3 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('3 of 5 movies ranked, 2 to go')).toBeTruthy());
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(view.queryByText('How was it?')).toBeNull();
   });
@@ -1306,6 +1308,140 @@ describe('Your First Five', () => {
     // The step after the payoff, and the stage that says so on a relaunch.
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
     await waitFor(() => expect(mockPrefs.get('user-1.onboarding.stage')).toBe('letterboxd'));
+  });
+});
+
+describe('First Five guidance (OB-3)', () => {
+  const coach = /New to this\? Tap the one you liked more/;
+  const events = (name: string) =>
+    mockTrack.mock.calls.map(([event]) => event).filter((event) => event.name === name);
+
+  /** Every title asks one comparison against the same opponent, then places. */
+  const everyTitleCompares = () => {
+    mockTableRows.media_items = [
+      { id: 'pivot-1', title: 'The Pivot', release_date: '2001-01-01', poster_path: null },
+      ...(mockTableRows.media_items ?? []),
+    ];
+    const server = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) => {
+      if (fn === 'rank_start') {
+        return Promise.resolve({
+          data: { done: false, session_id: `session-${String(args.p_media_item_id)}`, pivot: 'pivot-1' },
+          error: null,
+        });
+      }
+      if (fn === 'rank_answer') {
+        const id = String(args.p_session_id).replace('session-', '');
+        const position = (mockTableRows.rankings ?? []).length + 1;
+        mockTableRows.rankings = [
+          ...(mockTableRows.rankings ?? []),
+          rankedRow(id, `Placed ${position}`, position),
+        ];
+        return Promise.resolve({
+          data: { done: true, position, category: 'movies', bucket: 'loved', score: 8 },
+          error: null,
+        });
+      }
+      return server(fn, args);
+    });
+  };
+
+  const pick = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
+    await waitFor(() => expect(view.getByLabelText(label)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(label));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await chooseBucket(view);
+  };
+
+  it('explains the loop before the first pick', async () => {
+    const view = await open();
+
+    expect(view.getByText("Pick a movie you've seen")).toBeTruthy();
+    expect(
+      view.getByText(
+        'Say how it was, then pick which you liked more. Five picks and your list is started.',
+      ),
+    ).toBeTruthy();
+    expect(view.getByText('0 of 5')).toBeTruthy();
+    expect(view.getByLabelText('0 of 5 movies ranked')).toBeTruthy();
+  });
+
+  it('says how many are left once one is placed', async () => {
+    alreadyRanked(2);
+    const view = await open();
+
+    expect(view.getByText('Pick another one')).toBeTruthy();
+    expect(view.getByText('Each one is compared with the ones before it.')).toBeTruthy();
+    expect(view.getByText('2 of 5 · 3 to go')).toBeTruthy();
+    expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy();
+  });
+
+  it('counts down to one to go', async () => {
+    alreadyRanked(4);
+    const view = await open();
+
+    expect(view.getByText('4 of 5 · 1 to go')).toBeTruthy();
+    expect(view.getByLabelText('4 of 5 movies ranked, 1 to go')).toBeTruthy();
+  });
+
+  it('labels the search field for what it searches, and keeps its spoken name', async () => {
+    const view = await open();
+    const field = view.getByLabelText('Search for a movie');
+
+    expect(field.props.placeholder).toBe('Search movies');
+  });
+
+  it('coaches the first comparison of the run, and no comparison after it', async () => {
+    starterGrid(['film-1', 'film-2', 'film-3']);
+    everyTitleCompares();
+    const view = await open();
+
+    await pick(view, 'Inception');
+    await answerable(view, 'Inception');
+    expect(view.getByText(coach)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Choose Inception'));
+    await closeReveal(view);
+    await waitFor(() => expect(view.getByLabelText(/^1 of 5 movies ranked/)).toBeTruthy());
+
+    await pick(view, 'Starter 2');
+    await answerable(view, 'Starter 2');
+    expect(view.queryByText(coach)).toBeNull();
+    await fireEvent.press(view.getByLabelText('Choose Starter 2'));
+    await closeReveal(view);
+
+    await waitFor(() => expect(events('ranking_completed')).toHaveLength(2));
+    expect(events('ranking_completed').map((event) => event.props.coach_shown)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('saves the coach for the first comparison actually asked, past an outright placement', async () => {
+    starterGrid(['film-1', 'film-2']);
+    const view = await open();
+
+    // The first title on a new account has an empty band: no comparison, so no coach.
+    await pick(view, 'Inception');
+    await closeReveal(view);
+    await waitFor(() => expect(view.getByLabelText(/^1 of 5 movies ranked/)).toBeTruthy());
+
+    everyTitleCompares();
+    await pick(view, 'Starter 2');
+    await answerable(view, 'Starter 2');
+    expect(view.getByText(coach)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Choose Starter 2'));
+    await closeReveal(view);
+
+    await waitFor(() => expect(events('ranking_completed')).toHaveLength(2));
+    expect(
+      events('ranking_completed').map((event) => [
+        event.props.first_five_index,
+        event.props.coach_shown,
+      ]),
+    ).toEqual([
+      [1, false],
+      [2, true],
+    ]);
   });
 });
 

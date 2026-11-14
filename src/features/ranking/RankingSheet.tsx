@@ -45,7 +45,7 @@ import { movementSentence } from '@/features/watch-history/watch-history';
 import { hapticDecision, hapticSuccess } from '@/ui/haptics';
 import { useReducedMotion, useReducedMotionState } from '@/ui/motion';
 import { usePressScale } from '@/ui/press';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 import { useOperationIntent } from '@/lib/operation-intent';
@@ -275,10 +275,17 @@ export type RankingSheetProps = {
    *
    * `index` is which of the five this is, 1 to 5, counted by titles rather than by
    * comparisons, so an empty-band placement that shows none still takes its number.
-   * `coachShown` is whether the first-comparison coach line was on screen for it.
-   * Read only when `surface` is `onboarding`; every other surface omits both properties.
+   *
+   * `coachShown` asks for the first-comparison coach line (OB-3) on this session's first
+   * comparison. The caller sets it until one has actually been seen, and `onCoachShown`
+   * tells it when that happened — an empty-band session asks nothing and so shows nothing,
+   * and the offer passes to the next title. `ranking_completed.coach_shown` reports what
+   * was **on screen**, not what was asked for.
+   *
+   * Read only when `surface` is `onboarding`; every other surface ignores it, draws no
+   * coach, and omits both properties.
    */
-  onboardingContext?: { index: number; coachShown: boolean };
+  onboardingContext?: { index: number; coachShown: boolean; onCoachShown?: () => void };
 };
 
 /**
@@ -396,8 +403,33 @@ function Session({
   useEffect(() => {
     onboardingContextRef.current = onboardingContext;
   }, [onboardingContext]);
+
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
+
+  /**
+   * **The first-comparison coach line** (Onboarding 2.0, OB-3, 2026-11-14).
+   *
+   * On onboarding alone, when the caller asks for it, on this session's first comparison
+   * and only until the reader answers it — a pick, Can't decide or Undo spends it, so the
+   * pair after it is the ordinary pair. `coachSeen` is what `ranking_completed` reports and
+   * what the caller is told, once, so no later title in the run is offered it again.
+   */
+  const [coachSpent, setCoachSpent] = useState(false);
+  const coachSeen = useRef(false);
+  const coaching =
+    surface === 'onboarding' &&
+    Boolean(onboardingContext?.coachShown) &&
+    !coachSpent &&
+    step?.state === 'comparing';
+  useEffect(() => {
+    if (!coaching || coachSeen.current) return;
+    coachSeen.current = true;
+    onboardingContextRef.current?.onCoachShown?.();
+  }, [coaching]);
+  const spendCoach = () => {
+    if (coaching) setCoachSpent(true);
+  };
   /**
    * The reader's current scores, for the whole-show score a season's `ShowDecision`
    * carries (WS-TVC, founder spec t168u §3A): never the season's. Read only for a season,
@@ -674,7 +706,8 @@ function Session({
             ...(surface === 'onboarding' && onboardingContextRef.current
               ? {
                   first_five_index: onboardingContextRef.current.index,
-                  coach_shown: onboardingContextRef.current.coachShown,
+                  // What was on screen, not what was asked for: see `coachSeen`.
+                  coach_shown: coachSeen.current,
                 }
               : {}),
           },
@@ -1043,9 +1076,10 @@ function Session({
             pivotId={step.pivotId}
             skipped={step.skipped}
             surface={surface}
-
+            coach={coaching}
             busy={busy}
-            onPick={(winnerId) =>
+            onPick={(winnerId) => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1054,9 +1088,10 @@ function Session({
                     outcomeUnknown,
                   ),
                 1,
-              )
-            }
-            onBack={() =>
+              );
+            }}
+            onBack={() => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1065,9 +1100,10 @@ function Session({
                     outcomeUnknown,
                   ),
                 -1,
-              )
-            }
-            onSkip={() =>
+              );
+            }}
+            onSkip={() => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1077,8 +1113,8 @@ function Session({
                   ),
                 0,
                 true,
-              )
-            }
+              );
+            }}
             onClose={() => void close()}
           />
         ) : step?.state === 'failed' ? (
@@ -1215,6 +1251,7 @@ export function Comparison({
   onSkip,
   onClose,
   topBar = true,
+  coach = false,
 }: {
   /**
    * `kind` is here for the Details affordance under the card, which says a different
@@ -1243,6 +1280,11 @@ export function Comparison({
   onClose: () => void;
   /** Whether to draw the Close row. Off only when the host screen has its own. */
   topBar?: boolean;
+  /**
+   * The First Five's one-time coach line under the question (OB-3). Off everywhere except
+   * the comparison the onboarding session decides to coach; Refine never passes it.
+   */
+  coach?: boolean;
 }) {
   /**
    * Which title the reader asked to be reminded about, if any.
@@ -1321,9 +1363,29 @@ export function Comparison({
   return (
     <View style={styles.comparison}>
       {topBar ? <TopBar onClose={onClose} /> : null}
-      <Text variant="headline" style={styles.centre} accessibilityRole="header">
-        Which did you like more?
-      </Text>
+      {/**
+       * The question and, on the First Five's first comparison, the coach line under it
+       * (OB-3), held as one block so the line sits with the question it explains — a line
+       * gap, `space[2]`, rather than the section gap between the question and the pair.
+       * Without the coach this is the question alone and nothing about the pair, its
+       * controls or the reveal moves.
+       */}
+      <View style={styles.question}>
+        <Text variant="headline" style={styles.centre} accessibilityRole="header">
+          Which did you like more?
+        </Text>
+        {coach ? (
+          <View style={styles.coach} testID="comparison-coach">
+            <Text variant="footnote" style={styles.centre} accessibilityRole="text">
+              New to this? Tap the one you liked more. Too close to call? Tap{' '}
+              <Text variant="footnote" style={styles.coachEmphasis}>
+                {"Can't decide"}
+              </Text>
+              .
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.cards}>
         {/* `cardWidth` is the one measurement both cards take; see `useCardWidth`. */}
@@ -2724,6 +2786,15 @@ const styles = StyleSheet.create({
     padding: theme.layout.gutter,
     gap: theme.space[5],
   },
+  question: { gap: theme.space[2] },
+  // The coach line's Parchment strip (OB-3): sunken surface, control radius, a compact pad.
+  coach: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.control,
+    paddingVertical: theme.space[2],
+    paddingHorizontal: theme.space[3],
+  },
+  coachEmphasis: { fontFamily: fontFamily.sansSemibold },
   // In flow, not absolute. Absolute put it over the question once the sheet stopped
   // being full height and the content moved up to meet it.
   topBar: { alignItems: 'flex-end' },
