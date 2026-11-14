@@ -21,10 +21,15 @@ export type ToggleChipProps = {
  * has to be able to say which way each one currently sits without the user
  * pressing it to find out.
  *
- * On-state is carried by fill, border weight and a filled glyph together. Colour
- * alone would fail for the same reason the bucket chips carry a checkmark
+ * On-state is carried by the Maroon fill (its border goes Maroon with it; the weight does
+ * not change), the inverse label and the filled glyph the caller passes for `on`, together.
+ * Colour alone would fail for the same reason the bucket chips carry a checkmark
  * (design-system.md §3), and this control's on-state is genuinely load-bearing —
  * getting the spoiler toggle backwards is not a cosmetic error.
+ *
+ * Slop is `space[2]` above and below but only `space[1]` either side (design-system v3
+ * A.2 #12): the chips sit `space[2]` apart, and two neighbours' slops must meet in that
+ * gap without crossing, or a press between them belongs to whichever was drawn last.
  */
 export function ToggleChip({ icon, label, on, onToggle, accessibilityLabel }: ToggleChipProps) {
   return (
@@ -33,7 +38,7 @@ export function ToggleChip({ icon, label, on, onToggle, accessibilityLabel }: To
       accessibilityState={{ checked: on }}
       accessibilityLabel={accessibilityLabel ?? label}
       onPress={onToggle}
-      hitSlop={theme.space[2]}
+      hitSlop={SLOP}
       style={({ pressed }) => [styles.chip, on && styles.on, pressed && styles.pressed]}
     >
       <Ionicons
@@ -47,6 +52,13 @@ export function ToggleChip({ icon, label, on, onToggle, accessibilityLabel }: To
     </Pressable>
   );
 }
+
+const SLOP = {
+  top: theme.space[2],
+  bottom: theme.space[2],
+  left: theme.space[1],
+  right: theme.space[1],
+};
 
 const styles = StyleSheet.create({
   chip: {
