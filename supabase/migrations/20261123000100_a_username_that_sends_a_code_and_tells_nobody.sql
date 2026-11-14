@@ -239,7 +239,8 @@ begin
     from auth_username_challenges c
    where c.user_id = v_user and c.consumed_at is null and c.expires_at > now()
    order by c.created_at desc
-   limit 1;
+   limit 1
+     for update;
 
   -- Every earlier challenge for this account dies here, whichever branch follows: there is
   -- only ever one live challenge per account, so repeated sends cannot multiply the number

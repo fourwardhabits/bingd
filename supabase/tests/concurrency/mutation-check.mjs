@@ -81,13 +81,21 @@
  *  17. `mark_recommendations_seen` without its `seen_at is null` guards (20261121000100). A
  *      second mark must move `seen_at` and count the rows again — the "first time wins"
  *      that `races/recommendation-seen.mjs` S1 asserts.
+ *  18. `username_sign_in_send` without the `for update` on its live-challenge read
+ *      (20261123000100). The body is the migration's own, with only that clause removed. A
+ *      cooldown resend racing an uncommitted verify must mint a replacement that has lost
+ *      the attempt — `races/username-sign-in.mjs` US1, run here verbatim. The honest
+ *      function is run first as a control and must carry it.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
  * signature would create a second candidate rather than a wrong version of the real one
  * — leaving every call ambiguous and every result meaningless.
  */
+import { readFileSync } from 'node:fs';
+
 import { createRaceDb, fixtures, startCluster, stopCluster } from './harness.mjs';
+import { cooldownRace } from './races/username-sign-in.mjs';
 
 const NO_LOCK = `
 create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false, p_parent_id uuid default null)
@@ -1614,6 +1622,50 @@ end; $$;
   results.push([
     'seen guard dropped -> a second mark counts the row again and moves seen_at',
     second.marked === 1 && +after !== +first,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 18: username_sign_in_send without `for update` on its live-challenge read
+//     (20261123000100). The cooldown replacement copies the last committed attempt count
+//     while a verify is still spending one, so the attempt in flight is lost.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const honest = await cooldownRace(db, fx);
+  controls.push([
+    'send live-challenge row lock present -> a cooldown replacement carries the in-flight attempt',
+    honest.resend.outcome === 'cooldown' &&
+      honest.committed === 2 &&
+      honest.rows.filter((r) => !r.consumed).map((r) => r.attempts).join() === '2',
+  ]);
+
+  const migration = readFileSync(
+    new URL(
+      '../../migrations/20261123000100_a_username_that_sends_a_code_and_tells_nobody.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const start = migration.indexOf('create or replace function username_sign_in_send(');
+  const end = migration.indexOf('\n$$;', start) + '\n$$;'.length;
+  const body = migration.slice(start, end);
+  const mutant = body.replace(/\n\s*for update;/, ';');
+  if (start < 0 || mutant === body) {
+    throw new Error('mutant 18: could not find the `for update` in username_sign_in_send');
+  }
+  await db.sql(mutant);
+
+  const r = await cooldownRace(db, fx);
+  const live = r.rows.filter((row) => !row.consumed);
+  results.push([
+    'send live-challenge row lock removed -> a cooldown replacement loses an attempt spent mid-send',
+    r.resend.outcome === 'cooldown' &&
+      r.committed === 2 &&
+      live.length === 1 &&
+      live[0].attempts !== r.committed,
   ]);
 
   await db.close();
