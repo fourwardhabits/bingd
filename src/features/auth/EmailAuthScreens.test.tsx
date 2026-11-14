@@ -169,7 +169,9 @@ describe('Sign in', () => {
       fireEvent.press(view.getByText('Continue with email'));
     });
 
-    await waitFor(() => expect(view.getByText(/cannot send codes right now/)).toBeTruthy());
+    // A Field's error/hint caption is drawn but hidden from the a11y tree (the input speaks
+    // it), so queries for it include hidden elements (design-system v3 A.2 #26).
+    await waitFor(() => expect(view.getByText(/cannot send codes right now/, { includeHiddenElements: true })).toBeTruthy());
     expect(mockNav.pushed).toEqual([]);
   });
 
@@ -290,7 +292,7 @@ describe('Password sign-in', () => {
     });
 
     await waitFor(() =>
-      expect(view.getByText('We could not sign you in with that email and password.')).toBeTruthy(),
+      expect(view.getByText('We could not sign you in with that email and password.', { includeHiddenElements: true })).toBeTruthy(),
     );
     expect(mockNav.pushed).toEqual([]);
     // Not routed anywhere to "finish" or "verify" an account: there is no such state on
@@ -400,7 +402,7 @@ describe('The code screen', () => {
 
       expect(mockAuth.sendCode).toHaveBeenCalledWith('ada@bingd.app');
       expect(mockAuth.sendCode).toHaveBeenCalledTimes(1);
-      expect(view.getByText(/New code sent/)).toBeTruthy();
+      expect(view.getByText(/New code sent/, { includeHiddenElements: true })).toBeTruthy();
       // And straight back into a cooldown, so the next tap cannot be immediate.
       expect(view.getByText(/^Resend code in/)).toBeTruthy();
     } finally {
@@ -447,7 +449,7 @@ describe('The code screen', () => {
       await act(async () => {
         fireEvent.press(view.getByText('Continue'));
       });
-      expect(view.getByText(/That code did not work/)).toBeTruthy();
+      expect(view.getByText(/That code did not work/, { includeHiddenElements: true })).toBeTruthy();
 
       await act(async () => {
         jest.advanceTimersByTime(61_000);
@@ -458,9 +460,9 @@ describe('The code screen', () => {
 
       // The rejection was about a code that has just been superseded, so it goes with
       // it — and the digits go too, because they belong to that code.
-      expect(view.queryByText(/That code did not work/)).toBeNull();
+      expect(view.queryByText(/That code did not work/, { includeHiddenElements: true })).toBeNull();
       expect(view.getByLabelText('Six-digit code').props.value).toBe('');
-      expect(view.getByText(/New code sent/)).toBeTruthy();
+      expect(view.getByText(/New code sent/, { includeHiddenElements: true })).toBeTruthy();
     } finally {
       jest.useRealTimers();
     }
@@ -498,8 +500,8 @@ describe('The code screen', () => {
 
       // Not an error, and not the lie that a new code went out.
       expect(view.queryByText(/cannot send/i)).toBeNull();
-      expect(view.queryByText(/New code sent/)).toBeNull();
-      expect(view.getByText(/already on its way/)).toBeTruthy();
+      expect(view.queryByText(/New code sent/, { includeHiddenElements: true })).toBeNull();
+      expect(view.getByText(/already on its way/, { includeHiddenElements: true })).toBeTruthy();
 
       // Re-armed to the server's 5 seconds, not to a fresh 60.
       expect(view.getByText(/^Resend code in 0:0\d$/)).toBeTruthy();
@@ -532,7 +534,7 @@ describe('The code screen', () => {
 
       // Whatever GoTrue said, as `sendEmailCode` maps it — and nothing about whether
       // this address has an account.
-      expect(view.getByText(/cannot send codes right now/)).toBeTruthy();
+      expect(view.getByText(/cannot send codes right now/, { includeHiddenElements: true })).toBeTruthy();
       expect(view.queryByText(/no account/i)).toBeNull();
 
       // The screen is not permanently disabled by one failure: the same countdown runs
@@ -593,7 +595,7 @@ describe('The code screen', () => {
       fireEvent.press(view.getByText('Continue'));
     });
 
-    await waitFor(() => expect(view.getByText(/That code did not work/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/That code did not work/, { includeHiddenElements: true })).toBeTruthy());
   });
 
   it('will not submit a code that is not six digits', async () => {

@@ -67,9 +67,11 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
       <View style={styles.row}>
         <TextInput
           ref={input}
+          // The error is spoken once, in the label; the hint only when there is no error,
+          // which is also when the caption shows it (design-system v3 A.2 #26).
           accessibilityLabel={error ? `${label}. ${error}` : label}
           accessibilityLabelledBy={`${id}-label`}
-          accessibilityHint={description}
+          accessibilityHint={error ? undefined : hint}
           placeholderTextColor={theme.text.tertiary}
           onFocus={handleFocus}
           {...rest}
@@ -103,8 +105,15 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
           </Pressable>
         ) : null}
       </View>
+      {/* Drawn, not spoken: the input already says it (the error in its label, the hint as
+          its hint), and a screen reader reaching this caption next would say it twice. */}
       {description ? (
-        <Text variant="caption" tone={error ? 'action' : 'tertiary'}>
+        <Text
+          variant="caption"
+          tone={error ? 'action' : 'tertiary'}
+          importantForAccessibility="no"
+          accessibilityElementsHidden
+        >
           {description}
         </Text>
       ) : null}
