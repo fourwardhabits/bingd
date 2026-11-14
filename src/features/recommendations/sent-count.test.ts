@@ -5,6 +5,7 @@ import { renderHookWithProviders } from '@/test-utils/render';
 import {
   SENT_LIMIT,
   isUnread,
+  sentShortcutBadge,
   unreadCount,
   unreadIsAtLeast,
   useSentToYou,
@@ -138,6 +139,32 @@ describe('unread', () => {
 
     // An opened row on the page ends the unopened prefix, so the count is exact.
     expect(unreadIsAtLeast(list(SENT_LIMIT - 1, 1))).toBe(false);
+  });
+
+  /**
+   * **Codex review, #290.** With more than 200 unopened, seeing the first page makes the
+   * count in hand 0 while the page is still all unopened — there may be unread rows past
+   * the cap. The badge used to need a count above zero, so they vanished.
+   */
+  it('keeps an indicator when none in hand is unread but the page is a floor', () => {
+    const allSeen = list(SENT_LIMIT).map((r) => ({ ...r, seenAt: seen }));
+    expect(unreadCount(allSeen)).toBe(0);
+    expect(unreadIsAtLeast(allSeen)).toBe(true);
+    expect(sentShortcutBadge(allSeen)).toEqual({
+      badge: 'New',
+      spoken: 'Sent to You, more may be new',
+    });
+
+    // Before it was seen, the floor as a number, as before.
+    expect(sentShortcutBadge(list(SENT_LIMIT))).toEqual({
+      badge: `${SENT_LIMIT}+`,
+      spoken: `Sent to You, at least ${SENT_LIMIT} new`,
+    });
+    // An exact count, and an exact nothing, are unchanged.
+    expect(sentShortcutBadge(list(3, 5))).toEqual({ badge: '3', spoken: 'Sent to You, 3 new' });
+    const seenAndOpened = list(SENT_LIMIT - 1, 1).map((r) => ({ ...r, seenAt: seen }));
+    expect(sentShortcutBadge(seenAndOpened)).toEqual({ badge: null, spoken: 'Sent to You' });
+    expect(sentShortcutBadge(undefined)).toEqual({ badge: null, spoken: 'Sent to You' });
   });
 
   it('reads seen_at from the server, and treats an older backend without it as unseen', async () => {

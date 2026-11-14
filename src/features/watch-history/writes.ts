@@ -2,7 +2,7 @@ import { newOperationId, interpret, type WriteResult } from '@/features/collecti
 import { supabase } from '@/lib/supabase';
 import type { BucketId } from '@/ui/components';
 
-import { WATCH_NOTE_MAX_LENGTH, type WatchBasis } from './watch-history';
+import { WATCH_NOTE_MAX_LENGTH, watchNoteLength, type WatchBasis } from './watch-history';
 
 /**
  * The watch-history writers (§D.5).
@@ -157,7 +157,8 @@ export async function setWatchDetails(input: {
   note: string | null;
   companionIds?: string[];
 }): Promise<WriteResult> {
-  if ((input.note?.trim().length ?? 0) > WATCH_NOTE_MAX_LENGTH) {
+  // In code points, as the column's `char_length` check counts.
+  if (watchNoteLength(input.note?.trim() ?? '') > WATCH_NOTE_MAX_LENGTH) {
     return {
       outcome: 'failed',
       message: `A watch note can be up to ${WATCH_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`,

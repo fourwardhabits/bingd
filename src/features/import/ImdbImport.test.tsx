@@ -440,7 +440,31 @@ describe('the IMDb summary', () => {
     expect(view.getByText(/1 title couldn’t be saved/)).toBeTruthy();
     expect(view.getByRole('button', { name: 'Rank titles' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(view.queryByText('Import another file')).toBeNull();
+    // Codex review (#289): the restored summary is a way back to a fresh import.
+    expect(view.getByRole('button', { name: 'Import another file' })).toBeTruthy();
+  });
+
+  /**
+   * **Codex review, #289.** Settings restores a finished job for a day, and *Done* and *Rank
+   * titles* only navigate, so a reader who finished an import, left, and came back used to
+   * find the same summary with no way to start another one, of another file or from the
+   * other service. *Import another file* is the existing `reset`: the job leaves the screen
+   * and the choice of service is back.
+   */
+  it('lets a reader who comes back to a finished import start a fresh one', async () => {
+    finished({ watched: 5 });
+    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Import another file' }));
+
+    await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
+    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    // The existing reset, which on a finished job is answered `running` and deletes nothing.
+    expect(calls('import_discard')).toEqual([{ p_job_id: JOB }]);
+    // And the other service is one tap away.
+    await fireEvent.press(view.getByTestId('choose-letterboxd'));
+    await waitFor(() => expect(view.queryByText('Bring your watch history')).toBeNull());
   });
 
   it('says already here when a re-import changed nothing, and still offers ranking', async () => {

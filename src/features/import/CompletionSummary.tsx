@@ -47,6 +47,13 @@ export const failedNote = (failed: number) =>
  * runs the importer again; it is offered only when the import owns unranked titles. With
  * nothing to rank there is only *Done*. On the onboarding step there is only *Continue*,
  * because the flow guard would send Collection straight back.
+ *
+ * **Import another file** (Codex review, #289). Settings restores a finished job for a day
+ * (`RECENT_COMPLETION_MS`), and *Done* and *Rank titles* only navigate, so without a way to
+ * clear it the reader comes back to this summary and cannot start another import, of
+ * another file or from the other service, until the day is out. A quiet tertiary action
+ * under the pair calls `reset`, which drops the job from the screen (on a finished job
+ * `import_discard` deletes nothing). Not on the onboarding step, whose only way is on.
  */
 export function CompletionSummary({
   counts,
@@ -55,6 +62,7 @@ export function CompletionSummary({
   onRank,
   onDone,
   onContinue,
+  onReset,
 }: {
   counts: ImportCounts;
   provider: ImportProvider;
@@ -64,6 +72,8 @@ export function CompletionSummary({
   onDone: () => void;
   /** The onboarding step's way on, which replaces the pair. */
   onContinue?: () => void;
+  /** Clear the finished job and open the importer again. Off onboarding only. */
+  onReset?: () => void;
 }) {
   const model = resultModel(counts, provider);
   const unmatched = model.unmatched ?? 0;
@@ -134,6 +144,14 @@ export function CompletionSummary({
       ) : (
         <Button label="Done" onPress={onDone} testID="result-done" />
       )}
+      {!onContinue && onReset ? (
+        <Button
+          label="Import another file"
+          kind="tertiary"
+          onPress={onReset}
+          testID="result-import-another"
+        />
+      ) : null}
     </View>
   );
 }

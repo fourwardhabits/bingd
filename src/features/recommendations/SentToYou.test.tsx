@@ -9,7 +9,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
 import { resetMarkSentSeen } from './use-mark-sent-seen';
-import { relativeTime } from './use-sent-to-you';
+import { SENT_LIMIT, relativeTime } from './use-sent-to-you';
 
 const mockPush = jest.fn();
 const mockRpc = jest.fn();
@@ -305,6 +305,27 @@ describe('the wall and the list', () => {
     );
     expect(view.getByText('2', { includeHiddenElements: true })).toBeTruthy();
     expect(view.queryByLabelText(/unopened/)).toBeNull();
+  });
+
+  /**
+   * **Codex review, #290.** A full page of unopened rows, every one already seen: nothing in
+   * hand is unread, but the server orders by opened only, so unread rows may sit past the
+   * cap. The shortcut keeps an indicator rather than going blank.
+   */
+  it('keeps an indicator when a capped page is all seen but unopened', async () => {
+    mockRpcResults.recommendations_to_me = Array.from({ length: SENT_LIMIT }, (_, i) =>
+      recommendation({
+        id: `r${i}`,
+        media_item_id: `film-${i}`,
+        seen_at: '2026-08-16T09:00:00.000Z',
+      }),
+    );
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.getByText('New', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {

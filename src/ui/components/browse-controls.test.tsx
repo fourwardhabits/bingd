@@ -120,10 +120,11 @@ describe('ViewModeToggle (B5)', () => {
   it("selects with MediumSelector's own treatment", async () => {
     const view = await render(<ViewModeToggle value="list" onChange={() => {}} />);
     const [poster, list] = view.getAllByRole('radio') as [ReturnType<typeof view.getByRole>, ReturnType<typeof view.getByRole>];
-    expect(styleOf(list).backgroundColor).toBe(MEDIUM_SELECTED.background);
+    // The ground is the segment's, the pill drawn inside each 44pt target.
+    expect(styleOf(view.getByTestId('view-mode-list-segment')).backgroundColor).toBe(MEDIUM_SELECTED.background);
     expect(MEDIUM_SELECTED.background).toBe(theme.surface.sunken);
     expect(glyph(list as never)?.color).toBe(MEDIUM_SELECTED.ink);
-    expect(styleOf(poster).backgroundColor).toBeUndefined();
+    expect(styleOf(view.getByTestId('view-mode-poster-segment')).backgroundColor).toBeUndefined();
     expect(glyph(poster as never)?.color).toBe(theme.text.secondary);
   });
 
@@ -135,14 +136,35 @@ describe('ViewModeToggle (B5)', () => {
     expect(onChange.mock.calls).toEqual([['list']]);
   });
 
-  it('gives each segment a 44pt target', async () => {
+  /**
+   * **Codex review, #288.** The cells were 36pt with 4pt of vertical `hitSlop`, which React
+   * Native does not honour past the parent, and the parent was the 36pt pill: the 44 was
+   * arithmetic, not a target. Asserted on the real boxes: each `Pressable` and the group
+   * itself are 44 tall, with no slop, and the pill is still drawn 36pt inside them.
+   */
+  it('gives each segment a real 44pt target, with the pill drawn inside it', async () => {
     const view = await render(<ViewModeToggle value="poster" onChange={() => {}} />);
+    const group = styleOf(view.getByLabelText('View'));
+    expect(group.height).toBe(theme.layout.minTapTarget);
+    expect(group.overflow).toBeUndefined();
     for (const radio of view.getAllByRole('radio')) {
       const style = styleOf(radio);
-      const slop = radio.props.hitSlop as { top: number; bottom: number };
       expect(style.width).toBe(theme.layout.minTapTarget);
-      expect((style.height as number) + slop.top + slop.bottom).toBe(theme.layout.minTapTarget);
+      expect(style.height).toBe(theme.layout.minTapTarget);
+      expect(radio.props.hitSlop).toBeUndefined();
+      // The segment fills the cell inside its vertical inset: 36pt, as it was drawn.
+      expect(theme.layout.minTapTarget - 2 * (style.paddingVertical as number)).toBe(36);
     }
+    // The outline sits behind the cells, inset to the same 36pt (plus its own border).
+    const frame = view.getByTestId('view-mode-frame');
+    expect(frame.props.pointerEvents).toBe('none');
+    const border = StyleSheet.hairlineWidth * 2;
+    expect(styleOf(frame)).toMatchObject({
+      position: 'absolute',
+      top: theme.space[1] - border,
+      bottom: theme.space[1] - border,
+      borderWidth: border,
+    });
   });
 });
 
