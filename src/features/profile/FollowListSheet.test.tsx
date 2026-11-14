@@ -1,5 +1,6 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
+import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 
 /**
@@ -275,5 +276,40 @@ describe('the sheet around the list', () => {
       expect(up).not.toBe(scroller);
       up = up.parent;
     }
+  });
+});
+
+/**
+ * **The clear button answers 44 × 44 here, and the field has not moved** (A11Y-44,
+ * design-system v3 A.2 #11). `SearchField`'s box is now 44pt around the 40pt field it
+ * draws; this call site gives the extra 4pt back from space already around the field, so
+ * the drawn field is the same distance from what is above and below it as before (the header's `space[2]` gap above, its `space[3]` padding below).
+ * Laid out from the rendered styles (`hit-rect.ts`).
+ */
+describe('the search field', () => {
+  it('gives Clear a 44pt target and keeps the field where it was in the header', async () => {
+    mockRpc.pages = [[person(1)]];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Person 1')).toBeTruthy());
+    await act(async () => {
+      fireEvent.changeText(view.getByLabelText('Search followers'), 'person');
+    });
+    const input = view.getByLabelText('Search followers') as unknown as Host;
+    // input → drawn field → SearchField → the local wrapper → the sheet header.
+    let header = input;
+    for (let i = 0; i < 4; i += 1) header = parentView(header);
+    expect(header.props.testID).toBe('sheet-header');
+    const site = searchFieldSite(header, input, 360);
+
+    expect(site.clear.height).toBeGreaterThanOrEqual(44);
+    expect(site.clear.width).toBeGreaterThanOrEqual(44);
+    expect(site.row.height).toBe(40);
+    // `space[2]` from the title row (the header's gap), and the header's content ends at
+    // the drawn field, with its `space[3]` of padding below.
+    expect(site.spaceAbove).toBe(8);
+    expect(site.spaceBelow).toBe(0);
+    const headerBox = site.clear.boxes.get(header)!;
+    expect(headerBox.top + headerBox.height - (site.row.top + site.row.height)).toBe(12);
+    expect(site.insideParent).toBe(true);
   });
 });

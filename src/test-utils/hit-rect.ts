@@ -332,3 +332,61 @@ export function closest(node: Host, match: (candidate: Host) => boolean): Host {
 /** The nearest host `View` above `node`. */
 export const parentView = (node: Host): Host =>
   closest(node.parent as Host, (n) => n.type === 'View');
+
+/** The box inside `node`'s padding and border: where its content starts and ends. */
+export function contentBox(boxes: Map<Host, Rect>, node: Host) {
+  const box = boxes.get(node);
+  if (!box) throw new Error('hit-rect: node is not under the root');
+  const style = styleOf(node);
+  const p = edges(style, 'padding');
+  const b = edges(style, 'border');
+  return { top: box.top + p.top + b.top, bottom: box.top + box.height - p.bottom - b.bottom };
+}
+
+/**
+ * A `SearchField` where a screen puts it, measured from `root` at `width`.
+ *
+ * `input` is the field's `TextInput`. Returns the drawn field (`row`, the 40pt chrome),
+ * the component's own box (`field`), the clear button's usable rect (`clear`, clipped by
+ * every box up to `root`), and the drawn field's distance to whatever is above and below
+ * it at the call site: the content of the neighbouring block (inside its padding), or the
+ * parent's content edge where there is no neighbour. Those two distances are what a reader
+ * sees as the field's place on screen.
+ */
+export function searchFieldSite(root: Host, input: Host, width: number) {
+  const row = parentView(input);
+  const field = parentView(row);
+  const clear = kids(field).find((k) => k.props.accessibilityLabel === 'Clear search');
+  if (!clear) throw new Error('hit-rect: the field has no clear button (give it a value)');
+  const hit = hitRect(root, clear, width);
+  const { boxes } = hit;
+  const rowBox = boxes.get(row)!;
+
+  // The call site's block: the nearest ancestor that has siblings around it.
+  let block = field;
+  while (block.parent && block.parent !== root && kids(block.parent).length === 1) {
+    block = block.parent;
+  }
+  const parent = block.parent!;
+  const flow = kids(parent).filter((k) => !hidden(k) && !absolute(k) && boxes.has(k));
+  const at = flow.indexOf(block);
+  const above = flow[at - 1];
+  const below = flow[at + 1];
+  const edgeAbove = above ? contentBox(boxes, above).bottom : contentBox(boxes, parent).top;
+  const edgeBelow = below ? contentBox(boxes, below).top : contentBox(boxes, parent).bottom;
+
+  return {
+    row: rowBox,
+    field: boxes.get(field)!,
+    clear: hit,
+    clearSlop: clear.props.hitSlop,
+    spaceAbove: rowBox.top - edgeAbove,
+    spaceBelow: edgeBelow - (rowBox.top + rowBox.height),
+    /** The component's box lies inside its parent's (Android clips what does not). */
+    insideParent: (() => {
+      const own = boxes.get(field)!;
+      const outer = boxes.get(field.parent!)!;
+      return own.top >= outer.top && own.top + own.height <= outer.top + outer.height;
+    })(),
+  };
+}

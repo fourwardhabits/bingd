@@ -1064,7 +1064,9 @@ const styles = StyleSheet.create({
   intro: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
-    paddingBottom: theme.space[4],
+    // `space[4]` to the drawn field, as before: the other 2pt is the top of
+    // `SearchField`'s 44pt box (A11Y-44, A.2 #11).
+    paddingBottom: theme.space[4] - 2,
     gap: theme.space[3],
   },
   progress: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
@@ -1072,7 +1074,9 @@ const styles = StyleSheet.create({
   pipDone: { backgroundColor: theme.semantic.score },
   pipTodo: { backgroundColor: theme.border.hairline },
   progressLabel: { marginLeft: theme.space[2] },
-  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  // `space[2]` under the drawn field, as before: 2pt of it is the foot of `SearchField`'s
+  // 44pt box, for its clear button's target (A11Y-44, A.2 #11).
+  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] - 2 },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
