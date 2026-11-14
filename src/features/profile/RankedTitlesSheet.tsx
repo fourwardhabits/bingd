@@ -24,23 +24,29 @@ import {
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
+  BrowseControlsRow,
   DismissFooter,
   EmptyState,
-  FilterChip,
-  FiltersAction,
+  FilterIconButton,
+  MediumSelector,
   ScoreBadge,
   SeasonAverageBadge,
-  SegmentedTabs,
   Sheet,
-  SheetHeader,
   SkeletonRow,
   Text,
   TitleRow,
+  type MediumSelectorOption,
 } from '@/ui/components';
-import { coerceSortState, type SortAxisSpec, type SortState } from '@/ui/sort';
+import { coerceSortState, filterSortSpoken, type SortAxisSpec, type SortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 export type RankedCategory = 'movies' | 'tv_seasons';
+
+/** Same words as the wall above the sheet: Movies, TV Shows. */
+const RANKED_CATEGORIES: readonly MediumSelectorOption<RankedCategory>[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv_seasons', label: 'TV Shows' },
+];
 
 /**
  * How many rows this sheet will mount.
@@ -442,57 +448,56 @@ export function RankedTitlesSheet({
       size="standard"
       footer={<DismissFooter onPress={onClose} />}
     >
-      <SheetHeader title={whose}>
-        {/* Movies and TV are separate rankings and a position only means anything inside
-            its own category (PRD §11), so this switches between two lists rather than
-            filtering one. Same control and same words as the wall above it. */}
-        <SegmentedTabs
-          options={[
-            { id: 'movies' as const, label: 'Movies' },
-            { id: 'tv_seasons' as const, label: 'TV Shows' },
-          ]}
-          value={category}
-          // A filter chosen over films is not a filter over seasons — a genre or a decade
-          // may not exist in the other list at all — so the switch clears them (above).
-          onChange={onChangeCategory}
-        />
-      </SheetHeader>
-
       {/**
-       * **Filters & Sort, the main Collection's one entry** (founder spec §4, 2026-11-13).
+       * **One heading row** (FU1113-C): whose collection on the left; Movies / TV and the
+       * Filters & Sort icon on the right, in `BrowseControlsRow`, so the controls keep their
+       * 44pt targets on a 320pt phone and the heading is what truncates.
        *
-       * It replaced a sort chip with an inline menu, which was this sheet's own grammar for
-       * an idea the Collection tab already draws: one action opening one sheet that holds
-       * the order and the filters. The count beside it says how much of the list the
-       * filters leave, as the Collection tab's does.
+       * Movies and TV are separate rankings and a position only means anything inside its
+       * own category (PRD §11), so the selector switches between two lists rather than
+       * filtering one — and a filter chosen over films is cleared on the switch (above).
+       *
+       * No "N titles" here any more (founder, FU1113): the count bubble on the icon says
+       * when filters are on, and the sheet's own Clear all takes them off. The icon stays
+       * in place, disabled, while there is nothing to filter, so the row never shifts.
        */}
-      {pending || failed || total === 0 ? null : (
-        <View style={styles.toolbar} testID="ranked-toolbar">
-          <Text variant="footnote" tone="secondary" style={styles.count} testID="ranked-count">
-            {matching === total
-              ? `${total} ${total === 1 ? 'title' : 'titles'}`
-              : `${matching} of ${total}`}
-          </Text>
-          {isFiltered(filters) ? (
-            <FilterChip
-              icon="close"
-              label="Clear all"
-              onPress={() => {
-                setFilters(emptyFilters());
-                backToTop();
-              }}
-            />
-          ) : null}
-          <FiltersAction
-            label="Filters & Sort"
-            activeCount={activeCount}
-            accessibilityLabel={filterSortSpoken(axes, order, activeCount)}
-            accessibilityHint="Opens filters and the sort order"
-            onPress={() => setFiltering(true)}
-            testID="ranked-filter-sort"
-          />
-        </View>
-      )}
+      <View style={styles.heading} testID="ranked-toolbar">
+        <BrowseControlsRow
+          testID="ranked-heading-row"
+          leading={
+            <Text
+              variant="title2"
+              accessibilityRole="header"
+              numberOfLines={1}
+              // A sheet title has no room to wrap into (`SheetHeader`'s cap).
+              maxFontSizeMultiplier={1.5}
+            >
+              {whose}
+            </Text>
+          }
+          trailing={
+            <>
+              <MediumSelector
+                size="filter"
+                value={category}
+                options={RANKED_CATEGORIES}
+                accessibilityHint="Choose Movies or TV Shows"
+                onChange={onChangeCategory}
+                testID="ranked-category"
+              />
+              <FilterIconButton
+                activeCount={activeCount}
+                accessibilityLabel={filterSortSpoken(axes, order, activeCount)}
+                announceCount={false}
+                accessibilityHint="Opens filters and the sort order"
+                disabled={pending || failed || total === 0}
+                onPress={() => setFiltering(true)}
+                testID="ranked-filter-sort"
+              />
+            </>
+          }
+        />
+      </View>
 
       <ScrollView
         ref={scroll}
@@ -703,36 +708,13 @@ function asCollectionItem(entry: RankedEntry, score: number): CollectionItem {
   };
 }
 
-/** The sentence a screen reader is given for the Filters & Sort action — the Collection tab's. */
-function filterSortSpoken(
-  axes: readonly SortAxisSpec<CollectionSortAxis>[],
-  sort: CollectionSort,
-  activeFilters: number,
-): string {
-  const spec = axes.find((option) => option.axis === sort.axis);
-  const order = spec
-    ? spec.directions
-      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
-      : `Sorted by ${spec.label}`
-    : null;
-  const filters = activeFilters
-    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
-    : 'No filters';
-  return ['Filter and sort', order, filters].filter(Boolean).join('. ');
-}
-
 const styles = StyleSheet.create({
-  toolbar: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: theme.space[2],
-    paddingLeft: theme.layout.gutter,
-    // The Filters action's own 44pt cell carries its glyph to the gutter.
-    paddingRight: theme.layout.gutter - theme.space[2],
-    paddingBottom: theme.space[1],
+  // The handle to the heading row, and the row to the list: the section rhythm (FU1113-B),
+  // less the `space[2]` a 44pt row already leaves either side of a `title2` line.
+  heading: {
+    paddingTop: theme.layout.section.above - theme.space[2],
+    paddingBottom: theme.layout.section.controlsToContent - theme.space[2],
   },
-  count: { flex: 1 },
   // Wide enough for "#100" so the posters keep an unbroken left edge however deep the
   // list goes — a column that resizes per row is the ragged one.
   ordinal: { minWidth: 34 },

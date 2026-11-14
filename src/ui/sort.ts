@@ -167,3 +167,29 @@ export function directionWords<Axis extends string>(
 ): string | null {
   return spec.directions ? spec.directions[direction] : null;
 }
+
+/**
+ * **What a screen reader hears for a Filters & Sort icon** (FU1113-C): the control's name,
+ * the order in force and how many filters are on, in one sentence — "Filters and sort.
+ * Sorted by Rating, highest first. No filters". The icon draws none of it, so the words
+ * carry what the arrow and the count bubble show.
+ *
+ * One definition for Collection, Profile Collection and a person's Filmography, which each
+ * had (or would have had) their own copy.
+ */
+export function filterSortSpoken<Axis extends string>(
+  axes: readonly SortAxisSpec<Axis>[],
+  sort: SortState<Axis>,
+  activeFilters: number,
+): string {
+  const spec = axes.find((option) => option.axis === sort.axis);
+  const order = spec
+    ? spec.directions
+      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
+      : `Sorted by ${spec.label}`
+    : null;
+  const filters = activeFilters
+    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
+    : 'No filters';
+  return ['Filters and sort', order, filters].filter(Boolean).join('. ');
+}

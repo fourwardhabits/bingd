@@ -141,6 +141,7 @@ jest.mock('@/features/recommendations/use-top-rated', () => {
 });
 
 const KEY = (id: string) => `${id}.for-you.selection`;
+const VIEW_KEY = (id: string) => `${id}.for-you.view-mode`;
 
 beforeEach(() => {
   prefStore.reset();
@@ -513,7 +514,10 @@ describe('For You and Collection', () => {
     expect(showing(view)).toBe('Showing Recommended Movies');
 
     await switchTo(view, 'TV');
-    expect(prefStore.reads.every((name) => name === KEY('user-1'))).toBe(true);
+    // Its own two keys: the selection and, since FU1113-C, the view mode.
+    expect(
+      prefStore.reads.every((name) => name === KEY('user-1') || name === VIEW_KEY('user-1')),
+    ).toBe(true);
     expect(prefStore.writes.map((write) => write.name)).toEqual([KEY('user-1')]);
     expect(prefStore.get('user-1.collection.medium')).toBe('tv_seasons');
     expect(prefStore.get('user-1.collection.segment')).toBe('watchlist');

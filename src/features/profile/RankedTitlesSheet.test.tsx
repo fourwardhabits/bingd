@@ -1,6 +1,7 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Dimensions, StyleSheet } from 'react-native';
 
+import { expectRowFitsNarrow } from '@/test-utils/narrow-row';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { RankedTitlesSheet } from './RankedTitlesSheet';
@@ -78,6 +79,12 @@ beforeEach(() => {
   mockError = false;
 });
 
+/** Movies / TV Shows is a `MediumSelector` in the heading row since FU1113-C: open, choose. */
+const pickCategory = async (view: Awaited<ReturnType<typeof open>>, name: 'Movies' | 'TV Shows') => {
+  await fireEvent.press(view.getByTestId('ranked-category'));
+  await fireEvent.press(await view.findByRole('menuitem', { name }));
+};
+
 const open = (over: Partial<Parameters<typeof RankedTitlesSheet>[0]> = {}) =>
   renderWithProviders(
     <RankedTitlesSheet
@@ -154,7 +161,7 @@ it('switches list without closing, through the sheet’s own control', async () 
   const view = await open({ onChangeCategory });
   await waitFor(() => expect(view.getByText(/A Film/)).toBeTruthy());
 
-  fireEvent.press(view.getByText('TV Shows'));
+  await pickCategory(view, 'TV Shows');
 
   expect(onChangeCategory).toHaveBeenCalledWith('tv_seasons');
 });
@@ -591,7 +598,7 @@ describe('the sort control', () => {
 
     // Sorting is not switching lists, and it must not behave as though it were.
     expect(onChangeCategory).not.toHaveBeenCalled();
-    await fireEvent.press(view.getByText('TV Shows'));
+    await pickCategory(view, 'TV Shows');
     expect(onChangeCategory).toHaveBeenCalledWith('tv_seasons');
   });
 
@@ -663,11 +670,42 @@ describe('the sheet around the list', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('says how many titles the list holds', async () => {
+  /**
+   * FU1113-C (C5): one heading row — the heading on the left, Movies / TV and the Filters &
+   * Sort icon on the right — and no "N titles" anywhere.
+   */
+  it('heads the sheet with one row: whose collection, then Movies / TV and the filter icon', async () => {
     mockMovies = many;
     const view = await open();
-    await waitFor(() => expect(view.getByTestId('ranked-count')).toBeTruthy());
-    expect(view.getByText('60 titles')).toBeTruthy();
+    await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+
+    const leading = view.getByTestId('ranked-heading-row-leading');
+    expect(within(leading).getByRole('header').props.children).toBe("Anna's collection");
+    const trailing = view.getByTestId('ranked-heading-row-trailing');
+    expect(within(trailing).getByTestId('ranked-category').props.accessibilityLabel).toBe(
+      'Showing Movies',
+    );
+    const filter = within(trailing).getByTestId('ranked-filter-sort');
+    expect(filter.props.accessibilityLabel).toMatch(/^Filters and sort\. Sorted by Rank, highest first/);
+    // The selector first, the icon on the right gutter.
+    const json = JSON.stringify(view.toJSON());
+    expect(json.indexOf('ranked-category')).toBeLessThan(json.indexOf('ranked-filter-sort'));
+    // No count, in any form.
+    expect(view.queryByTestId('ranked-count')).toBeNull();
+    expect(view.queryByText(/\d+ titles?$/)).toBeNull();
+    expect(view.queryByText(/^\d+ of \d+$/)).toBeNull();
+    // Nothing else on the sheet chooses the category: no tabs.
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
+  });
+
+  it('keeps the icon in place, disabled, while there is nothing to filter', async () => {
+    mockMovies = [];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No movies ranked yet')).toBeTruthy());
+    expect(view.getByTestId('ranked-filter-sort').props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
+    expect(view.getByTestId('ranked-category')).toBeTruthy();
   });
 });
 
@@ -692,7 +730,8 @@ describe('the main Collection’s filters, over somebody’s ranking', () => {
     expect(view.getByText(/Another Comedy/)).toBeTruthy();
     // The ordinal is the owner's position, which a filter does not renumber.
     expect(view.getByText('#3')).toBeTruthy();
-    expect(view.getByText('2 of 3')).toBeTruthy();
+    // The icon carries the state: its count bubble, and the count in what it says.
+    expect(view.getByTestId('ranked-filter-sort-count', { includeHiddenElements: true })).toBeTruthy();
     expect(view.getByLabelText(/1 filter on/)).toBeTruthy();
   });
 
@@ -706,9 +745,14 @@ describe('the main Collection’s filters, over somebody’s ranking', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(view.queryByText(/A Comedy/)).toBeNull());
 
+    // The sheet's own Clear all, then Apply: the toolbar chip went with the count row.
+    await fireEvent.press(view.getByTestId('ranked-filter-sort'));
     await fireEvent.press(view.getByText('Clear all'));
+    await fireEvent.press(view.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(view.getByText(/A Comedy/)).toBeTruthy());
-    expect(view.getByText('3 titles')).toBeTruthy();
+    expect(view.getByText(/A Horror/)).toBeTruthy();
+    expect(view.getByText(/Another Comedy/)).toBeTruthy();
+    expect(view.queryByTestId('ranked-filter-sort-count', { includeHiddenElements: true })).toBeNull();
   });
 
   it('offers the main Collection’s title-fact orders, and sorts by release year', async () => {
@@ -804,4 +848,20 @@ describe('state that follows the list on screen', () => {
     await fireEvent.press(view.getByTestId('ranked-filter-sort'));
     expect(view.getByLabelText("Filter and sort Anna's collection")).toBeTruthy();
   });
+});
+
+describe('at 320pt and the largest text size (C9)', () => {
+  it.each(['movies', 'tv_seasons'] as const)(
+    'keeps the heading, %s and the filter icon on one line',
+    async (category) => {
+      mockMovies = [entry()];
+      const view = await open({ category });
+      await waitFor(() => expect(view.getByTestId('ranked-heading-row')).toBeTruthy());
+      const { targets } = expectRowFitsNarrow(view.getByTestId, 'ranked-heading-row');
+      expect(targets[0]?.label).toBe(category === 'movies' ? 'Showing Movies' : 'Showing TV Shows');
+      // The heading truncates to one line rather than wrapping the row.
+      const heading = view.getByRole('header');
+      expect(heading.props.numberOfLines).toBe(1);
+    },
+  );
 });
