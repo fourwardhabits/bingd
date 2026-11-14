@@ -5,6 +5,7 @@ import { bandSizes, scoreFor } from '@/features/collection/score';
 import {
   useLoggedCollection,
   useRankedCollection,
+  type LoggedEntry,
   type RankedEntry,
 } from '@/features/collection/use-collection';
 import {
@@ -21,10 +22,13 @@ import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
   SLATE_SIZE,
+  asksSocial,
   scoreSlate,
   tasteFrom,
   type Anchor,
   type Candidate,
+  type Collaborative,
+  type EngineId,
   type Scored,
   type Taste,
 } from './rank';
@@ -47,7 +51,10 @@ import {
   recommendationAnchorSeed,
   useRecommendationArrangement,
 } from './session-seed';
+import { coverageFill } from './coverage';
+import { profileFrom, sourceDecades, sourceLanguages, type Profile, type ProfileEntry } from './profile';
 import { useDismissedTitles } from './use-dismissed';
+import { useRecommendationEngine } from './use-engine';
 import { drawSlate } from './selection';
 import { useRecommendationExposure } from './use-exposure';
 
@@ -70,6 +77,18 @@ import { useRecommendationExposure } from './use-exposure';
  *      now" and this is "what is worth watching", which is a slower question. It is also
  *      what makes a slate possible for somebody who has ranked nothing, and a wall drawn
  *      from it alone is still labelled "Popular right now" (`popularityOnlyFor`).
+ *
+ * **Engine V2** (`recommendation_engine`, off by default) changes the sources, not just
+ * the scorer: anchors cover the reader's liked languages (`selectAnchors` `languages`),
+ * `catalogue_candidates` fills any language or decade the lists under-supply
+ * (`coverage.ts`), and `social_candidates` is not read at all — following somebody is not
+ * evidence about taste, and under V2 it has no effect on the wall (founder spec
+ * 2026-11-10, §2).
+ *
+ * The **`v2_hybrid`** engine adds `collaborative_candidates`: titles that taste-compatible
+ * public accounts scored well, chosen and aggregated server-side, whether or not the reader
+ * follows any of them. They arrive as ids with a support figure and an endorser count, take
+ * the slot the social source had, and are scored like everything else.
  */
 
 export type Medium = 'movies' | 'tv';
@@ -167,6 +186,12 @@ export type ForYouScoring = {
    * covered `headlineFor` and not its caller. Independent review found it.
    */
   taste: Taste;
+  /** Which engine scored this slate. `v1` unless the server chose otherwise. */
+  engine: EngineId;
+  /** The ids the V2 catalogue source added. Empty under V1. Ids only, like `socialIds`. */
+  catalogueIds: string[];
+  /** The ids `collaborative_candidates` contributed. Empty unless the engine is `v2_hybrid`. */
+  collaborativeIds: string[];
 };
 
 /**
@@ -320,6 +345,7 @@ export function likedFrom(
       // A season's genres are its show's (`resolveMetadata`), so a TV anchor covers what
       // the show covers.
       genres: entry.genres,
+      language: entry.language,
     });
   }
 
@@ -477,7 +503,113 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
     .eq('kind', KIND_FOR[medium]);
   if (error) throw error;
 
-  return ((data ?? []) as unknown as CandidateRow[]).map((row) => ({
+  return ((data ?? []) as unknown as CandidateRow[]).map(candidateFrom);
+}
+
+/**
+ * Engine V2's catalogue source: titles in the reader's languages and liked decades.
+ *
+ * The languages and decades come from the reader's own profile and are bounded again by
+ * the server. Answers empty under V1, and fails to empty: it is an enrichment of the pool,
+ * like `social_candidates` was.
+ */
+async function catalogueCandidates(
+  medium: Medium,
+  languages: readonly string[],
+  decades: readonly number[],
+  seed: number,
+): Promise<Candidate[]> {
+  if (languages.length === 0 && decades.length === 0) return [];
+  const { data, error } = await supabase.rpc('catalogue_candidates', {
+    p_kind: KIND_FOR[medium],
+    p_languages: languages as string[],
+    p_decades: decades as number[],
+    p_per_source: 20,
+    // A 32-bit integer for the server; the launch seed is the same per process.
+    p_seed: seed % 2_147_483_647,
+  });
+  if (error || !Array.isArray(data)) return [];
+  return (data as unknown as CandidateRow[]).map(candidateFrom);
+}
+
+/**
+ * Engine V2 hybrid's collaborative evidence: endorsed titles (positive support, strongest
+ * first) and disputed ones (negative support, evidence only).
+ *
+ * Ids, a support figure and an endorser count — the server never names who. Fails to
+ * empty for the same reason the catalogue source does.
+ */
+async function collaborativeCandidates(medium: Medium): Promise<Map<string, Collaborative>> {
+  const { data, error } = await supabase.rpc('collaborative_candidates', {
+    p_kind: KIND_FOR[medium],
+    p_limit: 40,
+  });
+  if (error || !Array.isArray(data)) return new Map();
+  const rows = data as unknown as { media_item_id: string; support: number; endorsers: number }[];
+  return new Map(
+    rows.map((row) => [row.media_item_id, { support: Number(row.support), endorsers: row.endorsers }]),
+  );
+}
+
+/**
+ * What the profile reads from the reader's collection: ranked titles first, so they win.
+ *
+ * **Films, seasons and whole shows** (WS5, 2026-11-14), each scored against its own pool's
+ * bands, with the rows of one series sharing one unit of influence — the same
+ * `seriesUnitWeights` over the same three pools V1's `tasteFrom` reads, so for ranked
+ * evidence the two engines weigh a series identically. Before this the V2 profile read
+ * films and seasons only, and a reader whose TV taste was ranked show by show had none.
+ *
+ * Logged-only titles (never ranked or bucketed in a pool) are weighted among themselves the
+ * same way, so ten logged seasons of one show are one show of logged interest, never ten.
+ */
+export function profileEntriesFrom(
+  movies: readonly RankedEntry[],
+  seasons: readonly RankedEntry[],
+  logged: readonly LoggedEntry[],
+  shows: readonly RankedEntry[] = [],
+): ProfileEntry[] {
+  const signals = [...movies, ...seasons, ...shows];
+  const rankedWeights = seriesUnitWeights(signals);
+  const ranked = (list: readonly RankedEntry[]) => {
+    const sizes = bandSizes(list);
+    return list.map(
+      (entry): ProfileEntry => ({
+        mediaItemId: entry.mediaItemId,
+        score: scoreFor(entry.bucket, entry.position, sizes),
+        bucket: entry.bucket,
+        language: entry.language,
+        year: entry.year,
+        kind: entry.kind,
+        genres: entry.genres,
+        weight: rankedWeights.get(entry.mediaItemId) ?? 1,
+      }),
+    );
+  };
+  const rankedIds = new Set(signals.map((entry) => entry.mediaItemId));
+  const loggedOnly = logged.filter((entry) => !rankedIds.has(entry.mediaItemId));
+  const loggedWeights = seriesUnitWeights(loggedOnly);
+  return [
+    ...ranked(movies),
+    ...ranked(seasons),
+    ...ranked(shows),
+    ...loggedOnly.map(
+      (entry): ProfileEntry => ({
+        mediaItemId: entry.mediaItemId,
+        score: null,
+        bucket: entry.bucket,
+        language: entry.language,
+        year: entry.year,
+        kind: entry.kind,
+        genres: entry.genres,
+        weight: loggedWeights.get(entry.mediaItemId) ?? 1,
+      }),
+    ),
+  ];
+}
+
+function candidateFrom(row: CandidateRow): Candidate {
+  return {
     mediaItemId: row.id,
     title: row.title,
     year: row.release_date ? Number(row.release_date.slice(0, 4)) : null,
@@ -495,7 +627,7 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
     }),
     language: row.original_language,
     popularity: row.popularity,
-  }));
+  };
 }
 
 /**
@@ -682,6 +814,15 @@ export function useForYou(
    * is a pure function of what its key says, and the viewer's vetoes are an overlay.
    */
   const dismissed = useDismissedTitles(userId);
+  /**
+   * Which engine scores this wall (`use-engine.ts`). Settles to `v1` on any failure, so
+   * gating on it never strands the wall; it is in the key, so a rollout or a rollback is a
+   * new slate rather than a cached one scored by the other engine.
+   */
+  const engineQuery = useRecommendationEngine(userId);
+  const engine: EngineId = engineQuery.data ?? 'v1';
+  /** V2 profiles from every logged title, so it needs the collection on both walls. */
+  const needsLogged = medium === 'tv' || engine !== 'v1';
 
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
@@ -821,7 +962,7 @@ export function useForYou(
     // The filters are part of the key: the same anchors and the same candidates with
     // a different genre picked are a different slate, and a shared key would serve
     // whichever the reader asked for first.
-    queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters()],
+    queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters(), engine],
     // The dismissed read gates too — settled, not necessarily successful: waiting
     // for it stops a cold wall drawing a tile the reader vetoed last week and
     // yanking it a beat later, while a *failed* read fails open. A wall without
@@ -832,7 +973,8 @@ export function useForYou(
       seasons.isSuccess &&
       !shows.isPending &&
       watched.isSuccess &&
-      (medium !== 'tv' || logged.isSuccess) &&
+      (!needsLogged || logged.isSuccess) &&
+      !engineQuery.isPending &&
       !dismissed.isPending,
     // See the note on `inputs`: everything the viewer can change is in the key, and
     // what is left changes on a six-hour clock at fastest.
@@ -877,7 +1019,13 @@ export function useForYou(
         return {
           ...scoring,
           // Said of the wall that is actually drawn, not of the pool it was drawn from.
-          popularityOnly: popularityOnlyFor(scoring.anchorsUsed, scoring.socialIds, items),
+          // A catalogue title came from the reader's own languages and decades, so a wall
+          // holding one is not "popular right now" either.
+          popularityOnly: popularityOnlyFor(
+            scoring.anchorsUsed,
+            [...scoring.socialIds, ...scoring.catalogueIds, ...scoring.collaborativeIds],
+            items,
+          ),
           // The pool feeds the filter sheet's facet counts, so it takes the veto
           // too — a dismissed title must not keep a genre option alive, or inflate
           // a count, for a wall it can never appear on (review 66, Minor 5).
@@ -919,6 +1067,17 @@ export function useForYou(
           weight: weights.get(entry.mediaItemId) ?? 1,
         })),
       );
+      const v2 = engine !== 'v1';
+      const profile: Profile | undefined = v2
+        ? profileFrom(profileEntriesFrom(pools.movies, pools.tv_seasons, logged.data?.entries ?? [], pools.tv_shows))
+        : undefined;
+      const catalogueRequest = profile
+        ? {
+            kind: KIND_FOR[medium],
+            languages: sourceLanguages(profile),
+            decades: sourceDecades(profile, KIND_FOR[medium]),
+          }
+        : null;
 
       /**
        * **Which lists the liked band already has, before choosing** (2026-09-13).
@@ -944,7 +1103,18 @@ export function useForYou(
        * TV wall still gets no popularity padding.
        */
       const trendingReads = Promise.all(TRENDING_FOR[medium].map(trendingFallback));
-      const socialRead = socialCandidates(medium);
+      // Under V2 the follow graph is not a candidate source: following alone has no effect.
+      // The allowlist-only `v2_metadata_social` prototype asks on the Films wall (`SOCIAL_SOURCE`).
+      const socialRead = asksSocial(engine, medium)
+        ? socialCandidates(medium)
+        : Promise.resolve<string[]>([]);
+      const catalogueRead = catalogueRequest
+        ? catalogueCandidates(medium, catalogueRequest.languages, catalogueRequest.decades, anchorSeed)
+        : Promise.resolve<Candidate[]>([]);
+      const collaborativeRead =
+        engine === 'v2_hybrid'
+          ? collaborativeCandidates(medium)
+          : Promise.resolve(new Map<string, Collaborative>());
       let lists = await cachedSimilar(readIds);
       const selectionKey = [
         userId,
@@ -952,6 +1122,7 @@ export function useForYou(
         medium,
         JSON.stringify(filters ?? emptyFilters()),
         liked.map((anchor) => `${anchor.mediaItemId}:${anchor.score}`).join(','),
+        engine,
       ].join('|');
       // An empty cached list is a title TMDB has nothing for: known, but no breadth.
       const cachedWithBreadth = new Set(
@@ -964,6 +1135,7 @@ export function useForYou(
               seed: anchorSeed,
               budget: ANCHOR_BUDGET,
               cached: cachedWithBreadth,
+              languages: v2,
             }),
           ),
         ),
@@ -1054,9 +1226,16 @@ export function useForYou(
        * instead of three is a slightly narrower slate rather than a broken one.
        */
       const social = await socialRead;
-      const candidateIds = candidateIdsFrom(anchors, social, fallback);
+      const collaborative = await collaborativeRead;
+      // Only endorsed titles are a source. A disputed one is evidence against a title some
+      // other source brought in, and never a reason to show it.
+      const collaborativeIds = [...collaborative]
+        .filter(([, evidence]) => evidence.support > 0)
+        .map(([id]) => id);
+      // Under V2 `social` is empty, so the collaborative ids take its place in the order.
+      const candidateIds = candidateIdsFrom(anchors, [...social, ...collaborativeIds], fallback);
 
-      const candidates = await candidatesFor(candidateIds, medium);
+      const listed = await candidatesFor(candidateIds, medium);
 
       // `user_media` is everything logged, bucketed or dated — the collection —
       // and is excluded outright: recommending someone a film they logged last week
@@ -1072,6 +1251,29 @@ export function useForYou(
         metSeries.size > 0
           ? new Set([...(watched.data ?? []), ...metSeries])
           : (watched.data ?? new Set<string>());
+
+      // The catalogue fills only what will survive eligibility: the collection and the
+      // anchors are not coverage, because `scoreSlate` drops both.
+      const filled =
+        profile && catalogueRequest
+          ? coverageFill(
+              listed,
+              await catalogueRead,
+              profile,
+              catalogueRequest,
+              new Set([...exclude, ...anchors.map((anchor) => anchor.mediaItemId)]),
+            )
+          : [];
+      const merged = filled.length > 0 ? [...listed, ...filled] : listed;
+      // Every candidate the neighbours have an opinion on carries it, whichever source
+      // brought it in: a title on an anchor's list that the cohort also loved is both.
+      const candidates =
+        collaborative.size > 0
+          ? merged.map((candidate) => {
+              const evidence = collaborative.get(candidate.mediaItemId);
+              return evidence ? { ...candidate, collaborative: evidence } : candidate;
+            })
+          : merged;
 
       /**
        * Filtered **before** scoring, not after.
@@ -1089,15 +1291,20 @@ export function useForYou(
           )
         : candidates;
 
+      const inPool = new Set(candidates.map((candidate) => candidate.mediaItemId));
+
       // Scored, and stopping there. The arrangement is `select`'s job, so that changing
       // it costs a sort rather than everything above this line.
       return {
-        scored: scoreSlate({ candidates: pool, anchors, taste, exclude }),
+        scored: scoreSlate({ candidates: pool, anchors, taste, exclude, engine, profile }),
         candidatePool: candidates.map(asCollectionItem),
         anchorsUsed,
         lowData: anchorsUsed === 0,
         socialIds: social,
         taste,
+        engine,
+        catalogueIds: filled.map((candidate) => candidate.mediaItemId),
+        collaborativeIds: collaborativeIds.filter((id) => inPool.has(id)),
       };
     },
   });
@@ -1120,6 +1327,7 @@ export function useForYou(
   const items = slate.data?.items;
   const anchorsUsed = slate.data?.anchorsUsed;
   const poolSize = slate.data?.scored.length;
+  const slateEngine = slate.data?.engine ?? 'v1';
   // Read once per process (see `useRecommendationExposure`), which is exactly the
   // baseline this measurement wants: how repetitive the wall is against what previous
   // sessions showed, not against what this render just recorded.
@@ -1169,6 +1377,8 @@ export function useForYou(
           liked_titles: likedCount,
           anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
+          engine: slateEngine,
+          wall_languages: 0,
         },
       });
       return;
@@ -1206,10 +1416,15 @@ export function useForYou(
           liked_titles: likedCount,
           anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
+          // Which engine drew it, and how many distinct original languages are on it — the
+          // one number V2's language work is answerable by. A count, never a code.
+          engine: slateEngine,
+          // A title with no recorded language is not a language.
+          wall_languages: new Set(items.flatMap((item) => (item.language ? [item.language] : []))).size,
         },
       });
     });
-  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize, slateEngine]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.
@@ -1235,7 +1450,7 @@ export function useForYou(
     movies.error ??
     seasons.error ??
     watched.error ??
-    (medium === 'tv' ? logged.error : null) ??
+    (needsLogged ? logged.error : null) ??
     null;
 
   return {
@@ -1247,15 +1462,24 @@ export function useForYou(
      * not this query at all. Refetching the slate would re-run a `queryFn` whose inputs
      * are still missing; refetching the sources flips `enabled` and the slate follows on
      * its own, which is the same path a first successful launch takes.
+     *
+     * The engine is re-asked on every retry as well (Codex P2 on #301), so an operator's
+     * rollback reaches a reader the moment they ask for the wall again. Its answer decides
+     * what is refetched: when the engine has **moved**, the slate's key moves with it and
+     * the new engine's slate draws on its own — refetching the old key here would run the
+     * old engine's `queryFn` once more, catalogue fill and all, for a wall nobody will see.
      */
-    refetch: () => {
+    refetch: async () => {
+      const asked = userId ? engineQuery.refetch() : null;
       if (sourceError) {
         void movies.refetch();
         void seasons.refetch();
         void watched.refetch();
-        if (medium === 'tv') void logged.refetch();
+        if (needsLogged) void logged.refetch();
         return;
       }
+      const next = asked ? (await asked).data : engine;
+      if ((next ?? 'v1') !== engine) return;
       void slate.refetch();
     },
   };
