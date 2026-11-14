@@ -1155,6 +1155,55 @@ try {
       });
       check('a note can be published as a Review', published.status === 200, JSON.stringify(published.body)?.slice(0, 160));
 
+      // QA1114: the Review read from the OTHER account, through the Reviews tab's own RPC.
+      // The expected score is the server's: `public_scores` (score_for over band_bounds,
+      // the same derivation title_reviews_v2 quotes) read by A for A's own pair, and null
+      // when A has no ranking on this title — `titleId` is A's first logged row, which this
+      // run may or may not have ranked, so the script asks rather than assumes.
+      const aRanking = await get(a.token, `rankings?select=media_item_id&user_id=eq.${a.id}&media_item_id=eq.${titleId}`);
+      const aRanked = (aRanking.body ?? []).length > 0;
+      const aScores = await rpc(a.token, 'public_scores', {
+        p_user_ids: [a.id],
+        p_media_item_ids: [titleId],
+      });
+      const aScoreRow = (aScores.body ?? [])[0];
+      const expectedScore = aRanked && aScoreRow?.score != null ? Number(aScoreRow.score) : null;
+      check(
+        'A’s own score for the title is readable (or the title is unranked)',
+        aRanking.status === 200 && aScores.status === 200 && (aRanked ? expectedScore !== null : !aScoreRow),
+        `ranked=${aRanked} ${JSON.stringify(aScores.body)?.slice(0, 160)}`,
+      );
+
+      const bReviews = await rpc(b.token, 'title_reviews_v2', {
+        p_media_item_id: titleId,
+        p_sort: 'top_desc',
+        p_limit: 25,
+      });
+      const bRows = Array.isArray(bReviews.body) ? bReviews.body : [];
+      const bRow = bRows[0];
+      check(
+        'B sees exactly A’s Review in the Reviews tab',
+        bReviews.status === 200 &&
+          bRows.length === 1 &&
+          bRow?.user_id === a.id &&
+          bRow?.username === a.username &&
+          bRow?.note === 'Acceptance run: a published review.' &&
+          Boolean(bRow?.updated_at),
+        `${bReviews.status} ${JSON.stringify(bReviews.body)?.slice(0, 200)}`,
+      );
+      check(
+        aRanked ? 'and it carries A’s current score' : 'and, unranked, it carries no score',
+        bRow !== undefined && (bRow.score == null ? null : Number(bRow.score)) === expectedScore,
+        `expected ${expectedScore}, got ${JSON.stringify(bRow?.score)}`,
+      );
+
+      const bCount = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      check(
+        'and the tab’s count for B is 1',
+        bCount.status === 200 && bCount.body === 1,
+        `${bCount.status} ${JSON.stringify(bCount.body)}`,
+      );
+
       const reviewRow = await get(a.token, `user_media?select=id&media_item_id=eq.${titleId}`);
       const reviewId = (reviewRow.body ?? [])[0]?.id;
 
@@ -1177,6 +1226,40 @@ try {
         p_reason: 'other',
       });
       check('but not their own', own.status >= 400, JSON.stringify(own.body)?.slice(0, 120));
+
+      // QA1114: un-publishing takes it out of B's Reviews tab and B's count. After the
+      // report checks, which need the review public; nothing later in the run reads it.
+      // The base is the version the publish returned, so a conflict here is a real one.
+      const unpublished = await rpc(a.token, 'save_note', {
+        p_operation_id: uuid(),
+        p_media_item_id: titleId,
+        p_note: 'Acceptance run: a published review.',
+        p_base_updated_at: published.body?.note_version ?? null,
+        p_note_visibility: 'private',
+        p_note_spoilers: null,
+      });
+      check(
+        'A can set the Review back to private',
+        unpublished.status === 200 && unpublished.body?.status === 'ok',
+        JSON.stringify(unpublished.body)?.slice(0, 160),
+      );
+
+      const bAfter = await rpc(b.token, 'title_reviews_v2', {
+        p_media_item_id: titleId,
+        p_sort: 'top_desc',
+        p_limit: 25,
+      });
+      const bCountAfter = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      check(
+        'and B’s Reviews tab no longer has it',
+        bAfter.status === 200 && Array.isArray(bAfter.body) && bAfter.body.length === 0,
+        `${bAfter.status} ${JSON.stringify(bAfter.body)?.slice(0, 160)}`,
+      );
+      check(
+        'and B’s count is 0',
+        bCountAfter.status === 200 && bCountAfter.body === 0,
+        `${bCountAfter.status} ${JSON.stringify(bCountAfter.body)}`,
+      );
     }
 
     // A comment, and the report on that. B's activity is readable by A at this point in
