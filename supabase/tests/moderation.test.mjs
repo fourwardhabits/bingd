@@ -622,6 +622,10 @@ describe('the guard is wired in, not merely present', () => {
     // take Sent to You away from a suspended reader. Its writer, mark_recommendations_seen,
     // calls the guard.
     'recommendation_seen_at',
+    // 20261121000100 (O2). The same recipient-only read for opened_at, whose column grant is
+    // revoked so the sender cannot read it. Called per row by recommendations_to_me and
+    // title_recommendations_for_me; its writer, mark_recommendation_opened, calls the guard.
+    'recommendation_opened_at',
     // 20260826000400. The same read, one state along: the caller's own pending
     // requests, filtered on recipient_id = auth.uid() which is not a parameter. Its
     // three writers — add_recommendation, dismiss_recommendation and

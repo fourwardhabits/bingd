@@ -876,6 +876,9 @@ const ALLOWED = {
   // it as a read receipt; it answers null for any row that is not the caller's and delivered.
   'mark_recommendations_seen(uuid,uuid[])': ['authenticated'],
   'recommendation_seen_at(uuid)': ['authenticated'],
+  // The same recipient-only read for `opened_at`, whose column grant 20261121000100 revokes
+  // (FU1113-E O2): a sender could otherwise select it as a read receipt.
+  'recommendation_opened_at(uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

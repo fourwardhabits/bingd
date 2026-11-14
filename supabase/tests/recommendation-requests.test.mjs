@@ -908,35 +908,171 @@ describe('the eligibility matrix (FU1113-E)', () => {
       'profiles_read no longer admits the private sender, so the row drops out',
     );
   });
+});
 
-  /**
-   * **Reported to the coordinator as a defect candidate, not fixed** (FU1113-E brief: a
-   * path that delivers without a mutual follow is reported, never fixed here).
-   *
-   * A sender's `unfollow` leaves their pending Requests in place, and `follow` /
-   * `respond_follow_request` / `set_profile_visibility` call `_release_recommendations`,
-   * which checks the block but not that the sender still follows the recipient. So the
-   * held rows land in Sent to You at a moment the pair is not mutual. The recipient did
-   * just follow the sender (the trust half), and the sender did follow when they sent (the
-   * authorisation half), so whether this is wrong is a founder call. This test pins the
-   * current behaviour so that a fix is a visible, deliberate change.
-   */
-  it('DEFECT CANDIDATE: a Request held from a sender who has since unfollowed is released on follow-back', async () => {
-    await send(sender, recipient, await movie('matrix_release_after_unfollow'));
-    await as(sender, () => t.sql(`select unfollow(gen_random_uuid(), $1)`, [recipient]));
-    assert.equal((await requests(recipient)).length, 1, 'the unfollow leaves the Request held');
+/**
+ * A held Request is released into Sent to You only for a MUTUAL pair (FU1113-E D1,
+ * 20261121000300, founder decision t180u).
+ *
+ * `_release_recommendations` used to check only the block, so a Request held from a sender
+ * who had since unfollowed landed in Sent to You when the recipient followed back, at a
+ * moment the pair was not mutual. Now the release needs both approved edges; otherwise the
+ * rows stay pending in Requests, where the recipient can still Add or Dismiss them. Each
+ * release path is exercised: `follow`, `respond_follow_request`, `set_profile_visibility`
+ * and `accept_invite`.
+ */
+describe('a held Request is released only to a mutual pair (D1)', () => {
+  const unfollow = (who, other) =>
+    as(who, () => t.sql(`select unfollow(gen_random_uuid(), $1)`, [other]));
+  const followAs = (who, other) =>
+    as(who, async () => {
+      const { rows } = await t.sql(`select follow(gen_random_uuid(), $1) as r`, [other]);
+      return rows[0].r;
+    });
+  const edge = async (a, b) =>
+    (await t.sql(`select state from follows where follower_id = $1 and followee_id = $2`, [a, b]))
+      .rows[0]?.state ?? null;
 
-    await as(recipient, () => t.sql(`select follow(gen_random_uuid(), $1)`, [sender]));
-
-    const { rows: edge } = await t.sql(
-      `select 1 from follows where follower_id = $1 and followee_id = $2`,
-      [sender, recipient],
+  /** Still held, still in Requests, and not in Sent to You. */
+  const assertHeld = async (id) => {
+    assert.equal(await stateOf(id), 'pending');
+    assert.deepEqual(
+      (await requests(recipient)).map((r) => r.id),
+      [id],
+      'still in the recipient’s Requests',
     );
-    assert.equal(edge.length, 0, 'the pair is not mutual');
-    assert.equal(
-      (await delivered(recipient)).length,
-      1,
-      'current behaviour: delivered to Sent to You without a mutual follow',
+    assert.equal((await delivered(recipient)).length, 0, 'not in Sent to You');
+  };
+
+  it('follow: the sender has unfollowed, so the follow-back releases nothing', async () => {
+    const { id } = await send(sender, recipient, await movie('d1_follow'));
+    await unfollow(sender, recipient);
+
+    await followAs(recipient, sender);
+
+    assert.equal(await edge(sender, recipient), null, 'the pair is not mutual');
+    await assertHeld(id);
+  });
+
+  it('follow: the recipient can still Add it, or Dismiss it', async () => {
+    const kept = (await send(sender, recipient, await movie('d1_add'))).id;
+    const dropped = (await send(sender, recipient, await movie('d1_dismiss'))).id;
+    await unfollow(sender, recipient);
+    await followAs(recipient, sender);
+
+    assert.deepEqual(await add(recipient, kept), { status: 'ok', added: true });
+    assert.equal(await stateOf(kept), 'delivered');
+    assert.deepEqual(
+      (await delivered(recipient)).map((r) => r.id),
+      [kept],
+      'Add is the recipient’s own choice, and still works',
     );
+
+    await dismiss(recipient, dropped);
+    assert.equal(await stateOf(dropped), 'dismissed');
+    assert.equal((await requests(recipient)).length, 0);
+  });
+
+  it('respond_follow_request: a private sender approving the recipient releases nothing', async () => {
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [sender]);
+    const { id } = await send(sender, recipient, await movie('d1_respond'));
+    await unfollow(sender, recipient);
+
+    assert.equal((await followAs(recipient, sender)).state, 'pending');
+    await as(sender, () =>
+      t.sql(`select respond_follow_request(gen_random_uuid(), $1, true)`, [recipient]),
+    );
+
+    assert.equal(await edge(recipient, sender), 'approved');
+    assert.equal(await edge(sender, recipient), null);
+    await assertHeld(id);
+  });
+
+  it('set_profile_visibility: a private sender going public releases nothing', async () => {
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [sender]);
+    const { id } = await send(sender, recipient, await movie('d1_visibility'));
+    assert.equal((await followAs(recipient, sender)).state, 'pending');
+    await unfollow(sender, recipient);
+
+    await as(sender, () =>
+      t.sql(`select set_profile_visibility(gen_random_uuid(), 'public'::profile_visibility)`),
+    );
+
+    assert.equal(await edge(recipient, sender), 'approved', 'the sweep approved the request');
+    assert.equal(await edge(sender, recipient), null);
+    await assertHeld(id);
+  });
+
+  it('documented: the sender re-following releases nothing; the recipient Adds it', async () => {
+    const { id } = await send(sender, recipient, await movie('d1_refollow'));
+    await unfollow(sender, recipient);
+    await followAs(recipient, sender);
+
+    await followAs(sender, recipient); // mutual again, by the sender's follow
+    assert.equal(await edge(sender, recipient), 'approved');
+    await assertHeld(id);
+
+    await add(recipient, id);
+    assert.deepEqual(
+      (await delivered(recipient)).map((r) => r.id),
+      [id],
+    );
+  });
+
+  // -------------------------------------------------------------------------------------
+  // Regressions: what was released before is still released.
+  // -------------------------------------------------------------------------------------
+
+  it('regression: the recipient following back while the sender still follows releases it', async () => {
+    const { id } = await send(sender, recipient, await movie('d1_regression_follow'));
+    await followAs(recipient, sender);
+
+    assert.equal(await stateOf(id), 'delivered');
+    assert.deepEqual(
+      (await delivered(recipient)).map((r) => r.id),
+      [id],
+    );
+    assert.equal((await requests(recipient)).length, 0);
+  });
+
+  it('regression: accepting the sender’s invitation (both edges) releases it', async () => {
+    const { id } = await send(sender, recipient, await movie('d1_regression_invite'));
+    const token = await t.asUser(sender, async () => {
+      const { rows } = await t.sql(`select create_invite_link(gen_random_uuid()) as r`);
+      return rows[0].r.token;
+    });
+    const accepted = await t.asUser(recipient, async () => {
+      const { rows } = await t.sql(`select accept_invite(gen_random_uuid(), $1, $2) as r`, [
+        token,
+        recipient,
+      ]);
+      return rows[0].r;
+    });
+    await t.actAs(sender);
+
+    assert.equal(accepted.connected, true, 'fixture: both edges approved');
+    assert.equal(await stateOf(id), 'delivered');
+  });
+
+  it('regression: a block before the release still releases nothing', async () => {
+    const { id } = await send(sender, recipient, await movie('d1_regression_block'));
+    await as(recipient, () => t.sql(`select block(gen_random_uuid(), $1)`, [sender]));
+    assert.equal(await stateOf(id), null, 'block deletes the held rows');
+
+    // Even with a held row and both edges put back by hand while the block stands, the
+    // block guard runs first and nothing moves.
+    const again = await t.sql(
+      `insert into title_recommendations (sender_id, recipient_id, media_item_id, state)
+       values ($1, $2, $3, 'pending') returning id`,
+      [sender, recipient, await movie('d1_regression_block_b')],
+    );
+    await followRow(sender, recipient);
+    await followRow(recipient, sender);
+    const { rows } = await t.sql(`select _release_recommendations($1, $2) as n`, [
+      sender,
+      recipient,
+    ]);
+    assert.equal(rows[0].n, 0);
+    assert.equal(await stateOf(again.rows[0].id), 'pending');
   });
 });

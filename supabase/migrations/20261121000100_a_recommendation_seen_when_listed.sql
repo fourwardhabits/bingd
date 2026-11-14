@@ -29,15 +29,27 @@
 --   * The send/delivery rule (`_may_recommend_to`, `_delivers_directly_to`). Unchanged.
 --
 -- ===========================================================================
--- WHO CAN READ IT
+-- WHO CAN READ IT: the recipient, and never the sender (seen_at AND opened_at)
 --
--- **Not the sender.** `title_recommendations_sender` admits the sender to their own rows, so a
--- column granted to `authenticated` is a column the sender can select — and `seen_at` would
--- then be a read receipt ("they looked at their list at 21:04"), which 20260826000400 rules
--- out. So, as with `state`, the column is granted to nobody. The recipient reads it through
--- `recommendation_seen_at`, a definer helper that answers only for `recipient_id = auth.uid()`
--- and only for a delivered row, and `recommendations_to_me` stays `security invoker` with no
--- visibility logic of its own.
+-- `title_recommendations_sender` admits the sender to their own rows, so any column granted
+-- to `authenticated` is a column the sender can select. 20260826000400 rules out a read
+-- receipt ("No message, no reply, no read receipt"), and yet its §2 column list granted
+-- `opened_at` — so a sender could select when the recipient opened what they sent. That is
+-- closed here (FU1113-E O2, founder decision t180u), together with the new column, because
+-- they are one concern: **the read state is the recipient's**.
+--
+--   * `seen_at` is granted to nobody; `opened_at`'s grant is revoked. The remaining column
+--     grant to `authenticated` is exactly id, sender_id, recipient_id, media_item_id,
+--     created_at, recommended_at and message — which still serves the shipped awards read
+--     (`awards/use-awards.ts`: id, recommended_at, recipient_id and embeds).
+--   * The recipient reads both through definer helpers, `recommendation_seen_at` and
+--     `recommendation_opened_at`, which answer only for `recipient_id = auth.uid()` and a
+--     delivered row, and null for anything else.
+--   * `recommendations_to_me` and `title_recommendations_for_me` stay `security invoker`
+--     with no visibility logic of their own; they read the two columns through the helpers.
+--     Same return columns, names, order, limits and grants as before.
+--   * Unchanged: `mark_recommendation_opened` (definer; it writes, and reads nothing back),
+--     `recommend_title`, and every definer reader of `opened_at` (they run as the owner).
 --
 -- ===========================================================================
 -- APPLYING IT
@@ -52,8 +64,12 @@
 --   drop function if exists mark_recommendations_seen(uuid, uuid[]);
 --   drop function if exists recommendations_to_me(integer);
 --   -- recreate recommendations_to_me exactly as 20260929000100 §4 defines it, with its
---   -- revoke from public, anon and grant to authenticated
+--   -- comment, revoke from public, anon and grant to authenticated
+--   -- create or replace title_recommendations_for_me exactly as 20260929000100 §5, with its
+--   -- comment
+--   drop function if exists recommendation_opened_at(uuid);
 --   drop function if exists recommendation_seen_at(uuid);
+--   grant select (opened_at) on title_recommendations to authenticated;
 --   alter table title_recommendations drop column if exists seen_at;
 -- ===========================================================================
 
@@ -71,6 +87,10 @@ comment on column title_recommendations.seen_at is
 -- Restated rather than assumed: a column added after 20260826000400 §2's column list inherits
 -- no select privilege, and that is the intended state.
 revoke select (seen_at) on title_recommendations from public, anon, authenticated;
+
+-- NEW (O2). `opened_at` stops being readable by the sender. Every other column in the
+-- 20260826000400 §2 / 20260929000100 §1 grant is left exactly as it was.
+revoke select (opened_at) on title_recommendations from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------------
@@ -99,6 +119,25 @@ comment on function recommendation_seen_at(uuid) is
 
 revoke execute on function recommendation_seen_at(uuid) from public, anon;
 grant execute on function recommendation_seen_at(uuid) to authenticated;
+
+-- The same shape for `opened_at`, which the column grant no longer reaches.
+create or replace function recommendation_opened_at(p_recommendation_id uuid)
+returns timestamptz
+language sql stable security definer
+set search_path = public
+as $$
+  select r.opened_at
+    from title_recommendations r
+   where r.id = p_recommendation_id
+     and r.recipient_id = auth.uid()
+     and r.state = 'delivered';
+$$;
+
+comment on function recommendation_opened_at(uuid) is
+  'When the caller opened one of their own delivered recommendations, or null. Null as well for a row that is not the caller''s, is not delivered or does not exist, so it discloses nothing. Definer because opened_at is no longer granted to authenticated: the sender must not be able to read it as a read receipt (20261121000100, FU1113-E O2).';
+
+revoke execute on function recommendation_opened_at(uuid) from public, anon;
+grant execute on function recommendation_opened_at(uuid) to authenticated;
 
 
 -- ---------------------------------------------------------------------------
@@ -176,7 +215,8 @@ grant execute on function mark_recommendations_seen(uuid, uuid[]) to authenticat
 --
 -- The return type gains a column, so this is a drop and a create (the 20260929000100 §4
 -- pattern), and the grant is restated because the drop takes it. Carried over from
--- 20260929000100 verbatim except the one trailing column: same signature, `security
+-- 20260929000100 verbatim except the one trailing column and `opened_at` read through
+-- `recommendation_opened_at` (in the select list and the order by): same signature, `security
 -- invoker`, same join, same filter (none of its own — RLS and profiles_read decide), same
 -- order, same limit. Appended, so a client that maps by name or ignores extras keeps working.
 -- ---------------------------------------------------------------------------
@@ -222,10 +262,10 @@ as $$
          m.original_language,
          m.runtime_minutes,
          r.recommended_at,
-         r.opened_at,
+         -- NEW (20261121000100). Both read-state columns through the recipient-only helpers,
+         -- because neither is granted to authenticated any more (see the header).
+         recommendation_opened_at(r.id),
          r.message,
-         -- NEW (20261121000100). Through the recipient-only helper, because the column is
-         -- granted to nobody (see the header).
          recommendation_seen_at(r.id)
     from title_recommendations r
     join profiles p    on p.id = r.sender_id and p.status = 'active'
@@ -234,7 +274,7 @@ as $$
    -- Pending and dismissed rows are absent because `title_recommendations_recipient`
    -- does not admit them, not because of anything written here.
    where r.recipient_id = auth.uid()
-   order by (r.opened_at is not null), r.recommended_at desc
+   order by (recommendation_opened_at(r.id) is not null), r.recommended_at desc
    limit least(greatest(coalesce(p_limit, 100), 1), 200);
 $$;
 
@@ -243,3 +283,49 @@ comment on function recommendations_to_me(integer) is
 
 revoke execute on function recommendations_to_me(integer) from public, anon;
 grant execute on function recommendations_to_me(integer) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- 5. The title page's "who recommended this to me", reading opened_at the new way
+--
+-- Carried over from 20260929000100 §5 verbatim — same return table, `security invoker`,
+-- search_path, filter, order, limit, comment, revoke and grant — except that `r.opened_at`
+-- becomes `recommendation_opened_at(r.id)`, because the column is no longer granted. The
+-- return type does not change, so `create or replace` is enough.
+-- ---------------------------------------------------------------------------
+
+create or replace function title_recommendations_for_me(p_media_item_id uuid)
+returns table (
+  id                  uuid,
+  sender_id           uuid,
+  sender_username     text,
+  sender_display_name text,
+  sender_avatar_path  text,
+  message             text,
+  recommended_at      timestamptz,
+  opened_at           timestamptz
+)
+language sql stable security invoker
+set search_path = public
+as $$
+  select r.id,
+         r.sender_id,
+         p.username::text,
+         p.display_name,
+         p.avatar_path,
+         r.message,
+         r.recommended_at,
+         recommendation_opened_at(r.id)
+    from title_recommendations r
+    join profiles p on p.id = r.sender_id and p.status = 'active'
+   where r.recipient_id = auth.uid()
+     and r.media_item_id = p_media_item_id
+   order by r.recommended_at desc, r.id
+   limit 10;
+$$;
+
+comment on function title_recommendations_for_me(uuid) is
+  'Every delivered recommendation of one exact title to the caller, newest first, at most ten, with each sender''s note (20260929000100). security invoker: title_recommendations_recipient admits only delivered rows, profiles_read drops blocked and private senders, and the active join drops suspended ones — no visibility logic is written here. Cannot be asked about another account.';
+
+revoke execute on function title_recommendations_for_me(uuid) from public, anon;
+grant execute on function title_recommendations_for_me(uuid) to authenticated;
