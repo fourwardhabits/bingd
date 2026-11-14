@@ -203,10 +203,13 @@ describe('the one selector', () => {
 
     expect(view.queryByText('Titles')).toBeNull();
     expect(view.queryByLabelText('What to look at')).toBeNull();
-    // The only radios on the screen are the Movies | TV switch's two.
+    // The only radios on the screen are the Movies | TV switch's two, and the Poster / List
+    // view toggle's two (FU1113-C), which say how the wall is drawn, not what is on it.
     expect(view.getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
       'Movies',
       'TV',
+      'Poster view',
+      'List view',
     ]);
   });
 

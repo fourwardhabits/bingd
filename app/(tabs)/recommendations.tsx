@@ -25,6 +25,7 @@ import {
   useSweepIntent,
 } from '@/features/recommendations/use-recommendation-requests';
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
+import { ForYouList, type ForYouListTile } from '@/features/recommendations/ForYouList';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import {
   refreshRecommendations,
@@ -62,17 +63,20 @@ import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
-  ContentToolbar,
+  BrowseControlsRow,
   EmptyState,
-  FiltersAction,
+  FilterIconButton,
   HeaderBoundary,
   PosterGrid,
   Screen,
   MediumSelector,
   type MediumSelectorOption,
+  type PosterTile,
   SkeletonGrid,
   SkeletonRow,
   Text,
+  ViewModeToggle,
+  type ViewMode,
 } from '@/ui/components';
 import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
@@ -308,6 +312,53 @@ export default function RecommendationsScreen() {
   }, [profile.id]);
 
   /**
+   * **Poster or list** (FU1113-C): how the wall is drawn, never what is on it.
+   *
+   * Remembered per account at `${profile.id}.for-you.view-mode` with the selection's own
+   * pattern above: the state is tagged with the account it was read for, so an account
+   * switch draws the default in the very render that switches and never the previous
+   * reader's mode; the chosen-ref is reset per account; a stored value is validated, and a
+   * miss, a bad value or a failed read all land on Poster; and only a tap writes, so a new
+   * account's store stays empty until they pick. The screen is a tab and stays mounted, so
+   * navigating away and back keeps the mode in state as well.
+   */
+  const [viewModePref, setViewModePref] = useState<{ profileId: string; mode: ViewMode }>(() => ({
+    profileId: profile.id,
+    mode: DEFAULT_FOR_YOU_VIEW_MODE,
+  }));
+  const viewMode: ViewMode =
+    viewModePref.profileId === profile.id ? viewModePref.mode : DEFAULT_FOR_YOU_VIEW_MODE;
+  /** A tap since the stored mode was read: newer intent than a slow read, which stands down. */
+  const chosenViewMode = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    chosenViewMode.current = false;
+    const settle = (stored: unknown) => {
+      if (cancelled || chosenViewMode.current) return;
+      const mode = isForYouViewMode(stored) ? stored : DEFAULT_FOR_YOU_VIEW_MODE;
+      setViewModePref((current) =>
+        current.profileId === profile.id && current.mode === mode
+          ? current
+          : { profileId: profile.id, mode },
+      );
+    };
+    readPref<unknown>(`${profile.id}.${FOR_YOU_VIEW_MODE_PREF_KEY}`)
+      .then(settle)
+      .catch(() => settle(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
+
+  /** The reader's tap on Poster or List: drawn, and remembered for this account only. */
+  const chooseViewMode = (next: ViewMode) => {
+    chosenViewMode.current = true;
+    setViewModePref({ profileId: profile.id, mode: next });
+    void writePref(`${profile.id}.${FOR_YOU_VIEW_MODE_PREF_KEY}`, next).catch(() => {});
+  };
+
+  /**
    * **Re-tapping the For You tab** (founder, physical iOS 1.0.1 build 8).
    *
    * Sent to you, Group Picks, the requests sheet and the two Top Rated walls are all
@@ -501,6 +552,8 @@ export default function RecommendationsScreen() {
     title: string;
     year: number | null;
     posterPath: string | null;
+    /** For a list row's second line (FU1113-C); a poster does not draw it. */
+    kind?: 'movie' | 'series' | 'season';
   }[] = onTopRated ? topItems : slateItems;
   /**
    * Whichever query the wall is currently drawn from, for the three states every wall
@@ -704,6 +757,53 @@ export default function RecommendationsScreen() {
     }
   };
 
+  /**
+   * **The wall's tiles and its three actions, defined once for both view modes** (FU1113-C).
+   *
+   * Poster and List are handed this same array and these same handlers, so the list can
+   * only hold the ids, order and eligibility the wall holds, and a bookmark, a dismissal
+   * or an open does exactly the same thing in either mode.
+   */
+  const wallTiles: ForYouListTile[] = items.map((item) => ({
+    id: item.mediaItemId,
+    title: item.title,
+    year: item.year,
+    kind: item.kind,
+    posterUri: posterUri(item.posterPath, 'card'),
+    // Read live from the watchlist query, not carried on the slate. That is
+    // what lets a bookmark redraw one icon instead of replacing the wall —
+    // see `toggleSaveById`.
+    saved: savedIds.has(item.mediaItemId),
+    // Only the reader's own score, and only on Top Rated: the recommended
+    // slate holds nothing they have watched, and nobody else's score is ever
+    // chipped onto a poster.
+    ...(onTopRated ? ownScore(myScores.data?.get(item.mediaItemId)) : null),
+  }));
+  const openTile = (tile: PosterTile) => router.push(`/title/${tile.id}`);
+  const toggleSaveTile = (tile: PosterTile) => {
+    const item = items.find((candidate) => candidate.mediaItemId === tile.id);
+    if (item) void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
+  };
+  /**
+   * The founder's X (§12): the card goes on the tap — the optimistic
+   * set feeds `useForYou`'s select, so no refetch and no flash — and
+   * the write persists it. Only a proven refusal is worth an alert.
+   *
+   * **Absent on Top Rated**, and not merely because it would do nothing.
+   * A dismissal is a durable statement that this reader does not want a
+   * title *recommended*, and it is read by the slate query alone — so an X
+   * here would silently edit a different wall while appearing to edit this
+   * one, and the tile it removed would come back on the next page. The
+   * community's order is not a list anybody gets to edit.
+   */
+  const dismissTile = onTopRated
+    ? undefined
+    : (tile: PosterTile) => {
+        void dismissTitle(tile.id).then((result) => {
+          if (!result.ok) Alert.alert('Could not hide this', result.message);
+        });
+      };
+
   const openRecommendation = (row: SentRecommendation) => {
     // Opened is recorded on the way through, which is the only moment anybody can
     // honestly call it opened. It is fire-and-forget: a failure here must not stand
@@ -778,43 +878,59 @@ export default function RecommendationsScreen() {
    */
   const toolbar = (
     <View testID="for-you-toolbar">
-      <ContentToolbar
-        title={
-          <MediumSelector
-            size="marquee"
-            value={onTopRated ? 'top' : 'recommended'}
-            options={FOR_YOU_WALLS}
-            accessibilityHint="Choose Recommended or Top Rated"
-            testID="for-you-mode"
-            onChange={(next) => {
-              const showing = topMedium ?? medium;
-              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
-            }}
-          />
-        }
-      >
-        {/* The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
-            stay off, because nothing on either wall has been ranked by this reader. */}
-        <View style={styles.tools} testID="for-you-controls">
-          <FiltersAction
-            activeCount={activeCount}
-            onPress={() => setFiltering(true)}
-            testID="for-you-filters"
-          />
-          {isFiltered(filters) ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Clear all"
-              accessibilityHint="Turns every filter off"
-              onPress={() => changeFilters(emptyFilters())}
-              style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
-              testID="for-you-clear-filters"
-            >
-              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
-            </Pressable>
-          ) : null}
-        </View>
-      </ContentToolbar>
+      <View style={styles.toolbarRow}>
+        <BrowseControlsRow
+          testID="for-you-controls-row"
+          leading={
+            <MediumSelector
+              size="marquee"
+              value={onTopRated ? 'top' : 'recommended'}
+              options={FOR_YOU_WALLS}
+              accessibilityHint="Choose Recommended or Top Rated"
+              testID="for-you-mode"
+              onChange={(next) => {
+                const showing = topMedium ?? medium;
+                changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
+              }}
+            />
+          }
+          trailing={
+            // The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
+            // stay off, because nothing on either wall has been ranked by this reader. No sort
+            // here: the wall's order is the recommendation order (FU1113-C).
+            <View style={styles.tools} testID="for-you-controls">
+              {/* How the wall is drawn. Not over Sent to You, which is always a list: a
+                  toggle there would be a control that changes nothing. */}
+              {sentOnly ? null : (
+                <ViewModeToggle
+                  value={viewMode}
+                  onChange={chooseViewMode}
+                  testID="for-you-view-mode"
+                />
+              )}
+              <FilterIconButton
+                activeCount={activeCount}
+                accessibilityLabel="Filters"
+                accessibilityHint="Opens filters"
+                onPress={() => setFiltering(true)}
+                testID="for-you-filters"
+              />
+              {isFiltered(filters) ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear all"
+                  accessibilityHint="Turns every filter off"
+                  onPress={() => changeFilters(emptyFilters())}
+                  style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
+                  testID="for-you-clear-filters"
+                >
+                  <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
+                </Pressable>
+              ) : null}
+            </View>
+          }
+        />
+      </View>
 
       {/* Above the features, and only when something is waiting. Not a filter: it says
           that something not on screen yet needs a decision. Absent at zero. */}
@@ -1077,49 +1193,21 @@ export default function RecommendationsScreen() {
               {/* No line above the wall about how well bingd. knows the reader's taste
                   (founder, 2026-11-03). Until then a thin taste printed "Popular right now
                   while bingd learns your taste" or "bingd is still learning your taste". */}
-              <PosterGrid
-                tiles={items.map((item) => ({
-                  id: item.mediaItemId,
-                  title: item.title,
-                  year: item.year,
-                  posterUri: posterUri(item.posterPath, 'card'),
-                  // Read live from the watchlist query, not carried on the slate. That is
-                  // what lets a bookmark redraw one icon instead of replacing the wall —
-                  // see `toggleSaveById`.
-                  saved: savedIds.has(item.mediaItemId),
-                  // Only the reader's own score, and only on Top Rated: the recommended
-                  // slate holds nothing they have watched, and nobody else's score is ever
-                  // chipped onto a poster.
-                  ...(onTopRated ? ownScore(myScores.data?.get(item.mediaItemId)) : null),
-                }))}
-                onPressTile={(tile) => router.push(`/title/${tile.id}`)}
-                onToggleSave={(tile) => {
-                  const item = items.find((candidate) => candidate.mediaItemId === tile.id);
-                  if (item)
-                    void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
-                }}
-                /**
-                 * The founder's X (§12): the card goes on the tap — the optimistic
-                 * set feeds `useForYou`'s select, so no refetch and no flash — and
-                 * the write persists it. Only a proven refusal is worth an alert.
-                 *
-                 * **Absent on Top Rated**, and not merely because it would do nothing.
-                 * A dismissal is a durable statement that this reader does not want a
-                 * title *recommended*, and it is read by the slate query alone — so an X
-                 * here would silently edit a different wall while appearing to edit this
-                 * one, and the tile it removed would come back on the next page. The
-                 * community's order is not a list anybody gets to edit.
-                 */
-                onDismissTile={
-                  onTopRated
-                    ? undefined
-                    : (tile) => {
-                        void dismissTitle(tile.id).then((result) => {
-                          if (!result.ok) Alert.alert('Could not hide this', result.message);
-                        });
-                      }
-                }
-              />
+              {viewMode === 'list' ? (
+                <ForYouList
+                  tiles={wallTiles}
+                  onPressTile={openTile}
+                  onToggleSave={toggleSaveTile}
+                  onDismissTile={dismissTile}
+                />
+              ) : (
+                <PosterGrid
+                  tiles={wallTiles}
+                  onPressTile={openTile}
+                  onToggleSave={toggleSaveTile}
+                  onDismissTile={dismissTile}
+                />
+              )}
 
               {/**
                * The end of the wall, said once, quietly (§18).
@@ -1240,6 +1328,19 @@ const DEFAULT_FOR_YOU_SELECTION: ForYouSelection = { medium: 'movies', topMedium
 const FOR_YOU_SELECTION_PREF_KEY = 'for-you.selection';
 
 const isForYouMedium = (value: unknown): value is Medium => value === 'movies' || value === 'tv';
+
+/**
+ * `${profile.id}.for-you.view-mode`, holding `'poster'` or `'list'` (FU1113-C). Device-local
+ * and per account, beside the selection and separate from Collection's own view mode: List
+ * on Collection does not draw For You as a list.
+ */
+const FOR_YOU_VIEW_MODE_PREF_KEY = 'for-you.view-mode';
+
+/** A new account, or one whose stored mode is missing, unreadable or not a mode: Poster. */
+const DEFAULT_FOR_YOU_VIEW_MODE: ViewMode = 'poster';
+
+const isForYouViewMode = (value: unknown): value is ViewMode =>
+  value === 'poster' || value === 'list';
 
 /**
  * A stored selection, validated rather than trusted, one field at a time.
@@ -1419,8 +1520,11 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  // Filters (`FiltersAction`) and, while filters are on, Clear beside it.
-  tools: { flexDirection: 'row', alignItems: 'center' },
+  // The toolbar's top inset, as `ContentToolbar` drew it: `BrowseControlsRow` draws none.
+  toolbarRow: { paddingTop: theme.space[2] },
+  // Poster / List, Filters and, while filters are on, Clear beside it — the row's own
+  // trailing gap between them.
+  tools: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   clear: {
     minHeight: theme.layout.minTapTarget,
     minWidth: theme.layout.minTapTarget,

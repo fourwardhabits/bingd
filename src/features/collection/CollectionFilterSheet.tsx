@@ -208,7 +208,11 @@ export function CollectionFilterSheet<Axis extends string = string>({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * One facet's heading and its options, on the gutter. Exported for the person page's
+ * Filmography sheet (FU1113-C), so its Decade section is this one rather than a copy.
+ */
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
       <Text variant="sectionHeader" tone="action">
@@ -219,7 +223,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Option({
+/** One option in a facet: a hairline chip, filled Maroon when chosen. Shared as `Section`. */
+export function Option({
   label,
   count,
   selected,

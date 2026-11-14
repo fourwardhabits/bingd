@@ -2,6 +2,7 @@ import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
+import { expectRowFitsNarrow, naturalWidth } from '@/test-utils/narrow-row';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
@@ -102,7 +103,7 @@ describe('the toolbar', () => {
     const view = await draw();
     const action = view.getByTestId('collection-filter-sort');
     expect(action.props.accessibilityLabel).toBe(
-      'Filter and sort. Sorted by Rating, highest first. No filters',
+      'Filters and sort. Sorted by Rating, highest first. No filters',
     );
     expect(action.props.accessibilityState).toMatchObject({ selected: false });
     const size = StyleSheet.flatten(
@@ -112,14 +113,26 @@ describe('the toolbar', () => {
     expect(size.height).toBe(theme.layout.minTapTarget);
   });
 
-  it('lets the tools wrap under the marquee rather than cut the marquee short', async () => {
+  /**
+   * FU1113-C: one `BrowseControlsRow`. The tools never wrap and never shrink — every cell
+   * keeps its 44pt target — and the marquee's side is what gives way on a narrow phone.
+   */
+  it('keeps the tools on one line and lets the marquee side give way', async () => {
     const view = await draw();
     const bar = view.getByTestId('collection-toolbar');
-    expect(StyleSheet.flatten(bar.props.style).flexWrap).toBe('wrap');
-    expect(within(bar).getByText('Watched marquee').props.numberOfLines).toBeUndefined();
-    // The tools never outgrow the row: they wrap among themselves (independent review 2).
-    const tools = StyleSheet.flatten(bar.children[1] && typeof bar.children[1] !== 'string' ? bar.children[1].props.style : undefined);
-    expect(tools).toMatchObject({ flexWrap: 'wrap', maxWidth: '100%', flexShrink: 1 });
+    expect(StyleSheet.flatten(bar.props.style)).toMatchObject({ flexDirection: 'row', flexWrap: 'nowrap' });
+    expect(within(bar).getByText('Watched marquee')).toBeTruthy();
+    expect(StyleSheet.flatten(view.getByTestId('collection-toolbar-leading').props.style)).toMatchObject({
+      flexShrink: 1,
+      minWidth: 0,
+    });
+    const tools = view.getByTestId('collection-toolbar-trailing');
+    expect(StyleSheet.flatten(tools.props.style)).toMatchObject({ flexWrap: 'nowrap', flexShrink: 0 });
+    // Poster / List first, then the Filters & Sort icon on the right gutter; no third button.
+    expect(within(tools).getByTestId('collection-view-mode')).toBeTruthy();
+    expect(within(tools).getByTestId('collection-filter-sort')).toBeTruthy();
+    const json = JSON.stringify(view.toJSON());
+    expect(json.indexOf('collection-view-mode')).toBeLessThan(json.indexOf('collection-filter-sort'));
   });
 
   it('heads the list: marquee, then the cards, then the count', async () => {
@@ -131,17 +144,24 @@ describe('the toolbar', () => {
     expect([...order].sort((x, y) => x - y)).toEqual(order);
   });
 
-  it('draws the view glyphs bare, the chosen one in Maroon, each a 44pt target', async () => {
+  it('draws the shared ViewModeToggle: each cell a 44pt target, the chosen one sunken', async () => {
     const view = await draw();
     for (const name of ['Poster view', 'List view']) {
       const cell = view.getByRole('radio', { name });
       const style = StyleSheet.flatten(
         typeof cell.props.style === 'function' ? cell.props.style({ pressed: false }) : cell.props.style,
       );
-      expect(style.width).toBe(44);
-      expect(style.height).toBe(44);
-      expect(style.backgroundColor).toBeUndefined();
+      // 44 wide; drawn 8pt shorter, with the vertical slop giving the 44 back.
+      expect(style.width).toBe(theme.layout.minTapTarget);
+      expect(style.height + cell.props.hitSlop.top + cell.props.hitSlop.bottom).toBe(
+        theme.layout.minTapTarget,
+      );
     }
+    const chosen = view.getByRole('radio', { name: 'List view' });
+    expect(
+      StyleSheet.flatten(typeof chosen.props.style === 'function' ? chosen.props.style({ pressed: false }) : chosen.props.style)
+        .backgroundColor,
+    ).toBe(theme.surface.sunken);
     expect(view.getByRole('radio', { name: 'List view' }).props.accessibilityState).toMatchObject({
       selected: true,
     });
@@ -300,5 +320,19 @@ describe('the sort in force', () => {
       .map((radio) => radio.props.accessibilityLabel.split(',')[0]);
     expect(offered).toContain('Recently watched');
     expect(offered).not.toContain('Recent');
+  });
+});
+
+describe('at 320pt and the largest text size (C9)', () => {
+  it('keeps the marquee, the view toggle and Filters on one line, each a 44pt target', async () => {
+    const view = await draw();
+    const { room, targets } = expectRowFitsNarrow(view.getByTestId, 'collection-toolbar');
+    expect(targets.map((target) => target.label)).toEqual([
+      'Poster view',
+      'List view',
+      'Filters and sort. Sorted by Rating, highest first. No filters',
+    ]);
+    // Room for the marquee's word beside them, before it has to truncate.
+    expect(room).toBeGreaterThan(naturalWidth(view.getByTestId('collection-filter-sort'), 2) * 3);
   });
 });
