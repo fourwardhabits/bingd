@@ -28,6 +28,7 @@ import watchHistory from './races/watch-history.mjs';
 import scaleHardening from './races/scale-hardening.mjs';
 import refine from './races/refine.mjs';
 import reviewHelpful from './races/review-helpful.mjs';
+import usernameSignIn from './races/username-sign-in.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -75,5 +76,6 @@ listAdd();
 welcomeEmail();
 releaseAwareness();
 proactiveNotifications();
+usernameSignIn();
 scaleHardening();
 stress();
