@@ -667,10 +667,13 @@ accept a whole show with no other change. `_assert_loggable` no longer refuses a
 - **Three independent pools.** Shows compare with shows, seasons with seasons, movies with
   movies. Positions, bands, scores, sessions, the placement ledger, Refine and the backlog
   are all keyed by `(user, category)`, so a show's bucket sizes never touch a season's.
-- **Nothing is derived across the two TV levels.** No show score is computed from its
-  seasons; ranking a season never creates a show ranking; neither moves when the other
-  changes. A show's score is its own explicit ranking, and so are its community and
-  Following scores (`community_score` and `following_score` read one media item).
+- **Nothing is derived across the two TV levels** in the rankings themselves: ranking a
+  season never creates a show ranking, and neither ladder moves when the other changes. A
+  show's Following score reads its explicit rankings only (`following_score` reads one
+  media item). Its **community** score, since `20261119000100` (founder spec t168u §4F),
+  is the equal-weight mean of one effective score per TV-eligible person: their explicit
+  show ranking, else the mean of their own ranked seasons of it (see `api.md`, Community
+  score). A season's community score is still that season's rankings only.
 - `comparisons_within_one_category` refuses a comparison row pairing two pools. The engine
   only ever offers a pivot from the subject's own band, so this was already true by
   construction; the trigger makes a regression loud.

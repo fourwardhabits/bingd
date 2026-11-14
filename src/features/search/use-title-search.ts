@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  skipToken,
   useQueries,
   useQuery,
   type UseQueryResult,
@@ -593,16 +594,22 @@ export function useSeasons(seriesId: string | null) {
     queryKey: queryKeys.seasons(seriesId ?? ''),
     enabled: Boolean(seriesId),
     staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('media_items')
-        .select('id, season_number, title, release_date, poster_path, fetched_at')
-        .eq('parent_id', seriesId)
-        .eq('kind', 'season')
-        .order('season_number');
-      if (error) throw error;
-      return (data ?? []) as SeasonRow[];
-    },
+    // `skipToken`, not just `enabled`: in React Query v5 `refetch()` ignores `enabled`,
+    // so a season or movie page's pull-to-refresh sent `parent_id=eq.null`, which
+    // Postgres refuses (22P02) and the client retried twice. With no series there is no
+    // queryFn to run at all.
+    queryFn: seriesId
+      ? async () => {
+          const { data, error } = await supabase
+            .from('media_items')
+            .select('id, season_number, title, release_date, poster_path, fetched_at')
+            .eq('parent_id', seriesId)
+            .eq('kind', 'season')
+            .order('season_number');
+          if (error) throw error;
+          return (data ?? []) as SeasonRow[];
+        }
+      : skipToken,
   });
 }
 

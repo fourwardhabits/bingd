@@ -43,6 +43,27 @@ export const RANK_LABEL = {
   season: 'Rank Season',
 } as const;
 
+/**
+ * **The drawn height of the filled Rank control** (visual refine, 2026-11-12).
+ *
+ * Rank used to take its height from the 44pt target itself, which made the filled Maroon
+ * block the tallest thing in the row and read heavier than the glyphs beside it. It is
+ * drawn 8pt shorter now and {@link RANK_SLOP} gives the 8 back, so the press target is
+ * still 44: the compact rewatch form's arithmetic (`rankCompact`, 36pt with 4pt of slop
+ * each side), reused rather than a second one invented. On the immersive page that also
+ * makes Rank and the Log rewatch that replaces it once ranked one height.
+ *
+ * The 17pt `headline` label (a 22pt line, 33pt at the 1.5x cap) still sits inside it, and
+ * `minHeight` lets the box grow rather than clip if it ever did not. The outlined `Ranked`
+ * keeps the full 44: only the invitation is lightened.
+ */
+export const RANK_VISIBLE_HEIGHT = theme.layout.minTapTarget - 8;
+/** Vertical slop that lifts a {@link RANK_VISIBLE_HEIGHT} control back to the 44pt target. */
+export const RANK_SLOP = {
+  top: (theme.layout.minTapTarget - RANK_VISIBLE_HEIGHT) / 2,
+  bottom: (theme.layout.minTapTarget - RANK_VISIBLE_HEIGHT) / 2,
+} as const;
+
 /** What around the word does not scale: padding, the tick, its gap, the border, the margin. */
 const RANK_CHROME = theme.space[3] * 2 + theme.layout.icon.sm + theme.space[2] + 2 + theme.space[1];
 
@@ -216,7 +237,9 @@ export function TitleActions({
             onPress={rank.onPress}
             onPressIn={rankPress.onPressIn}
             onPressOut={rankPress.onPressOut}
-            hitSlop={rank.compact ? { top: 4, bottom: 4 } : undefined}
+            // The filled Rank is drawn short and takes the slop that returns it to 44pt; the
+            // compact rewatch keeps its own; the outlined Ranked is drawn at 44 and needs none.
+            hitSlop={rank.compact ? { top: 4, bottom: 4 } : !rank.ranked ? RANK_SLOP : undefined}
             style={({ pressed }) => [
               styles.rank,
               rank.ranked ? (onArtwork ? styles.rankedOnArtwork : styles.ranked) : styles.unranked,
@@ -433,7 +456,8 @@ const styles = StyleSheet.create({
     marginRight: theme.space[1],
     borderRadius: theme.radius.control,
   },
-  unranked: { backgroundColor: theme.semantic.action },
+  /** Filled Maroon, drawn at {@link RANK_VISIBLE_HEIGHT}; `RANK_SLOP` keeps the 44pt target. */
+  unranked: { backgroundColor: theme.semantic.action, minHeight: RANK_VISIBLE_HEIGHT },
   ranked: {
     backgroundColor: theme.surface.raised,
     borderWidth: StyleSheet.hairlineWidth * 2,

@@ -55,6 +55,16 @@ let mockRpcErrors: Record<string, unknown> = {};
 const mockReads: Record<string, number> = {};
 /** Every `select`, by table and column list, so one read of a table can be told from another. */
 const mockSelects: [string, string][] = [];
+/**
+ * What a series' season-list read fails with, when a test asks it to: the one read of
+ * `media_items` filtered to `kind = 'season'` by `parent_id` (`useSeasons`).
+ */
+let mockSeasonListError: unknown = null;
+/**
+ * The `parent_id` of every season-list read that was sent, in order. A season or movie
+ * page has no series, and a read with `parent_id = null` is one Postgres refuses (22P02).
+ */
+const mockSeasonListReads: unknown[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -104,6 +114,29 @@ jest.mock('@/lib/supabase', () => ({
         // the call, which is exactly why a page that only misbehaves during a fetch had
         // no test until now.
         then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          if (table === 'media_items' && filters.kind === 'season' && 'parent_id' in filters) {
+            mockSeasonListReads.push(filters.parent_id);
+            // What PostgREST answers for `parent_id=eq.null` on a uuid column.
+            if (filters.parent_id === null) {
+              void Promise.resolve({
+                data: null,
+                error: { code: '22P02', message: 'invalid input syntax for type uuid: "null"' },
+              }).then(resolve, reject);
+              return;
+            }
+          }
+          if (
+            mockSeasonListError &&
+            table === 'media_items' &&
+            filters.kind === 'season' &&
+            'parent_id' in filters
+          ) {
+            void Promise.resolve({ data: null, error: mockSeasonListError }).then(
+              resolve,
+              reject,
+            );
+            return;
+          }
           void held(table, () => ({ data: rows(), error: null, count: rows().length })).then(
             resolve,
             reject,
@@ -322,6 +355,8 @@ beforeEach(() => {
   mockHeld.clear();
   mockRpcResults = {};
   mockRpcErrors = {};
+  mockSeasonListError = null;
+  mockSeasonListReads.length = 0;
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   mockSelects.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
@@ -756,7 +791,7 @@ describe('a title this user has ranked', () => {
     expect(view.getByText('Ranked')).toBeTruthy();
 
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Edit ranking')).toBeTruthy();
+    expect(view.getByText('Rerank')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
@@ -766,7 +801,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    expect(view.getByText('Edit ranking')).toBeTruthy();
+    expect(view.getByText('Rerank')).toBeTruthy();
   });
 
   /**
@@ -788,7 +823,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
     // Five rows in one column with no structure is a list you read rather than a menu
     // you use, and the destructive one has to be last and on its own.
     expect(view.getByText('YOUR LOG')).toBeTruthy();
@@ -873,7 +908,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
 
     // The two labels the founder retired, in both the forms they were ever drawn in.
@@ -905,7 +940,7 @@ describe('a title this user has ranked', () => {
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Edit ranking',
+      'Rerank',
       'Log another watch',
       'Remove from collection',
     ]) {
@@ -937,7 +972,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
     return view;
   };
 
@@ -1132,7 +1167,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
 
     expect(view.queryByLabelText('Remove ranking')).toBeNull();
     expect(view.queryByText('Keeps it in your collection')).toBeNull();
@@ -1790,7 +1825,9 @@ describe('a series', () => {
     await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('I liked it'));
 
-    const update = await view.findByText('Update Show');
+    // FU1113-D: the reveal's primary exit is "Update Show Ranking", with no score.
+    const update = await view.findByTestId('reveal-update-show');
+    expect(view.getByRole('button', { name: 'Update Show Ranking' })).toBe(update);
     await fireEvent.press(update);
 
     // The show's band chooser, on the band it already has: the same band re-ranks it
@@ -1807,6 +1844,72 @@ describe('a series', () => {
         }),
       ),
     );
+  });
+
+  it('carries the open show decision through Add details to the details sheet', async () => {
+    // WS-TVC (t168u §3B): Add details does not resolve the show. The post-rank sheet
+    // offers Update Show in place of Done, and it opens the same linked correction.
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'fine',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: 'fine',
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    mockRpcResults.log_title = { status: 'ok', created: true, watch_event_id: 'w-1' };
+    mockRpcResults.rank_start = {
+      done: true,
+      position: 1,
+      category: 'tv_seasons',
+      bucket: 'loved',
+      score: 10,
+      adjustable: false,
+      placement_id: 'placement-s2',
+      parent: { media_item_id: 'series-1', ranked: true, bucket: 'fine' },
+    };
+    mockRpcResults.rank_again = {
+      done: false,
+      session_id: 'show-session',
+      pivot: 'other-show',
+    };
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByLabelText('Log Breaking Bad, Season 2')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad, Season 2'));
+    await waitFor(() => expect(view.getByLabelText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    await fireEvent.press(await view.findByTestId('reveal-add-details'));
+    const update = await view.findByTestId('log-update-show');
+    expect(view.getByTestId('log-keep-show')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Done' })).toBeNull();
+    await fireEvent.press(update);
+
+    await waitFor(() => expect(view.getByLabelText('It was fine')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({
+          p_media_item_id: 'series-1',
+          p_linked_placement_id: 'placement-s2',
+        }),
+      ),
+    );
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'keep_show')).toHaveLength(0);
   });
 
   it('draws a ranked season row as its score circle, against seasons only', async () => {
@@ -2452,7 +2555,7 @@ describe('a season, and its episodes', () => {
       '/w780/still2.jpg',
     );
 
-    await fireEvent.press(view.getByText('Done'));
+    await fireEvent.press(view.getByText('Close'));
     expect(view.queryByTestId('episode-sheet')).toBeNull();
     // Reading an episode navigates nowhere and writes nothing.
     expect(mockPush).not.toHaveBeenCalled();
@@ -3104,7 +3207,7 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
     return view;
   };
 
@@ -3120,7 +3223,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
   const correctTheRating = async (view: Awaited<ReturnType<typeof openMenu>>) => {
-    await fireEvent.press(view.getByLabelText('Edit ranking'));
+    await fireEvent.press(view.getByLabelText('Rerank'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
   };
@@ -3140,7 +3243,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Edit ranking')).toBeTruthy();
+    expect(view.getByLabelText('Rerank')).toBeTruthy();
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
     // Every label this row has ever worn that meant "another viewing" while reading like
     // "redo my ranking", plus the second correction door the founder consolidated away.
@@ -3298,7 +3401,7 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
 
     await correctTheRating(view);
 
@@ -3315,7 +3418,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Edit ranking'));
+    await fireEvent.press(view.getByLabelText('Rerank'));
 
     expect(againCalls()).toHaveLength(0);
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
@@ -3331,7 +3434,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Edit ranking'));
+    await fireEvent.press(view.getByLabelText('Rerank'));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
     // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
@@ -3356,7 +3459,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
    * halves are asserted together so that neither can drift toward the other.
    */
-  it('goes straight into the comparisons, and records no watch, from Edit ranking', async () => {
+  it('goes straight into the comparisons, and records no watch, from Rerank', async () => {
     const view = await openMenu();
 
     await correctTheRating(view);
@@ -3487,6 +3590,105 @@ describe('the page behind an open sheet', () => {
 });
 
 /**
+ * **Pull to refresh asks for seasons only where there is a series** (2026-11-12).
+ *
+ * The page hands `useSeasons` no series on a season or movie page, and pull-to-refresh
+ * called `seasons.refetch()` regardless. In React Query v5 `refetch()` ignores `enabled`,
+ * so the queryFn ran with `seriesId === null`: `parent_id=eq.null`, a 22P02 from Postgres,
+ * and two retries holding the spinner for about three seconds (22 such requests in seven
+ * days of production logs). `useSeasons` now has a `skipToken` queryFn with no series, and
+ * the page refetches seasons only on a whole-show page.
+ */
+describe('pull to refresh and the season list', () => {
+  /** The page's own `RefreshControl`, read off the scroll view that carries it. */
+  const refreshControl = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    view
+      .root!.queryAll(() => true)
+      .map((node) => node as never as { props?: Record<string, any> })
+      .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
+  const pull = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await act(async () => {
+      refreshControl(view).props.onRefresh();
+    });
+    // Promptly: the test client does not retry, so anything still spinning here is
+    // waiting on a request, not on a back-off.
+    await waitFor(() => expect(refreshControl(view).props.refreshing).toBe(false));
+  };
+
+  /** The season list's own cache entry for "no series": never run, so never failed. */
+  const expectNoSeriesQueryUntouched = (
+    view: Awaited<ReturnType<typeof renderWithProviders>>,
+  ) => {
+    const state = view.client.getQueryState(['seasons', '']);
+    expect(state?.status).not.toBe('error');
+    expect(state?.fetchFailureCount ?? 0).toBe(0);
+  };
+
+  it('on a movie page, sends no season-list read with a null series', async () => {
+    const view = await open();
+    await pull(view);
+
+    expect(mockSeasonListReads).not.toContain(null);
+    expectNoSeriesQueryUntouched(view);
+  });
+
+  it('on a season page, sends no season-list read with a null series', async () => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: {
+          id: 'series-1',
+          title: 'Breaking Bad',
+          poster_path: null,
+          backdrop_path: null,
+        },
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() =>
+      expect(view.getByTestId('title-name')).toHaveTextContent(/^Breaking Bad$/),
+    );
+
+    await pull(view);
+
+    expect(mockSeasonListReads).not.toContain(null);
+    expectNoSeriesQueryUntouched(view);
+  });
+
+  it('on a whole-show page, still refetches the seasons, once', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+      {
+        id: 'season-1',
+        parent_id: 'series-1',
+        kind: 'season',
+        season_number: 1,
+        title: 'Season 1',
+        release_date: '2008-01-20',
+        poster_path: null,
+        fetched_at: new Date().toISOString(),
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
+    const before = mockSeasonListReads.length;
+    expect(mockSeasonListReads).toEqual(Array(before).fill('series-1'));
+
+    await pull(view);
+
+    expect(mockSeasonListReads.slice(before)).toEqual(['series-1']);
+  });
+});
+
+/**
  * **Anything in the collection can leave it without being ranked first** (Android beta
  * report, 2026-09-18).
  *
@@ -3544,12 +3746,7 @@ describe('a title in the collection that is not ranked', () => {
   it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of [
-      'Edit ranking',
-      'Log another watch',
-      'Who I watched with',
-      'Add a note',
-    ]) {
+    for (const label of ['Rerank', 'Log another watch', 'Who I watched with', 'Add a note']) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
     expect(view.queryByText('Ranking')).toBeNull();
@@ -3607,7 +3804,7 @@ describe('a title in the collection that is not ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
     // The full ranked menu, unchanged.
-    await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Remove from collection'));
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
 
@@ -3848,7 +4045,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => view.getByRole('button', { name: 'See all 6 cast members' })),
       );
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
-      await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+      await fireEvent.press(view.getByRole('button', { name: 'Close' }));
       await waitFor(() => expect(view.queryByTestId('cast-sheet')).toBeNull());
     });
 
@@ -4469,7 +4666,7 @@ describe('the immersive title page (experiment)', () => {
         const control = await waitFor(() => view.getByTestId('title-action-ranked'));
 
         expect(within(control).getByText('Log rewatch')).toBeTruthy();
-        expect(within(control).queryByText('Edit ranking')).toBeNull();
+        expect(within(control).queryByText('Rerank')).toBeNull();
         // An Ionicon renders as its glyph, so the icon is asserted by its character.
         const glyph = (name: keyof typeof Ionicons.glyphMap) =>
           String.fromCodePoint(Ionicons.glyphMap[name] as number);
@@ -4490,7 +4687,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
         expect(view.getByLabelText('Log another watch of Inception')).toBeTruthy();
         // Not the rating sheet, and no menu or chooser in between.
-        expect(view.queryByLabelText('Edit ranking')).toBeNull();
+        expect(view.queryByLabelText('Rerank')).toBeNull();
         expect(view.queryByLabelText('Options for Inception')).toBeNull();
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);
@@ -4635,15 +4832,15 @@ describe('the immersive title page (experiment)', () => {
         expect(rewatchCalls()).toHaveLength(1);
       });
 
-      it('keeps Edit ranking in the menu, as a correction that records no watch', async () => {
+      it('keeps Rerank in the menu, as a correction that records no watch', async () => {
         ranked();
         const view = await open();
         await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
         await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+        await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
         expect(view.getByLabelText('Log another watch')).toBeTruthy();
 
-        await fireEvent.press(view.getByLabelText('Edit ranking'));
+        await fireEvent.press(view.getByLabelText('Rerank'));
         await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
         await fireEvent.press(view.getByText('I liked it'));
 
@@ -4659,7 +4856,7 @@ describe('the immersive title page (experiment)', () => {
        * Watch History (#258), which this page's Watch history row opens. One label for the
        * one correction since 2026-11-11 (it read *Update your rating* in ⋯ before).
        */
-      it('draws no Edit ranking control on the page: the correction is in ⋯ and Watch History', async () => {
+      it('draws no Rerank control on the page: the correction is in ⋯ and Watch History', async () => {
         ranked();
         tableRows.watch_events = [
           { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
@@ -4671,15 +4868,15 @@ describe('the immersive title page (experiment)', () => {
 
         // Nothing on the page itself offers to edit the ranking: no button, no label, no
         // second ranking control beside Log rewatch.
-        expect(view.queryAllByText(/Edit ranking/i)).toHaveLength(0);
+        expect(view.queryAllByText(/Rerank/i)).toHaveLength(0);
         expect(view.queryAllByLabelText(/Edit (your )?ranking/i)).toHaveLength(0);
-        expect(view.queryByLabelText('Edit ranking')).toBeNull();
+        expect(view.queryByLabelText('Rerank')).toBeNull();
         expect(view.queryByTestId('title-action-rank')).toBeNull();
         expect(view.getAllByTestId('title-action-ranked')).toHaveLength(1);
 
         // The way to it: ⋯ holds the correction, beside Log another watch.
         await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Edit ranking')).toBeTruthy());
+        await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
         expect(view.getByLabelText('Log another watch')).toBeTruthy();
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);
@@ -4759,7 +4956,7 @@ describe('the immersive title page (experiment)', () => {
         }
       });
 
-      it('opens Watch History from its row (where #258 puts Edit ranking in an expanded watch)', async () => {
+      it('opens Watch History from its row (where #258 puts Rerank in an expanded watch)', async () => {
         ranked();
         tableRows.watch_events = [
           { id: 'w1', media_item_id: 'film-1', user_id: 'user-1' },
@@ -4914,7 +5111,12 @@ describe('the immersive title page (experiment)', () => {
         const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
         const mine = await waitFor(() => preview.getByTestId('your-review'));
 
-        expect(within(mine).getByText(/Your review/)).toBeTruthy();
+        // The shared card (FU1113-F): name and date, no "Your review" label on top.
+        expect(within(mine).queryByText(/Your review/)).toBeNull();
+        expect(
+          within(within(mine).getByTestId('review-card-head')).getByTestId('edit-review'),
+        ).toBeTruthy();
+        expect(within(mine).queryByTestId('review-helpful')).toBeNull();
         expect(preview.getAllByText('My own words on it.')).toHaveLength(1);
         expect(preview.getAllByTestId('review-preview')).toHaveLength(1);
         expect(preview.getByText('Review number 1.')).toBeTruthy();
@@ -4950,7 +5152,7 @@ describe('the immersive title page (experiment)', () => {
         ];
         mockRpcResults.title_review_count = 1;
         const view = await open();
-        const row = await waitFor(() => view.getByTestId('review-preview'));
+        const row = await waitFor(() => view.getByTestId('review-preview-body'));
         expect(within(row).queryByText(/The top keeps spinning/)).toBeNull();
         expect(row.props.accessibilityLabel).toMatch(/Contains spoilers$/);
         expect(row.props.accessibilityLabel).not.toMatch(/spinning/);
@@ -4990,7 +5192,7 @@ describe('the immersive title page (experiment)', () => {
         expect(reviewsCalledWith('following')).toBe(false);
       });
 
-      it('lists every review in the sheet, once, Most Helpful first, and closes on Done', async () => {
+      it('lists every review in the sheet, once, Most Helpful first, and closes on Close', async () => {
         mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
         mockRpcResults.title_review_count = 3;
         const view = await open();
@@ -5001,10 +5203,12 @@ describe('the immersive title page (experiment)', () => {
         }
         expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
         // Helpful is the review's one reaction: a thumbs-up, and no heart beside it.
-        expect(sheet.getByLabelText(/^Mark Reader 1's review helpful/)).toBeTruthy();
+        expect(sheet.getByHintText('Tells Reader 1 their review helped')).toBeTruthy();
+        // Every row is the shared card (FU1113-F).
+        expect(sheet.getAllByTestId('review-card')).toHaveLength(3);
         expect(sheet.getByLabelText("Report Reader 1's review")).toBeTruthy();
 
-        await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+        await fireEvent.press(view.getByRole('button', { name: 'Close' }));
         await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
       });
 
@@ -5015,13 +5219,54 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 2's review helpful/));
+        await fireEvent.press(sheet.getByHintText('Tells Reader 2 their review helped'));
         await waitFor(() =>
           expect(mockRpc).toHaveBeenCalledWith(
             'set_review_helpful',
             expect.objectContaining({ p_review_id: 'um-2', p_helpful: true }),
           ),
         );
+      });
+
+      /**
+       * **The standard sheet, and one count everywhere** (FU1113-F, F4).
+       *
+       * See all is B's standard 80% sheet with its pinned Close, and a vote cast in it is
+       * the same cache entry the page's preview reads, so closing the sheet shows the page
+       * already agreeing.
+       */
+      it('is the standard sheet with a pinned Close, and its vote shows on the page', async () => {
+        let voted = false;
+        mockRpcResults.title_reviews_v2 = () => [
+          { ...reviewBy(1), helpful_count: voted ? 1 : 0, viewer_helpful: voted },
+        ];
+        mockRpcResults.title_review_count = 1;
+        mockRpcResults.set_review_helpful = () => {
+          voted = true;
+          return { helpful_count: 1, viewer_helpful: true };
+        };
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('review-preview')).toBeTruthy());
+        expect(within(view.getByTestId('reviews-preview')).queryByText(/found this helpful/)).toBeNull();
+
+        const sheet = await sheetOf(view);
+        // Close is the DismissFooter, outside the scrolling cards.
+        const footer = view.getByTestId('dismiss-footer');
+        expect(within(footer).getByRole('button', { name: 'Close' })).toBeTruthy();
+        expect(within(view.getByTestId('reviews-sheet-list')).queryByTestId('dismiss-footer')).toBeNull();
+
+        await fireEvent.press(sheet.getByRole('button', { name: 'Mark review helpful' }));
+        await waitFor(() =>
+          expect(sheet.getByText('1 person found this helpful')).toBeTruthy(),
+        );
+        expect(sheet.getByRole('button', { name: 'Remove helpful' })).toBeTruthy();
+
+        await fireEvent.press(within(footer).getByRole('button', { name: 'Close' }));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
+        const preview = within(view.getByTestId('reviews-preview'));
+        await waitFor(() => expect(preview.getByText('1 person found this helpful')).toBeTruthy());
+        expect(preview.getByRole('button', { name: 'Remove helpful' }).props.accessibilityState)
+          .toMatchObject({ selected: true });
       });
 
       it('orders by Newest on the server, and Oldest on a second tap', async () => {
@@ -5124,7 +5369,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(sortTab(sheet, 'Highest rated first')).toBeSelected());
 
         full = true;
-        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
+        await fireEvent.press(sheet.getByHintText('Tells Reader 1 their review helped'));
         await waitFor(
           () => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(),
           {
@@ -5189,5 +5434,220 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
       expect(within(view.getByTestId('cast-sheet-list')).getByText('Actor 6')).toBeTruthy();
     });
+  });
+});
+
+/**
+ * **A whole show's length is its count of seasons** (visual refine, 2026-11-12).
+ *
+ * `YEAR · CERT · N seasons` on both layouts: the Cinematic module line says it in one,
+ * and the Original page keeps its two lines, the year alone over `CERT · N seasons ·
+ * Creator`, with the count in the length slot a film's runtime fills. The count is read
+ * from the series page's own season list, excludes Specials, and is absent, never
+ * `0 seasons` and never a stray separator, until that list has answered with a real
+ * season. A season's page and a film's are unchanged.
+ */
+describe("a series' count of seasons", () => {
+  const show = {
+    ...film,
+    id: 'series-1',
+    kind: 'series',
+    title: 'Fleabag',
+    release_date: '2019-03-04',
+    runtime_minutes: null,
+    certification: 'TV-MA',
+    backdrop_path: null,
+  };
+  const season = (n: number) => ({
+    id: `season-${n}`,
+    parent_id: 'series-1',
+    kind: 'season',
+    season_number: n,
+    title: n === 0 ? 'Specials' : `Season ${n}`,
+    release_date: '2019-03-04',
+    poster_path: null,
+    fetched_at: new Date().toISOString(),
+  });
+
+  const openShow = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getAllByText(/Fleabag/).length).toBeGreaterThan(0));
+    return view;
+  };
+  /** The season list has been read, so whatever the line says now is its final word. */
+  const seasonsRead = () =>
+    waitFor(() =>
+      expect(
+        mockSelects.some(
+          ([table, columns]) => table === 'media_items' && columns.includes('season_number'),
+        ),
+      ).toBe(true),
+    );
+
+  beforeEach(() => {
+    mockOpenId = 'series-1';
+  });
+
+  describe.each([
+    [
+      'Original',
+      'original',
+      (count: string) => ({ subtitle: '2019', meta: `TV-MA · ${count}` }),
+    ],
+    [
+      'Cinematic',
+      'immersive',
+      (count: string) => ({ subtitle: null, meta: `2019 · TV-MA · ${count}` }),
+    ],
+  ] as const)('on the %s page', (_name, layout, expected) => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout(layout);
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+    });
+
+    const expectLine = async (
+      view: Awaited<ReturnType<typeof openShow>>,
+      count: string | null,
+    ) => {
+      if (count == null) {
+        // The segment is gone, and so is any separator it would have needed.
+        const meta = layout === 'original' ? 'TV-MA' : '2019 · TV-MA';
+        await waitFor(() =>
+          expect(view.getByTestId('title-meta')).toHaveTextContent(new RegExp(`^${meta}$`)),
+        );
+        expect(view.getByTestId('title-meta')).not.toHaveTextContent(/season/);
+        expect(view.getByTestId('title-meta')).not.toHaveTextContent(/·\s*$|·\s*·/);
+        return;
+      }
+      const line = expected(count);
+      await waitFor(() =>
+        expect(view.getByTestId('title-meta')).toHaveTextContent(new RegExp(`^${line.meta}$`)),
+      );
+      if (line.subtitle) {
+        expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+          new RegExp(`^${line.subtitle}$`),
+        );
+      }
+    };
+
+    it('reads 1 season, singular', async () => {
+      tableRows.media_items = [show, season(1)];
+      const view = await openShow();
+      await expectLine(view, '1 season');
+    });
+
+    it('reads 3 seasons, plural', async () => {
+      tableRows.media_items = [show, season(1), season(2), season(3)];
+      const view = await openShow();
+      await expectLine(view, '3 seasons');
+    });
+
+    it('does not count Specials: Season 0, 1 and 2 are 2 seasons', async () => {
+      tableRows.media_items = [show, season(0), season(1), season(2)];
+      const view = await openShow();
+      await expectLine(view, '2 seasons');
+    });
+
+    it('says nothing for a show with only Specials', async () => {
+      tableRows.media_items = [show, season(0)];
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+    });
+
+    it('says nothing, never 0 seasons, while the list is empty', async () => {
+      tableRows.media_items = [show];
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+      expect(view.queryByText(/0 seasons/)).toBeNull();
+    });
+
+    it('says nothing when the list fails to load', async () => {
+      tableRows.media_items = [show, season(1), season(2)];
+      mockSeasonListError = { message: 'season list unavailable' };
+      const view = await openShow();
+      await seasonsRead();
+      await expectLine(view, null);
+    });
+
+    it('says nothing while the list is still loading, then the count once it lands', async () => {
+      tableRows.media_items = [show, season(1), season(2)];
+      // The series row answers; the season list read that follows it is parked.
+      holdReadsOf('media_items');
+      const view = await renderWithProviders(<TitleScreen />);
+      releaseReadsOf('media_items');
+      holdReadsOf('media_items');
+      await waitFor(() => expect(view.getByTestId('title-meta')).toBeTruthy());
+      await expectLine(view, null);
+      // Discriminating: the hold, and nothing else, is what kept it out.
+      releaseReadsOf('media_items');
+      await expectLine(view, '2 seasons');
+    });
+  });
+
+  it('leaves a season page as it was: Season 2 · 7 episodes · 2025', async () => {
+    mockOpenId = 'season-2';
+    tableRows.media_items = [
+      {
+        ...season(2),
+        release_date: '2025-04-13',
+        episode_count: 7,
+        certification: null,
+        overview: null,
+        parent: { id: 'series-1', title: 'Fleabag', certification: 'TV-MA' },
+      },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() =>
+      expect(view.getByTestId('title-subtitle')).toHaveTextContent(
+        /^Season 2 · 7 episodes · 2025$/,
+      ),
+    );
+    expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA$/);
+
+    view.unmount();
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+    try {
+      const cinematic = await renderWithProviders(<TitleScreen />);
+      await waitFor(() =>
+        expect(cinematic.getByTestId('title-meta')).toHaveTextContent(
+          /^Season 2 · 7 episodes · 2025 · TV-MA$/,
+        ),
+      );
+      expect(cinematic.getByTestId('title-meta')).not.toHaveTextContent(/seasons?\b(?! 2)/);
+    } finally {
+      await setTitleLayout('original');
+    }
+  });
+
+  it('leaves a film as it was on both layouts', async () => {
+    mockOpenId = 'film-1';
+    tableRows.media_items = [{ ...film, certification: 'PG-13' }];
+    tableRows.media_cache = [credits];
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent(
+        /^PG-13 · 148 min · Christopher Nolan$/,
+      ),
+    );
+
+    view.unmount();
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+    try {
+      const cinematic = await open();
+      await waitFor(() =>
+        expect(cinematic.getByTestId('title-meta')).toHaveTextContent(
+          /^2010 · PG-13 · 148 min$/,
+        ),
+      );
+    } finally {
+      await setTitleLayout('original');
+    }
   });
 });

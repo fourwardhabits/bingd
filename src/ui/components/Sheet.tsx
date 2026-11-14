@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
+import { BottomInsetPaidContext } from './DismissFooter';
 import { Text } from './Text';
 import { useStableBottomInset } from './use-stable-bottom-inset';
 import { useKeyboardHeight } from './use-keyboard-height';
@@ -88,7 +90,62 @@ export type SheetProps = {
    * with a round trip after it opened — before it has finished appearing.
    */
   onShown?: () => void;
+  /**
+   * **Pinned below the content, never inside its scroll** (founder spec §4, 2026-11-13).
+   *
+   * Usually a `DismissFooter`. With a footer the content area flexes to the room the sheet
+   * has left after its handle and footer, so a `ScrollView` inside it with
+   * `flexShrink: 1` (or `flex: 1` in a `dense` sheet) scrolls to its last row and that
+   * row finishes *above* the footer rather than under it. No fixed `maxHeight` on a list
+   * is needed, and none should be added: a cap is what made Profile Collection cramped.
+   *
+   * The sheet pays the bottom safe-area inset under the footer, once.
+   */
+  footer?: ReactNode;
+  /**
+   * How much of the screen the sheet takes (founder spec §4: "do not force every sheet to
+   * an identical height").
+   *
+   *   - `short` (default): sized to its content, up to 90%. Selection and statement sheets.
+   *   - `dense`: **an alias of `size="standard"` since FU1113-B** — the standard 80% height
+   *     replaced the 90% this used to take.
+   */
+  density?: 'dense' | 'short';
+  /**
+   * **The standard browsing sheet** (FU1113-B, 2026-11-13).
+   *
+   *   - `content` (default): today's behaviour — sized to its content, up to 90%.
+   *   - `standard`: a fixed height of `STANDARD_SHEET_FRACTION` (80%) of the window below
+   *     the top safe-area inset, whatever the content — so a list sheet is the same size
+   *     with four rows or four hundred, loading or loaded, and never jumps. The header the
+   *     caller draws first stays put, the content flexes and scrolls, and the `footer`
+   *     (`DismissFooter`) is pinned under it, safe-area aware, never over a row.
+   *
+   * For full-size browsing lists only: Profile Collection, Following / Followers, Awards,
+   * Group Recommendations and their like. Never confirmations, menus, inline editors, the
+   * log and ranking sheets, Report or small pickers — those stay `content`.
+   *
+   * With the keyboard open the sheet may shrink below the standard height (it still never
+   * exceeds 90% of what the keyboard leaves), so the footer and any field in it stay above
+   * the keyboard.
+   */
+  size?: SheetSize;
 };
+
+export type SheetSize = 'content' | 'standard';
+
+/** The standard sheet's share of the usable window height (FU1113-B). */
+export const STANDARD_SHEET_FRACTION = 0.8;
+
+/**
+ * The standard sheet's height in points: `STANDARD_SHEET_FRACTION` of the window height
+ * less the top safe-area inset — the status bar or notch is not room a sheet can use.
+ */
+export function useStandardSheetHeight(): number {
+  const { height } = useWindowDimensions();
+  const { top } = useSafeAreaInsets();
+  return Math.round(STANDARD_SHEET_FRACTION * (height - top));
+}
 
 /**
  * The modal pattern for the whole app (design-system.md §8).
@@ -115,9 +172,22 @@ export type SheetProps = {
  * it lifts the sheet clear, and it re-resolves `maxHeight: '90%'` against the space
  * that is actually left, so a tall sheet shrinks instead of running off the top.
  */
-export function Sheet({ visible, onClose, label, children, onDismissed, onShown }: SheetProps) {
+export function Sheet({
+  visible,
+  onClose,
+  label,
+  children,
+  onDismissed,
+  onShown,
+  footer,
+  density = 'short',
+  size = 'content',
+}: SheetProps) {
   const keyboard = useKeyboardHeight();
   const bottomInset = useStableBottomInset();
+  const standardHeight = useStandardSheetHeight();
+  /** `density="dense"` is the old name for the standard sheet. */
+  const standard = size === 'standard' || density === 'dense';
 
   /**
    * The foot of every sheet in the app, decided in one place.
@@ -135,6 +205,12 @@ export function Sheet({ visible, onClose, label, children, onDismissed, onShown 
    * `Screen` applies to the bottom of a page.
    */
   const bottomPadding = bottomInset + theme.space[4];
+  /**
+   * The structured form: content that flexes, and a footer pinned under it. Opted into by
+   * passing `footer` or `density`, so the sheets that do neither keep exactly the layout
+   * they had — their children are direct children of the body, as before.
+   */
+  const structured = footer !== undefined || standard;
 
   /**
    * **A dismissal is never asked for before the presentation has finished.**
@@ -227,7 +303,11 @@ export function Sheet({ visible, onClose, label, children, onDismissed, onShown 
         />
         <View
           testID="sheet-body"
-          style={[styles.sheet, { paddingBottom: bottomPadding }]}
+          style={[
+            styles.sheet,
+            standard && { height: standardHeight },
+            { paddingBottom: footer !== undefined ? bottomInset : bottomPadding },
+          ]}
           accessibilityLabel={label}
         >
           <View
@@ -235,7 +315,19 @@ export function Sheet({ visible, onClose, label, children, onDismissed, onShown 
             accessibilityElementsHidden
             importantForAccessibility="no"
           />
-          {children}
+          <BottomInsetPaidContext.Provider value>
+            {structured ? (
+              <View
+                testID="sheet-content"
+                style={standard ? styles.contentDense : styles.content}
+              >
+                {children}
+              </View>
+            ) : (
+              children
+            )}
+            {footer !== undefined ? <View testID="sheet-footer">{footer}</View> : null}
+          </BottomInsetPaidContext.Provider>
         </View>
       </View>
     </Modal>
@@ -310,8 +402,73 @@ export function SheetRow({
   );
 }
 
+export type SheetHeaderProps = {
+  title: string;
+  /** One quiet line under the title: whose list, how many, what it is for. */
+  subtitle?: string | null;
+  /** Something that belongs beside the title rather than under it. */
+  accessory?: ReactNode;
+  /** Controls that belong to the header: a Movies / TV toggle, a search field. */
+  children?: ReactNode;
+  /** Caps the title's growth at large text sizes; a sheet title has no room to wrap into. */
+  maxFontSizeMultiplier?: number;
+};
+
+/**
+ * **One header for every list sheet** (founder spec §4, 2026-11-13).
+ *
+ * Profile Collection, Following / Followers, bingd Awards and Group Recommendations each
+ * set their own title in their own size — `title2` serif in two, `headline` sans in the
+ * other two — with their own padding. This is the one treatment: the serif `title2` the
+ * two dense sheets already used, the gutter, and the header's own controls under it in
+ * the same column, so a toggle or a search field sits *near the heading* and outside the
+ * scroll region beneath it.
+ */
+export function SheetHeader({
+  title,
+  subtitle,
+  accessory,
+  children,
+  maxFontSizeMultiplier = 1.5,
+}: SheetHeaderProps) {
+  return (
+    <View testID="sheet-header" style={styles.header}>
+      <View style={styles.headerTitleRow}>
+        <Text
+          variant="title2"
+          accessibilityRole="header"
+          maxFontSizeMultiplier={maxFontSizeMultiplier}
+          style={styles.headerTitle}
+        >
+          {title}
+        </Text>
+        {accessory}
+      </View>
+      {subtitle ? (
+        <Text variant="footnote" tone="secondary">
+          {subtitle}
+        </Text>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
+  header: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+    paddingBottom: theme.space[3],
+    gap: theme.space[2],
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.space[3],
+  },
+  headerTitle: { flexShrink: 1 },
   backdrop: {
     position: 'absolute',
     top: 0,
@@ -327,6 +484,11 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     ...theme.elevation.e2,
   },
+  // `flexShrink: 1` is what lets the content give way to the footer when the list is taller
+  // than the sheet. `minHeight: 0` is belt and braces: Yoga applies no automatic minimum
+  // size today, but a flex item that may shrink should say it may shrink to nothing.
+  content: { flexShrink: 1, minHeight: 0 },
+  contentDense: { flex: 1, minHeight: 0 },
   handle: {
     alignSelf: 'center',
     width: 36,

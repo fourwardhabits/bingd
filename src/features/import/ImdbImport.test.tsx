@@ -10,6 +10,7 @@ import {
   imdbSyntheticBytes,
 } from './__fixtures__/imdb-synthetic';
 import { ImportScreen } from './ImportScreen';
+import { forgetSessionImport } from './session-outcomes';
 
 /**
  * The IMDb import and the choice of service, on screen (founder spec 2026-11-10, §7, §8, §10).
@@ -99,6 +100,9 @@ beforeEach(() => {
   mockPicked = null;
   mockLiveJob = { data: null, error: null };
   mockSelected = [];
+  // The parse an import leaves in memory for its summary is per process. Each test is a
+  // fresh app, so one test's file is never another's (`session-outcomes.ts`).
+  forgetSessionImport();
 });
 
 const calls = (name: string) =>
@@ -113,7 +117,7 @@ const openChooser = async () => {
 const openImdb = async () => {
   const view = await openChooser();
   await fireEvent.press(view.getByTestId('choose-imdb'));
-  await waitFor(() => expect(view.getByText('Bring your IMDb history')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
   return view;
 };
 
@@ -133,9 +137,12 @@ describe('the choice of service', () => {
   it('opens Letterboxd’s page exactly as Settings always drew it', async () => {
     const view = await openChooser();
     await fireEvent.press(view.getByTestId('choose-letterboxd'));
-    await waitFor(() => expect(view.getByText('Bring your Letterboxd history')).toBeTruthy());
-    expect(view.getByRole('button', { name: 'Choose Letterboxd ZIP' })).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Choose a different service' })).toBeTruthy();
+    await waitFor(() =>
+      expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
+    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
+    // Removed by the founder (IMP1113-UI): the service page has one action and its help.
+    expect(view.queryByRole('button', { name: 'Choose a different service' })).toBeNull();
   });
 
   /**
@@ -149,24 +156,22 @@ describe('the choice of service', () => {
       expect.objectContaining({ name: 'import_opened' }),
     );
     await fireEvent.press(view.getByTestId('choose-imdb'));
-    await waitFor(() => expect(view.getByText('Bring your IMDb history')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
       props: { surface: 'settings', provider: 'imdb' },
     });
-    await fireEvent.press(view.getByRole('button', { name: 'Choose a different service' }));
-    await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('choose-letterboxd'));
-    await waitFor(() => expect(view.getByText('Bring your Letterboxd history')).toBeTruthy());
     expect(
       mockTrack.mock.calls.filter(([event]) => event.name === 'import_opened'),
     ).toHaveLength(1);
   });
 
-  it('goes back to the choice from a service', async () => {
+  // IMP1113-UI: *Choose a different service* was removed by the founder, so the test that
+  // went back to the choice through it is now the assertion that it is gone.
+  it('no longer offers a way back to the choice from a service page', async () => {
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Choose a different service' }));
-    await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Choose a different service' })).toBeNull();
+    expect(view.queryByText('Bring your watch history')).toBeNull();
   });
 
   it('shows an import already running instead of the choice', async () => {
@@ -188,24 +193,38 @@ describe('the choice of service', () => {
 });
 
 describe('IMDb’s page', () => {
-  it('gives the instructions, and says ratings are a note, not scores', async () => {
+  /**
+   * IMP1113-UI (H2 row 1): the founder's text with the two accuracy edits, one primary, and
+   * the steps collapsed. The always-visible steps, the privacy block and the separate help
+   * button are gone, and asserted gone.
+   */
+  it('says the founder’s words, with Upload IMDb CSV and the steps collapsed', async () => {
     const view = await openImdb();
-    expect(view.getByText('On imdb.com, sign in and open Your Ratings.')).toBeTruthy();
     expect(
-      view.getByText(/your IMDb ratings come along as a note, not as bingd scores/),
+      view.getByText(
+        'Import the movies you’ve rated on IMDb. They join your collection unranked, and you can use the ranking flow to quickly rank them. Anything already ranked on bingd will keep its rating.',
+      ),
     ).toBeTruthy();
-    expect(view.getByText(/The dates you rated things are never sent\./)).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+    expect(view.queryByText('On imdb.com, sign in and open Your Ratings.')).toBeNull();
+    expect(view.queryByText('How to get your file')).toBeNull();
+    expect(view.queryByText(/The dates you rated things are never sent/)).toBeNull();
+    expect(view.queryByText(/CSV stays on your phone/)).toBeNull();
+    expect(view.getAllByRole('button', { name: 'Need help getting the file?' })).toHaveLength(
+      1,
+    );
   });
 
-  it('opens IMDb’s own instructions sheet', async () => {
+  it('opens IMDb’s own steps inline, with the ratings link', async () => {
     const view = await openImdb();
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
-    await waitFor(() => expect(view.getByText('Getting your IMDb file')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByText('On imdb.com, sign in and open Your Ratings.')).toBeTruthy(),
+    );
     expect(view.getByRole('button', { name: 'Open your IMDb ratings' })).toBeTruthy();
     const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
     await fireEvent.press(view.getByRole('button', { name: 'Open your IMDb ratings' }));
-    expect(openURL).toHaveBeenCalledTimes(1);
+    expect(openURL).toHaveBeenCalledWith('https://www.imdb.com/list/ratings');
     openURL.mockRestore();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_instructions_opened',
@@ -218,30 +237,43 @@ describe('the IMDb preview', () => {
   const preview = async (csv = IMDB_SYNTHETIC_CSV) => {
     mockPicked = imdbSyntheticBytes(csv);
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
     await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
     return view;
   };
 
-  it('counts movies and TV shows separately, and says what happens to each', async () => {
+  /**
+   * IMP1113-UI §B: one *Movies* row from the parse, a sentence for shows, episodes and
+   * other kinds, no *Ratings*, *Not supported* or *Unmatched* rows, no ranking mechanics,
+   * and the J5 fallback line. Was: separate TV and Not supported rows and a ratings
+   * paragraph, all removed by the founder.
+   */
+  it('counts movies from the parse, with a sentence for what will not come in', async () => {
     const view = await preview();
-    expect(view.getByText('Here’s what we found in your IMDb file.')).toBeTruthy();
-    expect(view.getByText('Movies')).toBeTruthy();
-    // Founder decision (2026-11-11): whole shows are matched and reported, not added, and
-    // the preview labels that on the count itself. The old season-only reason is gone: a
-    // whole show is rankable since 20261114000200 (founder copy, 2026-11-11 6:35 PM CST).
-    expect(view.getByText('TV shows, not added')).toBeTruthy();
-    expect(view.getByText('Not supported')).toBeTruthy();
+    expect(view.getByText('Here’s what we found.')).toBeTruthy();
+    expect(view.getByLabelText('Movies, 7')).toBeTruthy();
+    expect(view.queryByText('TV shows, not added')).toBeNull();
+    expect(view.queryByText('Not supported')).toBeNull();
+    expect(view.queryByText('Ratings')).toBeNull();
+    expect(view.queryByText(/Unmatched/)).toBeNull();
     expect(
       view.getByText(
-        'We’ll look for the 3 shows you rated and count the ones we find in your summary. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.',
+        'We’ll look for your 3 rated TV shows, but TV shows from IMDb aren’t added yet.',
       ),
     ).toBeTruthy();
-    expect(view.queryByText(/by season/)).toBeNull();
-    expect(view.getByText(/1 TV episode won’t come in/)).toBeTruthy();
+    expect(
+      view.getByText('1 TV episode won’t come in because bingd doesn’t track single episodes.'),
+    ).toBeTruthy();
+    expect(
+      view.getByText('1 title won’t come in because bingd doesn’t track that kind of title.'),
+    ).toBeTruthy();
     expect(view.getByText(/3 rows couldn’t be read/)).toBeTruthy();
-    expect(view.getByText(/They don’t become bingd scores/)).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Import 7 movies' })).toBeTruthy();
+    expect(view.queryByText(/bingd scores|start unranked/)).toBeNull();
+    expect(
+      view.getByText('Anything we can’t match will be listed after the import.'),
+    ).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Import' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Choose a different file' })).toBeTruthy();
   });
 
   it('sends the job as an IMDb job, with only the fields the server names', async () => {
@@ -256,7 +288,7 @@ describe('the IMDb preview', () => {
       },
     };
     const view = await preview();
-    await fireEvent.press(view.getByRole('button', { name: 'Import 7 movies' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(view.getByText('Importing your IMDb history')).toBeTruthy());
 
     expect(calls('import_create')).toEqual([{ p_provider: 'imdb' }]);
@@ -308,7 +340,7 @@ describe('the IMDb preview', () => {
       name: 'import_archive_selected',
       props: { outcome: 'ok', provider: 'imdb' },
     });
-    await fireEvent.press(view.getByRole('button', { name: 'Import 7 movies' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
@@ -319,19 +351,19 @@ describe('the IMDb preview', () => {
   it('refuses the Letterboxd ZIP picked on the IMDb page, and says which to choose', async () => {
     mockPicked = zipSync({ 'watched.csv': strToU8('Date,Name,Year\n') });
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
       props: { outcome: 'is_zip', provider: 'imdb' },
     });
-    expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
   });
 
   it('refuses a CSV that is not an IMDb ratings export', async () => {
     mockPicked = strToU8('a,b,c\n1,2,3\n');
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
     await waitFor(() =>
       expect(view.getByText('That isn’t an IMDb ratings export')).toBeTruthy(),
     );
@@ -342,7 +374,7 @@ describe('the IMDb preview', () => {
       `${IMDB_HEADER}\ntt9300001,8,2020-01-01,Pilot,,https://x,TV Episode,7,40,2010,Drama,1,,\n`,
     );
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
     await waitFor(() =>
       expect(view.getByText('There are no movies in that file')).toBeTruthy(),
     );
@@ -363,7 +395,13 @@ describe('the IMDb summary', () => {
     };
   };
 
-  it('reports the six outcomes, leaving out the zeros', async () => {
+  /**
+   * IMP1113-UI §D, through `resultModel`. The six-outcome card it replaces had a row each
+   * for Couldn't match, TV shows matched, Not supported and Couldn't import; the founder
+   * made the recognised kinds notes, *Couldn't match* the expandable *Unmatched*, and
+   * `failed` a warning note that is never folded into a row.
+   */
+  it('reports one card, with the recognised kinds and failures as notes', async () => {
     finished({
       watched: 640,
       kept: 12,
@@ -378,46 +416,73 @@ describe('the IMDb summary', () => {
     });
     const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
     await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
-    expect(view.getByLabelText('640 Added to your collection')).toBeTruthy();
-    // The duplicate is the title just added, counted once (independent review, 2026-11-11).
-    expect(view.getByLabelText('12 Already in your collection')).toBeTruthy();
-    expect(view.getByLabelText('3 Imported before')).toBeTruthy();
-    expect(view.getByLabelText('8 Couldn’t match')).toBeTruthy();
-    // Matched shows are their own line, not "Not supported": 148 - 139 = 9 (7 episodes, 2
-    // other kinds). Provisional founder decision, 2026-11-11.
-    expect(view.getByLabelText('139 TV shows matched, not added')).toBeTruthy();
-    expect(view.getByLabelText('9 Not supported')).toBeTruthy();
-    expect(view.queryByLabelText('148 Not supported')).toBeNull();
-    expect(view.getByLabelText('1 Couldn’t import')).toBeTruthy();
+    expect(view.getByLabelText('Already in bingd, 12')).toBeTruthy();
+    expect(view.getByLabelText('Imported movies, 643. 3 from an earlier import')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Unmatched, 8 titles' })).toBeTruthy();
+    expect(
+      view.queryByText(/Imported TV|Not supported|Couldn’t match|Couldn’t import/),
+    ).toBeNull();
     expect(
       view.getByText(
-        '139 TV shows were matched but not added. bingd lets you rank entire TV shows or individual seasons. TV shows from IMDb imports aren’t added yet.',
+        'We found 139 TV shows from your file in bingd, but TV shows from IMDb aren’t added yet.',
       ),
     ).toBeTruthy();
-    expect(view.queryByText(/by season|log the seasons/)).toBeNull();
-    expect(view.getByText(/7 TV episodes weren’t added/)).toBeTruthy();
-    // 9 - 7: every "Not supported" has a sentence.
     expect(
-      view.getByText(/2 titles weren’t added because they’re a kind of title/),
+      view.getByText(
+        '7 TV episodes didn’t come in because bingd doesn’t track single episodes.',
+      ),
     ).toBeTruthy();
-    expect(view.getByText(/your IMDb ratings stay a note rather than a score/)).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Rank imported movies' })).toBeTruthy();
+    expect(
+      view.getByText(
+        '2 titles didn’t come in because bingd doesn’t track those kinds of titles.',
+      ),
+    ).toBeTruthy();
+    expect(view.getByText(/1 title couldn’t be saved/)).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Rank titles' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+    // Codex review (#289): the restored summary is a way back to a fresh import.
+    expect(view.getByRole('button', { name: 'Import another file' })).toBeTruthy();
   });
 
-  it('says nothing arrived when a re-import changed nothing', async () => {
+  /**
+   * **Codex review, #289.** Settings restores a finished job for a day, and *Done* and *Rank
+   * titles* only navigate, so a reader who finished an import, left, and came back used to
+   * find the same summary with no way to start another one, of another file or from the
+   * other service. *Import another file* is the existing `reset`: the job leaves the screen
+   * and the choice of service is back.
+   */
+  it('lets a reader who comes back to a finished import start a fresh one', async () => {
+    finished({ watched: 5 });
+    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Import another file' }));
+
+    await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
+    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    // The existing reset, which on a finished job is answered `running` and deletes nothing.
+    expect(calls('import_discard')).toEqual([{ p_job_id: JOB }]);
+    // And the other service is one tap away.
+    await fireEvent.press(view.getByTestId('choose-letterboxd'));
+    await waitFor(() => expect(view.queryByText('Bring your watch history')).toBeNull());
+  });
+
+  it('says already here when a re-import changed nothing, and still offers ranking', async () => {
     finished({ watched: 0, already: 640 });
     const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
     await waitFor(() =>
       expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
     );
-    expect(view.getByLabelText('640 Imported before')).toBeTruthy();
-    expect(view.queryByLabelText(/Couldn’t match/)).toBeNull();
-    expect(view.queryByRole('button', { name: 'Rank imported movies' })).toBeNull();
+    expect(
+      view.getByLabelText('Imported movies, 640. 640 from an earlier import'),
+    ).toBeTruthy();
+    expect(view.queryByText('Unmatched')).toBeNull();
+    // The 640 are the import's and still unranked, so ranking them is still the way on
+    // (IMP1113-UI: *Rank titles* is offered whenever the import owns unranked titles).
+    expect(view.getByRole('button', { name: 'Rank titles' })).toBeTruthy();
   });
 
-  it('says nothing was added when nothing matched and nothing was already here', async () => {
-    // 2026-11-11: "already here" used to be the heading for every import that added no
-    // movie, including one where nothing matched at all.
+  it('says nothing new came in when nothing matched and nothing was already here', async () => {
     finished({
       watched: 0,
       unmatched: 4,
@@ -426,15 +491,14 @@ describe('the IMDb summary', () => {
       unsupported_episode: 1,
     });
     const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
-    await waitFor(() => expect(view.getByText('Nothing was added')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Nothing new came in')).toBeTruthy());
     expect(view.queryByText('Your IMDb history is already here')).toBeNull();
     expect(view.queryByText('Your IMDb history is in')).toBeNull();
-    expect(view.getByLabelText('4 Couldn’t match')).toBeTruthy();
-    expect(view.getByLabelText('2 TV shows matched, not added')).toBeTruthy();
-    expect(view.getByText(/We couldn’t match 4 titles from your file/)).toBeTruthy();
-    expect(view.getByText(/2 TV shows were matched but not added/)).toBeTruthy();
-    expect(view.getByText(/1 TV episode wasn’t added/)).toBeTruthy();
-    expect(view.queryByRole('button', { name: 'Rank imported movies' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Unmatched, 4 titles' })).toBeTruthy();
+    expect(view.getByText(/We found 2 TV shows from your file in bingd/)).toBeTruthy();
+    expect(view.getByText(/1 TV episode didn’t come in/)).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Rank titles' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
   });
 
   it('says already here when what was in the file was already in the collection', async () => {
@@ -443,7 +507,8 @@ describe('the IMDb summary', () => {
     await waitFor(() =>
       expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
     );
-    expect(view.getByLabelText('5 Already in your collection')).toBeTruthy();
+    expect(view.getByLabelText('Already in bingd, 5')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Rank titles' })).toBeNull();
   });
 });
 
@@ -463,11 +528,11 @@ describe('a failed IMDb import, reopened from its notification', () => {
     await waitFor(() =>
       expect(view.getByText('We couldn’t finish your IMDb import')).toBeTruthy(),
     );
-    expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
     expect(view.queryByText(/Letterboxd/)).toBeNull();
     // Choosing the file again opens the IMDb reader: a ZIP is refused as a ZIP.
     mockPicked = zipSync({ 'watched.csv': strToU8('Date,Name,Year\n') });
-    await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
   });
 });
@@ -496,7 +561,7 @@ describe('the onboarding question', () => {
     );
     await waitFor(() => expect(view.getByTestId('choose-imdb')).toBeTruthy());
     await fireEvent.press(view.getByTestId('choose-imdb'));
-    await waitFor(() => expect(view.getByText('Bring your IMDb history')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
     expect(onLeave).toHaveBeenCalled();
   });

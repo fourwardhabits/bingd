@@ -1,5 +1,6 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 import { bandSizes, formatScore, scoreFor, type Bucket } from '@/features/collection/score';
 
@@ -40,6 +41,13 @@ let mockTopRatedDelayMs = 0;
 const mockCatalogue: Record<string, Record<string, unknown>> = {};
 /** The reader's own `rankings` rows: what `useMyScores` derives their score chips from. */
 let mockRankings: Record<string, unknown>[] = [];
+
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -274,7 +282,7 @@ describe('choosing Top Rated', () => {
     expect(view.queryByLabelText(/^Sent to You/)).toBeNull();
     expect(view.queryByText('Find for a Group')).toBeNull();
     // Filters narrow *which titles*, which is a question this wall can answer.
-    expect(view.getByText('Filters')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters' })).toBeTruthy();
   });
 
   it('leaves Sent to you off when it comes back, rather than under the wrong wall', async () => {
@@ -454,7 +462,7 @@ describe('a filter that matches nothing on the pages loaded so far', () => {
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('Film p-0, 2014')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('1990s'));
@@ -482,7 +490,7 @@ describe('a filter that matches nothing on the pages loaded so far', () => {
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Only Drama, 2014')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('2010s'));
@@ -538,7 +546,7 @@ describe('keep looking on a deeply scrolled wall', () => {
 
     // Comedy alone matches three, so the wall renders and can be scrolled — and the
     // auto-advance spends its ten pages getting there.
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -562,7 +570,7 @@ describe('keep looking on a deeply scrolled wall', () => {
 
     // Now a filter combination nothing loaded satisfies, which resets the budget to ten
     // while the wall sits far deeper than that.
-    await fireEvent.press(view.getByText(/^Filters/));
+    await fireEvent.press(view.getByTestId('for-you-filters'));
     await waitFor(() => expect(view.getByText('1990s')).toBeTruthy());
     await fireEvent.press(view.getByText('1990s'));
     await fireEvent.press(view.getByText('Apply'));

@@ -51,7 +51,7 @@ All FKs are `on delete cascade` (profiles, media_items).
 **RLS and grants** (20260826000400 §2):
 - `title_recommendations_recipient`: `recipient_id = auth.uid() and state = 'delivered'`.
 - `title_recommendations_sender`: `sender_id = auth.uid()`.
-- `select (id, sender_id, recipient_id, media_item_id, created_at, recommended_at, opened_at)` is granted to `authenticated`. **Any new column is invisible until it is granted explicitly.** This is the pattern that hides `state` and `fulfilled_at`, and it is the safe default for `message`.
+- `select (id, sender_id, recipient_id, media_item_id, created_at, recommended_at, opened_at)` was granted to `authenticated` here. **Since 20261121000100 (FU1113-E O2) `opened_at` is no longer granted to signed-in users**: the sender policy admits the sender to their own rows, so the grant was a read receipt. The column grant is now `id, sender_id, recipient_id, media_item_id, created_at, recommended_at, message`, and the recipient reads `opened_at` (and the new `seen_at`, granted to nobody) only through the definer helpers `recommendation_opened_at` / `recommendation_seen_at`. **Any new column is invisible until it is granted explicitly.** This is the pattern that hides `state` and `fulfilled_at`, and it is the safe default for `message`.
 
 **Explicit prior decision to reverse.** The header of 20260826000400 lists under "WHAT IS DELIBERATELY NOT HERE": *"No message, no reply, no read receipt."* This tranche reverses **"no message"** only. Reply and read receipt stay out.
 

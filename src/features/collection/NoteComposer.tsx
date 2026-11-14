@@ -25,16 +25,20 @@ export function NoteInput({
   label,
   onChangeText,
   onBlur,
+  editable = true,
 }: {
   value: string;
   /** "Note". One field, one name; whether it is shared is the chip's job to say. */
   label: string;
   onChangeText: (next: string) => void;
   onBlur: () => void;
+  /** False while the caller's save is in flight, so nothing typed then is dropped. */
+  editable?: boolean;
 }) {
   return (
     <TextInput
       accessibilityLabel={label}
+      editable={editable}
       value={value}
       onChangeText={onChangeText}
       onBlur={onBlur}

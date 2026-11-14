@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Avatar, Sheet, Text } from '@/ui/components';
+import { Avatar, DismissFooter, Sheet, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { quoted } from './RecommendationCard';
@@ -33,11 +33,19 @@ export function RecommendersSheet({
   onReport,
 }: RecommendersSheetProps) {
   return (
-    <Sheet visible={visible} onClose={onClose} onDismissed={onDismissed} label="Recommended by">
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      onDismissed={onDismissed}
+      label="Recommended by"
+      // The standard browsing sheet (FU1113-B): a fixed 80% with Close pinned below the list.
+      size="standard"
+      footer={<DismissFooter onPress={onClose} />}
+    >
       <View style={styles.head}>
         <Text variant="headline">Recommended by</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.list}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
         {rows.map((row) => {
           const report = row.message ? () => onReport(row.id) : undefined;
           return (
@@ -80,6 +88,7 @@ export function RecommendersSheet({
 
 const styles = StyleSheet.create({
   head: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  scroll: { flex: 1 },
   list: { paddingBottom: theme.space[4] },
   row: {
     flexDirection: 'row',

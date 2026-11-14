@@ -35,6 +35,7 @@ export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
 export {
   MediumSelector,
   MEDIUM_OPTIONS,
+  MEDIUM_SELECTED,
   type Medium,
   type MediumSelectorOption,
 } from './MediumSelector';
@@ -54,7 +55,25 @@ export {
   type PosterGridProps,
   type PosterShelfProps,
   type PosterTile,
+  SeasonAverageBadge,
+  seasonAverageBadgeText,
+  type SeasonAverageBadgeProps,
 } from './PosterWall';
+export {
+  ScoreCircle,
+  type ScoreCircleProps,
+  type ScoreCircleVariant,
+} from './ScoreCircle';
+export { FilterIconButton, type FilterIconButtonProps } from './FilterIconButton';
+export { ViewModeToggle, type ViewMode, type ViewModeToggleProps } from './ViewModeToggle';
+export { BrowseControlsRow, type BrowseControlsRowProps } from './BrowseControlsRow';
+export {
+  EDIT_ICON_NAME,
+  EditAction,
+  EditIcon,
+  type EditActionProps,
+  type EditIconProps,
+} from './EditIcon';
 export { ReactionControl, ReactionSlot, type ReactionControlProps } from './ReactionControl';
 export { ReactionSummary, type ReactionSummaryProps } from './ReactionSummary';
 // Not only `Sheet`'s any more: the Comments *page* is not a sheet and needs the same
@@ -63,7 +82,19 @@ export { useKeyboardHeight } from './use-keyboard-height';
 export { usePullRefresh } from './use-pull-refresh';
 export { Screen } from './Screen';
 export { ScreenError, type ScreenErrorProps } from './ScreenError';
-export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
+export {
+  Sheet,
+  SheetHeader,
+  SheetRow,
+  STANDARD_SHEET_FRACTION,
+  useStandardSheetHeight,
+  type SheetSize,
+  type SheetHeaderProps,
+  type SheetProps,
+  type SheetRowProps,
+} from './Sheet';
+export { DismissFooter, type DismissFooterProps } from './DismissFooter';
+export { SaveButton, type SaveButtonProps } from './SaveButton';
 export { MiniButton } from './MiniButton';
 export { SheetDone } from './SheetDone';
 export {
@@ -75,7 +106,13 @@ export {
 export { ScorePanel, type ScorePanelProps } from './ScorePanel';
 export { ScoresSection, type ScoresSectionProps } from './ScoresSection';
 export { SearchField, type SearchFieldProps } from './SearchField';
-export { SectionHeader, type SectionHeaderProps, type SectionHeaderSize } from './SectionHeader';
+export {
+  SectionHeader,
+  sectionSpacing,
+  type SectionHeaderProps,
+  type SectionHeaderSize,
+  type SectionSpacingStep,
+} from './SectionHeader';
 export {
   SegmentedControl,
   type SegmentedControlOption,
@@ -93,3 +130,12 @@ export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
 export { UserRow, type UserRowProps } from './UserRow';
 export { Wordmark, type WordmarkProps } from './Wordmark';
+// IMP1113-UI: new shared pieces, appended rather than interleaved so FU1113-B's exports
+// above are untouched.
+export {
+  ActionPair,
+  actionPairFitsRow,
+  type ActionPairProps,
+  type PairAction,
+} from './ActionPair';
+export { Disclosure, type DisclosureProps } from './Disclosure';

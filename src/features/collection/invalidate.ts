@@ -232,20 +232,41 @@ export function invalidateAfterCollectionChange(
   invalidate(['sent-to-you', userId]);
 
   /**
-   * The community aggregate for this exact title: the reader's own new rating is part
-   * of it, and a score that excludes the rating you just gave reads as broken.
+   * **Every community score this reader has cached, not just this title's**
+   * (20261119000100, founder spec t168u §4G).
+   *
+   * The reader's own rating is part of the aggregate, and a score that excludes the
+   * rating you just gave reads as broken. Since contributor eligibility, one write can
+   * also move every *other* title in the category: a reader's rankings count toward
+   * community scores only from their tenth ranking in that category, so the ranking that
+   * takes them from nine to ten adds them to every movie (or every season and show) they
+   * have ranked, and the removal that takes them from ten to nine takes them out of all
+   * of them. A season ranking also moves its parent show's number, which averages each
+   * person's seasons. This module cannot cheaply know whether a write crossed the line,
+   * so it invalidates the reader's whole community-score cache by prefix: only the
+   * queries on screen refetch, and the rest are marked stale for their next mount.
    *
    * The account is in the key because the aggregate is viewer-relative — it excludes
-   * accounts blocked in either direction — and this line was left at
-   * `['community-score', mediaItemId]` when the key gained its account, which prefix
-   * matching then matched against nothing at all. Silent, because the test seeded the
-   * obsolete shape too. Independent review found it at 10b.
+   * accounts blocked in either direction. The test seeds the real hook key shape
+   * (`['community-score', userId, mediaItemId]`), because review 10b found this line
+   * once invalidating a shape nothing used.
    *
    * The Following score is deliberately **not** invalidated here. It is the mean over
    * other people's rankings, and nothing the reader does to their own collection can
    * move it.
    */
-  invalidate(['community-score', userId, mediaItemId]);
+  invalidate(['community-score', userId]);
+
+  /**
+   * The other surfaces that average strangers' rankings with the same eligibility rule,
+   * for the same reason: Top Rated (`['top-rated', userId, medium]`), group picks
+   * (`['group-picks', viewerId, members, medium]`, whose rows carry community_score) and
+   * the onboarding starter list (`['onboarding-starter-movies', userId]`). By prefix on
+   * the reader.
+   */
+  invalidate(['top-rated', userId]);
+  invalidate(['group-picks', userId]);
+  invalidate(['onboarding-starter-movies', userId]);
 
   /**
    * Taste Match, on every profile this session has looked at, and the People suggestions

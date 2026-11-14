@@ -1,7 +1,8 @@
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { formatScore } from '@/features/collection/score';
-import { ScoreBadge, Text } from '@/ui/components';
+import { averageCaption } from '@/features/collection/show-projection';
+import { ScoreCircle } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -9,13 +10,14 @@ import { theme } from '@/ui/tokens';
  *
  * Post-QA sprint 2 (2026-11-05) reworked the row, not the scores behind it:
  *
- *        (8.4)            8.7             —
+ *        (8.4)            (8.7)            —
  *     Your score       bingd (4)     Following (0)
  *
  * - three columns of exactly equal width, each value centred with its label centred
  *   directly beneath it, and the same padding above and below the row;
- * - the reader's own score keeps the filled Maroon circle once ranked; bingd and
- *   Following are quieter numbers;
+ * - the reader's own score is the filled Maroon circle once ranked; bingd and Following
+ *   are the outlined Maroon ring with Maroon numerals where a score exists (founder spec
+ *   §8, 2026-11-13 — they were bare numbers until then);
  * - the label carries the real **rating** count in brackets, as the server reports it,
  *   and only once it has reported it — never a 0 drawn while the number is loading;
  * - a score that does not exist is a dash. Its reason ("Not enough ratings", "No ratings
@@ -25,7 +27,19 @@ import { theme } from '@/ui/tokens';
  *   stacks them into rows, so nothing is ever clipped.
  */
 export type ImmersiveScoresProps = {
-  you: { score: number | null; pending?: boolean; onPress?: () => void } | null;
+  you: {
+    score: number | null;
+    pending?: boolean;
+    onPress?: () => void;
+    /**
+     * **A series' season average** (WS-TVC, founder spec t168u §2; FU1113-B): on a series
+     * page with no explicit show ranking but ranked seasons, the mean of those seasons —
+     * drawn as the outlined circle labelled "Season Average", never as the filled circle
+     * that means an explicit ranking. The season count is spoken, not printed. Ignored
+     * when `score` is present.
+     */
+    average?: { score: number; count: number } | null;
+  } | null;
   /**
    * `ratingCount` is null when the server has not given one; `loading` says it is still
    * being asked, which is the only time the column says "Loading".
@@ -40,7 +54,8 @@ const NO_FOLLOWING = 'No ratings yet from people you follow';
 const NOT_RANKED = 'Not ranked yet';
 const SCORE_LOADING = 'Score loading';
 const COUNT_LOADING = 'Loading';
-const DASH = '—';
+/** The personal slot's label when its number is the mean of ranked seasons. */
+const SEASON_AVERAGE = 'Season Average';
 
 /** Below this many points of width per unit of text scale, the three cells stack. */
 const STACK_BELOW = 290;
@@ -51,6 +66,7 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
   const { width, fontScale } = useWindowDimensions();
   if (!you && !bingd && !following) return null;
   const youRanked = you?.score != null;
+  const youAverage = !youRanked && you?.average ? you.average : null;
   // Three columns need about 300pt of 1x text; below that, at this text size, they stack.
   const stacked = width / fontScale < STACK_BELOW;
 
@@ -60,9 +76,10 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
         <Cell
           testID="immersive-score-you"
           label="Your score"
-          score={you.score}
-          reason={youRanked ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
+          score={youRanked ? you.score : (youAverage?.score ?? null)}
+          reason={youRanked || youAverage ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
           prominent={youRanked}
+          average={youAverage}
           stacked={stacked}
           onPress={you.onPress}
           hint={youRanked || you.pending ? 'Opens your rating options' : 'Ranks this title'}
@@ -112,6 +129,7 @@ function Cell({
   score,
   reason,
   prominent = false,
+  average = null,
   divided = false,
   stacked = false,
   onPress,
@@ -127,77 +145,50 @@ function Cell({
   /** Why there is no number — spoken, never printed. */
   reason: string | null;
   prominent?: boolean;
+  /** The personal slot's season average: outlined, labelled "Season Average". */
+  average?: { score: number; count: number } | null;
   divided?: boolean;
   stacked?: boolean;
   onPress?: () => void;
   hint?: string;
 }) {
-  const value = score != null ? formatScore(score) : null;
-  const body = (
-    <>
-      <View style={styles.valueSlot}>
-        {prominent && score != null ? (
-          <ScoreBadge score={score} bucket={null} size="md" variant="filled" />
-        ) : (
-          <Text
-            variant="headline"
-            tone={value ? 'primary' : 'tertiary'}
-            style={value ? styles.value : null}
-            numberOfLines={1}
-          >
-            {value ?? DASH}
-          </Text>
-        )}
-      </View>
-      {/* One line where it fits. At 320pt or a large text size the count may take a
-          second line under its label — still centred, never clipped. */}
-      <Text
-        variant="footnote"
-        tone="secondary"
-        numberOfLines={2}
-        style={stacked ? styles.labelStacked : styles.label}
-        testID={`${testID}-label`}
-      >
-        {label}
-        {count != null ? (
-          <Text variant="footnote" tone="tertiary">{` (${count})`}</Text>
-        ) : null}
-      </Text>
-    </>
-  );
-  const style = stacked
-    ? [styles.cell, styles.cellStacked, divided && styles.dividedStacked]
-    : [styles.cell, divided && styles.divided];
+  const shown = average ? average.score : score;
+  const value = shown != null ? formatScore(shown) : null;
+  /**
+   * **One `ScoreCircle` for all four states** (FU1113-B): yours filled; a season average,
+   * bingd and Following outlined; a missing score the dash. The season average is the
+   * same circle with "Season Average" under it — no `AVG` inside the circle and no
+   * "Average of N ranked seasons" paragraph. How many seasons it averages is still said,
+   * to a screen reader, where it costs the sighted layout nothing.
+   */
+  const printed = average ? SEASON_AVERAGE : label;
   const spoken = [
-    spokenLabel ?? label,
+    average ? SEASON_AVERAGE : (spokenLabel ?? label),
+    average ? averageCaption(average.count) : null,
     value ? `${value} out of 10` : reason,
     count != null ? ratings(count) : null,
   ]
     .filter(Boolean)
     .join('. ');
+  const style = stacked
+    ? [styles.cell, styles.cellStacked, divided && styles.dividedStacked]
+    : [styles.cell, divided && styles.divided];
 
-  if (!onPress) {
-    return (
-      <View testID={testID} style={style} accessible accessibilityLabel={spoken}>
-        {body}
-      </View>
-    );
-  }
   return (
-    <Pressable
+    <ScoreCircle
       testID={testID}
-      accessibilityRole="button"
+      score={shown}
+      variant={prominent ? 'filled' : 'outlined'}
+      label={printed}
+      count={count}
+      layout={stacked ? 'row' : 'column'}
       accessibilityLabel={spoken}
-      accessibilityHint={hint}
+      accessibilityHint={onPress ? hint : undefined}
       onPress={onPress}
-      style={({ pressed }) => [...style, pressed && styles.pressed]}
-    >
-      {body}
-    </Pressable>
+      style={style}
+    />
   );
 }
-
-const BADGE = theme.layout.scoreBadge.md;
 
 const styles = StyleSheet.create({
   /**
@@ -228,10 +219,6 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[3],
     paddingHorizontal: theme.space[1],
   },
-  /** Every value sits in a slot the badge's height, so the three labels share a baseline. */
-  valueSlot: { height: BADGE, alignItems: 'center', justifyContent: 'center' },
-  value: { fontVariant: ['tabular-nums'] },
-  label: { textAlign: 'center', alignSelf: 'stretch' },
   stripStacked: { flexDirection: 'column' },
   cellStacked: {
     flexGrow: 0,
@@ -242,11 +229,9 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[2],
     paddingHorizontal: theme.space[3],
   },
-  labelStacked: { flexShrink: 1, textAlign: 'left' },
   dividedStacked: {
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
   },
   divided: { borderLeftWidth: StyleSheet.hairlineWidth * 2, borderLeftColor: theme.border.hairline },
-  pressed: { opacity: 0.7 },
 });

@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
-import { standaloneShows } from '@/features/collection/watched-rows';
+import { projectShows, type ShowProjection } from '@/features/collection/show-projection';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -81,24 +81,22 @@ export function TopRanked({
 
   const movies = useRankedCollection(userId, 'movies');
   const seasons = useRankedCollection(userId, 'tv_seasons');
-  // The whole shows (20261114000100), scored among shows and drawn beside the seasons under
-  // Candidate A's precedence: a show stands alone only while none of its seasons is ranked.
+  // The whole shows (20261114000100). With the seasons they make one poster per series
+  // (WS-TVC, `projectShows`): the explicit show score, else the ranked seasons' mean.
   const shows = useRankedCollection(userId, 'tv_shows');
+  /** One entry per series, over the two whole pools: no request and no per-series work. */
+  const series = useMemo(
+    () => projectShows(seasons.data ?? [], shows.data ?? []),
+    [seasons.data, shows.data],
+  );
 
   const tiles = useMemo(() => {
     const movieRows = movies.data ?? [];
-    const seasonRows = seasons.data ?? [];
-    const showRows = standaloneShows(seasonRows, shows.data ?? []);
     const movieSizes = bandSizes(movieRows);
-    const seasonSizes = bandSizes(seasonRows);
-    // Over the whole show ranking, hidden shows included: a band is every title in it.
-    const showSizes = bandSizes(shows.data ?? []);
 
-    const toTile = (
-      entry: (typeof movieRows)[number],
-      sizes: ReturnType<typeof bandSizes>,
-    ) => ({
+    const movieTile = (entry: (typeof movieRows)[number]) => ({
       id: entry.mediaItemId,
+      // The canonical compact form, as every wall names a title.
       title:
         compactName({
           kind: entry.kind,
@@ -108,67 +106,66 @@ export function TopRanked({
         }) ?? entry.title,
       year: entry.year,
       posterUri: posterUri(entry.posterPath, 'card'),
-      score: scoreFor(entry.bucket, entry.position, sizes),
+      score: scoreFor(entry.bucket, entry.position, movieSizes),
       bucket: entry.bucket,
-      // A season's pill names its season (Candidate A): `S4 9.1`. A show keeps the number.
-      season: entry.kind === 'season' ? (entry.seasonNumber ?? null) : null,
+      season: null,
+    });
+    /**
+     * **One tile per series** (WS-TVC): the series' poster and name, its effective score,
+     * and the pill that says which kind of score it is — filled for an explicit show
+     * ranking, outlined `SN AVG` for the mean of its ranked seasons. Seasons are never tiles.
+     */
+    const seriesTile = (p: ShowProjection) => ({
+      id: p.seriesId,
+      title: p.title,
+      year: p.year,
+      posterUri: posterUri(p.posterPath, 'card'),
+      score: p.display,
+      bucket: p.bucket,
+      season: null,
+      scoreSource: p.source,
+      rankedSeasonCount: p.rankedSeasonCount,
     });
 
-    /**
-     * One wall from several pools, by the score each tile prints (the unrounded
-     * projection, so each pool keeps its own ranked order), then a fixed pool order and
-     * the id. Never by ordinal: a show's #2 and a season's #2 are different lists.
-     */
-    const byScore = (
-      pools: {
-        row: (typeof movieRows)[number];
-        sizes: ReturnType<typeof bandSizes>;
-        pool: number;
-      }[],
-    ) =>
-      pools
-        .map((entry) => ({
-          ...entry,
-          score: projectedScore(entry.row.bucket, entry.row.position, entry.sizes),
-        }))
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            a.pool - b.pool ||
-            a.row.mediaItemId.localeCompare(b.row.mediaItemId),
-        );
-    const tv = [
-      ...seasonRows.map((row) => ({ row, sizes: seasonSizes, pool: 1 })),
-      ...showRows.map((row) => ({ row, sizes: showSizes, pool: 2 })),
-    ];
-
-    if (filter === 'movies')
-      return movieRows.slice(0, WALL).map((row) => toTile(row, movieSizes));
-    if (filter === 'tv_seasons') {
-      return byScore(tv)
-        .slice(0, WALL)
-        .map((entry) => toTile(entry.row, entry.sizes));
-    }
+    if (filter === 'movies') return movieRows.slice(0, WALL).map(movieTile);
+    // The projection is already in the Rating order: exact score, explicit first, then
+    // position, title and id (`compareShowProjections`).
+    if (filter === 'tv_seasons') return series.slice(0, WALL).map(seriesTile);
 
     // All: both categories as one list, ordered by the score the tile will print.
     //
-    // Neither half is sliced before the sort. Taking six from each first is safe today —
-    // a global top six cannot contain a seventh of either category — but it is safe by an
-    // argument about `WALL` rather than by construction, and the defect this replaced was
-    // exactly a limit applied before an order. The lists are already read in full to size
-    // their bands; there is nothing to save by cutting them here.
-    // By the *unrounded* projection, not the printed one decimal. Inside a category the
-    // projection falls strictly with position, so each category keeps its own ranked order
-    // — a film ranked #1 and one ranked #2 both print 10.0 in a band of a hundred, and
-    // sorting by the printed number left their order to the id. The printed scores still
-    // never rise down the wall, because rounding a falling sequence cannot make it rise.
-    // An exact tie is ordinary (each pool's best scores its band's high, and so does a band
-    // of one), so it falls to a fixed pool order and then the id, never to which read
-    // resolved first.
-    return byScore([...movieRows.map((row) => ({ row, sizes: movieSizes, pool: 0 })), ...tv])
+    // Neither half is sliced before the sort: the defect this replaced was exactly a limit
+    // applied before an order. A film is compared by its *unrounded* projection, so each
+    // pool keeps its own ranked order (a #1 and a #2 both print 10.0 in a band of a
+    // hundred); a series by its exact effective score, which is what its tile prints
+    // before rounding. An exact tie falls to a fixed order — films, then series — and then
+    // the id, never to which read resolved first.
+    const all = [
+      ...movieRows.map((row) => ({
+        key: projectedScore(row.bucket, row.position, movieSizes),
+        pool: 0,
+        id: row.mediaItemId,
+        tile: () => movieTile(row),
+      })),
+      // `series` is already in `compareShowProjections` order (exact score, explicit
+      // before average, position, title, id); two series keep that order between them.
+      ...series.map((p, order) => ({
+        key: p.score,
+        pool: 1,
+        order,
+        id: p.seriesId,
+        tile: () => seriesTile(p),
+      })),
+    ];
+    return all
+      .sort((a, b) =>
+        'order' in a && 'order' in b
+          ? a.order - b.order
+          : b.key - a.key || a.pool - b.pool || a.id.localeCompare(b.id),
+      )
       .slice(0, WALL)
-      .map((entry) => toTile(entry.row, entry.sizes));
-  }, [filter, movies.data, seasons.data, shows.data]);
+      .map((entry) => entry.tile());
+  }, [filter, movies.data, series]);
 
   const loading = movies.isPending || seasons.isPending || shows.isPending;
   /**
@@ -183,9 +180,8 @@ export function TopRanked({
    * is the one thing a top-six cannot get wrong.
    */
   const failed = movies.isError || seasons.isError || shows.isError;
-  /** What the TV tab draws: every ranked season, and the shows that stand alone. */
-  const tvCount =
-    (seasons.data?.length ?? 0) + standaloneShows(seasons.data ?? [], shows.data ?? []).length;
+  /** What the TV tab draws: one poster per series (WS-TVC). */
+  const tvCount = series.length;
   const hasBoth = (movies.data?.length ?? 0) > 0 && tvCount > 0;
 
   /**

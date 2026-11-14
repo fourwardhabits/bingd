@@ -37,6 +37,11 @@ export type SentRecommendation = {
    * recipient policy admits no pending one, so a request's note cannot arrive here.
    */
   message: string | null;
+  /**
+   * When the reader saw it listed in Sent to you (20261121000100), or null. Independent of
+   * `openedAt`: seeing a row clears its "new" state, only opening the title opens it.
+   */
+  seenAt: string | null;
 };
 
 type Row = {
@@ -58,6 +63,8 @@ type Row = {
   opened_at: string | null;
   /** Absent against a backend older than 20260929000100, which reads as no note. */
   message?: string | null;
+  /** Absent against a backend older than 20261121000100, which reads as not seen. */
+  seen_at?: string | null;
 };
 
 const yearOf = (date: string | null): number | null => {
@@ -137,6 +144,7 @@ export function useSentToYou(viewerId: string) {
         recommendedAt: row.recommended_at,
         openedAt: row.opened_at,
         message: row.message ?? null,
+        seenAt: row.seen_at ?? null,
       }));
     },
   });
@@ -231,7 +239,7 @@ async function inheritedMetadata(
  * **What this cap is, and what it is not.** Independent review 21e asked for the audit
  * and this is its result, so that nobody has to redo it:
  *
- * - It is **not** behind any count that claims to be exact. `unopenedIsAtLeast` below is
+ * - It is **not** behind any count that claims to be exact. `unreadIsAtLeast` below is
  *   the guard, and it is exact rather than defensive because the server orders unopened
  *   first.
  * - It is **not** behind any award. Hype Courier and the rest read
@@ -247,7 +255,7 @@ async function inheritedMetadata(
  *   server served, and independent review asked for both consequences to be written down
  *   rather than discovered.
  *
- *   The first is harmless: a shorter page only ever makes `unopenedIsAtLeast` answer
+ *   The first is harmless: a shorter page only ever makes `unreadIsAtLeast` answer
  *   false where it would have answered true, so the chip says `199` rather than `200+` —
  *   an understatement of a capped list, which is the direction this rule permits. It
  *   cannot overstate.
@@ -275,9 +283,19 @@ async function inheritedMetadata(
  */
 export const SENT_LIMIT = 200;
 
-/** How many have not been opened, which is what the tab's dot carries. */
-export const unopenedCount = (rows: SentRecommendation[] | undefined) =>
-  (rows ?? []).filter((row) => !row.openedAt).length;
+/**
+ * **Unread** is neither opened nor seen (FU1113-E, 20261121000100).
+ *
+ * Opening the title still writes `openedAt` and still emits `recommendation_opened`; seeing
+ * the row listed in Sent to you writes `seenAt` (`useMarkSentSeen`). Either one means the
+ * reader has had it in front of them, so either one clears the tab's dot and the row's tint.
+ */
+export const isUnread = (row: Pick<SentRecommendation, 'openedAt' | 'seenAt'>) =>
+  !row.openedAt && !row.seenAt;
+
+/** How many are unread, which is what the tab's dot carries. */
+export const unreadCount = (rows: SentRecommendation[] | undefined) =>
+  (rows ?? []).filter(isUnread).length;
 
 /**
  * Whether that number is the whole truth or a floor.
@@ -294,8 +312,47 @@ export const unopenedCount = (rows: SentRecommendation[] | undefined) =>
  * Independent review 21c found this one, after the first sweep looked only at PostgREST's
  * cap and not at a limit the app asks for itself.
  */
-export const unopenedIsAtLeast = (rows: SentRecommendation[] | undefined) =>
-  (rows ?? []).length >= SENT_LIMIT && unopenedCount(rows) >= SENT_LIMIT;
+export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) =>
+  (rows ?? []).length >= SENT_LIMIT && (rows ?? []).every((row) => !row.openedAt);
+
+/**
+ * The Sent to You shortcut's badge and its spoken label (Codex review, #290).
+ *
+ * **A floor of zero is still a floor.** The server orders by *opened* only — seen rows stay
+ * in the unopened prefix — so a reader with more than `SENT_LIMIT` unopened recommendations
+ * who has seen the first page holds a page that is all unopened and none unread. The count
+ * in hand is 0 and `unreadIsAtLeast` is true: there may be unread ones past the cap. The
+ * badge used to be drawn only for a count above zero, so those vanished without a word.
+ * Now that state keeps an indicator, *New*, spoken as "more may be new", which is as much
+ * as the page can honestly say.
+ *
+ * **What the client cannot do here.** Reaching those rows needs the server to order seen
+ * rows after unseen ones, or to page, and both are `recommendations_to_me` changes (a
+ * migration); the client cannot ask for a different 200. Until then, opening a title moves
+ * it out of the unopened prefix and lets the next load bring a further row in.
+ */
+export const sentShortcutBadge = (
+  rows: SentRecommendation[] | undefined,
+): { badge: string | null; spoken: string } => {
+  const unread = unreadCount(rows);
+  const atLeast = unreadIsAtLeast(rows);
+  if (unread > 0) {
+    return {
+      badge: `${unread}${atLeast ? '+' : ''}`,
+      spoken: `Sent to You, ${atLeast ? 'at least ' : ''}${unread} new`,
+    };
+  }
+  if (atLeast) return { badge: 'New', spoken: 'Sent to You, more may be new' };
+  return { badge: null, spoken: 'Sent to You' };
+};
+
+/*
+ * **Why the test above is still about `openedAt`** (FU1113-E). The server's order is
+ * unchanged — unopened first — so it is still the unopened rows that form a prefix, and
+ * unread rows are a subset of them. If any row on the page is opened, every unopened row
+ * (and so every unread one) is in hand and the count is exact; only a page that is all
+ * unopened can hide more beyond the cap, so only then is the unread count a floor.
+ */
 
 /**
  * A recommendation as the shared filter sheet sees it.

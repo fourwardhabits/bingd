@@ -78,6 +78,37 @@ export function labelFor(events: readonly WatchEvent[], index: number): WatchRow
   return index === firstDated ? 'first' : 'rewatch';
 }
 
+/**
+ * The longest note one watch may carry: `watch_events_note_length` (20261014000100) checks
+ * `char_length(note) <= 1000`. The editor stops typing here and the writer refuses past it,
+ * so the server's check is never what a reader meets.
+ */
+export const WATCH_NOTE_MAX_LENGTH = 1000;
+
+/**
+ * A note's length as the database counts it (Codex review, #287). `char_length` counts
+ * code points, and a JS string's `length` counts UTF-16 units, so an emoji is one to the
+ * column and two to `.length`. Every limit on a watch note is in code points.
+ */
+export const watchNoteLength = (note: string): number => Array.from(note).length;
+
+/**
+ * `note` cut to `max` code points. Never splits a surrogate pair, which `slice` on UTF-16
+ * units would, leaving a lone half of an emoji at the end.
+ */
+export const clampWatchNote = (note: string, max: number): string => {
+  const points = Array.from(note);
+  return points.length > max ? points.slice(0, max).join('') : note;
+};
+
+/**
+ * A watch's note as `set_watch_details` stores it: trimmed, and empty is no note. The server
+ * applies the same rule (`nullif(btrim(p_note), '')`); the client applies it first so it can
+ * tell an edit from no edit.
+ */
+export const normalWatchNote = (note: string | null | undefined): string | null =>
+  note?.trim() ? note.trim() : null;
+
 /** Whether the date came from an authoritative import, which the row says out loud. */
 export const isFromDiary = (event: WatchEvent) => event.basis === 'diary';
 
@@ -91,6 +122,25 @@ export const isFromDiary = (event: WatchEvent) => event.basis === 'diary';
  */
 export function watchCountLabel(count: number): string | null {
   return count >= 2 ? `Watched ${count} times` : null;
+}
+
+/**
+ * The first and latest dated watch, for the screen's `First … · Latest …` line, or null when
+ * that line would say nothing.
+ *
+ * **Null for one dated watch, or for dated watches that all fall on one day** (founder QA,
+ * 2026-11-12). Either way the line would print the same date twice. Undated viewings never
+ * count: they are the ones nobody can place, so they are not a first or a latest date.
+ * `YYYY-MM-DD` strings sort the same as the dates, so the comparison is a string one.
+ */
+export function historySpan(
+  dates: readonly (string | null)[],
+): { first: string; latest: string } | null {
+  const dated = dates.filter((date): date is string => date !== null).sort();
+  if (dated.length < 2) return null;
+  const first = dated[0]!;
+  const latest = dated[dated.length - 1]!;
+  return first === latest ? null : { first, latest };
 }
 
 /**

@@ -28,6 +28,8 @@ import {
 } from '@/features/collection/genre-rank';
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
+import { useMyScores } from '@/features/collection/use-score';
+import { KEEP_SHOW_RANKING, UPDATE_SHOW_RANKING } from './show-decision-labels';
 import {
   asRankingCategory,
   CATEGORY_NAME,
@@ -57,6 +59,7 @@ import {
   rankRebucket,
   rankSkip,
   rankStart,
+  keepShow,
   type Placed,
   type PlacedMovement,
   type SessionStep,
@@ -140,6 +143,15 @@ export type UpdateShowLink = {
   linkedPlacementId: string;
 };
 
+/**
+ * **The parent-show decision a season's ranking left open** (WS-TVC, founder spec t168u
+ * §3). Carried out of the reveal by *Add details*, so the post-rank details sheet can offer
+ * Update Show and Keep Show in place of Done: the show, its band, the season placement that
+ * offered the choice, and the reader's current whole-show score — null when it is not known
+ * yet. No label draws the score (FU1113-D: "Update Show Ranking" / "Keep Show Ranking").
+ */
+export type ShowDecision = UpdateShowLink & { showScore: number | null };
+
 export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
   subject: RankingSubject | null;
@@ -169,7 +181,16 @@ export type RankingSheetProps = {
    * mounts this one does; the prop is optional so that adding a fourth cannot silently
    * break, and the reveal falls back to the two controls it has always had.
    */
-  onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
+  onFinishLog?: (placement: {
+    score: number;
+    position: number;
+    category: string;
+    /**
+     * Present when the reveal offered Update Show (WS-TVC): the decision is still the
+     * reader's, so the details sheet carries it on. Absent everywhere else.
+     */
+    showDecision?: ShowDecision;
+  }) => void;
   /**
    * **The placement, told to the caller the moment it lands** — for a caller that has to
    * count placements itself rather than wait for a refetch to do it.
@@ -355,6 +376,33 @@ function Session({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
+  /**
+   * The reader's current scores, for the whole-show score a season's `ShowDecision`
+   * carries (WS-TVC, founder spec t168u §3A): never the season's. Read only for a season,
+   * from the cache the Collection already fills. Since FU1113-D no label draws it.
+   */
+  const myScores = useMyScores(profile.id, subject.kind === 'season');
+  /**
+   * **Keep Show, once** (WS-TVC §3D): one call at a time — the ref answers synchronously,
+   * so a double tap is one request — and no optimistic "kept". A failure keeps the sheet
+   * open with the reason and both choices still live; retrying is safe because the server
+   * records one reaffirmation per season placement.
+   */
+  const keepInFlight = useRef(false);
+  /**
+   * Whether this session is still on screen when a Keep Show reply lands. A reply that
+   * arrives after the reader dismissed must not close whatever they opened next (the
+   * reaffirmation itself is recorded either way; the server is idempotent).
+   */
+  const keepAlive = useRef(true);
+  useEffect(() => {
+    keepAlive.current = true;
+    return () => {
+      keepAlive.current = false;
+    };
+  }, []);
+  const [keeping, setKeeping] = useState(false);
+  const [keepError, setKeepError] = useState<string | null>(null);
   /**
    * What the placement on screen earned, for the reveal to name (post-QA sprint 2,
    * 2026-11-05). A copy of what the detection already hands the celebration queue — the
@@ -829,6 +877,27 @@ function Session({
   };
 
   /**
+   * **Keep Show from the reveal** (WS-TVC §3D): record that the reader's whole-show ranking
+   * stands, then leave exactly as Done does. Nothing is shown as kept until the server says
+   * so; a failure stays on the reveal with its reason and every exit still live.
+   */
+  const keepFromReveal = async (placementId: string) => {
+    if (keepInFlight.current) return;
+    keepInFlight.current = true;
+    setKeeping(true);
+    setKeepError(null);
+    const result = await keepShow(placementId);
+    keepInFlight.current = false;
+    if (!keepAlive.current) return;
+    setKeeping(false);
+    if (result.outcome === 'kept') {
+      await closeAndCelebrate();
+      return;
+    }
+    setKeepError(result.message);
+  };
+
+  /**
    * The `onPlaced` contract: tell the caller about the placement, once.
    *
    * An effect rather than a branch inside `apply`, for two reasons. `apply` is a
@@ -879,6 +948,13 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
+            keeping={keeping}
+            keepError={keepError}
+            onKeepShow={
+              onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
+                ? () => void keepFromReveal(step.placementId!)
+                : undefined
+            }
             onUpdateShow={
               onUpdateShow && !onPlaced && offersUpdateShow(subject, step)
                 ? () => {
@@ -909,10 +985,23 @@ function Session({
                     // handoff never settles. Deferred with that work, deliberately: the
                     // onboarding path here uses `onPlaced` and never reaches this line.
                     void close();
+                    // WS-TVC §3B: Add details does not resolve the show. When Update Show was
+                    // offered, the decision rides along to the details sheet.
+                    const decided =
+                      onUpdateShow && offersUpdateShow(subject, step)
+                        ? {
+                            showId: step.parent!.mediaItemId,
+                            bucket: step.parent!.bucket,
+                            linkedPlacementId: step.placementId!,
+                            showScore:
+                              myScores.data?.get(step.parent!.mediaItemId)?.score ?? null,
+                          }
+                        : undefined;
                     onFinishLog({
                       score: step.score,
                       position: step.position,
                       category: step.category,
+                      ...(decided ? { showDecision: decided } : {}),
                     });
                   }
                 : undefined
@@ -1688,7 +1777,14 @@ function Reveal({
   onDone,
   onFinishLog,
   onUpdateShow,
+  onKeepShow,
+  keeping = false,
+  keepError = null,
 }: {
+  /** Keep Show (WS-TVC): present exactly when Update Show is. */
+  onKeepShow?: () => void;
+  keeping?: boolean;
+  keepError?: string | null;
   /**
    * **Update Show**, when this season's placement may lead into its show's correction.
    * Present only when the session decided every condition holds (`onUpdateShow` on the
@@ -1844,28 +1940,57 @@ function Reveal({
    * The reveal's exits, secondary first and the accent last — left to right in a row,
    * top to bottom when stacked, and in that order for a screen reader either way. Each
    * keeps exactly the handler it had: Done is `onDone`, Add details `onFinishLog`, Update
-   * Show `onUpdateShow`. Done joins the pair unless Update Show is offered, in which case
-   * it is the quiet control under it (drawn below).
+   * Show Ranking `onUpdateShow`. Done joins the pair unless Update Show Ranking is offered.
    */
-  const exitPair: RevealExit[] = [
-    onUpdateShow
-      ? {
-          label: 'Update Show',
-          kind: 'secondary',
-          onPress: onUpdateShow,
+  /**
+   * **When the show is the open question** (FU1113-D, founder spec 2026-11-13; behaviour
+   * WS-TVC t168u §3A): Add details (outlined secondary) on the left, Update Show Ranking
+   * (filled primary) on the right, both at the standard button height and type, each
+   * filling a share of the row in proportion to its label. Keep Show Ranking is the quiet
+   * grey text action centred under the pair across the full width. No score in any label.
+   * Done is not drawn: the sheet's close and system Back are the dismissal, and they
+   * record nothing. Stacked, the primary leads. Everywhere else the exits are as they were.
+   */
+  const deciding = Boolean(onUpdateShow);
+  const exitPair: RevealExit[] = deciding
+    ? [
+        ...(onFinishLog
+          ? [
+              {
+                label: 'Add details',
+                kind: 'secondary',
+                onPress: onFinishLog,
+                testID: 'reveal-add-details',
+              } as RevealExit,
+            ]
+          : []),
+        {
+          label: UPDATE_SHOW_RANKING,
+          kind: 'primary',
+          onPress: onUpdateShow!,
           hint: 'Re-ranks the show this season belongs to',
           testID: 'reveal-update-show',
-        }
-      : { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
-    ...(onFinishLog
-      ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
-      : []),
-  ];
-  const exitsStacked = !revealExitsFitRow(
-    exitPair.map((exit) => exit.label),
-    windowWidth,
-    fontScale,
-  );
+        },
+      ]
+    : [
+        { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
+        ...(onFinishLog
+          ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
+          : []),
+      ];
+  const exitsStacked = deciding
+    ? !decisionExitsFitRow(
+        exitPair.map((exit) => exit.label),
+        windowWidth,
+        fontScale,
+      )
+    : !revealExitsFitRow(
+        exitPair.map((exit) => exit.label),
+        windowWidth,
+        fontScale,
+      );
+  // Stacked, the primary comes first.
+  const shownExits = deciding && exitsStacked ? [...exitPair].reverse() : exitPair;
   const exitRows = (exitsStacked ? exitPair.length : 1) + (onUpdateShow ? 1 : 0);
 
   const revealBodyMax = Math.max(
@@ -2268,24 +2393,20 @@ function Reveal({
        * nothing here reorders at paint.
        */}
       {/**
-       * **Update Show** (founder brief §5, 2026-11-11): a season that was just watched, of
-       * a show the reader has ranked. Two rows, and no new modal, card or confirmation:
+       * **Update Show Ranking** (FU1113-D, founder spec 2026-11-13): a season that was just
+       * watched, of a show the reader has ranked. No new modal, card or confirmation:
        *
-       *   [ Update Show ] [ Add details ]
-       *               Done
+       *   [ Add details ] [ Update Show Ranking ]     standard height, filled right
+       *          Keep Show Ranking                    quiet grey, centred, 44pt target
        *
-       * Add details keeps the filled treatment and the trailing place (P0-3, 2026-11-12:
-       * it used to lead this row, the one reveal where the accent was on the left);
-       * Update Show is the outlined second act; Done is a quiet text control across the
-       * full width, still one tap and always reachable. Anywhere Update Show is not
-       * offered, the row is the unchanged Done | Add details pair.
+       * Too narrow for both labels at the reader's width and text size, it stacks with the
+       * primary first: Update Show Ranking, Add details, then Keep Show Ranking.
        */}
       {/**
        * **One row, one set of rules, on every reveal** (founder QA P0-3, Android, 2026-11-12).
        *
        *   movie / show / season, Edit ranking:   [ Done ]        [ Add details ]
-       *   season with Update Show:               [ Update Show ] [ Add details ]
-       *                                                     Done
+       *   season with Update Show Ranking:      (above)
        *   no log sheet to return to (onboarding): [            Done            ]
        *
        * Secondary on the left, the accent on the right; Done is the quiet exit, and the
@@ -2300,35 +2421,69 @@ function Reveal({
        * width and text size (`revealExitsFitRow`), and stacks full width, in the same
        * order, when they would not. A label is never shrunk, clipped or truncated.
        */}
-      <View style={styles.revealControls}>
+      <View
+        style={[styles.revealControls, deciding && styles.revealControlsWide]}
+        testID="reveal-controls"
+      >
         <View
           style={exitsStacked ? styles.revealExitsStacked : styles.revealExits}
           testID="reveal-exits"
         >
-          {exitPair.map((exit) => (
+          {shownExits.map((exit) => (
             <View
               key={exit.label}
-              style={exitsStacked ? undefined : styles.revealExit}
+              style={
+                exitsStacked
+                  ? undefined
+                  : deciding
+                    ? // A share of the row in proportion to the label's natural width, so
+                      // both fill the row and each is at least its natural width.
+                      { flex: decisionLabelWidth(exit.label, fontScale) }
+                    : styles.revealExit
+              }
               testID={`reveal-exit-${exit.kind}`}
             >
               <Button
                 label={exit.label}
                 kind={exit.kind}
+                // The standard size (48pt, `headline`) on every reveal; the decision pair
+                // keeps a snug minimum inset so it shares a 360pt row (FU1113-D).
+                inset={deciding ? 'snug' : 'standard'}
                 onPress={exit.onPress}
+                disabled={deciding && keeping}
+                disabledReason={deciding && keeping ? 'Keeping your show score' : undefined}
                 accessibilityHint={exit.hint}
                 testID={exit.testID}
               />
             </View>
           ))}
         </View>
-        {onUpdateShow ? (
-          <Button
-            label="Done"
-            kind="tertiary"
-            tone="secondary"
-            onPress={onDone}
-            testID="reveal-done"
-          />
+        {deciding && onKeepShow ? (
+          <View style={styles.revealKeep} testID="reveal-keep">
+            <Button
+              label={keeping ? 'Keeping…' : KEEP_SHOW_RANKING}
+              kind="tertiary"
+              tone="secondary"
+              size="sm"
+              hitSlop={COMPACT_EXIT_SLOP}
+              disabled={keeping}
+              disabledReason={keeping ? 'Keeping your show score' : undefined}
+              accessibilityHint="Keeps your show's ranking as it is"
+              onPress={onKeepShow}
+              testID="reveal-keep-show"
+            />
+            {keepError ? (
+              <Text
+                variant="footnote"
+                tone="action"
+                style={styles.centre}
+                accessibilityRole="alert"
+                testID="reveal-keep-error"
+              >
+                {keepError}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
       </View>
     </View>
@@ -2471,7 +2626,7 @@ export function revealExitsFitRow(labels: string[], windowWidth: number, fontSca
 export const REVEAL_LABEL_EM: Record<string, number> = {
   Done: 2.534,
   'Add details': 5.443,
-  'Update Show': 6.465,
+  'Update Show Ranking': 10.624,
 };
 
 /**
@@ -2482,6 +2637,42 @@ export const REVEAL_LABEL_EM: Record<string, number> = {
 export function revealLabelWidth(label: string, fontScale: number) {
   const em = REVEAL_LABEL_EM[label] ?? label.length * 0.62;
   return em * 17 * fontScale * 1.04 + 2 * theme.space[5] + 4;
+}
+
+/**
+ * The compact exits' slop: `Button`'s small size is drawn at the slimmer Rank height and
+ * this returns it to the 44pt target.
+ */
+const COMPACT_EXIT_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
+/**
+ * One decision exit's natural width: its label in `headline` (Inter SemiBold 17pt) at the
+ * reader's text size, plus `Button`'s snug inset either side and 1pt of border allowance
+ * either side (the outline is `hairlineWidth * 2`, at most 1pt on any device).
+ *
+ * 1.03 over the measured advance, not the 1.04 the equal-halves rule uses: the advance is
+ * already an upper bound (it ignores Inter's negative kerning), and 1.04 would stack
+ * this pair at 360pt by 0.06pt, which the founder spec rules out for standard phones.
+ */
+export function decisionLabelWidth(label: string, fontScale: number) {
+  const em = REVEAL_LABEL_EM[label] ?? label.length * 0.62;
+  return em * theme.typography.headline.fontSize * fontScale * 1.03 + 2 * theme.space[2] + 2;
+}
+
+/**
+ * **Whether Add details | Update Show Ranking sit side by side** (FU1113-D): both natural
+ * widths and the gap within the sheet's own gutter — the controls block steps out of the
+ * reveal's padding for this (`revealControlsWide`). Side by side from 360pt at default
+ * text; stacked only when the width or the reader's text size genuinely forbids it.
+ */
+export function decisionExitsFitRow(labels: string[], windowWidth: number, fontScale: number) {
+  if (labels.length < 2) return true;
+  const row = windowWidth - 2 * theme.layout.gutter;
+  const total = labels.reduce((sum, label) => sum + decisionLabelWidth(label, fontScale), 0);
+  return total + theme.space[2] * (labels.length - 1) <= row;
 }
 
 /** However small the phone, the body keeps room for the score and the title. */
@@ -2571,13 +2762,17 @@ const styles = StyleSheet.create({
   // Equal halves. Two controls of the same rank should be the same size, and letting
   // each hug its own label makes "Skip" visibly smaller than "Undo" for no reason.
   control: { flex: 1 },
-  // Every reveal's exits: the pair, then (under Update Show) the quiet Done, each
-  // across the reveal's full width.
+  // Every reveal's exits: the pair, then (under Update Show Ranking) the quiet Keep Show
+  // Ranking, each across the reveal's full width.
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   // The two ways out, side by side under the one way on. Equal halves, so neither
   // reads as the recommended exit.
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
+  // Across the sheet's own gutter rather than inside the reveal's padding as well.
+  revealControlsWide: { marginHorizontal: -theme.layout.gutter, paddingHorizontal: theme.layout.gutter },
+  // Keep Show Ranking: quiet, centred across the whole width, under the pair.
+  revealKeep: { alignItems: 'center', gap: theme.space[1] },
   /** The same exits, full width and in the same order, when the halves are too narrow. */
   revealExitsStacked: { gap: theme.space[2] },
   centre: { textAlign: 'center' },

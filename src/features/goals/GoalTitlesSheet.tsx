@@ -2,7 +2,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { formatWatchDate } from '@/features/collection/dates';
 import { posterUri } from '@/lib/images';
-import { Button, EmptyState, Sheet, Text, TitleRow } from '@/ui/components';
+import { DismissFooter, EmptyState, Sheet, Text, TitleRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { GOAL_LABEL, type GoalCategory } from './goals';
@@ -50,6 +50,9 @@ export function GoalTitlesSheet({
       visible
       onClose={onClose}
       label={`${GOAL_LABEL[category]} that counted toward your ${year} goal`}
+      // The standard browsing sheet (FU1113-B): a fixed 80% with Close pinned below the list.
+      size="standard"
+      footer={<DismissFooter onPress={onClose} />}
     >
       <View style={styles.head}>
         <Text variant="title2">
@@ -89,10 +92,6 @@ export function GoalTitlesSheet({
           ))
         )}
       </ScrollView>
-
-      <View style={styles.actions}>
-        <Button label="Close" kind="secondary" onPress={onClose} />
-      </View>
     </Sheet>
   );
 }
@@ -104,16 +103,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[3],
     gap: theme.space[1],
   },
-  // Bounded so a year of watching does not push the Close control off a sheet that is
-  // already capped at 90% of the screen.
-  list: { maxHeight: 380 },
+  // Flexes to the standard sheet's room; Close is pinned below it by the sheet.
+  list: { flex: 1 },
   listContent: { paddingBottom: theme.space[2] },
   empty: { paddingHorizontal: theme.layout.gutter },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
 });

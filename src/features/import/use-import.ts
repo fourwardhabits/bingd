@@ -48,6 +48,7 @@ import type { AnyStagingRow } from './payload';
 import { asProvider, type ImportProvider } from './providers';
 import { readArchive, type ArchivePreview, type ReadFailure } from './read-archive';
 import { readImdbCsv, type ImdbPreview, type ImdbReadReason } from './read-imdb';
+import { forgetSessionImport, rememberSessionImport } from './session-outcomes';
 
 /** Either provider's preview. An IMDb one says so; a Letterboxd one predates the field. */
 export type ImportPreview = ArchivePreview | ImdbPreview;
@@ -75,6 +76,12 @@ export type ImportJobStatus = {
    * for itself and from a server older than the column; both read as Letterboxd.
    */
   readonly provider?: ImportProvider;
+  /**
+   * Which job this is, when it was read from the server. Lets the summary read the job's
+   * own unresolved rows and find this process's parse of the file (`session-outcomes.ts`).
+   * Absent from a status the client made up for itself. Memory only, like the rest.
+   */
+  readonly jobId?: string;
 };
 
 /**
@@ -292,11 +299,12 @@ type JobRow = {
   provider?: string | null;
 };
 
-const asStatus = (row: JobRow): ImportJobStatus => ({
+const asStatus = (row: JobRow, jobId: string): ImportJobStatus => ({
   status: row.status as ImportJobStatus['status'],
   counts: row.counts ?? {},
   completedAt: row.completed_at,
   ...(row.provider ? { provider: asProvider(row.provider) } : {}),
+  jobId,
 });
 
 /**
@@ -315,7 +323,7 @@ async function readJob(jobId: string): Promise<ImportJobStatus | null> {
     if (answer === STALLED) return null;
     const { data, error } = answer;
     if (error || data === null) return null;
-    return asStatus(data as JobRow);
+    return asStatus(data as JobRow, jobId);
   } catch {
     return null;
   }
@@ -341,7 +349,7 @@ async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | '
     const { data, error } = answer;
     if (error) return 'unreadable';
     if (data === null) return 'gone';
-    return asStatus(data as JobRow);
+    return asStatus(data as JobRow, jobId);
   } catch {
     return 'unreadable';
   }
@@ -393,7 +401,7 @@ async function findLiveJob(): Promise<
     if (error) return 'unreadable';
     if (data === null) return null;
     const row = data as JobRow & { id: string };
-    return { id: row.id, status: asStatus(row) };
+    return { id: row.id, status: asStatus(row, row.id) };
   } catch {
     return 'unreadable';
   }
@@ -728,6 +736,8 @@ export function useImport(
     const jobId = jobRef.current;
     jobRef.current = null;
     unconfirmed.current = null;
+    // The parse held for the last summary goes with it (`session-outcomes.ts`).
+    forgetSessionImport();
     settle({ phase: 'idle' });
 
     if (jobId === null) return;
@@ -833,6 +843,11 @@ export function useImport(
           settle({ phase: 'failed', failure: { kind: 'already_running', status: existing } });
           return;
         }
+
+        // **The file, held in memory for this job's summary only** (`session-outcomes.ts`).
+        // The server deletes the shows, episodes and other types it cannot place when the
+        // job settles, so this parse is the only place their names survive. Never stored.
+        if (imdb) rememberSessionImport(jobId, (preview as ImdbPreview).normalised.titles);
 
         track({
           name: 'import_started',

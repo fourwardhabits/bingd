@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, useWindowDimensions } from 'react-native';
 
@@ -950,13 +951,13 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
     // Both intents offered, and neither of them taken by the press itself.
-    expect(view.getByText('Edit ranking')).toBeTruthy();
+    expect(view.getByText('Rerank')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
     expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('enters the same-watch rerank from Edit ranking, declaring no new watch', async () => {
+  it('enters the same-watch rerank from Rerank, declaring no new watch', async () => {
     /**
      * **The capability the 2026-09-08 consolidation had to keep.** *Rank it again* used
      * to make this call in one tap and is gone; *Edit ranking* opens the log
@@ -968,7 +969,7 @@ describe('the action group', () => {
 
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('Edit ranking'));
+    await fireEvent.press(view.getByText('Rerank'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     // One tap, straight into the comparisons (founder QA, 2026-09-21): the band is the
     // decision, and the "Rank <title> again? [Re-rank]" card that sat here is gone.
@@ -1417,7 +1418,7 @@ describe('where the action row lives', () => {
 });
 
 describe('the ranking menu, in the founder’s words', () => {
-  it('names the two intents Edit ranking and Log another watch, and nothing else', async () => {
+  it('names the two intents Rerank and Log another watch, and nothing else', async () => {
     /**
      * **The founder's menu, 2026-09-08.** It was three rows for a day: *Rank it again*,
      * *Log another watch* and *Change your rating*. The first and third were two doors
@@ -1436,8 +1437,17 @@ describe('the ranking menu, in the founder’s words', () => {
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
-    expect(view.getByText('Edit ranking')).toBeTruthy();
+    expect(view.getByText('Rerank')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
+    // **Rerank's left/right arrows, never the star** (founder spec §5, 2026-11-13): the
+    // star is the initial Rank's. The jest renderer prints an Ionicons glyph, not its name.
+    const glyph = (name: 'star-outline' | 'swap-horizontal-outline') =>
+      String.fromCodePoint(Ionicons.glyphMap[name] as number);
+    const rerankRow = view.getByRole('button', { name: 'Rerank' });
+    expect(within(rerankRow).getByText(glyph('swap-horizontal-outline'))).toBeTruthy();
+    expect(within(rerankRow).queryByText(glyph('star-outline'))).toBeNull();
+    expect(view.queryByText('Edit ranking')).toBeNull();
+    expect(view.queryByText('Recompare')).toBeNull();
     // Every label this group has ever carried and no longer does.
     expect(view.queryByText('Rank it again')).toBeNull();
     expect(view.queryByText('Change your rating')).toBeNull();

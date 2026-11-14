@@ -9,7 +9,7 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
 import { useLogState } from '@/features/collection/use-log-state';
-import { removeFromCollection } from '@/features/collection/writes';
+import { removeFromCollection, type WriteResult } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
@@ -24,9 +24,14 @@ import {
 } from '@/ui/components';
 import { formatWatchDate } from '@/features/collection/dates';
 
-import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
+import {
+  WatchRow,
+  type WatchEdit,
+  type WatchSaveResult,
+} from '@/features/watch-history/WatchRow';
 import {
   groupByYear,
+  historySpan,
   labelFor,
   scoresByWatch,
   type WatchEvent,
@@ -183,8 +188,8 @@ export default function WatchHistoryScreen() {
   const editRanking = () => {
     if (!loggable.data) return;
     // The inline editor closes first, so one sheet edits the title at a time. The row has
-    // already settled any unsaved date or companions — saved, or discarded by the reader's
-    // choice — and flushed the note (`WatchRow`'s `editRanking`).
+    // already settled any unsaved date, companions or note — saved, or discarded by the
+    // reader's choice (`WatchRow`'s `editRanking`).
     setEditingId(null);
     setError(null);
     setPlacement(null);
@@ -199,47 +204,58 @@ export default function WatchHistoryScreen() {
   };
 
   /**
-   * Writes a watch's edit and says whether all of it landed: `true` when every write
-   * succeeded, `false` (with the error line set) when one failed. Edit ranking's *Save*
-   * waits on it so the ranking only opens over a saved watch (stabilization pass,
-   * 2026-11-11); the editor's own Save does not, as before.
+   * Writes a watch's edit and says whether all of it landed: `ok` when every write
+   * succeeded, or the first failure's reason. Both of the editor's Saves wait on it, and
+   * the editor — not this screen's header — says why a save failed, beside the draft it
+   * kept (FU1113-A).
+   *
+   * Every write names this one `watch_event_id`. The note goes to `set_watch_details`
+   * (`watch_events.note`) and nowhere else: the title's review, its sharing and its
+   * spoiler flag are not this editor's to touch, and nothing about the ranking moves.
+   *
+   * The caches are refreshed only when something may have landed, so a refused save
+   * leaves the card exactly as it was.
    */
-  const saveEdit = async (eventId: string, edit: WatchEdit): Promise<boolean> => {
-    if (edit.watchedOn === undefined && !edit.details) return true;
+  const saveEdit = async (eventId: string, edit: WatchEdit): Promise<WatchSaveResult> => {
+    if (edit.watchedOn === undefined && !edit.details) return { ok: true };
     setBusy(true);
     setError(null);
-    const results = [];
-    if (edit.watchedOn !== undefined) {
-      results.push(
-        await editWatchEvent({
-          operationId: newOperationId(),
-          watchEventId: eventId,
-          watchedOn: edit.watchedOn,
-          // The reader is looking at this row and typed into it. Nothing here is defaulted,
-          // so nothing here is `today_default` (§D.6 path 13).
-          basis: edit.watchedOn === null ? 'none' : 'reader',
-        }),
-      );
-    }
-    if (edit.details) {
-      results.push(
-        await setWatchDetails({
-          operationId: newOperationId(),
-          watchEventId: eventId,
-          note: edit.details.note,
-          companionIds: edit.details.companionIds,
-        }),
-      );
-    }
-    setBusy(false);
-    reconcile();
-    for (const result of results) {
-      if (result.outcome === 'failed') {
-        setError(result.message);
-        return false;
+    const results: WriteResult[] = [];
+    try {
+      if (edit.watchedOn !== undefined) {
+        results.push(
+          await editWatchEvent({
+            operationId: newOperationId(),
+            watchEventId: eventId,
+            watchedOn: edit.watchedOn,
+            // The reader is looking at this row and typed into it. Nothing here is
+            // defaulted, so nothing here is `today_default` (§D.6 path 13).
+            basis: edit.watchedOn === null ? 'none' : 'reader',
+          }),
+        );
       }
+      // A refused date stops here: the note and companions are not written behind it.
+      if (edit.details && !results.some((result) => result.outcome === 'failed')) {
+        results.push(
+          await setWatchDetails({
+            operationId: newOperationId(),
+            watchEventId: eventId,
+            note: edit.details.note,
+            companionIds: edit.details.companionIds,
+          }),
+        );
+      }
+    } catch {
+      results.push({ outcome: 'failed', message: 'Could not save this watch.' });
+    } finally {
+      setBusy(false);
     }
-    return true;
+    // `mustReconcile`'s rule, inline: a write that landed, or may have, refreshes the caches.
+    if (results.some((result) => result.outcome !== 'failed' || result.changed === true)) {
+      reconcile();
+    }
+    const failed = results.find((result) => result.outcome === 'failed');
+    return failed?.outcome === 'failed' ? { ok: false, message: failed.message } : { ok: true };
   };
 
   /**
@@ -336,12 +352,15 @@ export default function WatchHistoryScreen() {
     );
 
   const count = events.length;
-  const dated = ordered.filter((event) => event.watchedOn).map((event) => event.watchedOn!);
-  /** `First Mar 4, 2024 · Latest Oct 12, 2026`, for two or more dated watches. */
-  const span =
-    count >= 2 && dated.length >= 2
-      ? `First ${formatWatchDate(dated[dated.length - 1]!)} · Latest ${formatWatchDate(dated[0]!)}`
-      : null;
+  /**
+   * `First Mar 4, 2024 · Latest Oct 12, 2026`, only when it says something: two or more
+   * dated watches on two different days. One dated watch, or two on the same day, would
+   * print the same date twice (founder QA, 2026-11-12). `historySpan` owns the rule.
+   */
+  const spanDates = historySpan(ordered.map((event) => event.watchedOn));
+  const span = spanDates
+    ? `First ${formatWatchDate(spanDates.first)} · Latest ${formatWatchDate(spanDates.latest)}`
+    : null;
 
   if (count === 0) {
     return (
@@ -392,7 +411,7 @@ export default function WatchHistoryScreen() {
             </View>
           </View>
         }
-        renderItem={({ item, index }) => {
+        renderItem={({ item }) => {
           // The year header belongs to the first row of its group, so the list stays one
           // flat array — a SectionList would give the same result and give up the
           // virtualisation tuning this screen is sized for.
@@ -402,8 +421,10 @@ export default function WatchHistoryScreen() {
           const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 
+          // Cards, spaced rather than ruled: the gap below each card is the only separator
+          // (UI wave, 2026-11-12), and the last card's is the list's bottom air.
           return (
-            <View>
+            <View style={styles.item}>
               {showYear ? (
                 <Text variant="sectionHeader" tone="action" style={styles.year}>
                   {String(group?.year)}
@@ -411,7 +432,6 @@ export default function WatchHistoryScreen() {
               ) : null}
               <WatchRow
                 event={item}
-                mediaItemId={id}
                 label={labelOf(item)}
                 score={score}
                 note={details?.note}
@@ -424,10 +444,17 @@ export default function WatchHistoryScreen() {
                 onDismissEdit={() => setEditingId(null)}
                 onSave={(edit) => saveEdit(item.id, edit)}
                 onRemove={() => void remove(item.id, count <= 1)}
-                onEditRanking={canEditRanking ? editRanking : undefined}
+                // Rerank sits on every collapsed card now (founder spec §5), so while one
+                // card's editor is open the others offer none: reranking from another card
+                // would close that editor and drop its unsaved date or companions without
+                // asking. The open card's own Rerank asks first.
+                onEditRanking={
+                  canEditRanking && (editingId === null || editingId === item.id)
+                    ? editRanking
+                    : undefined
+                }
                 busy={busy}
               />
-              {index === ordered.length - 1 ? null : <View style={styles.rule} />}
             </View>
           );
         }}
@@ -486,14 +513,17 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
   },
   loading: { paddingTop: theme.space[3] },
+  // Above its first card; `space[2]` under it so the label does not sit on the card's edge.
   year: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
-    paddingBottom: theme.space[1],
+    paddingBottom: theme.space[2],
   },
-  rule: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.border.hairline,
-    marginHorizontal: theme.layout.gutter,
-  },
+  /**
+   * The seam between two cards. `space[2]`, the compact interval, rather than a section
+   * seam: the card's own padding already gives each watch the air the ruled row had, so a
+   * card costs about ten points more than the row it replaced and a thirty-watch history
+   * stays a scroll of dates rather than of gaps.
+   */
+  item: { paddingBottom: theme.space[2] },
 });

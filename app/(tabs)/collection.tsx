@@ -109,6 +109,32 @@ const COLLECTION_MEDIA: readonly CompactSwitchOption<Medium>[] = [
 const VIEW_MODE_PREF_KEY = 'collection.view-mode';
 
 /**
+ * **Watched, Watchlist or Unranked**, per account, across launches (founder, 2026-11-12).
+ *
+ * The third of this tab's device habits, and deliberately the same mechanism as the two
+ * above: `readPref`/`writePref` over the existing local store, keyed by account, no column.
+ * It is independent of the side — a reader on TV/Watchlist reopens on TV/Watchlist, and
+ * either half can move without the other.
+ *
+ * **Only a choice writes it.** Watched is the first-ever default and is never saved on
+ * mount, for the reason the view mode gives: a screen that stored its own default could
+ * never change that default for anybody. What counts as a choice is listed at
+ * `chooseSegment`; what does *not* is just as deliberate:
+ *
+ * - **The Unranked fallback.** A saved Unranked on a side that has nothing unranked draws
+ *   Watched (`active` below), and the collection reads as having nothing unranked while it
+ *   is still loading. Writing Watched there would erase the reader's choice on every cold
+ *   start before the list arrived, so the display falls back and the store does not.
+ * - **A navigation that asks for Unranked** (`show: 'unranked'`). It wins on arrival, over
+ *   a read still in flight, but it is the importer's request rather than the reader's
+ *   habit, so the saved segment stands until the reader's own next tap.
+ */
+const SEGMENT_PREF_KEY = 'collection.segment';
+
+const isSegment = (value: unknown): value is Segment =>
+  value === 'watched' || value === 'watchlist' || value === 'unranked';
+
+/**
  * The user's own working surface (screens.md §5).
  *
  * Ranked and Watched used to be separate tabs and were largely the same list:
@@ -136,7 +162,17 @@ export default function CollectionScreen() {
   }>();
   const router = useRouter();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
-  const [segment, setSegment] = useState<Segment>('watched');
+  /**
+   * The segment, tagged with the account it belongs to — the shape `mediumPref` below has,
+   * for the same reason: an account switch is then correct during the render that switches,
+   * and a reader who is not the one this was set for sees Watched, never somebody else's
+   * Watchlist, even while their own read is still out.
+   */
+  const [segmentPref, setSegmentPref] = useState<{ profileId: string; segment: Segment }>(() => ({
+    profileId: profile.id,
+    segment: 'watched',
+  }));
+  const segment: Segment = segmentPref.profileId === profile.id ? segmentPref.segment : 'watched';
   /**
    * The remembered side, tagged with the account it was read for.
    *
@@ -173,6 +209,8 @@ export default function CollectionScreen() {
   const chosenMedium = useRef(false);
   /** The same guard for the view control, for the same race. */
   const chosenMode = useRef(false);
+  /** And for the segment: a tap, or a navigation's request, outranks a late read. */
+  const chosenSegment = useRef(false);
 
   useEffect(() => {
     readPref<UnrankedNudgePref>(`${profile.id}.${NUDGE_PREF_KEY}`)
@@ -215,6 +253,39 @@ export default function CollectionScreen() {
   }, [profile.id, mediumParam]);
 
   /**
+   * The remembered segment, applied when it arrives.
+   *
+   * The view mode's shape below — `cancelled`, the ref reset per account, validated rather
+   * than trusted, and resolved in both directions — so a miss or a failed read lands on
+   * Watched for *this* account rather than leaving whatever was in state.
+   *
+   * **Declared before the `show: 'unranked'` effect, and that order is load-bearing.**
+   * Effects run in declaration order, so this one resets `chosenSegment` and starts its
+   * read first, and the navigation's effect then marks the segment chosen; the read finds
+   * it chosen when it lands and stands down. The other way round, the reset would wipe the
+   * navigation's mark on a first mount and a slow read could move Unranked to Watchlist.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    chosenSegment.current = false;
+    const settle = (stored: unknown) => {
+      if (cancelled || chosenSegment.current) return;
+      const next: Segment = isSegment(stored) ? stored : 'watched';
+      setSegmentPref((current) =>
+        current.profileId === profile.id && current.segment === next
+          ? current
+          : { profileId: profile.id, segment: next },
+      );
+    };
+    readPref<unknown>(`${profile.id}.${SEGMENT_PREF_KEY}`)
+      .then(settle)
+      .catch(() => settle(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
+
+  /**
    * **Unranked, asked for by name** (`unrankedMovies` in `src/lib/routes.ts`).
    *
    * The importer's summary ends on "Rank imported movies", and an import is films: so it
@@ -236,12 +307,14 @@ export default function CollectionScreen() {
     setAskedFor(showParam);
     if (showParam === 'unranked') {
       setMediumPref({ profileId: profile.id, medium: 'movies' });
-      setSegment('unranked');
+      // Not written: see `SEGMENT_PREF_KEY`. The reader's next tap is what saves.
+      setSegmentPref({ profileId: profile.id, segment: 'unranked' });
     }
   }
   useEffect(() => {
     if (showParam !== 'unranked') return;
     chosenMedium.current = true;
+    chosenSegment.current = true;
     router.setParams({ show: undefined });
   }, [showParam, router]);
 
@@ -360,6 +433,27 @@ export default function CollectionScreen() {
   const active: Segment = segment === 'unranked' && unrankedCount === 0 ? 'watched' : segment;
 
   /**
+   * **A segment the reader chose**, remembered for next time.
+   *
+   * Every way a reader moves the segment comes through here: the marquee, the two cards'
+   * View unranked and Rank, the medium switch's fall back to Watched, and a re-press of the
+   * tab. That last one is a choice too (founder, 2026-11-12): what the reader sees after it
+   * is Watched, and a restart should show what they last saw rather than revive a Watchlist
+   * they just pressed their way out of.
+   *
+   * Fire-and-forget, as the medium's write is: a store that refuses costs the reader
+   * nothing more than opening on Watched next time.
+   */
+  const chooseSegment = useCallback(
+    (next: Segment) => {
+      chosenSegment.current = true;
+      setSegmentPref({ profileId: profile.id, segment: next });
+      void writePref(`${profile.id}.${SEGMENT_PREF_KEY}`, next).catch(() => {});
+    },
+    [profile.id],
+  );
+
+  /**
    * Switching Movies and TV, forgetting Unranked when the new side has none, and
    * remembering the choice for next time.
    *
@@ -376,7 +470,9 @@ export default function CollectionScreen() {
     chosenMedium.current = true;
     setMediumPref({ profileId: profile.id, medium: next });
     if (segment === 'unranked' && unrankedFor(next) === 0) {
-      setSegment('watched');
+      // Saved, unlike the display-only fallback at `active`: this one is the consequence of
+      // a tap, and "falling back for good" has to survive a restart to mean it.
+      chooseSegment('watched');
     }
     void writePref(`${profile.id}.${MEDIUM_PREF_KEY}`, next).catch(() => {});
   };
@@ -396,11 +492,14 @@ export default function CollectionScreen() {
    * watchlist is one nobody sets twice. Going back to the top of a section is not a
    * reason to throw away what somebody deliberately chose.
    *
+   * **The Watched it lands on is remembered** (2026-11-12), like any other choice of
+   * section: a restart shows what the reader last saw. See `chooseSegment`.
+   *
    * There is no scroll-to-top here, because there is no handle to scroll: the list lives
    * inside `CollectionView` and belongs to it. Reaching through the boundary for a
    * gesture would be new plumbing on a screen that passed its own physical pass.
    */
-  useTabReset(useCallback(() => setSegment('watched'), []));
+  useTabReset(useCallback(() => chooseSegment('watched'), [chooseSegment]));
 
   /**
    * **The unranked backlog, when it is on** (unified Backlog + Refine, 2026-09-21).
@@ -455,7 +554,7 @@ export default function CollectionScreen() {
       size="marquee"
       value={active}
       options={segments}
-      onChange={setSegment}
+      onChange={chooseSegment}
       accessibilityHint="Choose Watched, Watchlist or Unranked"
       testID="collection-mode"
     />
@@ -487,7 +586,7 @@ export default function CollectionScreen() {
               already seen.
             </Text>
             <View style={styles.nudgeActions}>
-              <Button label="View unranked" size="sm" onPress={() => setSegment('unranked')} />
+              <Button label="View unranked" size="sm" onPress={() => chooseSegment('unranked')} />
               <Button
                 label="Dismiss"
                 kind="secondary"
@@ -506,7 +605,7 @@ export default function CollectionScreen() {
               recommendations.
             </Text>
             <View style={styles.nudgeActions}>
-              <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
+              <Button label="Rank" size="sm" onPress={() => chooseSegment('unranked')} />
               <Button
                 label="Dismiss"
                 kind="secondary"
@@ -609,8 +708,11 @@ function Watched({
   const ranked = useRankedCollection(userId, medium);
   /**
    * **TV is two rankings** (TV show & season ranking, 2026-11-14): the seasons above and
-   * the whole shows here, each scored against its own bands and drawn together under
-   * Candidate A's precedence (`watchedItems`). Movies never asks for this one.
+   * the whole shows here, each scored against its own bands. The Watched wall draws **one
+   * poster per series** from the two (WS-TVC, founder spec t168u §2, `watchedItems` →
+   * `projectShows`): the explicit show score, else the mean of the ranked seasons. Both
+   * pools are read whole, as they already were, so there is no request per series. Movies
+   * never asks for this one.
    */
   const shows = useRankedCollection(userId, 'tv_shows', { enabled: medium === 'tv_seasons' });
   const logged = useLoggedCollection(userId);

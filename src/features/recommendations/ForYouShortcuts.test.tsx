@@ -90,11 +90,11 @@ it('stacks them at a large text size', async () => {
 it('shows the unread count as a badge, and says it in full', async () => {
   withFontScale(1);
   const { list } = shortcuts({
-    sent: { badge: '12+', accessibilityLabel: 'Sent to You, at least 12 unopened' },
+    sent: { badge: '12+', accessibilityLabel: 'Sent to You, at least 12 new' },
   });
   await render(<ForYouShortcuts shortcuts={list} />);
 
-  const sent = screen.getByRole('button', { name: 'Sent to You, at least 12 unopened' });
+  const sent = screen.getByRole('button', { name: 'Sent to You, at least 12 new' });
   // Hidden from a screen reader on purpose: the button's label says the count in full.
   expect(screen.getByText('12+', { includeHiddenElements: true })).toBeTruthy();
   expect(sent.props.accessibilityState).toMatchObject({ selected: false });

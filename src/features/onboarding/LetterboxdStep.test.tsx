@@ -221,13 +221,15 @@ type View = Awaited<ReturnType<typeof open>>;
 /** Letterboxd, from the choice: its own page, with its instructions and its picker. */
 const chooseLetterboxd = async (view: View) => {
   await fireEvent.press(view.getByTestId('choose-letterboxd'));
-  await waitFor(() => expect(view.getByText('Bring your Letterboxd history')).toBeTruthy());
+  await waitFor(() =>
+    expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+  );
 };
 
 /** Letterboxd, then its picker: what *Import from Letterboxd* used to do in one tap. */
 const pickLetterboxd = async (view: View) => {
   await chooseLetterboxd(view);
-  await fireEvent.press(view.getByRole('button', { name: 'Choose Letterboxd ZIP' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Upload Letterboxd ZIP' }));
 };
 
 const Q = 'Already tracking movies somewhere else?';
@@ -256,7 +258,7 @@ describe('the question', () => {
       ),
     ).toBeTruthy();
     // Not a service's own page yet.
-    expect(view.queryByText('Bring your Letterboxd history')).toBeNull();
+    expect(view.queryByText('Bring over your Letterboxd history')).toBeNull();
   });
 
   /**
@@ -321,7 +323,9 @@ describe('the question', () => {
    * file* returned to this question with a giant blank area). The same tree, the same styles,
    * whether the reader got here fresh or from the preview.
    */
-  it('returns from Choose a different file to the service, and from there to the same question', async () => {
+  // IMP1113-UI: *Choose a different service* was removed from the service page by the
+  // founder, so this ends on the service page instead of walking back to the question.
+  it('returns from Choose a different file to the service page, drawn as a fresh page', async () => {
     const fresh = await open();
     const outline = (view: typeof fresh) => {
       const headline = view.getByText(Q);
@@ -340,13 +344,15 @@ describe('the question', () => {
     await fireEvent.press(fresh.getByRole('button', { name: 'Choose a different file' }));
 
     // A different FILE keeps the service: back on Letterboxd's page, Not now on it.
-    await waitFor(() => expect(fresh.getByText('Bring your Letterboxd history')).toBeTruthy());
+    await waitFor(() =>
+      expect(fresh.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
     expect(fresh.getByRole('button', { name: 'Not now' })).toBeTruthy();
 
-    // A different SERVICE is the question again, drawn exactly as it first was.
-    await fireEvent.press(fresh.getByRole('button', { name: 'Choose a different service' }));
-    await waitFor(() => expect(fresh.getByText(Q)).toBeTruthy());
-    expect(outline(fresh)).toBe(before);
+    // There is no way back to a different SERVICE from here any more (founder); the
+    // question as first drawn is still the one asserted above.
+    expect(fresh.queryByRole('button', { name: 'Choose a different service' })).toBeNull();
+    expect(before).toContain('paddingHorizontal');
   });
 
   it('does not count the importer as opened just because the step was shown', async () => {
@@ -425,8 +431,8 @@ describe('Not now', () => {
       }),
     );
     // Back on Letterboxd's page, both answers live, and no apology for a choice.
-    expect(view.getByText('Bring your Letterboxd history')).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Choose Letterboxd ZIP' })).toBeTruthy();
+    expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
     // The press that reached the importer is the one that counts it.
@@ -445,7 +451,7 @@ describe('Not now', () => {
     await pickLetterboxd(view);
 
     await waitFor(() => expect(view.getByText(/not the Letterboxd ZIP/)).toBeTruthy());
-    expect(view.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(view.getByText('Upload Letterboxd ZIP')).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
@@ -458,7 +464,7 @@ describe('Not now', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
@@ -487,8 +493,8 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     // Accepted: the step does not wait for the result.
     await waitFor(() =>
@@ -540,8 +546,8 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     await waitFor(() => expect(view.getByText(/didn.+t finish sending/)).toBeTruthy());
     expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
@@ -559,8 +565,8 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     await waitFor(() => expect(view.getByText(/didn.+t finish sending/)).toBeTruthy());
     expect(called()).not.toContain('import_ready');
@@ -591,13 +597,15 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
     await waitFor(() => expect(view.getByText('We couldn’t check your import')).toBeTruthy());
 
     // Start over is the importer's own; it returns to the service's page with Not now on it.
     await fireEvent.press(view.getByRole('button', { name: 'Start over' }));
-    await waitFor(() => expect(view.getByText('Bring your Letterboxd history')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'continued' });
@@ -615,8 +623,8 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     await waitFor(() => expect(view.getByText('We couldn’t check your import')).toBeTruthy());
     expect(view.queryByText(/didn.+t finish sending/)).toBeNull();
@@ -651,8 +659,8 @@ describe('importing from the step', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     await waitFor(() => expect(view.getByText('Your Letterboxd history is in')).toBeTruthy());
     // Collection is outside the flow, and the guard would send it straight back.
@@ -664,12 +672,18 @@ describe('importing from the step', () => {
     expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'continued' });
   });
 
-  it('opens the instructions over the step without a refused presentation', async () => {
+  // IMP1113-UI: the instructions open inline (a `Disclosure`), not as a sheet, so there is
+  // no presentation at all to be refused, and the step's page stays where it is.
+  it('opens the instructions inline on the step without a refused presentation', async () => {
     const view = await open();
     await chooseLetterboxd(view);
 
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
-    await waitFor(() => expect(view.getByText('Getting your Letterboxd file')).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Need help getting the file?', expanded: true }),
+      ).toBeTruthy(),
+    );
     // The founder's four steps, numbered, in Letterboxd's current tab names.
     for (const step of [
       'Open Letterboxd.com and go to Settings → Import & Export.',
@@ -680,9 +694,12 @@ describe('importing from the step', () => {
       expect(view.getByText(step)).toBeTruthy();
     }
     expect(view.getByRole('button', { name: 'Open Letterboxd’s export page' })).toBeTruthy();
-    await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
 
-    await waitFor(() => expect(view.queryByText('Getting your Letterboxd file')).toBeNull());
+    await waitFor(() =>
+      expect(view.queryByText('Download the ZIP when it’s ready.')).toBeNull(),
+    );
+    expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
     expect(shows().refused).toBe(0);
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_opened',
@@ -727,8 +744,8 @@ describe('an import that is already running', () => {
     const view = await open();
 
     await pickLetterboxd(view);
-    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import'));
 
     await waitFor(() => expect(view.getByText('An import is already running')).toBeTruthy());
     expect(called()).not.toContain('import_stage');

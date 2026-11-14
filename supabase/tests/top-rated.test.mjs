@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { createTestDb } from './harness.mjs';
+import { addFillerRankings } from './helpers/qualify.mjs';
 
 /**
  * Top Rated: the catalogue in community-score order (20260913000100).
@@ -26,6 +27,20 @@ const movie = (title) => t.createMovie(title, seq++);
 
 /** Ranks to completion always letting the incumbent win, so arrival order is rank order. */
 const rankBelow = (id, bucket) => t.rankToCompletion(id, bucket, async (pivot) => pivot);
+
+/**
+ * A rater who is an eligible community contributor (20261119000100): ten filler rankings
+ * in the group, through the real engine, before any of the test's own rankings. Fillers
+ * sit in not_for_me, so a loved or fine subject scores exactly what it did; each filler
+ * has one rater, so none reaches the floor of five or shows up on a wall. Hidden and
+ * suspended raters are qualified too, so their exclusion is attributable to visibility
+ * and status alone.
+ */
+const rater = async (username, { group = 'movies', ...opts } = {}) => {
+  const id = await t.createUser({ username, ...opts });
+  await addFillerRankings(t, id, group === 'tv' ? 'seasons' : 'movies');
+  return id;
+};
 
 const topRated = async (medium, limit = 20, cursor = null) =>
   (
@@ -68,7 +83,7 @@ describe('top_rated_titles', () => {
   it('orders by the community score, and agrees with community_score on every row', async () => {
     const raters = [];
     for (let i = 0; i < 5; i += 1) {
-      raters.push(await t.createUser({ username: `agree${i}` }));
+      raters.push(await rater(`agree${i}`));
     }
 
     const best = await movie('The Best One');
@@ -108,7 +123,7 @@ describe('top_rated_titles', () => {
     // can explain the difference in the answer.
     const raters = [];
     for (let i = 0; i < 5; i += 1) {
-      raters.push(await t.createUser({ username: `bound${i}` }));
+      raters.push(await rater(`bound${i}`));
     }
 
     const four = await movie('Four Ratings');
@@ -138,7 +153,8 @@ describe('top_rated_titles', () => {
   });
 
   it('reports the threshold it applied, and does not read the display threshold', async () => {
-    const who = await t.createUser({ username: 'thresholdreader' });
+    // Eligible (20261119000100), so the refusal below is the floor's and nothing else's.
+    const who = await rater('thresholdreader');
     await t.actAs(who);
 
     // `score.community_min_ratings` is the *title page's* number and is 1. If this
@@ -157,9 +173,9 @@ describe('top_rated_titles', () => {
   it('counts public active accounts only, exactly as community_score does', async () => {
     const publicRaters = [];
     for (let i = 0; i < 5; i += 1) {
-      publicRaters.push(await t.createUser({ username: `pop${i}` }));
+      publicRaters.push(await rater(`pop${i}`));
     }
-    const hidden = await t.createUser({ username: 'hiddenone', visibility: 'private' });
+    const hidden = await rater('hiddenone', { visibility: 'private' });
 
     const film = await movie('Counted Once');
     for (const who of publicRaters) {
@@ -181,7 +197,7 @@ describe('top_rated_titles', () => {
      * distinguishes them. It is also the direction that matters for moderation — a
      * suspended account's ratings must stop counting towards what everybody is shown.
      */
-    const suspended = await t.createUser({ username: 'suspendedrater' });
+    const suspended = await rater('suspendedrater');
     await t.actAs(suspended);
     await rankBelow(film, 'not_for_me');
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [suspended]);
@@ -195,7 +211,7 @@ describe('top_rated_titles', () => {
   it('excludes a blocked account from both directions, like the single-title read', async () => {
     const raters = [];
     for (let i = 0; i < 5; i += 1) {
-      raters.push(await t.createUser({ username: `blockpop${i}` }));
+      raters.push(await rater(`blockpop${i}`));
     }
     const viewer = raters[0];
     const blocked = raters[4];
@@ -230,7 +246,7 @@ describe('top_rated_titles', () => {
 
   it('answers for TV with seasons and never with a series', async () => {
     const raters = [];
-    for (let i = 0; i < 5; i += 1) raters.push(await t.createUser({ username: `tvfan${i}` }));
+    for (let i = 0; i < 5; i += 1) raters.push(await rater(`tvfan${i}`, { group: 'tv' }));
 
     const show = await t.createSeries('A Show', seq++);
     const season = await t.createSeason(show, 1, 'Season 1');
@@ -258,7 +274,7 @@ describe('top_rated_titles', () => {
 
   it('pages without repeating or skipping a row', async () => {
     const raters = [];
-    for (let i = 0; i < 5; i += 1) raters.push(await t.createUser({ username: `pager${i}` }));
+    for (let i = 0; i < 5; i += 1) raters.push(await rater(`pager${i}`));
 
     // Six films, each rated by everyone, in a deliberate order so the scores spread.
     const films = [];
@@ -304,8 +320,8 @@ describe('top_rated_titles', () => {
      */
     const left = [];
     const right = [];
-    for (let i = 0; i < 5; i += 1) left.push(await t.createUser({ username: `tieleft${i}` }));
-    for (let i = 0; i < 5; i += 1) right.push(await t.createUser({ username: `tieright${i}` }));
+    for (let i = 0; i < 5; i += 1) left.push(await rater(`tieleft${i}`));
+    for (let i = 0; i < 5; i += 1) right.push(await rater(`tieright${i}`));
 
     const one = await movie('Tie One');
     const two = await movie('Tie Two');
@@ -411,8 +427,19 @@ describe('top_rated_titles', () => {
  * the floor**, or a green run proves only the floor.
  */
 describe('the shared support floor', () => {
+  /**
+   * 20261119000100: every database here pins `score.contributor_min_rankings` to 1. These
+   * cases build a per-title rating-count distribution and assert its percentile exactly;
+   * qualifying each rater with ten distinct filler titles would add ten one-rater titles
+   * per person and rewrite that distribution. At 1 every rater is eligible, so the
+   * populations are exactly the ones built. The floor over eligible contributors only is
+   * asserted in community-eligibility.test.mjs.
+   */
   const own = async (body) => {
     const db = await createTestDb();
+    await db.sql(
+      `update app_config set value = '1'::jsonb where key = 'score.contributor_min_rankings'`,
+    );
     try {
       await body(db);
     } finally {

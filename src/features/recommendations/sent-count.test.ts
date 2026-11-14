@@ -2,7 +2,14 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { SENT_LIMIT, unopenedCount, unopenedIsAtLeast, useSentToYou } from './use-sent-to-you';
+import {
+  SENT_LIMIT,
+  isUnread,
+  sentShortcutBadge,
+  unreadCount,
+  unreadIsAtLeast,
+  useSentToYou,
+} from './use-sent-to-you';
 
 import type { SentRecommendation } from './use-sent-to-you';
 
@@ -14,6 +21,7 @@ jest.mock('@/lib/supabase', () => ({
     from: () => {
       const chain = {
         select: () => chain,
+        eq: () => chain,
         in: () => chain,
         then: (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null }),
       };
@@ -62,6 +70,7 @@ const row = (over: Partial<SentRecommendation> = {}): SentRecommendation =>
     runtimeMinutes: null,
     recommendedAt: '2026-01-01T00:00:00Z',
     openedAt: null,
+    seenAt: null,
     ...over,
   }) as SentRecommendation;
 
@@ -75,33 +84,123 @@ const list = (unopened: number, opened = 0) => [
 
 describe('how many are unopened', () => {
   it('counts them', () => {
-    expect(unopenedCount(list(3, 5))).toBe(3);
+    expect(unreadCount(list(3, 5))).toBe(3);
   });
 
   it('is nothing for an empty or absent list', () => {
-    expect(unopenedCount([])).toBe(0);
-    expect(unopenedCount(undefined)).toBe(0);
+    expect(unreadCount([])).toBe(0);
+    expect(unreadCount(undefined)).toBe(0);
   });
 });
 
 describe('whether that number is the whole truth', () => {
   it('is exact for an ordinary list', () => {
-    expect(unopenedIsAtLeast(list(3, 5))).toBe(false);
+    expect(unreadIsAtLeast(list(3, 5))).toBe(false);
   });
 
   it('is still exact on a full page that has opened rows on the end of it', () => {
     // The page is full, so the *list* is capped — but the unopened rows are a prefix and
     // that prefix ended before the cap did, so there cannot be another unopened one.
-    expect(unopenedIsAtLeast(list(150, SENT_LIMIT - 150))).toBe(false);
-    expect(unopenedCount(list(150, SENT_LIMIT - 150))).toBe(150);
+    expect(unreadIsAtLeast(list(150, SENT_LIMIT - 150))).toBe(false);
+    expect(unreadCount(list(150, SENT_LIMIT - 150))).toBe(150);
   });
 
   it('is a floor when the whole page is unopened', () => {
     // 200 unopened and nothing else: there is no way to tell this from 201.
-    expect(unopenedIsAtLeast(list(SENT_LIMIT))).toBe(true);
-    expect(unopenedCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
+    expect(unreadIsAtLeast(list(SENT_LIMIT))).toBe(true);
+    expect(unreadCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
   });
 
+});
+
+/**
+ * **Unread is neither opened nor seen** (FU1113-E, 20261121000100). The dot counts unread;
+ * the floor test still reads `openedAt`, because the server's order is still unopened first.
+ */
+describe('unread', () => {
+  const seen = '2026-01-03T00:00:00Z';
+
+  it('is neither opened nor seen', () => {
+    expect(isUnread(row())).toBe(true);
+    expect(isUnread(row({ seenAt: seen }))).toBe(false);
+    expect(isUnread(row({ openedAt: seen }))).toBe(false);
+  });
+
+  it('is what the dot counts', () => {
+    const rows = [row({ id: 'a' }), row({ id: 'b', seenAt: seen }), ...list(0, 2)];
+    expect(unreadCount(rows)).toBe(1);
+  });
+
+  it('is a floor only when the whole full page is unopened, seen or not', () => {
+    // 200 unopened, some of them seen: there may be unread ones beyond the cap.
+    const full = list(SENT_LIMIT).map((r, i) => (i < 50 ? { ...r, seenAt: seen } : r));
+    expect(unreadCount(full)).toBe(SENT_LIMIT - 50);
+    expect(unreadIsAtLeast(full)).toBe(true);
+
+    // An opened row on the page ends the unopened prefix, so the count is exact.
+    expect(unreadIsAtLeast(list(SENT_LIMIT - 1, 1))).toBe(false);
+  });
+
+  /**
+   * **Codex review, #290.** With more than 200 unopened, seeing the first page makes the
+   * count in hand 0 while the page is still all unopened — there may be unread rows past
+   * the cap. The badge used to need a count above zero, so they vanished.
+   */
+  it('keeps an indicator when none in hand is unread but the page is a floor', () => {
+    const allSeen = list(SENT_LIMIT).map((r) => ({ ...r, seenAt: seen }));
+    expect(unreadCount(allSeen)).toBe(0);
+    expect(unreadIsAtLeast(allSeen)).toBe(true);
+    expect(sentShortcutBadge(allSeen)).toEqual({
+      badge: 'New',
+      spoken: 'Sent to You, more may be new',
+    });
+
+    // Before it was seen, the floor as a number, as before.
+    expect(sentShortcutBadge(list(SENT_LIMIT))).toEqual({
+      badge: `${SENT_LIMIT}+`,
+      spoken: `Sent to You, at least ${SENT_LIMIT} new`,
+    });
+    // An exact count, and an exact nothing, are unchanged.
+    expect(sentShortcutBadge(list(3, 5))).toEqual({ badge: '3', spoken: 'Sent to You, 3 new' });
+    const seenAndOpened = list(SENT_LIMIT - 1, 1).map((r) => ({ ...r, seenAt: seen }));
+    expect(sentShortcutBadge(seenAndOpened)).toEqual({ badge: null, spoken: 'Sent to You' });
+    expect(sentShortcutBadge(undefined)).toEqual({ badge: null, spoken: 'Sent to You' });
+  });
+
+  it('reads seen_at from the server, and treats an older backend without it as unseen', async () => {
+    mockRpc.mockResolvedValue({
+      data: [
+        { ...serverRow('r1'), seen_at: seen },
+        serverRow('r2'), // no seen_at at all: a backend before 20261121000100
+      ],
+      error: null,
+    });
+    const { result } = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(result.current.data?.map((r) => r.seenAt)).toEqual([seen, null]);
+    expect(unreadCount(result.current.data)).toBe(1);
+  });
+});
+
+const serverRow = (id: string) => ({
+  id,
+  sender_id: 's1',
+  sender_username: 'ada',
+  sender_display_name: 'Ada',
+  sender_avatar_path: null,
+  media_item_id: `film-${id}`,
+  media_kind: 'movie',
+  media_title: 'Heat',
+  series_title: null,
+  poster_path: null,
+  release_date: '1995-12-15',
+  genres: [],
+  original_language: 'en',
+  runtime_minutes: 170,
+  recommended_at: '2026-01-01T00:00:00Z',
+  opened_at: null,
+  message: null,
 });
 
 /**
@@ -109,7 +208,7 @@ describe('whether that number is the whole truth', () => {
  *
  * The first version of this asserted `SENT_LIMIT === 200` and nothing else, which
  * independent review 21e correctly called out: replacing `p_limit: SENT_LIMIT` with a
- * literal `100` left it green. The constant would still be 200, `unopenedIsAtLeast`
+ * literal `100` left it green. The constant would still be 200, `unreadIsAtLeast`
  * would still compare against 200, and a hundred unopened recommendations would be
  * presented as an exact count of a hundred while the reader had more. A test on a
  * constant proves the constant.

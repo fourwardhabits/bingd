@@ -1,14 +1,17 @@
-import { Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 
-import { track } from '@/lib/analytics';
-import type { ImportSurface } from '@/lib/analytics';
-import { Button, Sheet, Text } from '@/ui/components';
+import { track, type ImportSurface } from '@/lib/analytics';
+import { Button, Disclosure, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import type { ImportProvider } from './providers';
 
 /**
  * How to get the file, for the one step of this flow that happens in somebody else's app.
+ *
+ * IMP1113-UI: this copy moved here, verbatim, from `HowToExportSheet`, when the help became
+ * an inline disclosure on the intro and on the failure screens instead of a sheet. The
+ * evidence below is unchanged and still governs the words.
  *
  * ---------------------------------------------------------------------------
  * WHAT IS VERIFIED HERE, AND WHAT IS NOT
@@ -62,7 +65,7 @@ import type { ImportProvider } from './providers';
  * tabs, only one of which has the export on it. A stale path would land on Letterboxd's own
  * 404 rather than ours, with the site's navigation still on it.
  */
-const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
+export const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
 /**
  * The four steps (founder, 2026-09-14), in the tab names the header records as current.
@@ -84,106 +87,79 @@ export const HOW_TO_STEPS = [
  * **CSV**, and recent IMDb prepares it and offers the download on an exports page rather than
  * immediately. The button opens the ratings page, which is where the control is in both.
  * Recorded as open for the founder in `docs/product/imdb-import.md`.
+ *
+ * Step 2 is no longer soft (2026-11-13): IMDb Help's Ratings FAQ (updated 9 Feb 2026) puts
+ * the Export icon at the top right of Your Ratings, not in a menu. Taken from the founder's
+ * brief, which checked the page; this environment still cannot reach imdb.com.
  */
 export const IMDB_HOW_TO_STEPS = [
   'On imdb.com, sign in and open Your Ratings.',
-  'Open the page’s menu and choose Export.',
+  'Tap Export at the top right of Your Ratings.',
   'IMDb prepares a CSV file. When it’s ready, download it (IMDb may list it under Your exports).',
   'Come back to bingd and choose that CSV.',
 ] as const;
 
-const IMDB_RATINGS = 'https://www.imdb.com/list/ratings';
+export const IMDB_RATINGS = 'https://www.imdb.com/list/ratings';
 
-const SHEET = {
+const HELP = {
   letterboxd: {
-    label: 'How to export from Letterboxd',
-    title: 'Getting your Letterboxd file',
     steps: HOW_TO_STEPS,
     open: 'Open Letterboxd’s export page',
     url: LETTERBOXD_EXPORT,
   },
   imdb: {
-    label: 'How to export from IMDb',
-    title: 'Getting your IMDb file',
     steps: IMDB_HOW_TO_STEPS,
     open: 'Open your IMDb ratings',
     url: IMDB_RATINGS,
   },
-} as const;
+} as const satisfies Record<
+  ImportProvider,
+  { steps: readonly string[]; open: string; url: string }
+>;
 
-export function HowToExportSheet({
-  visible,
-  onClose,
+/**
+ * *Need help getting the file?*, collapsed until asked (IMP1113-UI). The numbered steps and a
+ * link to the provider's own page, which is the authority (the header above says why).
+ *
+ * The link counts `import_instructions_opened` exactly as the sheet's button did, so the
+ * funnel keeps its meaning.
+ */
+export function ExportHelp({
+  provider,
   surface,
-  provider = 'letterboxd',
 }: {
-  visible: boolean;
-  onClose: () => void;
+  provider: ImportProvider;
   surface: ImportSurface;
-  /** Whose steps. Letterboxd when absent, which is every caller that predates the choice. */
-  provider?: ImportProvider;
 }) {
-  const sheet = SHEET[provider];
+  const help = HELP[provider];
   const open = () => {
     track({ name: 'import_instructions_opened', props: { surface, provider } });
-    void Linking.openURL(sheet.url).catch(() => {});
+    void Linking.openURL(help.url).catch(() => {});
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} label={sheet.label}>
-      {/**
-       * **The sheet's own layout, the way the Details sheet draws it** (founder, physical
-       * preview QA, 2026-09-14: the first version ran edge to edge). `Sheet` supplies the
-       * panel, the handle and the safe-area padding under the last child, and no horizontal
-       * padding, so the content brings the gutter. The steps scroll inside the panel's 90%
-       * cap (shrink, no grow) and the two actions stay below them, so the largest text sizes
-       * cannot push Done off the sheet. Same shape as `TitleRecallSheet`.
-       */}
-      <View style={styles.sheet}>
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
-          <Text variant="headline">{sheet.title}</Text>
-
-          <View style={styles.steps}>
-            {sheet.steps.map((step, index) => (
-              <View key={step} style={styles.step}>
-                <Text variant="subhead" tone="action" style={styles.number}>
-                  {index + 1}
-                </Text>
-                <Text variant="body" tone="secondary" style={styles.stepText}>
-                  {step}
-                </Text>
-              </View>
-            ))}
+    <Disclosure label="Need help getting the file?" variant="callout" testID="export-help">
+      <View style={styles.body}>
+        {help.steps.map((step, index) => (
+          <View key={step} style={styles.step}>
+            <Text variant="subhead" tone="action" style={styles.number}>
+              {index + 1}
+            </Text>
+            <Text variant="body" tone="secondary" style={styles.stepText}>
+              {step}
+            </Text>
           </View>
-        </ScrollView>
-
-        <View style={styles.foot}>
-          <Button label={sheet.open} onPress={open} />
-          <Button label="Done" kind="secondary" onPress={onClose} />
-        </View>
+        ))}
+        <Button label={help.open} kind="secondary" onPress={open} />
       </View>
-    </Sheet>
+    </Disclosure>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: { paddingTop: theme.space[2], flexShrink: 1 },
-  scroll: { flexGrow: 0, flexShrink: 1 },
-  // The wrapper's `space[2]` is the gap under the handle (design-system.md, Layout
-  // invariants), so the body pads the sides and the bottom only.
-  body: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.layout.gutter,
-    gap: theme.space[4],
-  },
-  steps: { gap: theme.space[3] },
+  body: { gap: theme.space[3] },
   step: { flexDirection: 'row', gap: theme.space[3] },
   // A fixed width so the numbers form a column and the text a straight left edge.
   number: { width: theme.space[4], textAlign: 'right' },
   stepText: { flex: 1 },
-  foot: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-    gap: theme.space[2],
-  },
 });

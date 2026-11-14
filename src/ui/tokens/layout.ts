@@ -33,6 +33,26 @@ export const layout = {
    *  full-bleed surface in the app (design-system.md §7). */
   gutter: space[4],
   sectionGap: space[6],
+  /**
+   * **The vertical rhythm of a section, named once** (FU1113-B, 2026-11-13).
+   *
+   *   above              a section's top edge to whatever ends above it — a sheet's drag
+   *                      handle or title, or the page's previous block.
+   *   headingToControls  a section heading to its own controls (chips, toggles).
+   *   controlsToContent  those controls to the content they act on.
+   *   between            one section's end to the next section's heading.
+   *
+   * Every value is a step of `space`, so this is a vocabulary rather than new numbers:
+   * screens that agreed by hand now agree by name, and a filter sheet's Genre / Decade /
+   * Language / Rating gaps are equal because they are the same token. `between` is
+   * `sectionGap`'s value on purpose — one section interval in the app.
+   */
+  section: {
+    above: space[4],
+    headingToControls: space[2],
+    controlsToContent: space[3],
+    between: space[6],
+  },
   cardPadding: space[4],
   /** Efficient surfaces: Rankings, Search. */
   rowMinHeight: 56,
@@ -69,6 +89,20 @@ export const layout = {
      * type, where it is the difference between a compact control and a full-width one.
      */
     inlineButtonMaxWidth: 168,
+    /**
+     * **The compact filled action: the slimmer Rank button's metrics, named once**
+     * (founder spec §2A, 2026-11-13).
+     *
+     * The Rank invitation on the title page is drawn 8pt under the 44pt floor and pads the
+     * difference back as touch area (`TitleActions`' `RANK_VISIBLE_HEIGHT`). `SaveButton`
+     * is the same control in a header, and takes its numbers from here rather than copying
+     * them, so a change to the compact action's shape is one edit. The 44pt target is kept
+     * by the control's own pressable box, never by slop a parent can clip on Android.
+     */
+    compactAction: {
+      visibleHeight: 36,
+      paddingHorizontal: space[3],
+    },
   },
   /**
    * What lifts a 32pt chip to the 44pt target without drawing it any larger

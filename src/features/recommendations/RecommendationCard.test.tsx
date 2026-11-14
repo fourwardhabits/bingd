@@ -74,6 +74,7 @@ describe('which recommendation leads', () => {
         recommendedAt,
         openedAt: null,
         message: null,
+        seenAt: null,
       }) satisfies SentRecommendation;
 
     const seeded = seedFromSentToYou(

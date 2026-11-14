@@ -5,17 +5,16 @@ import { AccessibilityInfo, StyleSheet, useWindowDimensions, View } from 'react-
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
-  ContentToolbar,
+  BrowseControlsRow,
   EmptyState,
-  FiltersAction,
-  IconToggle,
-  type IconToggleOption,
+  FilterIconButton,
   PosterGridList,
   Text,
   TitleMetadata,
   TitleRow,
+  ViewModeToggle,
 } from '@/ui/components';
-import { coerceSortState, type SortAxisSpec } from '@/ui/sort';
+import { coerceSortState, filterSortSpoken } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
@@ -88,18 +87,6 @@ export const initialViewState = (): CollectionViewState => ({
 /** Whether an unknown value from the preference store is a mode this component can draw. */
 export const isCollectionViewMode = (value: unknown): value is CollectionViewMode =>
   value === 'list' || value === 'poster';
-
-/**
- * Poster first, list second — the founder's ordering (§11).
- *
- * The leftmost cell is the one a device with no stored preference opens on, so the
- * control reads as its own default without the reader having to discover that it does.
- * Reversed from the original, which drew List first and then had to default to Poster.
- */
-const VIEW_MODES = [
-  { value: 'poster', icon: 'grid', label: 'Poster view' },
-  { value: 'list', icon: 'list', label: 'List view' },
-] as const satisfies readonly IconToggleOption<CollectionViewMode>[];
 
 export type CollectionViewProps = {
   items: readonly CollectionItem[];
@@ -237,12 +224,13 @@ export function CollectionView({
    * **The page's toolbar, then its cards, then the count — all at the head of the list**
    * (founder, marquee cohesion sprint, 2026-11-07).
    *
-   *     Watched ▾                          ⚙ Filters   ▦ ☰
+   *     Watched ▾                               ▦ ☰   ⚙
    *     37 titles                                My lists ›
    *
    * The marquee is the page's navigation (Watched / Watchlist / Unranked), and the tools
-   * opposite it act on what it shows: Filters, one sheet holding the sort and the filters,
-   * and the Grid / List glyphs. The full-width segmented control that sat above this is
+   * opposite it act on what it shows: the Poster / List toggle, then the Filters & Sort icon,
+   * one sheet holding the sort and the filters — `BrowseControlsRow` since FU1113-C, so the
+   * tools never wrap and the marquee is what gives way on a narrow phone. The full-width segmented control that sat above this is
    * gone; the order in force is not written beside Filters any more, because the sheet
    * names it. The whole header scrolls away with the titles, so the posters get the screen
    * back; the app header and the tab bar stay where they always were.
@@ -251,35 +239,36 @@ export function CollectionView({
     <View>
       {/* First, in every state: the one position the marquee has (see `placeholder`). The
           tools act on titles, so they are drawn only when there are some. */}
-      <ContentToolbar
-        title={title}
-        // The last glyph's 44pt cell around its 20pt glyph, so the glyph lands on the gutter.
-        edgeInset={hasTitles ? (theme.layout.minTapTarget - theme.layout.icon.sm) / 2 : undefined}
-        testID="collection-toolbar"
-      >
-        {hasTitles ? (
-          <>
-            <FiltersAction
-              label="Filters & Sort"
-              activeCount={activeCount}
-              accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
-              accessibilityHint="Opens filters and the sort order"
-              onPress={() => setFilterOpen(true)}
-              testID="collection-filter-sort"
-            />
-            {/* The view control, not a third collection state. **Poster first, list second**
-                (founder §11): the leftmost cell is the one a device with no stored preference
-                opens on, so the row and the state agree. */}
-            <IconToggle
-              label="View"
-              appearance="quiet"
-              value={state.mode}
-              onChange={(mode) => onChange({ ...state, mode })}
-              options={VIEW_MODES}
-            />
-          </>
-        ) : null}
-      </ContentToolbar>
+      <View style={styles.toolbar}>
+        <BrowseControlsRow
+          testID="collection-toolbar"
+          leading={title}
+          trailing={
+            hasTitles ? (
+              <>
+                {/* The view control, not a third collection state. **Poster first, list
+                    second** (founder §11): the leftmost cell is the one a device with no
+                    stored preference opens on, so the row and the state agree. */}
+                <ViewModeToggle
+                  value={state.mode}
+                  onChange={(mode) => onChange({ ...state, mode })}
+                  testID="collection-view-mode"
+                />
+                <FilterIconButton
+                  activeCount={activeCount}
+                  // The sentence says the order and the count itself, so the button adds no
+                  // ", N on" of its own.
+                  accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+                  announceCount={false}
+                  accessibilityHint="Opens filters and the sort order"
+                  onPress={() => setFilterOpen(true)}
+                  testID="collection-filter-sort"
+                />
+              </>
+            ) : undefined
+          }
+        />
+      </View>
 
       {lead}
 
@@ -333,8 +322,14 @@ export function CollectionView({
             // numbers, which is what keeps it from looking like a scoreboard.
             score: item.score,
             bucket: item.bucket,
-            // A ranked season's pill names its season (Candidate A): `S4 9.1`.
+            // A ranked season's pill names its season: `S4 - 9.1`. The TV Collection draws
+            // series, not seasons, since WS-TVC, so this only fires where a season tile
+            // still appears.
             season: item.kind === 'season' && item.score != null ? (item.seasonNumber ?? null) : null,
+            // WS-TVC: a series poster's score is its explicit show ranking (filled) or the
+            // mean of its ranked seasons (outlined `SN AVG`).
+            scoreSource: item.showScore?.source,
+            rankedSeasonCount: item.showScore?.rankedSeasonCount,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
           // The wall's top space follows the header now, rather than preceding it.
@@ -376,7 +371,18 @@ export function CollectionView({
                   <TitleRowActions
                     name={nameOf(item)}
                     kind={item.kind}
-                    score={item.score != null ? { score: item.score, bucket: item.bucket } : null}
+                    score={
+                      item.score != null
+                        ? {
+                            score: item.score,
+                            bucket: item.bucket,
+                            // WS-TVC: a season average draws outlined, as on the wall —
+                            // the same `SN AVG` badge since FU1113-B.
+                            variant: item.showScore?.source === 'average' ? 'outlined' : 'filled',
+                            average: item.showScore?.source === 'average',
+                          }
+                        : null
+                    }
                     saved={null}
                     onRank={() => onPressItem(item.mediaItemId)}
                     onToggleWatchlist={() => {}}
@@ -448,24 +454,6 @@ export function StateFill({ children }: { children: ReactNode }) {
  * toolbar and tab bar on a phone. */
 const STATE_FILL = 0.55;
 
-/** The sentence a screen reader is given instead of the arrow. */
-function filterSortSpoken<Axis extends string>(
-  axes: readonly SortAxisSpec<Axis>[],
-  sort: { axis: Axis; direction: 'asc' | 'desc' },
-  activeFilters: number,
-): string {
-  const spec = axes.find((option) => option.axis === sort.axis);
-  const order = spec
-    ? spec.directions
-      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
-      : `Sorted by ${spec.label}`
-    : null;
-  const filters = activeFilters
-    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
-    : 'No filters';
-  return ['Filter and sort', order, filters].filter(Boolean).join('. ');
-}
-
 /** A ranked TV list is otherwise a column of rows called "Season 2". */
 const nameOf = (item: CollectionItem) =>
   compactName({
@@ -477,6 +465,8 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
+  // The toolbar's top inset, as `ContentToolbar` drew it: `BrowseControlsRow` draws none.
+  toolbar: { paddingTop: theme.space[2] },
 
   /** `37 titles` on the left and the lists link on the right, one line under the toolbar. */
   countRow: {

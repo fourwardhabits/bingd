@@ -8,7 +8,7 @@ import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
@@ -16,13 +16,8 @@ import { ProviderLogos } from '@/features/import/ProviderLogo';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
-import { Button, Screen, SectionHeader, Text } from '@/ui/components';
+import { EDIT_ICON_NAME, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
-import {
-  isTitleLayoutAvailable,
-  setTitleLayout,
-  useStoredTitleLayout,
-} from '@/features/title/title-layout';
 
 /**
  * Settings, as an information architecture rather than a single scroll.
@@ -47,7 +42,6 @@ import {
 export default function SettingsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
-  const titleLayout = useStoredTitleLayout();
 
   const leave = async () => {
     await signOut();
@@ -57,14 +51,53 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12: an oversized gap between the Settings header and
+     * ACCOUNT), for the reason `notifications.tsx` records: this screen shows a native-stack
+     * header, which already consumes the status-bar inset, so `Screen`'s default `top` edge added
+     * the same inset a second time below it. Left and right still apply; only the top edge is the
+     * header's. The first section's `marginTop: space[6]` is the ordinary section interval and
+     * stays — it was never the band.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
         options={{
           headerShown: true,
           title: 'Settings',
-          headerRight: () => (
-            <Button label="Close" kind="tertiary" onPress={() => router.back()} />
-          ),
+          /**
+           * **One way out, on both platforms** (founder spec §2B/§7, 2026-11-13).
+           *
+           * The header's Close text is gone: on Android this screen is pushed with the
+           * native back arrow, so Close was a second dismissal beside it. On iOS the root
+           * layout presents Settings as a modal (`presentation: 'modal'`), and a presented
+           * screen gets **no** back arrow — so there the arrow is drawn here, in the place
+           * and shape the native one takes, and it is still the only control that leaves.
+           * Without it an iOS reader's only exit would be an undiscoverable swipe, and a
+           * VoiceOver reader might have none (independent review, 2026-11-13).
+           */
+          headerLeft:
+            Platform.OS === 'ios'
+              ? () => (
+                  <Pressable
+                    testID="settings-back"
+                    accessibilityRole="button"
+                    accessibilityLabel="Back"
+                    hitSlop={theme.space[2]}
+                    // A cold deep link to Settings has nothing behind it: go to the
+                    // profile it is normally opened from instead of doing nothing.
+                    onPress={() =>
+                      router.canGoBack() ? router.back() : router.replace('/(tabs)/profile')
+                    }
+                    style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={theme.layout.icon.lg}
+                      color={theme.semantic.action}
+                    />
+                  </Pressable>
+                )
+              : undefined,
         }}
       />
       {/* **Four named sections, and the first one had no name at all** (founder,
@@ -88,10 +121,11 @@ export default function SettingsScreen() {
           links out would be a tap that buys nothing. */}
       <ScrollView contentContainerStyle={styles.page}>
         <View style={styles.section}>
-          <SectionHeader title="Account" />
+          <SectionHeader title="Account" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
-              icon="person-outline"
+              // The shared Edit glyph for a genuine edit (FU1113-B).
+              icon={EDIT_ICON_NAME}
               label="Edit Profile"
               detail={`@${profile.username}`}
               onPress={() => router.push('/settings/profile')}
@@ -199,7 +233,7 @@ export default function SettingsScreen() {
             carries a version, a build number and a platform, and carries no account, no
             identifier and no address of the person sending it. */}
         <View style={styles.section}>
-          <SectionHeader title="Help & feedback" />
+          <SectionHeader title="Help & feedback" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
               icon="alert-circle-outline"
@@ -225,26 +259,9 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Labs: one row per alternative, and the row is the whole switch: tap it to swap,
-            and the next title page opens in the other layout. Since the release pass
-            (2026-11-07) the Cinematic title page is the default everywhere, production
-            included, and this row is how somebody returns to the Original one.
-            `title-layout.ts` says how to put Original back for everyone. */}
-        {isTitleLayoutAvailable() ? (
-          <View style={styles.section}>
-            <SectionHeader title="Labs" />
-            <View style={[styles.group, styles.sectionGroup]}>
-              <Row
-                icon="flask-outline"
-                label="Title page"
-                detail={titleLayout === 'immersive' ? 'Cinematic' : 'Original'}
-                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the cinematic title page'}
-                onPress={() => void setTitleLayout(titleLayout === 'immersive' ? 'original' : 'immersive')}
-                last
-              />
-            </View>
-          </View>
-        ) : null}
+        {/* **No Labs section** (founder spec §7, 2026-11-13). Its one row switched the title
+            page between Cinematic and Original; Cinematic is the standard page now and the
+            switch is gone with it (`title-layout.ts`). */}
         {/* Privacy and Terms, under a heading of their own since 2026-09-05.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
@@ -261,7 +278,7 @@ export default function SettingsScreen() {
             TMDB's notice, quoted in their words — and a legal document is not a
             credit. */}
         <View style={styles.section}>
-          <SectionHeader title="Legal" />
+          <SectionHeader title="Legal" size="large" />
           <View style={[styles.group, styles.sectionGroup]}>
             <Row
               icon="lock-closed-outline"
@@ -394,7 +411,7 @@ function About() {
 
   return (
     <View style={styles.block}>
-      <SectionHeader title="About" />
+      <SectionHeader title="About" size="large" />
       <View style={styles.blockBody}>
         <Image
           source={TMDB_LOGO}
@@ -611,6 +628,14 @@ function short(value: string | null | undefined) {
 }
 
 const styles = StyleSheet.create({
+  // The native back button's own box: 44pt, glyph against the leading edge.
+  back: {
+    minWidth: theme.layout.minTapTarget,
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  backPressed: { opacity: 0.6 },
   // A 44pt target on a caption-sized label, so the one control on this block that is a
   // control can actually be pressed.
   diagnostics: { paddingTop: theme.space[2], gap: theme.space[1] },

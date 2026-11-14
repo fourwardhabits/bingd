@@ -1,6 +1,7 @@
 import { Alert } from 'react-native';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -20,6 +21,13 @@ import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 // `expo-crypto` has no native module under jest and `randomUUID` answers undefined
 // without this — which would make the Dismiss all operation id a literal undefined.
 let issued = 0;
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
+
 jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${(issued += 1)}` }));
 
 const mockPush = jest.fn();
