@@ -9,9 +9,9 @@ import { BrandLockup } from '@/ui/components';
  * ---------------------------------------------------------------------------
  * WHY THIS IS ONE COMPONENT AND NOT A HEADER PER SCREEN
  *
- * Four screens draw it. A copy each is four places for the progress line to be given a
- * different height, or for one screen to quietly keep a back button the flow no longer
- * has. The flow's chrome rules are short enough to state once and are stated here
+ * Every step draws it, the notification question included. A copy each is six places for
+ * the progress to be given a different height, or for one screen to quietly keep a back
+ * button the flow no longer has. The flow's chrome rules are short enough to state once and are stated here
  * (`01-screen-map.md` §4):
  *
  * - **No bottom tab bar anywhere in onboarding.** The tabs belong to the app, and a
@@ -23,32 +23,31 @@ import { BrandLockup } from '@/ui/components';
  *   and it does not render this.
  *
  * ---------------------------------------------------------------------------
- * WHY THE PROGRESS IS A LINE AND NOT A COUNT
+ * WHY THE PROGRESS IS FOUR SEGMENTS AND NOT A COUNT (Onboarding 2.0, OB-2, 2026-11-14)
  *
  * A flow this long has to say that it ends. What it must not do is say *how far away* the
  * end is in units somebody can dread: "step 2 of 5" turns an introduction into a form
- * with three more pages, and it is wrong the moment a step is added or removed — which
+ * with three more pages, and it is wrong the moment a screen is added or removed — which
  * has now happened twice.
  *
- * A two-pixel line under the status bar makes the same promise without the arithmetic. It
- * is deliberately not the app's five-pip control: those count something real and countable
- * — five movies placed — and the picker draws them *as well*, which only reads correctly
- * because the two look nothing alike.
+ * The founder's approved mockup replaces the single 2pt line over six screens with **four
+ * equal segments over the four parts of the flow** — Profile, First Five, History, Friends
+ * — so the promise is made in parts a reader can picture, still without a number on
+ * screen. Screens map onto parts (`segmentsFilled`), so a part with two screens does not
+ * move the bar twice, and the notification step fills the last segment: the finale. It is
+ * deliberately not the picker's five pips: those count something real — five movies
+ * placed — and only read correctly beside this because the two look nothing alike.
  *
- * The line is hidden from assistive technology. A bar with no label is noise to a screen
- * reader, and each step already announces itself by its own heading; a spoken "40 percent"
- * with no unit attached would be less informative than the silence.
+ * The bar is hidden from assistive technology. Each step already announces itself by its
+ * own heading; see the note in `OnboardingHeader` on the label it carries.
  */
 
 /**
- * The steps the line measures, in order.
+ * The steps a header can be drawn on, in flow order.
  *
- * The opening and sign in are absent: this component is not drawn on either, and a
- * fraction that started counting before the account existed would be a promise the flow
- * had already broken by the time anybody could see it move.
- *
- * `notifications` is last and is what makes the bar full. Nothing follows it: onboarding
- * ends by opening the app, and there is no closing screen whose job is to announce that.
+ * Unchanged by Onboarding 2.0, so no call site moves: `rank` is the picker, `payoff` is
+ * Your First Five, and `letterboxd` keeps the stored stage's name for the optional import.
+ * What changed is what they are measured *against* — see `SEGMENTS`.
  *
  * ---------------------------------------------------------------------------
  * **THREE STEPS LEFT IN 2026-09-09** (founder, physical iOS 1.0.1 build 9)
@@ -57,15 +56,9 @@ import { BrandLockup } from '@/ui/components';
  * product had done anything, and both are gone with their stages — the flow teaches
  * itself by ranking. `pick` went for a different reason: choosing and ranking are no
  * longer two halves of the run, they are one loop repeated five times
- * (`app/onboarding/taste.tsx`), and a bar that advanced when the picker opened and again
- * when it closed would be measuring the same step twice.
+ * (`app/onboarding/taste.tsx`).
  *
- * The line is shorter and therefore moves further per screen, which is the truth: the
- * flow really is shorter.
- *
- * `letterboxd` (2026-09-13) is the optional import step after the payoff. It is counted
- * because it is drawn: a line that stood still on a screen with the header on it would
- * read as the flow having paused.
+ * `letterboxd` (2026-09-13) is the optional import step after the payoff.
  */
 export const FLOW_STEPS = [
   'profile',
@@ -79,35 +72,89 @@ export const FLOW_STEPS = [
 export type FlowStep = (typeof FLOW_STEPS)[number];
 
 /**
- * How full the line is on a given step, as a fraction from just-started to complete.
+ * The four parts of the flow the header shows, in order (Onboarding 2.0, OB-2, 2026-11-14).
  *
- * The step being *drawn* is counted as done, so the first screen already shows movement.
- * A bar that is empty on the screen somebody is looking at reads as broken rather than as
- * early, and the reader has in fact already done something to reach it.
- *
- * Exported so the arithmetic can be asserted without a render.
+ * The founder's approved mockup: four equal segments named for what each part is for —
+ * Profile, First Five, History, Friends — rather than one line divided by six screens. The
+ * names are for this file and the tests; nothing draws them, for the reason the header's
+ * note gives about counts.
  */
-export function flowProgress(step: FlowStep): number {
-  return (FLOW_STEPS.indexOf(step) + 1) / FLOW_STEPS.length;
+export const SEGMENTS = ['Profile', 'First Five', 'History', 'Friends'] as const;
+
+/**
+ * How many of the four segments are filled on a step.
+ *
+ * The step being drawn counts as done, so the first screen already shows movement — an
+ * empty bar on the screen somebody is looking at reads as broken rather than as early.
+ * The picker and the payoff are both the First Five; the import is History; People and
+ * the notification question are both Friends, and the notification step is the **finale**:
+ * the bar is full there, which is the visible end of the flow.
+ *
+ * Exported so the mapping can be asserted without a render.
+ */
+export function segmentsFilled(step: FlowStep): number {
+  switch (step) {
+    case 'profile':
+      return 1;
+    case 'rank':
+    case 'payoff':
+      return 2;
+    case 'letterboxd':
+      return 3;
+    case 'people':
+    case 'notifications':
+      return 4;
+  }
 }
 
+/**
+ * How full the header is on a step, as a fraction. Kept for the callers and tests that
+ * read progress as a number; it is `segmentsFilled` over the four segments.
+ */
+export function flowProgress(step: FlowStep): number {
+  return segmentsFilled(step) / SEGMENTS.length;
+}
+
+/**
+ * The segments' thickness. Local and named, the way the single line's 2 was: there is no
+ * token for a progress-bar height, and one sized for a bar of four parts (3pt, so each
+ * segment reads as a shape rather than a hairline) is not a value anything else should
+ * borrow.
+ */
+const SEGMENT_HEIGHT = 3;
+
 export type OnboardingHeaderProps = {
-  /** Which step is being drawn, which is all the progress line needs. */
+  /** Which step is being drawn, which is all the progress needs. */
   step: FlowStep;
 };
 
 export function OnboardingHeader({ step }: OnboardingHeaderProps) {
+  const filled = segmentsFilled(step);
   return (
     <View>
+      {/**
+       * **Hidden from assistive technology, as the line was, and labelled anyway.**
+       *
+       * Every step announces itself by its own title, and "Step 4 of 4" spoken on both
+       * People and the notification question would be a second, competing heading — and a
+       * wrong one on the finale, which is not a step of its own. So the row stays hidden;
+       * the label is on the wrapper so the count is stated in one place should a later
+       * pass decide to expose it.
+       */}
       <View
-        style={styles.track}
+        style={styles.segments}
+        accessibilityLabel={`Step ${filled} of ${SEGMENTS.length}`}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
+        testID="onboarding-progress"
       >
-        {/* A percentage width rather than a measured one: the track is the full width of
-            the screen, so there is nothing to measure and nothing to re-measure on a
-            rotation or a font-size change. */}
-        <View style={[styles.fill, { width: `${flowProgress(step) * 100}%` }]} />
+        {SEGMENTS.map((name, index) => (
+          <View
+            key={name}
+            testID={index < filled ? 'onboarding-segment-filled' : 'onboarding-segment-empty'}
+            style={[styles.segment, index < filled ? styles.filled : styles.empty]}
+          />
+        ))}
       </View>
       <View style={styles.brand}>
         <BrandLockup size="sm" />
@@ -117,7 +164,13 @@ export function OnboardingHeader({ step }: OnboardingHeaderProps) {
 }
 
 const styles = StyleSheet.create({
-  track: { height: 2, backgroundColor: theme.border.hairline, width: '100%' },
-  fill: { height: 2, backgroundColor: theme.semantic.score },
+  segments: {
+    flexDirection: 'row',
+    gap: theme.space[1],
+    paddingHorizontal: theme.layout.gutter,
+  },
+  segment: { flex: 1, height: SEGMENT_HEIGHT, borderRadius: theme.radius.control },
+  filled: { backgroundColor: theme.semantic.score },
+  empty: { backgroundColor: theme.border.hairline },
   brand: { alignItems: 'center', paddingVertical: theme.space[3] },
 });

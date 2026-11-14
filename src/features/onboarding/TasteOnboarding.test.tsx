@@ -1309,6 +1309,27 @@ describe('Your First Five', () => {
   });
 });
 
+describe('the voice pass (OB-2)', () => {
+  it('asks for a movie with a contraction when the grid has nothing to offer', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText("Search for a movie you've seen.")).toBeTruthy());
+    expect(view.queryByText('Search for a movie you have seen.')).toBeNull();
+  });
+
+  it('tells the bucket question any movie counts, with contractions', async () => {
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+
+    await waitFor(() =>
+      expect(
+        view.getByText('Anything you’ve seen counts. It doesn’t have to be recent.'),
+      ).toBeTruthy(),
+    );
+  });
+});
+
 describe('the run in the onboarding funnel (OB-1)', () => {
   const events = (name: string) =>
     mockTrack.mock.calls.map(([event]) => event).filter((event) => event.name === name);
@@ -1327,7 +1348,9 @@ describe('the run in the onboarding funnel (OB-1)', () => {
       await closeReveal(view);
       if (turn < 4) {
         await waitFor(() =>
-          expect(view.getByLabelText(new RegExp(`^${turn + 1} of 5 movies ranked`))).toBeTruthy(),
+          expect(
+            view.getByLabelText(new RegExp(`^${turn + 1} of 5 movies ranked`)),
+          ).toBeTruthy(),
         );
       }
     }

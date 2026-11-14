@@ -151,7 +151,7 @@ describe('the step itself', () => {
 
     expect(mockPush.requested).toBe(1);
     expect(mockPush.registered).toBe(1);
-    await waitFor(() => expect(view.getByText('You are all set')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('You’re all set')).toBeTruthy());
   });
 
   it('continues without asking when Not now is pressed', async () => {
@@ -217,9 +217,9 @@ describe('the step itself', () => {
       fireEvent.press(view.getByText('Turn on notifications'));
     });
 
-    expect(view.queryByText('You are all set')).toBeNull();
+    expect(view.queryByText('You’re all set')).toBeNull();
     await waitFor(() =>
-      expect(view.getByText(/cannot send notifications to your lock screen yet/)).toBeTruthy(),
+      expect(view.getByText(/can’t send notifications to your lock screen yet/)).toBeTruthy(),
     );
     // And it still says what does work, because the inbox genuinely does.
     expect(view.getByText(/still see everything in the app/)).toBeTruthy();
@@ -253,9 +253,11 @@ describe('registration never gates the exit', () => {
       await act(async () => {
         jest.advanceTimersByTime(5000);
       });
-      expect(view.getByText(/Still setting up notifications in the background/)).toBeTruthy();
-      expect(view.queryByText('You are all set')).toBeNull();
-      expect(view.queryByText(/cannot send notifications/)).toBeNull();
+      expect(
+        view.getByText(/Still setting up notifications\. You’ll see everything/),
+      ).toBeTruthy();
+      expect(view.queryByText('You’re all set')).toBeNull();
+      expect(view.queryByText(/can’t send notifications/)).toBeNull();
 
       await act(async () => {
         jest.advanceTimersByTime(1400);
@@ -274,7 +276,7 @@ describe('registration never gates the exit', () => {
       fireEvent.press(view.getByText('Turn on notifications'));
     });
 
-    await waitFor(() => expect(view.getByText(/cannot send notifications/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/can’t send notifications/)).toBeTruthy());
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
@@ -303,7 +305,7 @@ describe('registration never gates the exit', () => {
     });
 
     expect(mockPush.requested).toBe(1);
-    await waitFor(() => expect(view.getByText('You are all set')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('You’re all set')).toBeTruthy());
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
@@ -331,7 +333,7 @@ describe('registration never gates the exit', () => {
       await act(async () => {
         jest.advanceTimersByTime(5000);
       });
-      expect(view.queryByText('You are all set')).toBeNull();
+      expect(view.queryByText('You’re all set')).toBeNull();
       expect(view.queryByText(/Still setting up/)).toBeNull();
 
       await act(async () => {
@@ -364,7 +366,7 @@ describe('the way forward when the hand-off does not take', () => {
 
   it('offers a control on the granted state, not only a timer', async () => {
     const { view } = await open();
-    await settle(view, 'You are all set');
+    await settle(view, 'You’re all set');
 
     expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
   });
@@ -507,6 +509,55 @@ describe('the answer the step reports', () => {
     const views = mockTrack.mock.calls.filter(
       ([event]) => event.name === 'onboarding_step_viewed',
     );
-    expect(views).toEqual([[{ name: 'onboarding_step_viewed', props: { step: 'notifications' } }]]);
+    expect(views).toEqual([
+      [{ name: 'onboarding_step_viewed', props: { step: 'notifications' } }],
+    ]);
+  });
+});
+
+/**
+ * **The flow's header, on every state of the last step** (OB-2, 2026-11-14): the bar
+ * visibly completes on the finale.
+ */
+describe('the header on the last step', () => {
+  const fullBar = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const hidden = { includeHiddenElements: true };
+    expect(view.getByTestId('onboarding-progress', hidden)).toBeTruthy();
+    expect(view.queryAllByTestId('onboarding-segment-filled', hidden)).toHaveLength(4);
+    expect(view.queryAllByTestId('onboarding-segment-empty', hidden)).toHaveLength(0);
+  };
+
+  it('is full while asking', async () => {
+    const { view } = await open();
+    fullBar(view);
+  });
+
+  it('is full once granted', async () => {
+    const { view } = await open();
+    await act(async () => {
+      fireEvent.press(view.getByText('Turn on notifications'));
+    });
+    await waitFor(() => expect(view.getByText('You’re all set')).toBeTruthy());
+    expect(view.getByText('We’ll let you know when something happens.')).toBeTruthy();
+    fullBar(view);
+  });
+
+  it('is full once declined', async () => {
+    const { view } = await open();
+    await act(async () => {
+      fireEvent.press(view.getByText('Not now'));
+    });
+    await waitFor(() => expect(view.getByText('No problem')).toBeTruthy());
+    expect(view.getByText('You can turn notifications on later in Settings.')).toBeTruthy();
+    fullBar(view);
+  });
+
+  it('keeps the founder’s Stay in the loop copy word for word', async () => {
+    const { view } = await open();
+    expect(
+      view.getByText(
+        'Know when friends follow you, recommend something, or interact with what you watched.',
+      ),
+    ).toBeTruthy();
   });
 });

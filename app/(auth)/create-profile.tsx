@@ -375,8 +375,12 @@ export default function CreateProfileScreen() {
               the age gate, the birthday, the visibility default and the Terms line are all
               exactly where they were. */}
           <Text variant="title1">Set up your profile</Text>
-          <Text variant="footnote" tone="secondary">
-            Your username is how friends find you.
+          {/* `body`, not `footnote` (Onboarding 2.0, OB-2): the one sentence under the title
+              is the reason for the field below it, and it was the smallest text on the
+              screen. It names the app because a username is how friends find you *on
+              bingd*, not in general. */}
+          <Text variant="body" tone="secondary">
+            Your username is how friends find you on bingd.
           </Text>
         </View>
 

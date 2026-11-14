@@ -359,7 +359,7 @@ describe('when the read fails', () => {
     const view = await renderWithProviders(<PeopleStepScreen />);
 
     await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
-    expect(view.getByText(/could not load suggestions/)).toBeTruthy();
+    expect(view.getByText(/couldn't load suggestions/)).toBeTruthy();
     expect(view.queryByText('Start your Feed')).toBeNull();
     expect(view.queryByText("You're already connected")).toBeNull();
   });

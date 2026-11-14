@@ -1,5 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Linking } from 'react-native';
+import { Linking, StyleSheet } from 'react-native';
+
+import { theme } from '@/ui/tokens';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -63,13 +65,27 @@ jest.mock('@/features/auth', () => ({
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 
+describe('the line under the title (OB-2)', () => {
+  it('says what the username is for, at body size', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    const line = await view.findByText('Your username is how friends find you on bingd.');
+    expect(StyleSheet.flatten(line.props.style)).toMatchObject({
+      fontSize: theme.typography.body.fontSize,
+      color: theme.text.secondary,
+    });
+  });
+});
+
 describe('why the signup screen asks for a birthday', () => {
   it('says what it is for, and that it is not on your profile', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
     await waitFor(() =>
       expect(
-        view.getByText('Your birthday isn’t shown on your profile. We use it to confirm age eligibility.'),
+        view.getByText(
+          'Your birthday isn’t shown on your profile. We use it to confirm age eligibility.',
+        ),
       ).toBeTruthy(),
     );
   });
@@ -142,7 +158,6 @@ describe('why the signup screen asks for a birthday', () => {
     expect(view.getByLabelText('Year')).toBeTruthy();
   });
 });
-
 
 /**
  * The legal acknowledgment under the create-account button.

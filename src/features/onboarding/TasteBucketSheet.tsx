@@ -215,7 +215,7 @@ export function TasteBucketSheet({
         {/* Said once, here, because it is the thing a new user is most likely to be
             wrong about — and being wrong about it makes them pick only recent films. */}
         <Text variant="footnote" tone="tertiary">
-          Anything you have ever seen. It does not have to be recent.
+          Anything you’ve seen counts. It doesn’t have to be recent.
         </Text>
       </ScrollView>
     </Sheet>

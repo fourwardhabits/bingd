@@ -577,7 +577,7 @@ export default function TasteOnboardingScreen() {
               {grid.length === 0 ? (
                 <View style={styles.status}>
                   <Text variant="body" tone="tertiary">
-                    Search for a movie you have seen.
+                    {"Search for a movie you've seen."}
                   </Text>
                 </View>
               ) : (
