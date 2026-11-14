@@ -52,11 +52,21 @@ export function useMarkSentSeen(
 
   /** A failure during this visit. Cleared when the visit ends, so the next focus retries. */
   const failed = useRef(false);
+  /**
+   * Which visit this is, bumped as each one ends (Codex review, #290). A call outlives the
+   * visit that sent it: leave while it is pending and it can fail after the reset above,
+   * which used to set `failed` for the *next* visit and block its retry. A failure now
+   * counts only for the visit that sent the call.
+   */
+  const visit = useRef(0);
   /** Bumped when a call settles, so anything that arrived meanwhile is considered. */
   const [settled, setSettled] = useState(0);
 
   useEffect(() => {
-    if (!active) failed.current = false;
+    if (!active) {
+      failed.current = false;
+      visit.current += 1;
+    }
   }, [active]);
 
   const unreadIds = active ? rows.filter(isUnread).map((row) => row.id) : [];
@@ -65,11 +75,12 @@ export function useMarkSentSeen(
   useEffect(() => {
     if (!active || pending === '' || failed.current || inFlight.has(viewerId)) return;
     const ids = pending.split(',');
+    const sentIn = visit.current;
 
     inFlight.add(viewerId);
     void markSentSeen(queryClient, viewerId, ids)
       .then((ok) => {
-        if (!ok) failed.current = true;
+        if (!ok && visit.current === sentIn) failed.current = true;
       })
       .finally(() => {
         inFlight.delete(viewerId);

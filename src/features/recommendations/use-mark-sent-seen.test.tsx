@@ -199,6 +199,35 @@ describe('useMarkSentSeen', () => {
     await waitFor(() => expect(unreadCount(result.current.data)).toBe(0));
   });
 
+  /**
+   * **Codex review, #290.** Leave while the call is pending, and let it fail after the
+   * visit has ended: that failure belongs to the visit that sent it. It used to land after
+   * the reset and block the next visit's retry until a further focus.
+   */
+  it('retries on the next focus when a call from the last visit fails after leaving', async () => {
+    let fail: () => void = () => {};
+    mockAnswer = () =>
+      new Promise((done) => {
+        fail = () => done({ data: null, error: { code: '08006', message: 'down' } });
+      });
+    server['account-a'] = [row('new-1')];
+    const { result } = await renderHookWithProviders(useScreen);
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+
+    // Leave while it is pending; it fails while nobody is looking.
+    await setFocused(false);
+    await act(async () => fail());
+    await waitFor(() => expect(unreadCount(result.current.data)).toBe(1));
+    expect(markCalls()).toHaveLength(1);
+
+    // Back: this visit has had no failure of its own, so it tries again.
+    mockAnswer = () => Promise.resolve({ data: { status: 'ok', marked: 1 }, error: null });
+    await setFocused(true);
+    await waitFor(() => expect(markCalls()).toHaveLength(2));
+    expect(markCalls()[1][1]).toMatchObject({ p_ids: ['new-1'] });
+    await waitFor(() => expect(unreadCount(result.current.data)).toBe(0));
+  });
+
   it('a thrown network error rolls back the same way', async () => {
     mockAnswer = () => Promise.reject(new Error('network'));
     server['account-a'] = [row('new-1')];
