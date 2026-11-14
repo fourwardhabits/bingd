@@ -6,7 +6,7 @@ import { formatWatchDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { fontFamily, theme } from '@/ui/tokens';
-import { Button, SaveButton, ScoreBadge, Text } from '@/ui/components';
+import { Button, EDIT_ICON_NAME, SaveButton, ScoreBadge, Text } from '@/ui/components';
 
 import { RERANK_ICON, RERANK_LABEL } from './rerank';
 import { WatchDetailsRows } from './WatchDetailsRows';
@@ -23,10 +23,10 @@ import {
 const NOTE_PREVIEW = 140;
 
 /**
- * *Edit watch*'s glyph: the square-with-pencil bingd already draws for editing. One local
- * constant so the shared `EditIcon` (workstream B) replaces it in one place at integration.
+ * *Edit watch*'s glyph: the shared Edit glyph (workstream B's `EDIT_ICON_NAME`,
+ * `create-outline`), swapped in at integration as FU1113-A planned. Same glyph as before.
  */
-const EDIT_WATCH_ICON = 'create-outline' as const;
+const EDIT_WATCH_ICON = EDIT_ICON_NAME;
 
 export type WatchEdit = {
   /** Present only when the date was changed; null clears it. */
