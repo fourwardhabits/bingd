@@ -27,6 +27,7 @@ import { formatWatchDate } from '@/features/collection/dates';
 import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
 import {
   groupByYear,
+  historySpan,
   labelFor,
   scoresByWatch,
   type WatchEvent,
@@ -336,12 +337,15 @@ export default function WatchHistoryScreen() {
     );
 
   const count = events.length;
-  const dated = ordered.filter((event) => event.watchedOn).map((event) => event.watchedOn!);
-  /** `First Mar 4, 2024 · Latest Oct 12, 2026`, for two or more dated watches. */
-  const span =
-    count >= 2 && dated.length >= 2
-      ? `First ${formatWatchDate(dated[dated.length - 1]!)} · Latest ${formatWatchDate(dated[0]!)}`
-      : null;
+  /**
+   * `First Mar 4, 2024 · Latest Oct 12, 2026`, only when it says something: two or more
+   * dated watches on two different days. One dated watch, or two on the same day, would
+   * print the same date twice (founder QA, 2026-11-12). `historySpan` owns the rule.
+   */
+  const spanDates = historySpan(ordered.map((event) => event.watchedOn));
+  const span = spanDates
+    ? `First ${formatWatchDate(spanDates.first)} · Latest ${formatWatchDate(spanDates.latest)}`
+    : null;
 
   if (count === 0) {
     return (
@@ -392,7 +396,7 @@ export default function WatchHistoryScreen() {
             </View>
           </View>
         }
-        renderItem={({ item, index }) => {
+        renderItem={({ item }) => {
           // The year header belongs to the first row of its group, so the list stays one
           // flat array — a SectionList would give the same result and give up the
           // virtualisation tuning this screen is sized for.
@@ -402,8 +406,10 @@ export default function WatchHistoryScreen() {
           const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 
+          // Cards, spaced rather than ruled: the gap below each card is the only separator
+          // (UI wave, 2026-11-12), and the last card's is the list's bottom air.
           return (
-            <View>
+            <View style={styles.item}>
               {showYear ? (
                 <Text variant="sectionHeader" tone="action" style={styles.year}>
                   {String(group?.year)}
@@ -427,7 +433,6 @@ export default function WatchHistoryScreen() {
                 onEditRanking={canEditRanking ? editRanking : undefined}
                 busy={busy}
               />
-              {index === ordered.length - 1 ? null : <View style={styles.rule} />}
             </View>
           );
         }}
@@ -486,14 +491,17 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
   },
   loading: { paddingTop: theme.space[3] },
+  // Above its first card; `space[2]` under it so the label does not sit on the card's edge.
   year: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
-    paddingBottom: theme.space[1],
+    paddingBottom: theme.space[2],
   },
-  rule: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.border.hairline,
-    marginHorizontal: theme.layout.gutter,
-  },
+  /**
+   * The seam between two cards. `space[2]`, the compact interval, rather than a section
+   * seam: the card's own padding already gives each watch the air the ruled row had, so a
+   * card costs about ten points more than the row it replaced and a thirty-watch history
+   * stays a scroll of dates rather than of gaps.
+   */
+  item: { paddingBottom: theme.space[2] },
 });

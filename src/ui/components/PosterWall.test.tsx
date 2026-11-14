@@ -3,7 +3,14 @@ import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { theme } from '../tokens';
 
-import { PosterGrid, PosterShelf, seasonPillLabel, type PosterTile } from './PosterWall';
+import {
+  PosterGrid,
+  PosterShelf,
+  seasonPillLabel,
+  averagePillText,
+  seasonPillText,
+  type PosterTile,
+} from './PosterWall';
 
 const tiles: PosterTile[] = [
   { id: 'a', title: 'Inception', year: 2010, score: 9.4, bucket: 'loved' },
@@ -270,7 +277,15 @@ describe('the season pill', () => {
     expect(seasonPillLabel(n)).toBe(label);
   });
 
-  it('reads "S1 9.8" for a season and the bare number for a show', async () => {
+  it('writes one space either side of a hyphen-minus, and nothing else', () => {
+    expect(seasonPillText(1, 9.8)).toBe('S1 - 9.8');
+    expect(seasonPillText(0, 3.1)).toBe('SP - 3.1');
+    expect(seasonPillText(12, 10)).toBe('S12 - 10.0');
+    // A hyphen-minus, not an en dash or a minus sign, with exactly one space each side.
+    expect(seasonPillText(2, 7.5)).toMatch(/^S2 \u002D 7\.5$/);
+  });
+
+  it('reads "S1 - 9.8" for a season and the bare number for a show', async () => {
     const view = await render(
       <PosterGrid
         tiles={[
@@ -289,9 +304,13 @@ describe('the season pill', () => {
       />,
     );
 
-    expect(view.getByText('S1 9.8', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('S10 9.4', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('SP 3.1', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S1 - 9.8', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('S10 - 9.4', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('SP - 3.1', { includeHiddenElements: true })).toBeTruthy();
+    // The two older forms are gone everywhere: the space-only one and the colon.
+    expect(view.queryByText('S1 9.8', { includeHiddenElements: true })).toBeNull();
+    expect(view.queryByText('S1: 9.8', { includeHiddenElements: true })).toBeNull();
+    // A show keeps the bare number: an exact match, so no prefix and no separator.
     expect(view.getByText('8.7', { includeHiddenElements: true })).toBeTruthy();
   });
 
@@ -329,10 +348,86 @@ describe('the season pill', () => {
         onPressTile={() => {}}
       />,
     );
-    const text = view.getByText('S10 9.4', { includeHiddenElements: true });
+    const text = view.getByText('S10 - 9.4', { includeHiddenElements: true });
     expect(text.props.numberOfLines).toBe(1);
     // Fixed size, as every chip on a wall is: a pill that grew with text size would cover
     // the poster it labels.
     expect(text.props.allowFontScaling).toBe(false);
+  });
+
+  /**
+   * The separator costs two glyphs more than the bare pair and the pill is **not** widened
+   * for it (2026-11-12, re-measured 2026-11-13). In Inter Medium 12pt with the caption's
+   * 0.2 tracking, the widest realistic pill, `S12 - 10.0`, is about 54pt of text, so about
+   * 64pt of pill with its padding and border; a three-across tile at 320pt is 92pt wide
+   * with 84pt left of the 4pt inset. The pill sits in the bottom corner and the bookmark
+   * in the top one, so they cannot meet.
+   */
+  it('keeps the pill box as it was, with the separator inside it', async () => {
+    const view = await render(
+      <PosterGrid
+        tiles={[{ id: 's12', title: 'Shameless, S12', score: 10, bucket: 'loved', season: 12 }]}
+        onPressTile={() => {}}
+      />,
+    );
+    expect(view.getByText('S12 - 10.0', { includeHiddenElements: true })).toBeTruthy();
+    const pill = StyleSheet.flatten(
+      view.getByTestId('poster-season-pill', { includeHiddenElements: true }).props.style,
+    ) as ViewStyle;
+    expect(pill.minWidth).toBe(34);
+    expect(pill.paddingHorizontal).toBe(theme.space[1]);
+    expect(pill.position).toBe('absolute');
+    expect(pill.bottom).toBe(theme.space[1]);
+  });
+});
+
+/**
+ * **A series poster's two kinds of score** (WS-TVC, founder spec t168u §2): the reader's
+ * explicit show ranking in the filled Maroon chip, the mean of their ranked seasons in an
+ * outlined chip reading `AVG 8.7` — the same height, at the three-across size.
+ */
+describe('the season-average pill', () => {
+  const tiles = [
+    { id: 'avg', title: 'Barry', score: 8.7, bucket: null, scoreSource: 'average' as const, rankedSeasonCount: 3 },
+    { id: 'exp', title: 'Severance', score: 9.5, bucket: 'loved' as const, scoreSource: 'explicit' as const },
+  ];
+
+  it('reads AVG and the number, outlined Maroon, beside a filled explicit score', async () => {
+    const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
+    const avg = view.getByTestId('poster-average-pill', { includeHiddenElements: true });
+    const exp = view.getByTestId('poster-score-pill', { includeHiddenElements: true });
+    expect(view.getByText('AVG 8.7', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('9.5', { includeHiddenElements: true })).toBeTruthy();
+    expect(averagePillText(10)).toBe('AVG 10.0');
+
+    const avgStyle = StyleSheet.flatten(avg.props.style) as ViewStyle;
+    const expStyle = StyleSheet.flatten(exp.props.style) as ViewStyle;
+    expect(avgStyle.borderColor).toBe(theme.semantic.score);
+    expect(avgStyle.borderWidth).toBe(1);
+    expect(avgStyle.backgroundColor).not.toBe(theme.semantic.action);
+    expect(expStyle.backgroundColor).toBe(theme.semantic.action);
+    // The same height: the 1pt border is given back from the vertical padding.
+    expect((avgStyle.paddingVertical as number) + (avgStyle.borderWidth as number)).toBe(
+      expStyle.paddingVertical,
+    );
+    const avgText = view.getByText('AVG 8.7', { includeHiddenElements: true });
+    expect(StyleSheet.flatten(avgText.props.style).color).toBe(theme.semantic.action);
+    expect(avgText.props.allowFontScaling).toBe(false);
+    expect(avgText.props.numberOfLines).toBe(1);
+  });
+
+  it('fits a three-across tile at 320pt', () => {
+    // Inter Medium 12pt with the caption's 0.2 tracking: about 6.6pt a glyph for the
+    // widest pill, `AVG 10.0`, so about 53pt of text and 63pt of pill with its padding and
+    // border, against the 84pt a 92pt tile leaves inside its 4pt insets.
+    const tile = (320 - 2 * theme.layout.gutter - 2 * theme.layout.posterGrid.gap) / 3;
+    const pill = averagePillText(10).length * 6.6 + 2 * theme.space[1] + 2;
+    expect(pill).toBeLessThan(tile - 2 * theme.space[1]);
+  });
+
+  it('says it is an average, of how many seasons, before the number', async () => {
+    const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
+    expect(view.getByLabelText('Barry, average of 3 ranked seasons, scored 8.7 out of 10')).toBeTruthy();
+    expect(view.getByLabelText('Severance, scored 9.5 out of 10')).toBeTruthy();
   });
 });

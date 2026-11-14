@@ -11,6 +11,9 @@ import {
   offersUpdateShow,
   RankingSheet,
   REVEAL_LABEL_EM,
+  COMPACT_EXIT_CHAR_EM,
+  compactExitsFitRow,
+  compactLabelWidth,
   revealExitsFitRow,
   type RankingSheetProps,
 } from './RankingSheet';
@@ -78,6 +81,16 @@ jest.mock('@/lib/supabase', () => ({
     },
   },
   startSessionRefresh: () => () => {},
+}));
+
+/**
+ * The reader's scores, for the show Update Show / Keep Show name (WS-TVC). Empty by
+ * default, which is the "not known yet" case: the labels then carry no number.
+ */
+let mockMyScores = new Map<string, { score: number }>();
+jest.mock('@/features/collection/use-score', () => ({
+  ...jest.requireActual('@/features/collection/use-score'),
+  useMyScores: () => ({ data: mockMyScores }),
 }));
 
 const mockPush = jest.fn();
@@ -2793,18 +2806,23 @@ describe('Update Show on a season reveal', () => {
     ).toBe(false);
   });
 
-  it('lays out Update Show | Add details, with Done under them, and hands over the link', async () => {
+  /**
+   * **Founder spec t168u §3A** (WS-TVC): Add details (secondary) | Update Show (primary),
+   * Keep Show quiet under the pair, no Done — the sheet's close and Back are the dismissal.
+   */
+  it('lays out Add details | Update Show, Keep Show under them, and hands over the link', async () => {
     answering(seasonPlaced(ranked));
     const onUpdateShow = jest.fn();
     const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow });
 
     const update = await sheet.findByText('Update Show');
     expect(sheet.getByText('Add details')).toBeTruthy();
-    expect(sheet.getByTestId('reveal-done')).toBeTruthy();
-    // P0-3 (2026-11-12): the secondary Update Show leads, the accent Add details trails.
+    expect(sheet.getByTestId('reveal-keep-show')).toBeTruthy();
+    expect(sheet.queryByTestId('reveal-done')).toBeNull();
+    expect(sheet.queryByText('Done')).toBeNull();
     const labels = visibleText(sheet.toJSON());
-    expect(labels.indexOf('Update Show')).toBeLessThan(labels.indexOf('Add details'));
-    expect(labels.indexOf('Add details')).toBeLessThan(labels.lastIndexOf('Done'));
+    expect(labels.indexOf('Add details')).toBeLessThan(labels.indexOf('Update Show'));
+    expect(labels.indexOf('Update Show')).toBeLessThan(labels.indexOf('Keep Show'));
 
     await fireEvent.press(update);
     expect(onUpdateShow).toHaveBeenCalledWith({
@@ -2815,16 +2833,94 @@ describe('Update Show on a season reveal', () => {
     expect(sheet.onClose).toHaveBeenCalled();
   });
 
-  it('keeps Done one tap away', async () => {
+  it('names the reader’s whole-show score, never the season’s, and none until it is known', async () => {
     answering(seasonPlaced(ranked));
-    const sheet = await openSheet({
-      subject: season,
-      onFinishLog: jest.fn(),
-      onUpdateShow: jest.fn(),
-    });
+    mockMyScores = new Map([['shameless', { score: 9.5 }]]);
+    try {
+      const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
+      expect(await sheet.findByText('Update Show 9.5')).toBeTruthy();
+      expect(sheet.getByText('Keep Show 9.5')).toBeTruthy();
+      // The season's own score is 8.7 in this fixture: never on these labels.
+      expect(sheet.queryByText(/Show 8\.7/)).toBeNull();
+    } finally {
+      mockMyScores = new Map();
+    }
+  });
+
+  it('keeps the show once for a double tap, then leaves as Done did', async () => {
+    answering(seasonPlaced(ranked));
+    const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
     await sheet.findByText('Update Show');
-    await fireEvent.press(sheet.getByTestId('reveal-done'));
+    let land!: (value: unknown) => void;
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'keep_show'
+        ? new Promise((resolve) => (land = resolve))
+        : Promise.resolve({ data: null, error: null }),
+    );
+    const keep = sheet.getByTestId('reveal-keep-show');
+    await fireEvent.press(keep);
+    await fireEvent.press(keep);
+    expect(callsTo('keep_show')).toHaveLength(1);
+    expect(callsTo('keep_show')[0]![1]).toEqual({ p_season_placement_id: 'placement-s4' });
+    await act(async () => {
+      land({ data: { status: 'kept', created: true, kept_at: '2026-11-13T00:00:00Z' }, error: null });
+    });
     await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+  });
+
+  it('stays open with the reason when Keep Show fails, every exit still live', async () => {
+    answering(seasonPlaced(ranked));
+    const onUpdateShow = jest.fn();
+    const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow });
+    await sheet.findByText('Update Show');
+    mockRpc.mockImplementation((fn: string) =>
+      Promise.resolve(
+        fn === 'keep_show'
+          ? { data: null, error: { code: '08006', message: 'network' } }
+          : { data: null, error: null },
+      ),
+    );
+    await fireEvent.press(sheet.getByTestId('reveal-keep-show'));
+    await waitFor(() => expect(sheet.getByTestId('reveal-keep-error')).toBeTruthy());
+    expect(sheet.onClose).not.toHaveBeenCalled();
+    expect(sheet.getByRole('button', { name: 'Update Show' })).not.toBeDisabled();
+    expect(sheet.getByTestId('reveal-keep-show')).not.toBeDisabled();
+    // A retry is one more call, and safe: the server keeps one row per season placement.
+    await fireEvent.press(sheet.getByTestId('reveal-keep-show'));
+    await waitFor(() => expect(callsTo('keep_show')).toHaveLength(2));
+  });
+
+  it('records nothing when dismissed without choosing', async () => {
+    answering(seasonPlaced(ranked));
+    const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
+    await sheet.findByText('Update Show');
+    const modal = sheet.root!.queryAll((node) => node.type === 'Modal')[0];
+    await fireEvent(modal!, 'requestClose');
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(callsTo('keep_show')).toHaveLength(0);
+  });
+
+  it('carries the open decision to Add details instead of resolving it', async () => {
+    answering(seasonPlaced(ranked));
+    mockMyScores = new Map([['shameless', { score: 9.5 }]]);
+    try {
+      const onFinishLog = jest.fn();
+      const sheet = await openSheet({ subject: season, onFinishLog, onUpdateShow: jest.fn() });
+      await fireEvent.press(await sheet.findByText('Add details'));
+      expect(onFinishLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          showDecision: {
+            showId: 'shameless',
+            bucket: 'fine',
+            linkedPlacementId: 'placement-s4',
+            showScore: 9.5,
+          },
+        }),
+      );
+      expect(callsTo('keep_show')).toHaveLength(0);
+    } finally {
+      mockMyScores = new Map();
+    }
   });
 
   it('is the ordinary Done | Add details when the show is not ranked', async () => {
@@ -3024,7 +3120,23 @@ describe('the reveal’s exits', () => {
     expect(mockRpc.mock.calls.length).toBe(before);
   });
 
-  it('a season with Update Show: Update Show (secondary) | Add details (accent), Done quiet under them', async () => {
+  /** The compact exits: `Button sm`, the slimmer Rank height, slop to 44pt, never shrunk. */
+  const expectCompact = (sheet: Sheet, labels: string[]) => {
+    for (const label of labels) {
+      const text = sheet.getByText(label);
+      expect(text.props.numberOfLines).toBeUndefined();
+      expect(text.props.adjustsFontSizeToFit).toBeFalsy();
+      const button = sheet.getByRole('button', { name: label });
+      const style = StyleSheet.flatten(button.props.style);
+      expect(style.minHeight).toBe(theme.layout.control.compactAction.visibleHeight);
+      const slop = button.props.hitSlop as { top: number; bottom: number };
+      expect(style.minHeight + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+        theme.layout.minTapTarget,
+      );
+    }
+  };
+
+  it('a season with Update Show: Add details (secondary) | Update Show (accent), Keep Show quiet under them', async () => {
     await withWindow(412, 1, async () => {
       answering(seasonPlaced);
       const onUpdateShow = jest.fn();
@@ -3032,14 +3144,15 @@ describe('the reveal’s exits', () => {
       const sheet = await openSheet({ subject: season, onFinishLog, onUpdateShow });
       await sheet.findByText('Update Show');
 
-      expect(pairLabels(sheet)).toEqual(['Update Show', 'Add details']);
-      expect(kindOf(sheet, 'Update Show')).toBe('secondary');
-      expect(kindOf(sheet, 'Add details')).toBe('primary');
-      expect(kindOf(sheet, 'Done')).toBe('tertiary');
+      expect(pairLabels(sheet)).toEqual(['Add details', 'Update Show']);
+      expect(kindOf(sheet, 'Add details')).toBe('secondary');
+      expect(kindOf(sheet, 'Update Show')).toBe('primary');
+      expect(kindOf(sheet, 'Keep Show')).toBe('tertiary');
       expect(isRow(sheet)).toBe(true);
-      expectNaturalSize(sheet, ['Update Show', 'Add details', 'Done']);
-      // Done is outside the pair, after it, and spans the reveal rather than hugging "Done".
-      expect(within(sheet.getByTestId('reveal-exits')).queryByText('Done')).toBeNull();
+      expectCompact(sheet, ['Add details', 'Update Show', 'Keep Show']);
+      // Keep Show is outside the pair, after it, centred across the width.
+      expect(within(sheet.getByTestId('reveal-exits')).queryByText('Keep Show')).toBeNull();
+      expect(sheet.queryByText('Done')).toBeNull();
       expect(sheet.getByRole('button', { name: 'Update Show' }).props.accessibilityHint).toBe(
         'Re-ranks the show this season belongs to',
       );
@@ -3047,6 +3160,19 @@ describe('the reveal’s exits', () => {
       await fireEvent.press(sheet.getByRole('button', { name: 'Add details' }));
       expect(onFinishLog).toHaveBeenCalled();
       expect(onUpdateShow).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    [360, 1],
+    [393, 1],
+    [412, 1],
+  ])('keeps the Update Show pair side by side at %ipt and text size %fx', async (width, scale) => {
+    await withWindow(width, scale, async () => {
+      answering(seasonPlaced);
+      const sheet = await openSheet({ subject: season, onFinishLog: jest.fn(), onUpdateShow: jest.fn() });
+      await sheet.findByText('Update Show');
+      expect(isRow(sheet)).toBe(true);
     });
   });
 
@@ -3062,30 +3188,37 @@ describe('the reveal’s exits', () => {
   });
 
   it.each([
-    [330, 1],
+    [320, 1],
+    [360, 1.3],
     [360, 2],
     [412, 2],
   ])(
-    'stacks the same exits in the same order at %ipt and text size %fx',
+    'stacks the Update Show pair primary first at %ipt and text size %fx, Keep Show under it',
     async (width, scale) => {
-      await withWindow(width, scale, async () => {
-        answering(seasonPlaced);
-        const sheet = await openSheet({
-          subject: season,
-          onFinishLog: jest.fn(),
-          onUpdateShow: jest.fn(),
+      // The widest real label, a show at 10.0.
+      mockMyScores = new Map([['shameless', { score: 10 }]]);
+      try {
+        await withWindow(width, scale, async () => {
+          answering(seasonPlaced);
+          const sheet = await openSheet({
+            subject: season,
+            onFinishLog: jest.fn(),
+            onUpdateShow: jest.fn(),
+          });
+          await sheet.findByText('Update Show 10.0');
+          expect(isRow(sheet)).toBe(false);
+          expect(pairLabels(sheet)).toEqual(['Update Show 10.0', 'Add details']);
+          for (const kind of ['secondary', 'primary']) {
+            expect(
+              StyleSheet.flatten(sheet.getByTestId(`reveal-exit-${kind}`).props.style ?? {}).flex,
+            ).toBeUndefined();
+          }
+          expectCompact(sheet, ['Update Show 10.0', 'Add details', 'Keep Show 10.0']);
+          expect(within(sheet.getByTestId('reveal-exits')).queryByText('Keep Show 10.0')).toBeNull();
         });
-        await sheet.findByText('Update Show');
-        expect(isRow(sheet)).toBe(false);
-        expect(pairLabels(sheet)).toEqual(['Update Show', 'Add details']);
-        // Full width: no half-width wrapper left on either.
-        for (const kind of ['secondary', 'primary']) {
-          expect(
-            StyleSheet.flatten(sheet.getByTestId(`reveal-exit-${kind}`).props.style ?? {}).flex,
-          ).toBeUndefined();
-        }
-        expectNaturalSize(sheet, ['Update Show', 'Add details', 'Done']);
-      });
+      } finally {
+        mockMyScores = new Map();
+      }
     },
   );
 
@@ -3201,3 +3334,88 @@ describe('the reveal’s exits', () => {
     });
   });
 });
+
+/**
+ * **The Update Show pair's fit rule, against the font** (WS-TVC, founder spec t168u §3A):
+ * natural widths across the sheet's own gutter, measured from Inter Medium — the face
+ * `Button sm` sets its label in — so the table cannot drift from what is drawn.
+ */
+describe('the Update Show pair, measured from the font', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('path') as typeof import('path');
+  const font = fs.readFileSync(
+    path.join(process.cwd(), 'node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
+  );
+  const em = (() => {
+    const u16 = (o: number) => font.readUInt16BE(o);
+    const tables: Record<string, number> = {};
+    for (let i = 0; i < u16(4); i++) {
+      tables[font.toString('latin1', 12 + 16 * i, 16 + 16 * i)] = font.readUInt32BE(20 + 16 * i);
+    }
+    const unitsPerEm = u16(tables.head! + 18);
+    const metrics = u16(tables.hhea! + 34);
+    const advance = (glyph: number) => u16(tables.hmtx! + 4 * Math.min(glyph, metrics - 1));
+    const cmap = tables.cmap!;
+    let format4 = -1;
+    for (let i = 0; i < u16(cmap + 2) && format4 < 0; i++) {
+      const sub = cmap + font.readUInt32BE(cmap + 8 + 8 * i);
+      if (u16(sub) === 4) format4 = sub;
+    }
+    const segments = u16(format4 + 6) / 2;
+    return (ch: string) => {
+      const code = ch.charCodeAt(0);
+      for (let k = 0; k < segments; k++) {
+        const end = u16(format4 + 14 + 2 * k);
+        if (code > end) continue;
+        const start = u16(format4 + 16 + 2 * segments + 2 * k);
+        if (code < start) return 0;
+        const delta = font.readInt16BE(format4 + 16 + 4 * segments + 2 * k);
+        const rangeAt = format4 + 16 + 6 * segments + 2 * k;
+        const range = u16(rangeAt);
+        const glyph =
+          range === 0 ? (code + delta) & 0xffff : u16(rangeAt + range + 2 * (code - start));
+        return advance(range === 0 ? glyph : glyph ? (glyph + delta) & 0xffff : 0) / unitsPerEm;
+      }
+      return 0;
+    };
+  })();
+
+  it('agrees with the table the layout uses, and the face is callout’s', () => {
+    for (const [ch, value] of Object.entries(COMPACT_EXIT_CHAR_EM)) {
+      expect(Math.abs(em(ch) - value)).toBeLessThan(0.001);
+    }
+    expect(typography.callout.fontSize).toBe(15);
+  });
+
+  it('sits side by side at 360pt and up at default text, whatever the show scores', () => {
+    for (const width of [360, 375, 390, 393, 412, 430]) {
+      for (const score of ['0.0', '7.4', '9.5', '10.0']) {
+        expect(
+          compactExitsFitRow([`Update Show ${score}`, 'Add details'], width, 1),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('stacks only where the row genuinely runs out, and a stacked label fits its row', () => {
+    for (let width = 320; width <= 430; width += 2) {
+      for (const scale of [1, 1.15, 1.3, 1.5, 2]) {
+        const pair = ['Update Show 10.0', 'Add details'];
+        const row = width - 2 * theme.layout.gutter;
+        const natural = pair.map((label) => compactLabelWidth(label, scale));
+        expect(compactExitsFitRow(pair, width, scale)).toBe(
+          natural[0]! + natural[1]! + theme.space[2] <= row,
+        );
+        // Full width when stacked: each label alone fits on one line from 340pt at every
+        // text size. Below that, at 2x, the widest label (`Update Show 10.0`) wraps to a
+        // second line inside its button — it is never shrunk, clipped or truncated.
+        if (width >= 340) for (const w of natural) expect(w).toBeLessThanOrEqual(row);
+      }
+    }
+    expect(compactExitsFitRow(['Update Show 10.0', 'Add details'], 320, 1)).toBe(false);
+    expect(compactExitsFitRow(['Update Show 10.0', 'Add details'], 360, 2)).toBe(false);
+  });
+});
+

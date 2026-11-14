@@ -3527,3 +3527,314 @@ describe('the watch-history row', () => {
     expect(view.queryByRole('button', { name: 'Watch date' })).toBeNull();
   });
 });
+
+/**
+ * **Update Show or Keep Show, after the details** (WS-TVC, founder spec t168u §3B/§3E).
+ *
+ * A season's reveal that offered Update Show and was left by *Add details* has not
+ * resolved the show. The post-rank sheet carries that decision in place of Done: the
+ * details the reader adds land first (the same barrier a bucket tap waits on), then
+ * Update Show opens the show's correction with the link, or Keep Show records the
+ * reaffirmation and ends the flow. Leaving the sheet any other way records nothing.
+ */
+describe('the show decision a season ranking left open', () => {
+  const placed = { score: 9.1, position: 2, category: 'tv_seasons' };
+  const decision = {
+    showId: 'show-1',
+    bucket: 'loved' as const,
+    linkedPlacementId: 'placement-s2',
+    showScore: 9.5,
+  };
+  const season: LoggableTitle = {
+    ...filmA,
+    id: 'season-2',
+    title: 'Show · Season 2',
+    kind: 'season',
+  };
+
+  it('offers Update Show and Keep Show with the show score, in place of Done', async () => {
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow: jest.fn(),
+    });
+
+    await waitFor(() => expect(sheet.getByTestId('log-show-decision')).toBeTruthy());
+    expect(sheet.getByRole('button', { name: 'Update Show 9.5' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Keep Show 9.5' })).toBeTruthy();
+    expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
+  });
+
+  it('drops the number when the show score is not known', async () => {
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: { ...decision, showScore: null },
+      onUpdateShow: jest.fn(),
+    });
+
+    await waitFor(() =>
+      expect(sheet.getByRole('button', { name: 'Update Show' })).toBeTruthy(),
+    );
+    expect(sheet.getByRole('button', { name: 'Keep Show' })).toBeTruthy();
+  });
+
+  it('keeps the ordinary Done when no decision was carried', async () => {
+    const sheet = await open(season, { postRank: placed });
+
+    await waitFor(() => expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy());
+    expect(sheet.queryByTestId('log-show-decision')).toBeNull();
+  });
+
+  it('lands a typed note before Update Show hands over the link', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string) => {
+      order.push(name);
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+    const onUpdateShow = jest.fn(() => order.push('update-show'));
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+    });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'the finale earns it');
+
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+
+    await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+    expect(onUpdateShow).toHaveBeenCalledWith({
+      showId: 'show-1',
+      bucket: 'loved',
+      linkedPlacementId: 'placement-s2',
+    });
+    expect(order.indexOf('log_watched')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('log_watched')).toBeLessThan(order.indexOf('update-show'));
+    expect(callsTo('keep_show')).toHaveLength(0);
+  });
+
+  it('keeps once on a double tap, after the details, and then finishes', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string) => {
+      order.push(name);
+      return Promise.resolve({
+        data:
+          name === 'keep_show'
+            ? { status: 'kept', created: true, kept_at: 'now' }
+            : { status: 'ok' },
+        error: null,
+      });
+    });
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'still a ten');
+
+    await act(async () => {
+      fireEvent.press(sheet.getByTestId('log-keep-show'));
+      fireEvent.press(sheet.getByTestId('log-keep-show'));
+    });
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(callsTo('keep_show')).toHaveLength(1);
+    expect(callsTo('keep_show')[0][1]).toEqual({ p_season_placement_id: 'placement-s2' });
+    expect(order.indexOf('log_watched')).toBeLessThan(order.indexOf('keep_show'));
+  });
+
+  it('stays open with the reason when Keep Show is refused, and can try again', async () => {
+    failing('keep_show', { code: 'P0002', message: 'stale' });
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await waitFor(() => expect(sheet.getByTestId('log-keep-show')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+
+    await waitFor(() => expect(sheet.getByTestId('log-keep-error')).toBeTruthy());
+    expect(
+      sheet.getByText('This season’s ranking has moved on, so there is nothing to keep.'),
+    ).toBeTruthy();
+    expect(onDone).not.toHaveBeenCalled();
+    // Nothing optimistic: both choices are still there.
+    expect(sheet.getByTestId('log-update-show')).toBeTruthy();
+
+    mockRpc.mockResolvedValue({
+      data: { status: 'kept', created: true, kept_at: 'now' },
+      error: null,
+    });
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(callsTo('keep_show')).toHaveLength(2);
+  });
+
+  it('holds the first decision once when a detail failed meanwhile', async () => {
+    failing('log_watched', { code: '22023', message: 'note refused' });
+    const onUpdateShow = jest.fn();
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+    });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'will be refused');
+
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await waitFor(() => expect(sheet.getByText('note refused')).toBeTruthy());
+    expect(onUpdateShow).not.toHaveBeenCalled();
+
+    // The second tap goes on: nothing above is required to decide the show.
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+    await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not finish a later sheet when a Keep Show reply lands after closing', async () => {
+    // Independent review (WS-TVC): the reply of a Keep sent before the sheet closed must
+    // not run `onDone` for whatever the reader has open by then.
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) =>
+      name === 'keep_show'
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await waitFor(() => expect(sheet.getByTestId('log-keep-show')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+    await waitFor(() => expect(callsTo('keep_show')).toHaveLength(1));
+    await sheet.show(null);
+    await act(async () => {
+      answer({ data: { status: 'kept', created: true, kept_at: 'now' }, error: null });
+    });
+    await settle();
+
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Independent review (Codex P2 on #286): a note still saving when Update Show or Keep
+   * Show is tapped holds the decision at the details barrier. A sheet closed while it
+   * waits must not go on to open the show's correction or send the reaffirmation.
+   */
+  describe('when the sheet closes while a detail is still saving', () => {
+    /** `log_watched` stays in flight until the test answers it; everything else is ok. */
+    const holdingTheNote = () => {
+      let answer: () => void = () => {};
+      mockRpc.mockImplementation((name: string) =>
+        name === 'log_watched'
+          ? new Promise((resolve) => {
+              answer = () => resolve({ data: { status: 'ok' }, error: null });
+            })
+          : Promise.resolve({
+              data:
+                name === 'keep_show'
+                  ? { status: 'kept', created: true, kept_at: 'now' }
+                  : { status: 'ok' },
+              error: null,
+            }),
+      );
+      return () => answer();
+    };
+
+    it('does not open Update Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(onUpdateShow).not.toHaveBeenCalled();
+    });
+
+    it('does not send Keep Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(callsTo('keep_show')).toHaveLength(0);
+      expect(onDone).not.toHaveBeenCalled();
+    });
+
+    it('still hands over Update Show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(onUpdateShow).not.toHaveBeenCalled();
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+    });
+
+    it('still keeps the show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(callsTo('keep_show')).toHaveLength(0);
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      expect(callsTo('keep_show')).toHaveLength(1);
+    });
+  });
+
+  it('records nothing when the sheet is dismissed', async () => {
+    const onClose = jest.fn();
+    const onUpdateShow = jest.fn();
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+      onClose,
+    });
+    await waitFor(() => expect(sheet.getByTestId('log-show-decision')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Close'));
+    await settle();
+
+    expect(callsTo('keep_show')).toHaveLength(0);
+    expect(onUpdateShow).not.toHaveBeenCalled();
+  });
+});

@@ -128,6 +128,9 @@ describe('the ranked list', () => {
       // recommendations for a series and none for a season.
       seasonNumber: null,
       seriesId: null,
+      // The parent's artwork, for a season (WS-TVC); null for a film.
+      seriesPosterPath: null,
+      seriesYear: null,
       language: null,
       bucket: 'loved',
       position: 1,
@@ -412,8 +415,47 @@ describe('a season inherits its series metadata', () => {
     // The embed was already being fetched for the show's name; this is two more columns
     // on it rather than another query.
     expect(readOf('rankings').columns).toContain(
-      'parent:parent_id(title, genres, original_language)',
+      'parent:parent_id(title, genres, original_language, poster_path, release_date)',
     );
+  });
+
+  /**
+   * **The series' own poster and year, on the same embed** (WS-TVC, 2026-11-13): the TV
+   * Collection draws one poster per series, and a series ranked only by its seasons has no
+   * row of its own in hand. Two more columns on the parent, not another request.
+   */
+  it('carries the parent’s poster and year on a ranked season, without another read', async () => {
+    seed('rankings', [
+      {
+        media_item_id: 'season-2',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+        media_items: {
+          ...item('Season 2', '2021'),
+          kind: 'season',
+          season_number: 2,
+          parent_id: 'show-1',
+          parent: {
+            title: 'The Show',
+            genres: ['Drama'],
+            original_language: 'en',
+            poster_path: '/show.jpg',
+            release_date: '2019-04-01',
+          },
+        },
+      },
+    ]);
+    const { result } = await renderHookWithProviders(() =>
+      useRankedCollection('user-1', 'tv_seasons'),
+    );
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data?.[0]).toMatchObject({
+      seriesId: 'show-1',
+      seriesPosterPath: '/show.jpg',
+      seriesYear: 2019,
+    });
+    expect(reads().filter((read) => read.table === 'rankings')).toHaveLength(1);
   });
 
   it('gives a ranked season the show’s genres and language', async () => {

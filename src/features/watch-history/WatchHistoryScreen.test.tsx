@@ -1,4 +1,5 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, StyleSheet, type AlertButton } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -187,7 +188,8 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
 
     expect(view.queryByText('Add a past watch')).toBeNull();
     expect(view.queryByText('Log another watch')).toBeNull();
-    expect(view.getByTestId('watch-date-w1').props.children).toMatch(/\(First watch\)$/);
+    // The date alone on every row, the earliest included (founder QA, 2026-11-12).
+    expect(view.getByTestId('watch-date-w1').props.children).not.toMatch(/First watch/);
     expect(view.getByTestId('watch-date-w2').props.children).not.toMatch(/First watch/);
     expect(view.getByTestId('watch-score-w1')).toBeTruthy();
     expect(view.getByLabelText(/^9\.0 out of 10/)).toBeTruthy();
@@ -487,6 +489,75 @@ describe('the page', () => {
     expect(view.getByTestId('watch-history-span').props.children).toMatch(/^First .* · Latest /);
   });
 
+  /**
+   * **The span only when it says something** (founder QA, 2026-11-12): one dated watch, or
+   * dated watches all on one day, would print the same date as both First and Latest.
+   */
+  type Row = Omit<ReturnType<typeof event>, 'watchedOn' | 'basis'> & {
+    watchedOn: string | null;
+    basis: 'reader' | 'none';
+  };
+  const history = (events: Row[]) =>
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: { count: events.length, events, details: new Map(), placements: [], posts: [] },
+    });
+  const undated = (id: string, recordedAt: string) => ({
+    ...event(id, '2000-01-01', recordedAt),
+    watchedOn: null,
+    basis: 'none' as const,
+  });
+
+  it('has no span for two watches on the same day', async () => {
+    history([
+      event('w1', '2026-10-12', '2026-10-12T10:00:00Z'),
+      event('w2', '2026-10-12', '2026-10-12T22:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.queryByTestId('watch-history-span')).toBeNull();
+  });
+
+  it('has no span for one dated watch beside an undated one', async () => {
+    history([
+      undated('w0', '2025-01-01T10:00:00Z'),
+      event('w1', '2026-10-12', '2026-10-12T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.queryByTestId('watch-history-span')).toBeNull();
+  });
+
+  it('keeps the span for two dated watches on different days, earliest first', async () => {
+    history([
+      event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+      event('w2', '2024-03-04', '2024-03-04T12:00:00Z'),
+      event('w3', '2025-06-01', '2025-06-01T10:00:00Z'),
+      undated('w0', '2023-01-01T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-history-span').props.children).toBe(
+      'First Mar 4, 2024 · Latest Jun 1, 2025',
+    );
+  });
+
+  it('keeps the order, and the undated import in Earlier, with no First watch label', async () => {
+    history([
+      undated('w0', '2023-01-01T10:00:00Z'),
+      event('w1', '2024-03-04', '2024-03-04T10:00:00Z'),
+      event('w2', '2025-06-01', '2025-06-01T10:00:00Z'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    // Newest first, the undated viewing last under Earlier — unchanged.
+    const rows = view
+      .getAllByTestId(/^watch-row-/)
+      .map((node) => String(node.props.testID).replace('watch-row-', ''));
+    expect(rows).toEqual(['w2', 'w1', 'w0']);
+    expect(view.getByTestId('watch-date-w0').props.children).toBe('Earlier');
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
+    expect(view.queryByText(/First watch/)).toBeNull();
+  });
+
   it('adds no padding of its own above the summary, under the label’s 44pt row', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
@@ -559,8 +630,8 @@ describe('Back', () => {
 });
 
 /**
- * **The collapsed row** (founder, UI consistency sprint, 2026-11-10): the date — with
- * *(First watch)* where it applies — and Edit directly under it on the left; the score at
+ * **The collapsed row** (founder, UI consistency sprint, 2026-11-10): the date — alone, with
+ * no *(First watch)* since 2026-11-12 — and Edit directly under it on the left; the score at
  * the watch on the right, alone in its column so Edit cannot push it down.
  */
 describe('a collapsed row', () => {
@@ -595,7 +666,8 @@ describe('a collapsed row', () => {
     expect(lead).toBeTruthy();
     // The score is the right column, and Edit is not in it.
     expect(right?.props.testID).toBe('watch-score-w1');
-    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024 (First watch)');
+    // No *(First watch)* suffix on the earliest dated watch (founder QA, 2026-11-12).
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
   });
 
   it('keeps the score level with the date, whether Edit or the editor is showing', async () => {
@@ -724,6 +796,20 @@ describe('Edit ranking', () => {
     expect(view.getByTestId('watch-edit-ranking-w1')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Edit ranking' })).toBeTruthy();
     expect(view.getByText('Remove this watch')).toBeTruthy();
+  });
+
+  // The Watch History editor is held for the founder (2026-11-14): its Edit ranking icon stays
+  // swap-vertical-outline in this release; the star-outline swap from 6bab0a6 is reverted.
+  it('keeps the held editor’s Edit ranking icon, swap-vertical-outline', async () => {
+    ranked();
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    // The jest renderer prints an Ionicons glyph rather than its name.
+    const glyph = (name: 'star-outline' | 'swap-vertical-outline') =>
+      String.fromCodePoint(Ionicons.glyphMap[name] as number);
+    const row = within(view.getByTestId('watch-edit-ranking-w1'));
+    expect(row.getByText(glyph('swap-vertical-outline'))).toBeTruthy();
+    expect(row.queryByText(glyph('star-outline'))).toBeNull();
   });
 
   it('is not offered when the title has no ranking to correct', async () => {

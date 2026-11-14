@@ -293,7 +293,11 @@ describe('scores a reader sees for a show', () => {
 });
 
 describe('the profile count follows the collection precedence', () => {
-  it('counts a show alone, or its ranked seasons instead of it', async () => {
+  /**
+   * **One per series** (20261120000100, WS-TVC): the TV Collection draws one poster per
+   * parent series, so the count beside it does too — a show, its seasons, or both are one.
+   */
+  it('counts a series once, whether the show, its seasons or both are ranked', async () => {
     const main = await series('Counted');
     const s1 = await ctx.t.createSeason(main, 1, 'Season 1');
     const s2 = await ctx.t.createSeason(main, 2, 'Season 2');
@@ -301,11 +305,31 @@ describe('the profile count follows the collection precedence', () => {
       (await ctx.t.sql(`select tv from profile_title_counts($1)`, [ctx.user])).rows[0].tv;
 
     await rank(main, 'loved', 1);
-    assert.equal(await count(), 1, 'show only: the show');
+    assert.equal(await count(), 1, 'show only: one');
     await rank(s1, 'loved', 2);
-    assert.equal(await count(), 1, 'show + S1: S1');
+    assert.equal(await count(), 1, 'show + S1: still one');
     await rank(s2, 'loved', 1);
-    assert.equal(await count(), 2, 'show + S1 + S2: both seasons');
+    assert.equal(await count(), 1, 'show + S1 + S2: still one');
+  });
+
+  it('counts two series for a season of each, and a season-only series as one', async () => {
+    const a = await series('Series A');
+    const b = await series('Series B');
+    const a1 = await ctx.t.createSeason(a, 1, 'Season 1');
+    const a2 = await ctx.t.createSeason(a, 2, 'Season 2');
+    const b1 = await ctx.t.createSeason(b, 1, 'Season 1');
+    const count = async () =>
+      (await ctx.t.sql(`select movies, tv from profile_title_counts($1)`, [ctx.user])).rows[0];
+
+    await rank(a1, 'loved', 2);
+    await rank(a2, 'loved', 1);
+    assert.equal((await count()).tv, 1, 'S1 + S2 of A: one');
+    await rank(b1, 'loved', 3);
+    assert.equal((await count()).tv, 2, 'S1 of A and S1 of B: two');
+    // Movies are unchanged.
+    const film = await movie('Heat');
+    await rank(film, 'loved', 4);
+    assert.deepEqual(await count(), { movies: 1, tv: 2 });
   });
 });
 

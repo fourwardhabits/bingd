@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
@@ -31,7 +32,7 @@ export type StatRowProps = {
 export function StatRow({ stats, centered = false }: StatRowProps) {
   return (
     <View style={styles.row}>
-      {stats.map((stat) => {
+      {stats.map((stat, index) => {
         const content = (
           <>
             <Text variant="headline">{stat.value}</Text>
@@ -46,9 +47,8 @@ export function StatRow({ stats, centered = false }: StatRowProps) {
         // first because that is the order the pair makes sense in when heard.
         const label = `${stat.label}: ${stat.value}`;
 
-        return stat.onPress ? (
+        const cell = stat.onPress ? (
           <Pressable
-            key={stat.label}
             accessible
             accessibilityRole="button"
             accessibilityLabel={label}
@@ -66,13 +66,30 @@ export function StatRow({ stats, centered = false }: StatRowProps) {
           </Pressable>
         ) : (
           <View
-            key={stat.label}
             accessible
             accessibilityLabel={label}
             style={[styles.item, centered && styles.centered]}
           >
             {content}
           </View>
+        );
+
+        // The rule is a sibling *between* two cells rather than a border on either, so
+        // neither tap target gives up its height to it, and nothing is drawn before the
+        // first stat or after the last.
+        return (
+          <Fragment key={stat.label}>
+            {index > 0 ? (
+              <View
+                testID="stat-rule"
+                style={styles.rule}
+                pointerEvents="none"
+                accessible={false}
+                importantForAccessibility="no"
+              />
+            ) : null}
+            {cell}
+          </Fragment>
         );
       })}
     </View>
@@ -82,14 +99,33 @@ export function StatRow({ stats, centered = false }: StatRowProps) {
 /**
  * **Four open columns, no card** (founder, marquee cohesion sprint, 2026-11-07): the boxed,
  * divided strip was the part of the profile that read as older than the poster sections
- * under it. Each figure and its label now sit left-aligned in an equal quarter, the first
- * on the gutter under the avatar, with no border, fill or rule. Every cell is still the
+ * under it, so the box, the fill and the full-height dividers went. Every cell is still the
  * whole 44pt target it was.
+ *
+ * **A lighter rule back between the four** (founder, 2026-11-12). Not the old strip's: the
+ * title page's score-card hairline (`ImmersiveScores`' `divided` — `hairlineWidth * 2`, so
+ * it survives the Android densities where a single hairline rounds to nothing, in
+ * `border.hairline`), drawn short and centred so it separates the figures without
+ * re-drawing a box around them. Its height is the two lines of type it sits beside, not
+ * the cell: a full-height border would be the old divided strip again, and would run the
+ * whole height of the tap target.
  */
 const styles = StyleSheet.create({
+  /**
+   * **A subtle rounded outline around the four** (founder spec §7, 2026-11-13: "a clean
+   * outline rather than a heavy coloured background"). The hairline is the dividers' own
+   * colour and weight, so the frame and the rules read as one drawing; the radius is the
+   * card's. The cells keep their 44pt targets — the padding is inside the frame, around
+   * them, never taken out of them.
+   */
   row: {
     flexDirection: 'row',
     marginHorizontal: theme.layout.gutter,
+    paddingHorizontal: theme.space[2],
+    paddingVertical: theme.space[1],
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    borderRadius: theme.radius.card,
   },
   item: {
     flex: 1,
@@ -100,8 +136,16 @@ const styles = StyleSheet.create({
     // stated because half of these tiles are now buttons, and the 44pt floor should be a
     // property of the cell rather than a coincidence of the type scale inside it.
     minHeight: theme.layout.minTapTarget,
+    // A little air between a rule and the words beside it, now that the row is framed.
+    paddingHorizontal: theme.space[1],
     gap: 2,
   },
   centered: { alignItems: 'center' },
+  rule: {
+    alignSelf: 'center',
+    height: theme.typography.headline.lineHeight + theme.typography.footnote.lineHeight,
+    borderLeftWidth: StyleSheet.hairlineWidth * 2,
+    borderLeftColor: theme.border.hairline,
+  },
   pressed: { opacity: 0.6 },
 });

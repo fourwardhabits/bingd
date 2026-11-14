@@ -1,7 +1,8 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screens: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -9,7 +10,6 @@ import { renderWithProviders } from '@/test-utils/render';
 import AccountScreen from '../../../app/settings/account';
 import NotificationsScreen from '../../../app/settings/notifications';
 import SettingsScreen from '../../../app/settings/index';
-import { setTitleLayout, useStoredTitleLayout } from '@/features/title/title-layout';
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
@@ -65,9 +65,24 @@ jest.mock('expo-router', () => ({
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
-  useRouter: () => ({ push: mockPush, replace: mockReplace, back: () => {} }),
-  Stack: { Screen: () => null },
+  useRouter: () => ({
+    push: mockPush,
+    replace: mockReplace,
+    back: () => mockBackForSettings(),
+    canGoBack: () => true,
+  }),
+  // Captures what each screen asks of its native header, so a header control can be
+  // asserted on without a navigator.
+  Stack: {
+    Screen: ({ options }: { options?: Record<string, unknown> }) => {
+      mockStackOptions = options ?? {};
+      return null;
+    },
+  },
 }));
+
+let mockStackOptions: Record<string, unknown> = {};
+let mockBackForSettings: () => void = () => {};
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
@@ -1161,45 +1176,71 @@ describe('the Settings sections', () => {
 });
 
 /**
- * **Labs** (Immersive Scroll experiment, 2026-11-04): one row, offered on every lane but
- * production, that switches the title page between Original and Immersive on this device.
+ * **One dismissal, and no Labs** (founder spec §2B/§7, 2026-11-13).
+ *
+ * The header's Close text sat beside a working back arrow, so Settings had two ways out of
+ * one screen; it is gone. The Labs section's one row switched the title page between
+ * Cinematic and Original; Cinematic is the standard page now, so the section is gone too.
+ * Every other section is still here, with its headings one step more prominent.
  */
-/**
- * **Labs offers the way back to Original, production included** (founder, release pass,
- * 2026-11-07): the Cinematic title page is the default everywhere, and this row switches it.
- */
-describe('Labs in Settings', () => {
-  afterEach(async () => {
-    mockLane = 'production';
-    await setTitleLayout('original');
+describe('the Settings header and sections', () => {
+  it('draws no Close in the header', async () => {
+    mockStackOptions = {};
+    await renderWithProviders(<SettingsScreen />);
+
+    expect(mockStackOptions.title).toBe('Settings');
+    expect(mockStackOptions.headerRight).toBeUndefined();
   });
 
-  it('is offered in a production build, and switches the title page in one tap', async () => {
+  it('draws the back arrow itself on iOS, where a presented modal has none, and it leaves', async () => {
+    mockStackOptions = {};
+    const back = jest.fn();
+    mockBackForSettings = back;
+    await renderWithProviders(<SettingsScreen />);
+
+    const HeaderLeft = mockStackOptions.headerLeft as () => React.ReactElement;
+    expect(HeaderLeft).toBeDefined();
+    const header = await renderWithProviders(<HeaderLeft />);
+    const arrow = header.getByRole('button', { name: 'Back' });
+    expect(StyleSheet.flatten(arrow.props.style).minHeight).toBeGreaterThanOrEqual(44);
+    await fireEvent.press(arrow);
+    expect(back).toHaveBeenCalledTimes(1);
+    mockBackForSettings = () => {};
+  });
+
+  it('leaves Android its native back arrow, and adds nothing beside it', async () => {
+    const { Platform } = jest.requireActual<typeof import('react-native')>('react-native');
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      mockStackOptions = {};
+      await renderWithProviders(<SettingsScreen />);
+      expect(mockStackOptions.headerLeft).toBeUndefined();
+      expect(mockStackOptions.headerRight).toBeUndefined();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: original, configurable: true });
+    }
+  });
+
+  it('has no Labs section and no title-page switch, in any lane', async () => {
+    for (const lane of ['development', 'preview', 'beta', 'production']) {
+      mockLane = lane;
+      const view = await renderWithProviders(<SettingsScreen />);
+      expect(view.queryByText('LABS')).toBeNull();
+      expect(view.queryByLabelText(/^Title page/)).toBeNull();
+    }
     mockLane = 'production';
-    await setTitleLayout('immersive');
-    let shown = '';
-    const Probe = () => {
-      shown = useStoredTitleLayout();
-      return null;
-    };
-    const view = await renderWithProviders(
-      <>
-        <SettingsScreen />
-        <Probe />
-      </>,
-    );
+  });
 
-    expect(view.getByText('LABS')).toBeTruthy();
-    const row = view.getByRole('button', { name: 'Title page, Cinematic' });
-    await act(async () => {
-      fireEvent.press(row);
-    });
-    await waitFor(() => expect(shown).toBe('original'));
-    expect(view.getByRole('button', { name: 'Title page, Original' })).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.press(view.getByRole('button', { name: 'Title page, Original' }));
-    });
-    await waitFor(() => expect(shown).toBe('immersive'));
+  it('keeps every other section, under the larger section heading', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+    for (const title of ['Account', 'Help & feedback', 'Legal', 'About']) {
+      const heading = view.getByText(title.toUpperCase());
+      expect(StyleSheet.flatten(heading.props.style).fontSize).toBe(
+        theme.typography.sectionHeaderLarge.fontSize,
+      );
+    }
+    expect(view.getByRole('button', { name: /Edit Profile/ })).toBeTruthy();
+    expect(view.getByRole('button', { name: /Privacy/ })).toBeTruthy();
   });
 });
