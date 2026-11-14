@@ -59,7 +59,9 @@ it('shows today’s sign-in screen: Email, Continue with email, and today’s hi
   expect(view.queryByLabelText('Email or username')).toBeNull();
   expect(view.getByText('Continue with email')).toBeTruthy();
   expect(
-    view.getByText('We will send a six-digit code. No password to remember.'),
+    view.getByText('We will send a six-digit code. No password to remember.', {
+      includeHiddenElements: true,
+    }),
   ).toBeTruthy();
   await waitFor(() => expect(view.getByText('Continue with Apple')).toBeTruthy());
   expect(JSON.stringify(view.toJSON())).not.toMatch(/username/i);

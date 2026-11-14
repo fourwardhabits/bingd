@@ -186,6 +186,9 @@ describe('Sign in, with username sign-in on', () => {
     expect(mockAuth.sendCode).not.toHaveBeenCalled();
   });
 
+  // Field captions (error/hint) are queried with includeHiddenElements: on this base they
+  // are visible, and after design-system v3 A.2 #26 (DS-FIX) they are drawn but hidden from
+  // the a11y tree because the input speaks them. The same query holds on both.
   it('stays put and says so when the request itself failed', async () => {
     mockAuth.sendUsername.mockResolvedValue({
       ok: false,
@@ -194,7 +197,11 @@ describe('Sign in, with username sign-in on', () => {
     const view = await renderWithProviders(<SignInScreen />);
     await typeInto(view, 'Email or username', 'ada');
     await pressContinue(view);
-    await waitFor(() => expect(view.getByText('That did not work. Try again.')).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        view.getByText('That did not work. Try again.', { includeHiddenElements: true }),
+      ).toBeTruthy(),
+    );
     expect(mockNav.pushed).toEqual([]);
   });
 
@@ -220,7 +227,7 @@ describe('Password sign-in, with username sign-in on', () => {
     const view = await renderWithProviders(<PasswordSignInScreen />);
     expect(view.getByLabelText('Email')).toBeTruthy();
     expect(view.queryByLabelText(/username/i)).toBeNull();
-    expect(view.queryByText(/username/i)).toBeNull();
+    expect(view.queryByText(/username/i, { includeHiddenElements: true })).toBeNull();
   });
 });
 
@@ -260,7 +267,9 @@ describe('Verify by username', () => {
     await pressContinue(view);
     await waitFor(() =>
       expect(
-        view.getByText('That code did not work. Check it, or send a new one.'),
+        view.getByText('That code did not work. Check it, or send a new one.', {
+          includeHiddenElements: true,
+        }),
       ).toBeTruthy(),
     );
   });
@@ -296,7 +305,9 @@ describe('Verify by username', () => {
       }
       expect(mockAuth.sendUsername).toHaveBeenCalledTimes(2);
       expect(mockAuth.sendUsername).toHaveBeenCalledWith('ada');
-      expect(view.getByText(/a new code is on its way/)).toBeTruthy();
+      expect(
+        view.getByText(/a new code is on its way/, { includeHiddenElements: true }),
+      ).toBeTruthy();
 
       await act(async () => {
         jest.advanceTimersByTime(61_000);
