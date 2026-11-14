@@ -3734,6 +3734,112 @@ describe('the show decision a season ranking left open', () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 
+  /**
+   * Independent review (Codex P2 on #286): a note still saving when Update Show or Keep
+   * Show is tapped holds the decision at the details barrier. A sheet closed while it
+   * waits must not go on to open the show's correction or send the reaffirmation.
+   */
+  describe('when the sheet closes while a detail is still saving', () => {
+    /** `log_watched` stays in flight until the test answers it; everything else is ok. */
+    const holdingTheNote = () => {
+      let answer: () => void = () => {};
+      mockRpc.mockImplementation((name: string) =>
+        name === 'log_watched'
+          ? new Promise((resolve) => {
+              answer = () => resolve({ data: { status: 'ok' }, error: null });
+            })
+          : Promise.resolve({
+              data:
+                name === 'keep_show'
+                  ? { status: 'kept', created: true, kept_at: 'now' }
+                  : { status: 'ok' },
+              error: null,
+            }),
+      );
+      return () => answer();
+    };
+
+    it('does not open Update Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(onUpdateShow).not.toHaveBeenCalled();
+    });
+
+    it('does not send Keep Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(callsTo('keep_show')).toHaveLength(0);
+      expect(onDone).not.toHaveBeenCalled();
+    });
+
+    it('still hands over Update Show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(onUpdateShow).not.toHaveBeenCalled();
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+    });
+
+    it('still keeps the show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(callsTo('keep_show')).toHaveLength(0);
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      expect(callsTo('keep_show')).toHaveLength(1);
+    });
+  });
+
   it('records nothing when the sheet is dismissed', async () => {
     const onClose = jest.fn();
     const onUpdateShow = jest.fn();

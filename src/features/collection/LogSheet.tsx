@@ -1588,6 +1588,7 @@ function Body({
     deciding.current = true;
     try {
       if (!(await detailsSettled())) return;
+      if (!decisionAlive.current) return;
       onUpdateShow({
         showId: showDecision.showId,
         bucket: showDecision.bucket,
@@ -1604,6 +1605,7 @@ function Body({
     setKeepShowError(null);
     try {
       if (!(await detailsSettled())) return;
+      if (!decisionAlive.current) return;
       setKeepingShow(true);
       const result = await keepShow(showDecision.linkedPlacementId);
       if (!decisionAlive.current) return;
