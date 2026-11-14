@@ -16,6 +16,7 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 | **README.md** (this file) | System shape, the ten decisions everything else follows from |
 | [`data-model.md`](./data-model.md) | Postgres schema, indexes, row-level security |
 | [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
+| [`username-sign-in.md`](./username-sign-in.md) | Username-or-email sign-in: threat model, limits, deployment checklist (dark, not deployed) |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
 | [`api.md`](./api.md) | The write and read surface |
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
