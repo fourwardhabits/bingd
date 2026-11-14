@@ -3,13 +3,16 @@ import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { imdbSyntheticBytes } from './__fixtures__/imdb-synthetic';
-import { COLLAPSED, PAGE } from './ImportOutcomeList';
 import { ImportScreen } from './ImportScreen';
+import { UNMATCHED_PAGE } from './UnmatchedDisclosure';
 import { forgetSessionImport, sessionImportFor } from './session-outcomes';
 import { MAX_PAGES, readUnresolvedRows, UNRESOLVED_PAGE } from './use-imdb-outcomes';
 
 /**
- * The IMDb summary by title (`outcomes.ts`, `ImportOutcomeList.tsx`), on screen.
+ * The results' *Unmatched* row by title (`outcomes.ts`, `UnmatchedDisclosure.tsx`), on
+ * screen. IMP1113-UI rewrote this file with the screen: the per-heading lists of shows,
+ * episodes and other kinds became notes (founder), so what is listed by title now is the
+ * Unmatched row alone, behind a disclosure, paged by fifty.
  *
  * The same mocks as `ImdbImport.test.tsx`, plus a readable `import_rows`: `mockUnresolved`
  * is what the owner's RLS-scoped select returns for the job, in `{ id, raw }` rows as
@@ -144,11 +147,11 @@ const importSynthetic = async (counts: Record<string, number> = COUNTS) => {
   await waitFor(() => expect(view.getByTestId('choose-imdb')).toBeTruthy());
   await fireEvent.press(view.getByTestId('choose-imdb'));
   await waitFor(() =>
-    expect(view.getByRole('button', { name: 'Choose IMDb CSV' })).toBeTruthy(),
+    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy(),
   );
-  await fireEvent.press(view.getByRole('button', { name: 'Choose IMDb CSV' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
   await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
-  await fireEvent.press(view.getByRole('button', { name: 'Import 7 movies' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Import' }));
   await waitFor(() => expect(view.getByText(/^Your IMDb history is/)).toBeTruthy());
   return view;
 };
@@ -167,100 +170,104 @@ const restored = async (counts: Record<string, number> = COUNTS) => {
   };
   const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
   await waitFor(() =>
-    expect(view.getByText(/Your IMDb history|Nothing was added/)).toBeTruthy(),
+    expect(view.getByText(/Your IMDb history|Nothing new came in/)).toBeTruthy(),
   );
   return view;
 };
 
-const rowsOf = (view: Awaited<ReturnType<typeof restored>>, section: string) =>
-  view.queryAllByTestId(`outcome-row-${section}`);
+type View = Awaited<ReturnType<typeof restored>>;
 
-describe('the import just sent: every heading by title', () => {
-  it('lists each title under the heading it landed in, with name, year and tt id', async () => {
+/** Open the Unmatched row and wait for whatever it opens to. */
+const openUnmatched = async (view: View) => {
+  const toggle = await waitFor(() => view.getByRole('button', { name: /^Unmatched, / }));
+  await fireEvent.press(toggle);
+  await waitFor(() => expect(view.getByTestId('result-unmatched-content')).toBeTruthy());
+  await waitFor(() => expect(view.queryByText('Getting the list…')).toBeNull());
+  return within(view.getByTestId('result-unmatched-content'));
+};
+
+const rowsOf = (view: View) => view.queryAllByTestId('unmatched-row');
+
+describe('the import just sent: Unmatched by title', () => {
+  it('is collapsed, with the count, until it is opened', async () => {
     unresolved(UNRESOLVED);
     const view = await importSynthetic();
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-
-    // The counts card is exactly what it was.
-    expect(view.getByLabelText('5 Added to your collection')).toBeTruthy();
-    expect(view.getByLabelText('1 Already in your collection')).toBeTruthy();
-    expect(view.getByLabelText('2 Couldn’t match')).toBeTruthy();
-    expect(view.getByLabelText('2 TV shows matched, not added')).toBeTruthy();
-    expect(view.getByLabelText('2 Not supported')).toBeTruthy();
-
-    const unmatched = within(view.getByTestId('outcome-unmatched'));
-    expect(unmatched.getByText('Couldn’t match')).toBeTruthy();
-    expect(unmatched.getByText(/couldn’t find a confident match/)).toBeTruthy();
-    expect(unmatched.getByText('Too Loud (2003)')).toBeTruthy();
-    expect(unmatched.getByText('tt9000011')).toBeTruthy();
-    expect(unmatched.getByText('The Long Valley')).toBeTruthy();
-
-    const tv = within(view.getByTestId('outcome-tv'));
-    expect(tv.getByText('TV shows (not added yet)')).toBeTruthy();
-    expect(tv.getByText('Harbour Lights (2011)')).toBeTruthy();
-    expect(tv.getByText('Seven Winters (2019)')).toBeTruthy();
-    expect(tv.getByText('Mini-series · tt9000003')).toBeTruthy();
-    // Not found, so it is under Couldn't match and not here.
-    expect(tv.queryByText('The Long Valley')).toBeNull();
-
     expect(
-      within(view.getByTestId('outcome-episodes')).getByText('Harbour Lights: Pilot (2011)'),
+      view.getByRole('button', { name: 'Unmatched, 2 titles', expanded: false }),
     ).toBeTruthy();
-    expect(
-      within(view.getByTestId('outcome-other')).getByText('Starfall Quest (2021)'),
-    ).toBeTruthy();
-    expect(
-      within(view.getByTestId('outcome-other')).getByText('Video game · tt9000009'),
-    ).toBeTruthy();
-
-    // A list replaces its sentence; nothing is said twice.
-    expect(view.queryByText(/We couldn’t match 2 titles/)).toBeNull();
-    expect(view.queryByText(/2 TV shows were matched but not added/)).toBeNull();
+    expect(rowsOf(view)).toHaveLength(0);
   });
 
-  it('has exactly as many titles under each heading as the count beside it', async () => {
+  it('lists each unmatched title with name, year, type and tt id, split by medium', async () => {
     unresolved(UNRESOLVED);
     const view = await importSynthetic();
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    const expected = { unmatched: 2, tv: 2, episodes: 1, other: 1 };
-    for (const [section, n] of Object.entries(expected)) {
-      expect(rowsOf(view, section)).toHaveLength(n);
-      expect(
-        within(view.getByTestId(`outcome-${section}`)).getByLabelText(`${n} titles`),
-      ).toBeTruthy();
-    }
-    // Episodes + other = the card's "Not supported".
-    expect(rowsOf(view, 'episodes').length + rowsOf(view, 'other').length).toBe(2);
+    const list = await openUnmatched(view);
+    expect(list.getByText(/couldn’t find a confident match/)).toBeTruthy();
+    // Both types are known from this session's parse, and both media are present, so the
+    // list is split (IMP1113-UI §D). Movies first.
+    expect(view.getByTestId('unmatched-medium')).toBeTruthy();
+    expect(list.getByText('Too Loud (2003)')).toBeTruthy();
+    expect(list.getByText('Movie · tt9000011')).toBeTruthy();
+    expect(list.queryByText('The Long Valley')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('unmatched-medium'));
+    await fireEvent.press(
+      await waitFor(() => view.getByRole('menuitem', { name: 'TV shows' })),
+    );
+    await waitFor(() => expect(list.getByText('The Long Valley')).toBeTruthy());
+    expect(list.getByText('TV Series · tt9000014')).toBeTruthy();
+    expect(list.queryByText('Too Loud (2003)')).toBeNull();
+  });
+
+  it('has exactly as many titles as the count, across both media', async () => {
+    unresolved(UNRESOLVED);
+    const view = await importSynthetic();
+    await openUnmatched(view);
+    expect(rowsOf(view)).toHaveLength(1);
+    await fireEvent.press(view.getByTestId('unmatched-medium'));
+    await fireEvent.press(
+      await waitFor(() => view.getByRole('menuitem', { name: 'TV shows' })),
+    );
+    await waitFor(() => expect(rowsOf(view)).toHaveLength(1));
   });
 
   it('reads the unmatched rows of this job only, name and year and nothing else', async () => {
     unresolved(UNRESOLVED);
     const view = await importSynthetic();
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
+    await openUnmatched(view);
     expect(mockRowReads).toEqual([
       { table: 'import_rows', columns: 'id, raw', eq: ['job_id', JOB], range: [0, 999] },
     ]);
   });
 
-  it('labels every row for a screen reader with its heading', async () => {
+  it('labels every row for a screen reader', async () => {
     unresolved(UNRESOLVED);
     const view = await importSynthetic();
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    expect(view.getByLabelText('Too Loud, 2003, IMDb tt9000011, Couldn’t match')).toBeTruthy();
+    await openUnmatched(view);
+    expect(view.getByLabelText('Too Loud, 2003, Movie, IMDb tt9000011')).toBeTruthy();
+  });
+
+  // H2 rows 7 and 8: a recognised show, an episode and another kind are notes, never rows,
+  // and never listed under Unmatched or counted as imported.
+  it('says recognised shows, episodes and other kinds in notes, and lists none of them', async () => {
+    unresolved(UNRESOLVED);
+    const view = await importSynthetic();
     expect(
-      view.getByLabelText('The Long Valley, no year, IMDb tt9000014, Couldn’t match'),
-    ).toBeTruthy();
-    expect(
-      view.getByLabelText(
-        'Seven Winters, 2019, Mini-series, IMDb tt9000003, TV shows (not added yet)',
+      view.getByText(
+        'We found 2 TV shows from your file in bingd, but TV shows from IMDb aren’t added yet.',
       ),
     ).toBeTruthy();
-    expect(
-      view.getByLabelText('Starfall Quest, 2021, Video game, IMDb tt9000009, Other'),
-    ).toBeTruthy();
-    for (const heading of ['Couldn’t match', 'TV shows (not added yet)', 'Episodes', 'Other']) {
-      expect(view.getByRole('header', { name: heading })).toBeTruthy();
-    }
+    expect(view.getByText(/1 TV episode didn’t come in/)).toBeTruthy();
+    expect(view.getByText(/1 title didn’t come in because/)).toBeTruthy();
+    expect(view.getByLabelText('Imported movies, 5')).toBeTruthy();
+    await openUnmatched(view);
+    for (const name of [
+      'Harbour Lights (2011)',
+      'Seven Winters (2019)',
+      'Starfall Quest (2021)',
+    ])
+      expect(view.queryByText(name)).toBeNull();
+    expect(view.queryByText(/Imported TV/)).toBeNull();
   });
 
   it('keeps the parse in memory only, for this job only', async () => {
@@ -270,9 +277,7 @@ describe('the import just sent: every heading by title', () => {
     expect(sessionImportFor('22222222-2222-4333-8444-555555555555')).toBeNull();
   });
 
-  it('a re-import that changed nothing lists nothing it cannot know', async () => {
-    // Same file again: every movie is "Imported before" and every show is matched again.
-    // Which movie is which is the server's to know, so those stay counts.
+  it('a re-import with nothing unmatched reads nothing and draws no Unmatched row', async () => {
     const view = await importSynthetic({
       applied: 7,
       watched: 0,
@@ -284,48 +289,43 @@ describe('the import just sent: every heading by title', () => {
     await waitFor(() =>
       expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
     );
-    expect(view.getByLabelText('7 Imported before')).toBeTruthy();
-    expect(view.queryByLabelText(/Added to your collection/)).toBeTruthy();
-    expect(view.queryByTestId('outcome-unmatched')).toBeNull();
-    expect(rowsOf(view, 'tv')).toHaveLength(3);
-    // No list exists for added or already-here titles.
-    expect(view.queryByText('Paper Birds (2015)')).toBeNull();
+    expect(view.getByLabelText('Imported movies, 7. 7 from an earlier import')).toBeTruthy();
+    expect(view.queryByRole('button', { name: /^Unmatched/ })).toBeNull();
     expect(mockRowReads).toEqual([]);
   });
 });
 
 describe('after a restart', () => {
-  it('lists Couldn’t match from the server, and keeps counts and sentences for the rest', async () => {
+  it('lists Unmatched from the server as one list, with no tt ids or types', async () => {
     unresolved(UNRESOLVED);
     const view = await restored();
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    expect(rowsOf(view, 'unmatched')).toHaveLength(2);
+    const list = await openUnmatched(view);
+    expect(rowsOf(view)).toHaveLength(2);
+    // Types are not known without the parse, so there is no split (IMP1113-UI §D).
+    expect(view.queryByTestId('unmatched-medium')).toBeNull();
+    expect(list.getByText('Too Loud (2003)')).toBeTruthy();
+    expect(list.getByText('The Long Valley')).toBeTruthy();
     // The tt id is not recovered from the server: it was redacted, and nothing asks for it.
     expect(view.queryByText(/tt9\d{6}/)).toBeNull();
-    expect(view.queryByTestId('outcome-tv')).toBeNull();
-    expect(view.queryByTestId('outcome-episodes')).toBeNull();
-    expect(view.queryByTestId('outcome-other')).toBeNull();
-    expect(view.getByText(/2 TV shows were matched but not added/)).toBeTruthy();
-    expect(view.getByText(/1 TV episode wasn’t added/)).toBeTruthy();
-    expect(view.getByText(/1 title wasn’t added because it’s a kind of title/)).toBeTruthy();
-    expect(view.getByLabelText('2 TV shows matched, not added')).toBeTruthy();
-    expect(view.getByLabelText('2 Not supported')).toBeTruthy();
+    expect(view.getByText(/We found 2 TV shows from your file in bingd/)).toBeTruthy();
   });
 
-  it('falls back to the sentence when the rows cannot be read', async () => {
+  it('says details are not available when the rows cannot be read, keeping the count', async () => {
     mockUnresolved = { data: null, error: { message: 'offline' } };
     const view = await restored();
-    await waitFor(() => expect(view.getByText(/We couldn’t match 2 titles/)).toBeTruthy());
-    expect(view.queryByTestId('outcome-unmatched')).toBeNull();
-    expect(view.getByLabelText('2 Couldn’t match')).toBeTruthy();
+    const list = await openUnmatched(view);
+    expect(list.getByText('Details aren’t available for this import.')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Unmatched, 2 titles' })).toBeTruthy();
+    expect(rowsOf(view)).toHaveLength(0);
   });
 
-  it('falls back to the sentence when the rows do not add up to the count', async () => {
+  it('says details are not available when the rows do not add up to the count', async () => {
     unresolved([{ name: 'Too Loud', year: 2003 }]);
     const view = await restored();
     await waitFor(() => expect(mockRowReads.length).toBe(1));
-    await waitFor(() => expect(view.getByText(/We couldn’t match 2 titles/)).toBeTruthy());
-    expect(view.queryByTestId('outcome-unmatched')).toBeNull();
+    const list = await openUnmatched(view);
+    expect(list.getByText('Details aren’t available for this import.')).toBeTruthy();
+    expect(rowsOf(view)).toHaveLength(0);
   });
 });
 
@@ -336,57 +336,47 @@ describe('a long list', () => {
       year: 2000,
     }));
 
-  it('is collapsed, and Show all draws the rest', async () => {
-    unresolved(many(40));
-    const view = await restored({ watched: 1, unmatched: 40 });
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    expect(rowsOf(view, 'unmatched')).toHaveLength(COLLAPSED);
-    // The count is the whole number, never the rows drawn.
-    expect(view.getByLabelText('40 Couldn’t match')).toBeTruthy();
-    await fireEvent.press(view.getByRole('button', { name: 'Show all 40' }));
-    expect(rowsOf(view, 'unmatched')).toHaveLength(40);
-    expect(view.queryByRole('button', { name: /^Show / })).toBeNull();
-  });
-
-  it('is drawn a page at a time past a hundred, and pages the read past a thousand', async () => {
+  // H2 row 19 / I5: 1,000+ unmatched rows render paged, never all at once.
+  it('draws fifty at a time, and pages the read past a thousand', async () => {
     unresolved(many(1_250));
     const view = await restored({ watched: 1, unmatched: 1_250 });
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
+    await openUnmatched(view);
     expect(mockRowReads.map((r) => r.range)).toEqual([
       [0, 999],
       [1000, 1999],
     ]);
-    expect(rowsOf(view, 'unmatched')).toHaveLength(COLLAPSED);
-    await fireEvent.press(view.getByRole('button', { name: `Show ${PAGE} more of 1250` }));
-    expect(rowsOf(view, 'unmatched')).toHaveLength(PAGE);
-    await fireEvent.press(view.getByRole('button', { name: `Show ${PAGE} more of 1250` }));
-    expect(rowsOf(view, 'unmatched')).toHaveLength(2 * PAGE);
+    expect(rowsOf(view)).toHaveLength(UNMATCHED_PAGE);
+    // The count is the whole number, never the rows drawn.
+    expect(view.getByRole('button', { name: 'Unmatched, 1250 titles' })).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Show more (1200 left)' }));
+    expect(rowsOf(view)).toHaveLength(2 * UNMATCHED_PAGE);
+    await fireEvent.press(view.getByRole('button', { name: 'Show more (1150 left)' }));
+    expect(rowsOf(view)).toHaveLength(3 * UNMATCHED_PAGE);
   });
 
-  // Founder QA, 2026-11-12: nine "Couldn't match" rows. Nine is the first length past
-  // COLLAPSE_ABOVE (8), so the intended view is five rows and "Show all 9".
-  it('collapses at nine, the first length past the threshold, to five and Show all 9', async () => {
-    unresolved(many(9));
-    const view = await restored({ watched: 647, unmatched: 9 });
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    expect(rowsOf(view, 'unmatched')).toHaveLength(COLLAPSED);
-    expect(view.getByLabelText('9 Couldn’t match')).toBeTruthy();
-    await fireEvent.press(view.getByRole('button', { name: 'Show all 9' }));
-    expect(rowsOf(view, 'unmatched')).toHaveLength(9);
-    expect(view.queryByRole('button', { name: /^Show / })).toBeNull();
+  it('pages a list of more than two hundred and ends with no Show more', async () => {
+    unresolved(many(201));
+    const view = await restored({ watched: 1, unmatched: 201 });
+    await openUnmatched(view);
+    for (let shown = UNMATCHED_PAGE; shown < 201; shown += UNMATCHED_PAGE) {
+      expect(rowsOf(view)).toHaveLength(shown);
+      await fireEvent.press(view.getByTestId('unmatched-more'));
+    }
+    expect(rowsOf(view)).toHaveLength(201);
+    expect(view.queryByTestId('unmatched-more')).toBeNull();
   });
 
-  it('a short list is never collapsed', async () => {
-    unresolved(many(8));
-    const view = await restored({ watched: 1, unmatched: 8 });
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
-    expect(rowsOf(view, 'unmatched')).toHaveLength(8);
-    expect(view.queryByRole('button', { name: /^Show / })).toBeNull();
+  it('draws a list of fifty or fewer whole', async () => {
+    unresolved(many(UNMATCHED_PAGE));
+    const view = await restored({ watched: 1, unmatched: UNMATCHED_PAGE });
+    await openUnmatched(view);
+    expect(rowsOf(view)).toHaveLength(UNMATCHED_PAGE);
+    expect(view.queryByTestId('unmatched-more')).toBeNull();
   });
 });
 
 describe('a small screen', () => {
-  it('never truncates a count, a heading or a title: everything wraps', async () => {
+  it('never truncates a count, a label or a title: everything wraps', async () => {
     unresolved([
       {
         name: 'A Very Long Title That Will Certainly Need To Wrap On A Small Phone',
@@ -394,12 +384,11 @@ describe('a small screen', () => {
       },
     ]);
     const view = await restored({ watched: 12_345, kept: 2, unmatched: 1 });
-    await waitFor(() => expect(view.getByTestId('outcome-unmatched')).toBeTruthy());
+    await openUnmatched(view);
     const texts = [
       view.getByText('12345'),
-      view.getByText('Added to your collection'),
-      within(view.getByTestId('outcome-unmatched')).getByText('Couldn’t match'),
-      within(view.getByTestId('outcome-unmatched')).getByText('1'),
+      view.getByText('Imported movies'),
+      view.getByText('Unmatched'),
       view.getByText(/A Very Long Title/),
     ];
     for (const text of texts) {

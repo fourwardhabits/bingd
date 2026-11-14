@@ -130,3 +130,12 @@ export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
 export { UserRow, type UserRowProps } from './UserRow';
 export { Wordmark, type WordmarkProps } from './Wordmark';
+// IMP1113-UI: new shared pieces, appended rather than interleaved so FU1113-B's exports
+// above are untouched.
+export {
+  ActionPair,
+  actionPairFitsRow,
+  type ActionPairProps,
+  type PairAction,
+} from './ActionPair';
+export { Disclosure, type DisclosureProps } from './Disclosure';
