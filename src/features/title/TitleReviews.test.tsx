@@ -145,31 +145,32 @@ describe('the sort row', () => {
 });
 
 describe('the Helpful control', () => {
-  it('offers the mark, and reports the count in words to a screen reader', async () => {
+  it('offers the mark as a thumbs-up, with the count in words beneath (FU1113-F)', async () => {
     const view = await open({
       reviews: [review({ id: 'a', helpfulCount: 4, viewerHelpful: false })],
     });
 
-    expect(view.getByText('Helpful · 4')).toBeTruthy();
-    expect(
-      view.getByLabelText(/Mark Author a's review helpful\. 4 people found this helpful/),
-    ).toBeTruthy();
+    const control = view.getByRole('button', { name: 'Mark review helpful' });
+    expect(control.props.accessibilityState).toMatchObject({ selected: false });
+    expect(view.getByHintText("Tells Author a their review helped")).toBeTruthy();
+    expect(view.getByText('4 people found this helpful')).toBeTruthy();
   });
 
-  it('reads as unmarked and countless before anybody has said so', async () => {
+  it('reads as unmarked, with no count at all, before anybody has said so', async () => {
     const view = await open({ reviews: [review({ id: 'a' })] });
 
-    expect(view.getByText('Helpful')).toBeTruthy();
-    expect(view.getByLabelText(/Nobody has marked it yet/)).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Mark review helpful' })).toBeTruthy();
+    expect(view.queryByText(/found this helpful/)).toBeNull();
   });
 
-  it('shows the viewer’s own mark as selected', async () => {
+  it('shows the viewer’s own mark as selected, offering to take it back', async () => {
     const view = await open({
       reviews: [review({ id: 'a', helpfulCount: 1, viewerHelpful: true })],
     });
 
-    const control = view.getByLabelText(/Helpful, marked by you/);
+    const control = view.getByRole('button', { name: 'Remove helpful' });
     expect(control.props.accessibilityState.selected).toBe(true);
+    expect(view.getByText('1 person found this helpful')).toBeTruthy();
   });
 
   it('asks to toggle, carrying the review it belongs to', async () => {
@@ -177,7 +178,7 @@ describe('the Helpful control', () => {
     const one = review({ id: 'a', helpfulCount: 2, viewerHelpful: false });
     const view = await open({ reviews: [one], onToggleHelpful });
 
-    fireEvent.press(view.getByLabelText(/Mark Author a's review helpful/));
+    fireEvent.press(view.getByRole('button', { name: 'Mark review helpful' }));
     expect(onToggleHelpful).toHaveBeenCalledWith(one);
   });
 
@@ -185,7 +186,10 @@ describe('the Helpful control', () => {
     const mine = review({ id: 'mine', userId: VIEWER, helpfulCount: 3 });
     const view = await open({ reviews: [mine, review({ id: 'theirs' })] });
 
-    expect(view.queryByLabelText(/Mark Author mine's review helpful/)).toBeNull();
+    const mineCard = within(view.getAllByTestId('review-card')[0]!);
+    expect(mineCard.queryByTestId('review-helpful')).toBeNull();
+    // Edit instead, top right: the one composer.
+    expect(within(mineCard.getByTestId('review-card-head')).getByTestId('edit-review')).toBeTruthy();
     // The count is still shown to them: an author may see that their writing landed.
     expect(view.getByText('3 people found this helpful')).toBeTruthy();
   });
@@ -195,7 +199,7 @@ describe('the Helpful control', () => {
     const view = await open({ reviews: [mine] });
 
     expect(view.queryByText(/found this helpful/)).toBeNull();
-    expect(view.queryByText('Helpful')).toBeNull();
+    expect(view.queryByTestId('review-helpful')).toBeNull();
   });
 });
 
@@ -303,7 +307,7 @@ describe('the editorial sheet', () => {
         variant="editorial"
       />,
     );
-    expect(view.getByLabelText(/review helpful/)).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Mark review helpful' })).toBeTruthy();
     expect(view.queryByText('4')).toBeNull();
   });
 
@@ -341,7 +345,7 @@ describe('the reviews preview', () => {
     expect(REVIEWS_PREVIEW_COUNT).toBe(2);
     expect(view.getAllByTestId('review-preview')).toHaveLength(2);
     expect(view.queryByText('Third.')).toBeNull();
-    const [first] = view.getAllByTestId('review-preview');
+    const [first] = view.getAllByTestId('review-preview-body');
     if (!first) throw new Error('no preview row');
     await fireEvent.press(first);
     expect(onSeeAll).toHaveBeenCalled();
@@ -367,7 +371,7 @@ describe('the reviews preview', () => {
    */
   it('names the author with a face, the date and their score', async () => {
     const view = await renderWithProviders(<ReviewsPreview {...base} reviews={others.slice(0, 1)} />);
-    const head = within(view.getByTestId('review-preview')).getByTestId('reviewer-head');
+    const head = within(view.getByTestId('review-preview')).getByTestId('review-card-head');
     expect(within(head).getByText('Author a')).toBeTruthy();
     expect(within(head).getByText(/2026/)).toBeTruthy();
     expect(within(head).getByLabelText('8.4 out of 10')).toBeTruthy();
@@ -384,10 +388,15 @@ describe('the reviews preview', () => {
         onToggleHelpful={onToggleHelpful}
       />,
     );
-    const helpful = view.getByRole('button', { name: /^Mark Author a's review helpful/ });
-    expect(within(helpful).getByText('Helpful · 3')).toBeTruthy();
-    // Its own control, not inside the press that opens the sheet.
-    expect(within(view.getByTestId('review-preview')).queryByTestId('review-helpful')).toBeNull();
+    const helpful = view.getByRole('button', { name: 'Mark review helpful' });
+    expect(view.getByText('3 people found this helpful')).toBeTruthy();
+    // Its own control, top right, not inside the press that opens the sheet.
+    expect(
+      within(view.getByTestId('review-preview-body')).queryByTestId('review-helpful'),
+    ).toBeNull();
+    expect(
+      within(view.getByTestId('review-card-head')).getByTestId('review-helpful'),
+    ).toBeTruthy();
     await fireEvent.press(helpful);
     expect(onToggleHelpful).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
     expect(onSeeAll).not.toHaveBeenCalled();
@@ -405,7 +414,7 @@ describe('the reviews preview', () => {
     expect(helpful.props.accessibilityState).toMatchObject({ selected: true });
   });
 
-  it('says whose your review is, with no Helpful control and no score on it', async () => {
+  it('says whose your review is by name and date alone, with Edit, no Helpful and no score', async () => {
     const view = await renderWithProviders(
       <ReviewsPreview
         {...base}
@@ -421,8 +430,10 @@ describe('the reviews preview', () => {
       />,
     );
     const mine = within(view.getByTestId('your-review'));
-    expect(mine.getByText('Your review')).toBeTruthy();
-    expect(mine.getByText(/^Sai · /)).toBeTruthy();
+    // No "Your review" heading on top of the name and date (FU1113-F).
+    expect(mine.queryByText(/Your review/)).toBeNull();
+    expect(mine.getByText('Sai')).toBeTruthy();
+    expect(mine.getByText(/2026/)).toBeTruthy();
     expect(mine.queryAllByLabelText(/out of 10/)).toHaveLength(0);
     expect(mine.queryByTestId('review-helpful')).toBeNull();
     expect(mine.getByTestId('edit-review')).toBeTruthy();
@@ -463,7 +474,7 @@ describe('the reviews preview', () => {
       />,
     );
     expect(view.queryByText(/dead all along/)).toBeNull();
-    expect(view.getByTestId('review-preview').props.accessibilityLabel).toMatch(
+    expect(view.getByTestId('review-preview-body').props.accessibilityLabel).toMatch(
       /Contains spoilers$/,
     );
   });

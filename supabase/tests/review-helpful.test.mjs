@@ -578,3 +578,183 @@ describe('a sort nobody recognises', () => {
     assert.equal(rows.some((r) => r.user_id === third), false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FU1113-F audit (2026-11-14): the cases the review card's thumbs-up relies on, asserted
+// against the existing 20260911000100 functions. No migration: these pin what is there.
+// ---------------------------------------------------------------------------
+
+describe('FU1113-F: what a vote may never reach', () => {
+  /** A fresh public author on the shared film, so these cases never disturb the sorts above. */
+  const freshAuthor = async (username, text) => {
+    const who = await t.createUser({ username });
+    await collect(who);
+    await saveNote(who, text, 'public');
+    return { who, reviewId: await reviewIdOf(who) };
+  };
+
+  const rowsFor = async (reviewId) =>
+    (
+      await t.sql(`select user_id from review_helpful_votes where review_id = $1`, [reviewId])
+    ).rows;
+
+  it('refuses a self-vote with 42501, and writes nothing', async () => {
+    const reviewId = await reviewIdOf(author);
+    const denied = await refusal(author, reviewId);
+    assert.equal(denied?.code, '42501');
+    assert.equal((await rowsFor(reviewId)).length, 0);
+
+    // Taking back a vote you never could cast is refused the same way, not a silent ok.
+    const deniedOff = await refusal(author, reviewId, false);
+    assert.equal(deniedOff?.code, '42501');
+  });
+
+  it('refuses a private account’s review to a reader who does not follow it', async () => {
+    const { who, reviewId } = await freshAuthor('rh_closed', 'Behind a closed profile.');
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [who]);
+    try {
+      const denied = await refusal(voterB, reviewId);
+      const nothing = await refusal(voterB, await uuid());
+      assert.notEqual(denied, null, 'a private account’s review accepted a vote');
+      // Indistinguishable from a uuid that was never a review.
+      assert.equal(denied.code, nothing.code);
+      assert.equal(denied.message, nothing.message);
+      assert.equal((await rowsFor(reviewId)).length, 0);
+      const listed = await list(voterB, 'recent_desc');
+      await t.actAs(null);
+      assert.equal(listed.some((r) => r.id === reviewId), false);
+    } finally {
+      await t.sql(`delete from user_media where user_id = $1`, [who]);
+    }
+  });
+
+  it('refuses a suspended author’s review', async () => {
+    const { who, reviewId } = await freshAuthor('rh_suspended', 'Written before the suspension.');
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [who]);
+    try {
+      const denied = await refusal(reader, reviewId);
+      assert.equal(denied?.code, 'P0002');
+      assert.equal((await rowsFor(reviewId)).length, 0);
+    } finally {
+      await t.sql(`delete from user_media where user_id = $1`, [who]);
+    }
+  });
+
+  it('refuses a deleted review — the note cleared, or the row gone — and lists neither', async () => {
+    const cleared = await freshAuthor('rh_cleared', 'About to be taken down.');
+    await t.sql(`update user_media set note = null where id = $1`, [cleared.reviewId]);
+    assert.equal((await refusal(reader, cleared.reviewId))?.code, 'P0002');
+
+    const gone = await freshAuthor('rh_gone', 'About to be deleted with its row.');
+    await t.sql(`delete from user_media where id = $1`, [gone.reviewId]);
+    assert.equal((await refusal(reader, gone.reviewId))?.code, 'P0002');
+
+    const listed = await list(reader, 'recent_desc');
+    await t.actAs(null);
+    assert.equal(listed.some((r) => r.id === cleared.reviewId || r.id === gone.reviewId), false);
+    assert.equal((await rowsFor(cleared.reviewId)).length, 0);
+    await t.sql(`delete from user_media where id = $1`, [cleared.reviewId]);
+  });
+
+  it('applies a repeated operation id once, whatever the replay asks for', async () => {
+    const reviewId = await reviewIdOf(author);
+    const op = await uuid();
+    const call = (helpful) =>
+      t.asUser(reader, async () => {
+        const { rows } = await t.sql(`select set_review_helpful($1, $2, $3) as r`, [
+          op,
+          reviewId,
+          helpful,
+        ]);
+        return rows[0].r;
+      });
+
+    const first = await call(true);
+    const replay = await call(true);
+    // A replay carrying a different intent under the same id is still the first write.
+    const conflicting = await call(false);
+    await t.actAs(null);
+
+    assert.equal(first.helpful_count, 1);
+    assert.deepEqual(
+      [replay.helpful_count, replay.viewer_helpful],
+      [1, true],
+      'a replay changed the count',
+    );
+    assert.deepEqual(
+      [conflicting.helpful_count, conflicting.viewer_helpful],
+      [1, true],
+      'a replayed id applied a second, different write',
+    );
+    assert.deepEqual(await rowsFor(reviewId), [{ user_id: reader }]);
+  });
+
+  it('removes the row itself on toggle off, not merely the count', async () => {
+    const reviewId = await reviewIdOf(author);
+    await vote(reader, reviewId, true);
+    await vote(voterB, reviewId, true);
+    const off = await vote(reader, reviewId, false);
+    await t.actAs(null);
+
+    assert.equal(off.helpful_count, 1);
+    assert.equal(off.viewer_helpful, false);
+    assert.deepEqual(await rowsFor(reviewId), [{ user_id: voterB }]);
+
+    // Taking back a vote that is not there is a no-op, not an error.
+    const again = await vote(reader, reviewId, false);
+    await t.actAs(null);
+    assert.equal(again.helpful_count, 1);
+  });
+
+  it('creates no Feed post, notification, push, reaction, ranking, watch or score change', async () => {
+    /**
+     * A vote is a quiet signal on a piece of writing. Everything the social and scoring
+     * system writes is snapshotted around a full add / repeat / remove / add cycle by two
+     * people, and must be byte-for-byte what it was — apart from the votes table itself.
+     */
+    const tables = [
+      'feed_events',
+      'notifications',
+      'push_outbox',
+      'reactions',
+      'rankings',
+      'watch_events',
+      'user_media',
+    ];
+    const snapshot = async () => {
+      const out = {};
+      for (const table of tables) {
+        const { rows } = await t.sql(
+          `select coalesce(jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text), '[]'::jsonb) as rows
+             from ${table} x`,
+        );
+        out[table] = rows[0].rows;
+      }
+      return out;
+    };
+
+    const reviewId = await reviewIdOf(author);
+    const secondId = await reviewIdOf(second);
+    const before = await snapshot();
+
+    await vote(reader, reviewId, true);
+    await vote(reader, reviewId, true);
+    await vote(voterB, reviewId, true);
+    await vote(reader, reviewId, false);
+    await vote(voterB, secondId, true);
+    await t.actAs(null);
+
+    const afterVotes = await snapshot();
+    for (const table of tables) {
+      assert.deepEqual(afterVotes[table], before[table], `a vote wrote to ${table}`);
+    }
+    // And the live score title_reviews_v2 quotes beside each review is unmoved.
+    const scores = (rows) => rows.map((r) => [r.id, r.score]).sort();
+    const listed = await list(reader, 'recent_desc');
+    await t.actAs(null);
+    await t.sql(`delete from review_helpful_votes`);
+    const unvoted = await list(reader, 'recent_desc');
+    await t.actAs(null);
+    assert.deepEqual(scores(listed), scores(unvoted));
+  });
+});
