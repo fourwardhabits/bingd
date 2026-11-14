@@ -229,7 +229,7 @@ const chooseLetterboxd = async (view: View) => {
 /** Letterboxd, then its picker: what *Import from Letterboxd* used to do in one tap. */
 const pickLetterboxd = async (view: View) => {
   await chooseLetterboxd(view);
-  await fireEvent.press(view.getByRole('button', { name: 'Upload Letterboxd ZIP' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Upload Letterboxd file' }));
 };
 
 const Q = 'Already tracking movies somewhere else?';
@@ -432,7 +432,7 @@ describe('Not now', () => {
     );
     // Back on Letterboxd's page, both answers live, and no apology for a choice.
     expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload Letterboxd file' })).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
     // The press that reached the importer is the one that counts it.
@@ -451,7 +451,7 @@ describe('Not now', () => {
     await pickLetterboxd(view);
 
     await waitFor(() => expect(view.getByText(/not the Letterboxd ZIP/)).toBeTruthy());
-    expect(view.getByText('Upload Letterboxd ZIP')).toBeTruthy();
+    expect(view.getByText('Upload Letterboxd file')).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
@@ -693,7 +693,10 @@ describe('importing from the step', () => {
     ]) {
       expect(view.getByText(step)).toBeTruthy();
     }
-    expect(view.getByRole('button', { name: 'Open Letterboxd’s export page' })).toBeTruthy();
+    // QA 11-14 §7: the page's own *Letterboxd Export* sits above the help, so the help no
+    // longer repeats it. Was: an *Open Letterboxd’s export page* button inside the help.
+    expect(view.queryByRole('button', { name: 'Open Letterboxd’s export page' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Letterboxd Export' })).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
 
     await waitFor(() =>

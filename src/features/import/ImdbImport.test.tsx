@@ -1,14 +1,16 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
-import { Linking } from 'react-native';
+import { Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import {
   IMDB_HEADER,
   IMDB_SYNTHETIC_CSV,
   imdbSyntheticBytes,
 } from './__fixtures__/imdb-synthetic';
+import { IMDB_HOW_TO_STEPS } from './ExportHelp';
 import { ImportScreen } from './ImportScreen';
 import { forgetSessionImport } from './session-outcomes';
 
@@ -140,7 +142,7 @@ describe('the choice of service', () => {
     await waitFor(() =>
       expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
     );
-    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload Letterboxd file' })).toBeTruthy();
     // Removed by the founder (IMP1113-UI): the service page has one action and its help.
     expect(view.queryByRole('button', { name: 'Choose a different service' })).toBeNull();
   });
@@ -194,18 +196,22 @@ describe('the choice of service', () => {
 
 describe('IMDb’s page', () => {
   /**
-   * IMP1113-UI (H2 row 1): the founder's text with the two accuracy edits, one primary, and
-   * the steps collapsed. The always-visible steps, the privacy block and the separate help
-   * button are gone, and asserted gone.
+   * IMP1113-UI (H2 row 1), polished QA 11-14 §7: the founder's shorter text, a `title1`
+   * heading, Export and Upload side by side, and the steps collapsed. The always-visible
+   * steps, the privacy block and the separate help button are gone, and asserted gone.
+   * Was: the longer body, `display`, and one Upload IMDb CSV button.
    */
-  it('says the founder’s words, with Upload IMDb CSV and the steps collapsed', async () => {
+  it('says the founder’s words under a title1 heading, with Export and Upload and the steps collapsed', async () => {
     const view = await openImdb();
     expect(
       view.getByText(
-        'Import the movies you’ve rated on IMDb. They join your collection unranked, and you can use the ranking flow to quickly rank them. Anything already ranked on bingd will keep its rating.',
+        'Movies you’ve rated join your collection unranked. Rank them using bingd’s ranking flow. Anything already ranked keeps its score.',
       ),
     ).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+    const heading = view.getByText('Bring over your IMDb history');
+    expect(StyleSheet.flatten(heading.props.style)).toMatchObject(theme.typography.title1);
+    expect(view.getByRole('button', { name: 'IMDb Export' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
     expect(view.queryByText('On imdb.com, sign in and open Your Ratings.')).toBeNull();
     expect(view.queryByText('How to get your file')).toBeNull();
     expect(view.queryByText(/The dates you rated things are never sent/)).toBeNull();
@@ -215,21 +221,35 @@ describe('IMDb’s page', () => {
     );
   });
 
-  it('opens IMDb’s own steps inline, with the ratings link', async () => {
+  /**
+   * QA 11-14 §7: *IMDb Export* opens Your Ratings, where IMDb's Export control lives, and
+   * counts `import_instructions_opened` as the help's link did, so the funnel keeps its
+   * meaning. It never opens the picker.
+   */
+  it('IMDb Export opens Your Ratings, counts the open, and starts nothing', async () => {
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
-    await waitFor(() =>
-      expect(view.getByText('On imdb.com, sign in and open Your Ratings.')).toBeTruthy(),
-    );
-    expect(view.getByRole('button', { name: 'Open your IMDb ratings' })).toBeTruthy();
     const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
-    await fireEvent.press(view.getByRole('button', { name: 'Open your IMDb ratings' }));
+    await fireEvent.press(view.getByRole('button', { name: 'IMDb Export' }));
     expect(openURL).toHaveBeenCalledWith('https://www.imdb.com/list/ratings');
     openURL.mockRestore();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_instructions_opened',
       props: { surface: 'settings', provider: 'imdb' },
     });
+    expect(view.queryByText('Ready to import')).toBeNull();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
+  });
+
+  /** Was: the help carried *Open your IMDb ratings*, which the Export action now repeats. */
+  it('opens IMDb’s own steps inline, without a second export button', async () => {
+    const view = await openImdb();
+    await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
+    await waitFor(() =>
+      expect(view.getByText('On imdb.com, sign in and open Your Ratings.')).toBeTruthy(),
+    );
+    for (const step of IMDB_HOW_TO_STEPS) expect(view.getByText(step)).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Open your IMDb ratings' })).toBeNull();
+    expect(view.getAllByRole('button', { name: 'IMDb Export' })).toHaveLength(1);
   });
 });
 
@@ -237,7 +257,7 @@ describe('the IMDb preview', () => {
   const preview = async (csv = IMDB_SYNTHETIC_CSV) => {
     mockPicked = imdbSyntheticBytes(csv);
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
     return view;
   };
@@ -351,19 +371,19 @@ describe('the IMDb preview', () => {
   it('refuses the Letterboxd ZIP picked on the IMDb page, and says which to choose', async () => {
     mockPicked = zipSync({ 'watched.csv': strToU8('Date,Name,Year\n') });
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_archive_selected',
       props: { outcome: 'is_zip', provider: 'imdb' },
     });
-    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
   });
 
   it('refuses a CSV that is not an IMDb ratings export', async () => {
     mockPicked = strToU8('a,b,c\n1,2,3\n');
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() =>
       expect(view.getByText('That isn’t an IMDb ratings export')).toBeTruthy(),
     );
@@ -374,24 +394,27 @@ describe('the IMDb preview', () => {
       `${IMDB_HEADER}\ntt9300001,8,2020-01-01,Pilot,,https://x,TV Episode,7,40,2010,Drama,1,,\n`,
     );
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() =>
       expect(view.getByText('There are no movies in that file')).toBeTruthy(),
     );
   });
 });
 
+/**
+ * The summary of a finished IMDb job, opened by name (`?job=`). Was: restored from the open-
+ * job lookup inside the 24-hour window, which QA 11-14 §6 removed; a named job is the way a
+ * finished summary is reopened now, so the assertions on the summary itself are unchanged.
+ */
 describe('the IMDb summary', () => {
   const finished = (counts: Record<string, number>) => {
-    mockLiveJob = {
-      data: {
-        id: JOB,
+    mockRpcResults = {
+      import_status: {
         status: 'done',
         counts,
         completed_at: new Date().toISOString(),
         provider: 'imdb',
       },
-      error: null,
     };
   };
 
@@ -414,7 +437,9 @@ describe('the IMDb summary', () => {
       unsupported_episode: 7,
       failed: 1,
     });
-    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
     await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
     expect(view.getByLabelText('Already in bingd, 12')).toBeTruthy();
     expect(view.getByLabelText('Imported movies, 643. 3 from an earlier import')).toBeTruthy();
@@ -440,20 +465,22 @@ describe('the IMDb summary', () => {
     expect(view.getByText(/1 title couldn’t be saved/)).toBeTruthy();
     expect(view.getByRole('button', { name: 'Rank titles' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    // Codex review (#289): the restored summary is a way back to a fresh import.
+    // Codex review (#289): a summary on screen is a way back to a fresh import.
     expect(view.getByRole('button', { name: 'Import another file' })).toBeTruthy();
   });
 
   /**
-   * **Codex review, #289.** Settings restores a finished job for a day, and *Done* and *Rank
-   * titles* only navigate, so a reader who finished an import, left, and came back used to
-   * find the same summary with no way to start another one, of another file or from the
-   * other service. *Import another file* is the existing `reset`: the job leaves the screen
-   * and the choice of service is back.
+   * **Codex review, #289.** *Done* and *Rank titles* only navigate, so a reader on a finished
+   * summary (opened by its notification, or finished in front of them) needs a way to start
+   * another import, of another file or from the other service. *Import another file* is the
+   * existing `reset`: the job leaves the screen and the choice of service is back. Was:
+   * reached through the 24-hour restore, which QA 11-14 §6 removed.
    */
-  it('lets a reader who comes back to a finished import start a fresh one', async () => {
+  it('lets a reader on a finished import start a fresh one', async () => {
     finished({ watched: 5 });
-    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
     await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
 
     await fireEvent.press(view.getByRole('button', { name: 'Import another file' }));
@@ -469,7 +496,9 @@ describe('the IMDb summary', () => {
 
   it('says already here when a re-import changed nothing, and still offers ranking', async () => {
     finished({ watched: 0, already: 640 });
-    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
     await waitFor(() =>
       expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
     );
@@ -490,7 +519,9 @@ describe('the IMDb summary', () => {
       unsupported_tv: 2,
       unsupported_episode: 1,
     });
-    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
     await waitFor(() => expect(view.getByText('Nothing new came in')).toBeTruthy());
     expect(view.queryByText('Your IMDb history is already here')).toBeNull();
     expect(view.queryByText('Your IMDb history is in')).toBeNull();
@@ -503,12 +534,97 @@ describe('the IMDb summary', () => {
 
   it('says already here when what was in the file was already in the collection', async () => {
     finished({ watched: 0, kept: 5 });
-    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    const view = await renderWithProviders(
+      <ImportScreen surface="settings" chooser jobId={JOB} />,
+    );
     await waitFor(() =>
       expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
     );
     expect(view.getByLabelText('Already in bingd, 5')).toBeTruthy();
     expect(view.queryByRole('button', { name: 'Rank titles' })).toBeNull();
+  });
+});
+
+/**
+ * QA 11-14 §6, IMDb side: Settings ▸ Import ▸ IMDb always opens the normal intro. A job that
+ * finished a minute ago is history (not deleted, not discarded, not shown); the picker is
+ * offered at once, with no cooldown; a reimport of the same file says *already here* in the
+ * session it finishes in, and a newer file with additions says *is in*.
+ */
+describe('Settings ▸ Import ▸ IMDb after an earlier import', () => {
+  const earlier = () => {
+    mockLiveJob = {
+      data: {
+        id: JOB,
+        status: 'done',
+        counts: { watched: 0, already: 7 },
+        completed_at: new Date(Date.now() - 60_000).toISOString(),
+        provider: 'imdb',
+      },
+      error: null,
+    };
+  };
+  const finishes = (counts: Record<string, number>) => {
+    let reads = 0;
+    mockRpcResults = {
+      import_create: JOB,
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null, provider: 'imdb' }
+          : { status: 'done', counts, completed_at: new Date().toISOString(), provider: 'imdb' };
+      },
+    };
+  };
+  const importAgain = async () => {
+    mockPicked = imdbSyntheticBytes(IMDB_SYNTHETIC_CSV);
+    const view = await openImdb();
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
+    await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Import' }));
+    return view;
+  };
+
+  it('opens on the choice and then the IMDb intro, not on the last summary', async () => {
+    earlier();
+    const view = await openImdb();
+    expect(view.getByRole('button', { name: 'IMDb Export' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
+    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
+    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    // The earlier job is history: nothing discards or re-reads it.
+    expect(calls('import_discard')).toEqual([]);
+    expect(calls('import_status')).toEqual([]);
+  });
+
+  it('says already here when the same file is imported again', async () => {
+    earlier();
+    finishes({ watched: 0, already: 7 });
+    const view = await importAgain();
+    await waitFor(() =>
+      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+    );
+    expect(calls('import_create')).toEqual([{ p_provider: 'imdb' }]);
+  });
+
+  it('says the history is in, with the imported count, when a newer file adds movies', async () => {
+    earlier();
+    finishes({ watched: 3, already: 7 });
+    const view = await importAgain();
+    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
+    expect(view.getByLabelText('Imported movies, 10. 7 from an earlier import')).toBeTruthy();
+  });
+
+  /** Score preservation, as words only: nothing here writes a ranking. */
+  it('says existing scores are kept, before and after', async () => {
+    earlier();
+    finishes({ watched: 3, kept: 4 });
+    const view = await importAgain();
+    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    expect(view.getByLabelText('Already in bingd, 4')).toBeTruthy();
+    const intro = await openImdb();
+    expect(intro.getByText(/Anything already ranked keeps its score\./)).toBeTruthy();
   });
 });
 
@@ -528,11 +644,11 @@ describe('a failed IMDb import, reopened from its notification', () => {
     await waitFor(() =>
       expect(view.getByText('We couldn’t finish your IMDb import')).toBeTruthy(),
     );
-    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
     expect(view.queryByText(/Letterboxd/)).toBeNull();
     // Choosing the file again opens the IMDb reader: a ZIP is refused as a ZIP.
     mockPicked = zipSync({ 'watched.csv': strToU8('Date,Name,Year\n') });
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
   });
 });

@@ -3,7 +3,7 @@ import { Linking } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { ExportHelp, HOW_TO_STEPS, IMDB_HOW_TO_STEPS } from './ExportHelp';
+import { ExportHelp, HOW_TO_STEPS, IMDB_HOW_TO_STEPS, openProviderExport } from './ExportHelp';
 
 const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({ track: (event: unknown) => mockTrack(event) }));
@@ -55,5 +55,42 @@ describe('the export help', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Open your IMDb ratings' }));
     expect(openURL).toHaveBeenCalledWith('https://www.imdb.com/list/ratings');
     openURL.mockRestore();
+  });
+
+  /**
+   * QA 11-14 §7: on a service's page the Export action sits above the help, so the help
+   * there draws the steps without its own link. The failure screens keep the link (the
+   * default), because nothing above them opens the export page.
+   */
+  it.each(['letterboxd', 'imdb'] as const)(
+    'keeps every %s step but drops its own link where the page has an Export action',
+    async (provider) => {
+      const view = await renderWithProviders(
+        <ExportHelp provider={provider} surface="settings" withLink={false} />,
+      );
+      await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
+      const steps = provider === 'imdb' ? IMDB_HOW_TO_STEPS : HOW_TO_STEPS;
+      steps.forEach((step, index) => {
+        expect(view.getByText(step)).toBeTruthy();
+        expect(view.getByText(String(index + 1))).toBeTruthy();
+      });
+      expect(view.getAllByRole('button')).toHaveLength(1);
+      expect(view.queryByRole('button', { name: 'Open your IMDb ratings' })).toBeNull();
+      expect(view.queryByRole('button', { name: 'Open Letterboxd’s export page' })).toBeNull();
+    },
+  );
+
+  it.each([
+    ['letterboxd', 'https://letterboxd.com/settings/data/'],
+    ['imdb', 'https://www.imdb.com/list/ratings'],
+  ] as const)('openProviderExport(%s) opens %s and counts it', (provider, url) => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    openProviderExport(provider, 'onboarding');
+    expect(openURL).toHaveBeenCalledWith(url);
+    openURL.mockRestore();
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_instructions_opened',
+      props: { surface: 'onboarding', provider },
+    });
   });
 });

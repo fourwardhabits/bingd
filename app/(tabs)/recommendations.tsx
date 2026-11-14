@@ -901,16 +901,9 @@ export default function RecommendationsScreen() {
             // The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
             // stay off, because nothing on either wall has been ranked by this reader. No sort
             // here: the wall's order is the recommendation order (FU1113-C).
+            // **Filters, then Clear all when on, then the view toggle rightmost** (founder QA
+            // 11-14, §5; was the toggle first), as on Collection.
             <View style={styles.tools} testID="for-you-controls">
-              {/* How the wall is drawn. Not over Sent to You, which is always a list: a
-                  toggle there would be a control that changes nothing. */}
-              {sentOnly ? null : (
-                <ViewModeToggle
-                  value={viewMode}
-                  onChange={chooseViewMode}
-                  testID="for-you-view-mode"
-                />
-              )}
               <FilterIconButton
                 activeCount={activeCount}
                 accessibilityLabel="Filters"
@@ -930,6 +923,15 @@ export default function RecommendationsScreen() {
                   <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
                 </Pressable>
               ) : null}
+              {/* How the wall is drawn. Not over Sent to You, which is always a list: a
+                  toggle there would be a control that changes nothing. */}
+              {sentOnly ? null : (
+                <ViewModeToggle
+                  value={viewMode}
+                  onChange={chooseViewMode}
+                  testID="for-you-view-mode"
+                />
+              )}
             </View>
           }
         />

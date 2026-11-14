@@ -408,23 +408,6 @@ async function findLiveJob(): Promise<
 }
 
 /**
- * How long a finished import is still the thing you came here to see.
- *
- * A window rather than an acknowledgement flag, because the flag would need durable
- * per-device state for a screen somebody opens twice. A day is comfortably longer than any
- * import takes and comfortably shorter than "for ever", which is the only answer that would
- * make this annoying — and the summary it restores now offers a way on to another archive,
- * so even inside the window it is never a dead end.
- */
-const RECENT_COMPLETION_MS = 24 * 60 * 60 * 1000;
-
-const completedRecently = (completedAt: string | null): boolean => {
-  if (completedAt === null) return false;
-  const at = Date.parse(completedAt);
-  return Number.isFinite(at) && Date.now() - at < RECENT_COMPLETION_MS;
-};
-
-/**
  * Where a job that has already ended belongs on this screen.
  *
  * **A failed job is a failure, not a summary.** The restore used to test only
@@ -587,20 +570,30 @@ export function useImport(
         return;
       }
 
-      const finished = live.status.completedAt !== null;
-      nothingRunning.current = finished;
-      // A job that finished long ago is history, not news. Picking it up would mean opening
-      // the importer onto last month's summary every time.
-      if (finished && !completedRecently(live.status.completedAt)) return;
+      // **A finished job is history, not a screen** (founder, QA 11-14, §6). Settings ▸
+      // Import always opens on the importer when nothing is running and no job is named:
+      // the latest job finishing a minute ago or a month ago makes no difference, and there
+      // is no window and no cooldown. It used to restore a job that ended within a day,
+      // which reopened Settings ▸ Import ▸ IMDb on "Your IMDb history is already here"
+      // instead of the page that lets somebody pick a newer export. The job row stays where
+      // it is (history, dedupe and recovery are the server's), its summary is still shown
+      // when it finishes in front of somebody (the poll) and when a link names it (`?job=`),
+      // and picking a file again is the same idempotent import it always was.
+      //
+      // It can still have ended while nobody was watching (the screen left mid-import, so
+      // no poll saw it end), so the caches it changed are refreshed all the same: the
+      // Collection tab should not wait for a relaunch to show what it imported.
+      if (live.status.completedAt !== null) {
+        nothingRunning.current = true;
+        invalidateAfterImport(queryClient);
+        return;
+      }
 
+      // Still running: pick it up, so "you can close the app and come back" stays true.
+      nothingRunning.current = false;
       jobRef.current = live.id;
-      if (finished) invalidateAfterImport(queryClient);
       setState((current) =>
-        current.phase === 'idle'
-          ? finished
-            ? phaseForEnded(live.status)
-            : { phase: 'working', status: live.status }
-          : current,
+        current.phase === 'idle' ? { phase: 'working', status: live.status } : current,
       );
     })();
 

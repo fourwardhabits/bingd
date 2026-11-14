@@ -409,14 +409,19 @@ describe('the view mode is remembered per account (C4)', () => {
   });
 });
 
+/**
+ * QA 11-14 §5: Filters first and the view toggle rightmost, with Clear all (when filters are
+ * on) between them, as a filter control. Was: the toggle first, then Filters, then Clear
+ * all. The same targets as before, so the row's budget at 320pt is unchanged.
+ */
 describe('at 320pt and the largest text size (C9)', () => {
-  it('keeps Recommended ▾, the view toggle and Filters on one line', async () => {
+  it('keeps Recommended ▾, Filters and the view toggle on one line, the toggle rightmost', async () => {
     const view = await open();
     const { targets } = expectRowFitsNarrow(view.getByTestId, 'for-you-controls-row');
-    expect(targets.map((target) => target.label)).toEqual(['Poster view', 'List view', 'Filters']);
+    expect(targets.map((target) => target.label)).toEqual(['Filters', 'Poster view', 'List view']);
   });
 
-  it('still fits with Clear beside Filters while filters are on', async () => {
+  it('still fits with Clear beside Filters while filters are on, the toggle still rightmost', async () => {
     const view = await open();
     await fireEvent.press(view.getByTestId('for-you-filters'));
     await waitFor(() => expect(view.getByTestId('collection-filter-scroll')).toBeTruthy());
@@ -425,10 +430,52 @@ describe('at 320pt and the largest text size (C9)', () => {
     await waitFor(() => expect(view.getByTestId('for-you-clear-filters')).toBeTruthy());
     const { targets } = expectRowFitsNarrow(view.getByTestId, 'for-you-controls-row');
     expect(targets.map((target) => target.label)).toEqual([
-      'Poster view',
-      'List view',
       'Filters, 1 on',
       'Clear all',
+      'Poster view',
+      'List view',
     ]);
+  });
+});
+
+describe('the trailing order (QA 11-14 §5)', () => {
+  const order = (view: Awaited<ReturnType<typeof open>>) => {
+    // The controls' testIDs in drawing order, depth first, under the trailing group.
+    const wanted = new Set(['for-you-filters', 'for-you-clear-filters', 'for-you-view-mode']);
+    const seen: string[] = [];
+    type Node = { props: { testID?: string }; children: readonly (Node | string)[] };
+    const walk = (node: Node) => {
+      const id = node.props.testID;
+      if (id && wanted.has(id) && !seen.includes(id)) seen.push(id);
+      for (const child of node.children) if (typeof child !== 'string') walk(child);
+    };
+    walk(view.getByTestId('for-you-controls') as unknown as Node);
+    return seen;
+  };
+
+  it('is Filters, then the view toggle', async () => {
+    const view = await open();
+    expect(order(view)).toEqual(['for-you-filters', 'for-you-view-mode']);
+  });
+
+  it('is Filters, Clear all, then the view toggle while filters are on', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByTestId('for-you-filters'));
+    await waitFor(() => expect(view.getByTestId('collection-filter-scroll')).toBeTruthy());
+    await fireEvent.press(view.getAllByRole('checkbox')[0]!);
+    await fireEvent.press(view.getByText('Apply'));
+    await waitFor(() => expect(view.getByTestId('for-you-clear-filters')).toBeTruthy());
+    expect(order(view)).toEqual(['for-you-filters', 'for-you-clear-filters', 'for-you-view-mode']);
+    // Clear all still clears, and the toggle stays where it is.
+    await fireEvent.press(view.getByTestId('for-you-clear-filters'));
+    await waitFor(() => expect(view.queryByTestId('for-you-clear-filters')).toBeNull());
+    expect(order(view)).toEqual(['for-you-filters', 'for-you-view-mode']);
+  });
+
+  it('is Filters alone over Sent to You, which has no toggle', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByLabelText(/^Sent to You/));
+    await waitFor(() => expect(view.queryByTestId('for-you-view-mode')).toBeNull());
+    expect(order(view)).toEqual(['for-you-filters']);
   });
 });

@@ -11,8 +11,6 @@ import { QUIET_SLOP } from './PreviewSummary';
 /** Rows drawn when the list opens, and added by each *Show more*. */
 export const UNMATCHED_PAGE = 50;
 
-export const UNMATCHED_REASON =
-  'We couldn’t find a confident match for these, so they weren’t added.';
 export const UNMATCHED_UNAVAILABLE = 'Details aren’t available for this import.';
 export const UNMATCHED_LOADING = 'Getting the list…';
 
@@ -94,9 +92,6 @@ export function UnmatchedDisclosure({
       testID="result-unmatched"
     >
       <View style={styles.content}>
-        <Text variant="footnote" tone="tertiary">
-          {UNMATCHED_REASON}
-        </Text>
         {loading ? (
           <Text variant="footnote" tone="secondary">
             {UNMATCHED_LOADING}
