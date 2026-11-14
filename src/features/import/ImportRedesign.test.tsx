@@ -468,3 +468,107 @@ describe('H2: Letterboxd Ready', () => {
     expect(card.getByText(FALLBACK_LINE)).toBeTruthy();
   });
 });
+
+/**
+ * Polish (IMP1113-UI): a file that belongs to the other service offers that service in
+ * place, where the screen has the choice of service, and no failure says "go back".
+ */
+describe('a file for the other service', () => {
+  const lbZip = () => zipSync({ 'lb/watched.csv': strToU8('Date,Name,Year\n') });
+
+  it('on IMDb’s page, a ZIP offers Letterboxd, and switching opens its page with nothing sent', async () => {
+    mockPicked = lbZip();
+    const view = await openImdb();
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
+    expect(
+      view.getByText(
+        'IMDb exports one CSV file. If this is your Letterboxd export, you can import it from Letterboxd instead.',
+      ),
+    ).toBeTruthy();
+    expect(view.queryByText(/go back/)).toBeNull();
+    const button = view.getByTestId('import-switch-provider');
+    expect(view.getByRole('button', { name: 'Import from Letterboxd instead' })).toBe(button);
+    // Quiet, centred, and a 44pt target.
+    expect(
+      theme.layout.control.compactAction.visibleHeight +
+        button.props.hitSlop.top +
+        button.props.hitSlop.bottom,
+    ).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    expect(StyleSheet.flatten(button.parent!.props.style)).toMatchObject({
+      alignItems: 'center',
+    });
+
+    await fireEvent.press(button);
+    await waitFor(() =>
+      expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
+    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
+    expect(view.queryByText('That’s a ZIP, not the IMDb file')).toBeNull();
+    expect(mockRpcNames).toEqual([]);
+  });
+
+  it('on Letterboxd’s page, a CSV offers IMDb, and switching opens IMDb’s page', async () => {
+    mockPicked = strToU8(IMDB_QA_MIRROR_CSV);
+    const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+    await waitFor(() => expect(view.getByTestId('choose-letterboxd')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('choose-letterboxd'));
+    await fireEvent.press(
+      await waitFor(() => view.getByRole('button', { name: 'Upload Letterboxd ZIP' })),
+    );
+    await waitFor(() => expect(view.getByText('That’s not the Letterboxd ZIP')).toBeTruthy());
+    expect(
+      view.getByText(
+        'Letterboxd sends a ZIP file. If your computer unzipped it, use the original download. A single CSV isn’t enough. If this is your IMDb ratings export, you can import it from IMDb instead.',
+      ),
+    ).toBeTruthy();
+    expect(view.queryByText(/go back/)).toBeNull();
+    await fireEvent.press(view.getByRole('button', { name: 'Import from IMDb instead' }));
+    await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+  });
+
+  it('without the choice of service, offers no switch and still says no "go back"', async () => {
+    mockPicked = strToU8(IMDB_QA_MIRROR_CSV);
+    const lb = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(lb.getByRole('button', { name: 'Upload Letterboxd ZIP' }));
+    await waitFor(() => expect(lb.getByText('That’s not the Letterboxd ZIP')).toBeTruthy());
+    expect(
+      lb.getByText(
+        'Letterboxd sends a ZIP file. If your computer unzipped it, use the original download. A single CSV isn’t enough.',
+      ),
+    ).toBeTruthy();
+    expect(lb.queryByTestId('import-switch-provider')).toBeNull();
+    await lb.unmount();
+
+    mockPicked = lbZip();
+    const imdb = await renderWithProviders(<ImportScreen surface="settings" provider="imdb" />);
+    await fireEvent.press(imdb.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await waitFor(() => expect(imdb.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
+    expect(
+      imdb.getByText(
+        'IMDb exports one CSV file. If this is your Letterboxd export, choose Letterboxd instead.',
+      ),
+    ).toBeTruthy();
+    expect(imdb.queryByText(/go back/)).toBeNull();
+    expect(imdb.queryByTestId('import-switch-provider')).toBeNull();
+  });
+});
+
+describe('a warning note', () => {
+  it('reads in secondary ink and is announced as a warning; an information note is not', async () => {
+    // Two rows the reader cannot use: an unquoted comma and a name id.
+    const csv = `${IMDB_QA_MIRROR_CSV}tt9100008,8,2024-02-08,Broken, Row,Broken Row,https://www.imdb.com/title/tt9100008/,Movie,7,90,2001,Drama,1,,\nnm9100009,8,2024-02-09,Somebody,Somebody,https://www.imdb.com/name/nm9100009/,Movie,7,90,2001,Drama,1,,\n`;
+    const view = await toReady(csv);
+    const warning = view.getByLabelText(
+      'Warning, 2 rows couldn’t be read, so we skipped them.',
+    );
+    expect(warning.props.accessible).toBe(true);
+    const text = view.getByText('2 rows couldn’t be read, so we skipped them.');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(theme.text.secondary);
+    // The information notes stay tertiary and carry no warning label.
+    const info = view.getByText(tvNote(1));
+    expect(StyleSheet.flatten(info.props.style).color).toBe(theme.text.tertiary);
+    expect(view.queryByLabelText(/^Warning, We’ll look/)).toBeNull();
+  });
+});
