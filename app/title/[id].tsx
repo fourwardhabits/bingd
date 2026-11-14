@@ -126,6 +126,7 @@ import { compactName } from '@/lib/titles';
 import {
   Avatar,
   CastStrip,
+  DismissFooter,
   EmptyState,
   LoadingScreen,
   Poster,
@@ -1813,6 +1814,9 @@ export default function TitleScreen() {
           viewerId={profile.id}
           ratingAvailable={inSheet && ratingAvailable}
           truncated={inSheet && !reviewsComplete(serverRows)}
+          // Your own card carries your name and picture, as everybody else's carries theirs.
+          viewer={reviewViewer}
+          helpfulPendingId={helpfulPendingId}
           // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
           // published review first, from your own row — a public note and nothing else.
           variant={immersive ? 'editorial' : undefined}
@@ -1820,6 +1824,14 @@ export default function TitleScreen() {
         />
     );
   };
+
+  /** The reader as their own review card names them (FU1113-F). */
+  const reviewViewer = {
+    name: profile.display_name || profile.username,
+    avatarUri: avatarUri(profile.avatar_path),
+  };
+  /** The one review whose Helpful write is in flight, if any. */
+  const helpfulPendingId = setHelpful.isPending ? (setHelpful.variables?.reviewId ?? null) : null;
 
   /** Rating needs every review in hand; a list at the server's ceiling may not be all. */
   const ratingAvailable = immersive && reviewsComplete(helpfulReviews.data);
@@ -2449,10 +2461,8 @@ export default function TitleScreen() {
               // own name and picture on your review, and the same thumbs-up the sheet offers
               // under everybody else's. Your score is the module's, so it is not repeated.
               onToggleHelpful={toggleHelpful}
-              viewer={{
-                name: profile.display_name || profile.username,
-                avatarUri: avatarUri(profile.avatar_path),
-              }}
+              helpfulPendingId={helpfulPendingId}
+              viewer={reviewViewer}
             />,
             {
               action:
@@ -2578,6 +2588,10 @@ export default function TitleScreen() {
         visible={reviewsOpen}
         onClose={() => setReviewsOpen(false)}
         label={`Reviews of ${displayTitle ?? title.title}`}
+        // The standard browsing sheet (FU1113-F, on B's contract): a fixed 80%, the cards
+        // scrolling above a pinned Close that never covers the last one.
+        size="standard"
+        footer={<DismissFooter onPress={() => setReviewsOpen(false)} />}
         onDismissed={() => {
           if (!pendingReviewWrite.current) return;
           pendingReviewWrite.current = false;
@@ -2591,12 +2605,11 @@ export default function TitleScreen() {
         </View>
         <ScrollView
           testID="reviews-sheet-list"
-          style={styles.castScroll}
+          style={styles.reviewsSheetScroll}
           contentContainerStyle={styles.reviewsSheetList}
         >
           {reviewList({ inSheet: true })}
         </ScrollView>
-        <SheetDone onPress={() => setReviewsOpen(false)} />
       </Sheet>
     </>
   );
@@ -3830,6 +3843,8 @@ const styles = StyleSheet.create({
   immersiveCircleCopy: { flex: 1, gap: 2 },
   castSheet: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   reviewsSheetList: { paddingBottom: theme.space[2] },
+  // Takes the standard sheet's room left under the heading and above the pinned Close.
+  reviewsSheetScroll: { flex: 1 },
   castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
   castList: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },

@@ -5111,7 +5111,12 @@ describe('the immersive title page (experiment)', () => {
         const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
         const mine = await waitFor(() => preview.getByTestId('your-review'));
 
-        expect(within(mine).getByText(/Your review/)).toBeTruthy();
+        // The shared card (FU1113-F): name and date, no "Your review" label on top.
+        expect(within(mine).queryByText(/Your review/)).toBeNull();
+        expect(
+          within(within(mine).getByTestId('review-card-head')).getByTestId('edit-review'),
+        ).toBeTruthy();
+        expect(within(mine).queryByTestId('review-helpful')).toBeNull();
         expect(preview.getAllByText('My own words on it.')).toHaveLength(1);
         expect(preview.getAllByTestId('review-preview')).toHaveLength(1);
         expect(preview.getByText('Review number 1.')).toBeTruthy();
@@ -5147,7 +5152,7 @@ describe('the immersive title page (experiment)', () => {
         ];
         mockRpcResults.title_review_count = 1;
         const view = await open();
-        const row = await waitFor(() => view.getByTestId('review-preview'));
+        const row = await waitFor(() => view.getByTestId('review-preview-body'));
         expect(within(row).queryByText(/The top keeps spinning/)).toBeNull();
         expect(row.props.accessibilityLabel).toMatch(/Contains spoilers$/);
         expect(row.props.accessibilityLabel).not.toMatch(/spinning/);
@@ -5198,7 +5203,9 @@ describe('the immersive title page (experiment)', () => {
         }
         expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
         // Helpful is the review's one reaction: a thumbs-up, and no heart beside it.
-        expect(sheet.getByLabelText(/^Mark Reader 1's review helpful/)).toBeTruthy();
+        expect(sheet.getByHintText('Tells Reader 1 their review helped')).toBeTruthy();
+        // Every row is the shared card (FU1113-F).
+        expect(sheet.getAllByTestId('review-card')).toHaveLength(3);
         expect(sheet.getByLabelText("Report Reader 1's review")).toBeTruthy();
 
         await fireEvent.press(view.getByRole('button', { name: 'Close' }));
@@ -5212,13 +5219,54 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 2's review helpful/));
+        await fireEvent.press(sheet.getByHintText('Tells Reader 2 their review helped'));
         await waitFor(() =>
           expect(mockRpc).toHaveBeenCalledWith(
             'set_review_helpful',
             expect.objectContaining({ p_review_id: 'um-2', p_helpful: true }),
           ),
         );
+      });
+
+      /**
+       * **The standard sheet, and one count everywhere** (FU1113-F, F4).
+       *
+       * See all is B's standard 80% sheet with its pinned Close, and a vote cast in it is
+       * the same cache entry the page's preview reads, so closing the sheet shows the page
+       * already agreeing.
+       */
+      it('is the standard sheet with a pinned Close, and its vote shows on the page', async () => {
+        let voted = false;
+        mockRpcResults.title_reviews_v2 = () => [
+          { ...reviewBy(1), helpful_count: voted ? 1 : 0, viewer_helpful: voted },
+        ];
+        mockRpcResults.title_review_count = 1;
+        mockRpcResults.set_review_helpful = () => {
+          voted = true;
+          return { helpful_count: 1, viewer_helpful: true };
+        };
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('review-preview')).toBeTruthy());
+        expect(within(view.getByTestId('reviews-preview')).queryByText(/found this helpful/)).toBeNull();
+
+        const sheet = await sheetOf(view);
+        // Close is the DismissFooter, outside the scrolling cards.
+        const footer = view.getByTestId('dismiss-footer');
+        expect(within(footer).getByRole('button', { name: 'Close' })).toBeTruthy();
+        expect(within(view.getByTestId('reviews-sheet-list')).queryByTestId('dismiss-footer')).toBeNull();
+
+        await fireEvent.press(sheet.getByRole('button', { name: 'Mark review helpful' }));
+        await waitFor(() =>
+          expect(sheet.getByText('1 person found this helpful')).toBeTruthy(),
+        );
+        expect(sheet.getByRole('button', { name: 'Remove helpful' })).toBeTruthy();
+
+        await fireEvent.press(within(footer).getByRole('button', { name: 'Close' }));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
+        const preview = within(view.getByTestId('reviews-preview'));
+        await waitFor(() => expect(preview.getByText('1 person found this helpful')).toBeTruthy());
+        expect(preview.getByRole('button', { name: 'Remove helpful' }).props.accessibilityState)
+          .toMatchObject({ selected: true });
       });
 
       it('orders by Newest on the server, and Oldest on a second tap', async () => {
@@ -5321,7 +5369,7 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(sortTab(sheet, 'Highest rated first')).toBeSelected());
 
         full = true;
-        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
+        await fireEvent.press(sheet.getByHintText('Tells Reader 1 their review helped'));
         await waitFor(
           () => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(),
           {
