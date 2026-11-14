@@ -173,7 +173,7 @@ const skipped = [];
  *
  * There is exactly one legitimate use and it is worth naming, because "skip" is otherwise the
  * word a red suite gets turned green with. `bingd-nonprod` holds 1,027 movies and **zero**
- * `tv_season` and `tv_series` rows, so M2's season semantics cannot be exercised there at all
+ * `season` and `series` rows, so M2's season semantics cannot be exercised there at all
  * — not because anything is broken, but because the seed run that filled that project fetched
  * films only.
  *
@@ -1057,17 +1057,19 @@ try {
     // `tv_shows` pool (it was refused under AD-1 until then). The catalogue may hold no
     // season at all, which is a skip rather than a pass, so both are reported honestly.
     //
-    // KNOWN, NOT CHANGED HERE: the two filters below name kinds that do not exist
-    // (`media_kind` is movie | series | season) and the bucket 'liked' is not a
-    // `taste_bucket`, so this block has always skipped. Correcting them would run two
-    // untested rank_start writes against production for the first time; that is its own
-    // change (see #266).
-    const seasons = await get(a.token, 'media_items?kind=eq.tv_season&select=id,title&limit=1');
+    // FIXED 2026-11-14 (fix/acceptance-kinds-1114): the filters used to name kinds that do
+    // not exist (`tv_season` / `tv_series`; `media_kind` is movie | series | season) and the
+    // bucket 'liked', which is not a `taste_bucket` (loved | fine | not_for_me), so this
+    // block always skipped. Both `rank_start` calls are made by run-scoped account A, whose
+    // whole history goes with it through `delete_account` at the end, like every other write
+    // in this file. NOTE for a `--target production` run: these are now two rank_start
+    // writes there too (by the same throwaway account), which they never were before (#266).
+    const seasons = await get(a.token, 'media_items?kind=eq.season&select=id,title&limit=1');
     const season = (seasons.body ?? [])[0];
     if (!season) {
       skip(
         'a season can be ranked',
-        'this project holds no tv_season rows. `npm run seed:fetch` fetches series and ' +
+        'this project holds no season rows. `npm run seed:fetch` fetches series and ' +
           'seasons, and the run that filled bingd-nonprod fetched films only — so M2 has ' +
           'never been exercised against a deployed database. A production catalogue with ' +
           'no television is a launch decision, not a test condition.',
@@ -1075,7 +1077,7 @@ try {
     } else {
       const started = await rpc(a.token, 'rank_start', {
         p_media_item_id: season.id,
-        p_bucket: 'liked',
+        p_bucket: 'loved',
         p_operation_id: uuid(),
       });
       check(
@@ -1085,14 +1087,14 @@ try {
       );
     }
 
-    const series = await get(a.token, 'media_items?kind=eq.tv_series&select=id&limit=1');
+    const series = await get(a.token, 'media_items?kind=eq.series&select=id&limit=1');
     const show = (series.body ?? [])[0];
     if (!show) {
-      skip('and so can a whole series', 'this project holds no tv_series rows either');
+      skip('and so can a whole series', 'this project holds no series rows either');
     } else {
       const showStarted = await rpc(a.token, 'rank_start', {
         p_media_item_id: show.id,
-        p_bucket: 'liked',
+        p_bucket: 'loved',
         p_operation_id: uuid(),
       });
       check('and so can a whole series', showStarted.status === 200, JSON.stringify(showStarted.body)?.slice(0, 120));
