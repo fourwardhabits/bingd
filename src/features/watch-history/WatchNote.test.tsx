@@ -91,7 +91,13 @@ jest.mock('@/lib/supabase', () => {
   const profiles: Record<string, unknown> = {
     'friend-1': { id: 'friend-1', username: 'qa_b', display_name: 'QA account B', avatar_path: null },
   };
-  const rpc = (name: string, args: Record<string, unknown> = {}) => {
+  const rpc = (name: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+    // A test can hold the write open (`hold`), to see what the editor does meanwhile.
+    const held = (globalThis as { __held?: Promise<void> | null }).__held;
+    if (name === 'set_watch_details' && held) {
+      (globalThis as { __held?: Promise<void> | null }).__held = null;
+      return held.then(() => rpc(name, args));
+    }
     if (name === 'set_watch_details' && !client.broken.has(name)) {
       const rows = client.tables.watch_events as Record<string, unknown>[];
       const index = rows.findIndex((row) => row.id === args.p_watch_event_id);
@@ -115,6 +121,15 @@ jest.mock('@/lib/supabase', () => {
 });
 
 const pg = () => (globalThis as unknown as { __pg: Postgrest }).__pg;
+
+/** Holds the next `set_watch_details` until the returned function is called. */
+const hold = () => {
+  let release!: () => void;
+  (globalThis as { __held?: Promise<void> | null }).__held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return release;
+};
 
 const THIRD_NOTE = 'Third time, on the big screen, and it still lands.';
 const REVIEW = {
@@ -356,6 +371,33 @@ describe('Edit watch → Note edits this watch’s own note', () => {
     clock.mockRestore();
     await waitFor(() => expect(view.queryByTestId('watch-editor-w3')).toBeNull());
     expect(notes().w3).toBe('A draft worth keeping.');
+  });
+
+  /**
+   * **Codex review, #287.** Save writes a snapshot of the draft, and its success closes the
+   * editor. While the write was in flight the note, date and companions stayed editable,
+   * so anything changed then was dropped without a word when the editor closed. The
+   * controls are shut for the length of the request; the values stay on screen.
+   */
+  it('shuts the note, date and companions while a save is in flight', async () => {
+    const view = await loaded();
+    const editor = await open(view, 'w3');
+    await fireEvent.changeText(field(editor), 'Saved as typed.');
+    const release = hold();
+    await save(view, 'w3');
+
+    const during = within(view.getByTestId('watch-editor-w3'));
+    expect(field(during).props.editable).toBe(false);
+    await fireEvent.changeText(field(during), 'Typed during the save.');
+    expect(field(during).props.value).toBe('Saved as typed.');
+    for (const row of [/^Who I watched with/, /^Note/, /^Watch date/]) {
+      expect(during.getByRole('button', { name: row })).toBeDisabled();
+    }
+
+    release();
+    await waitFor(() => expect(view.queryByTestId('watch-editor-w3')).toBeNull());
+    expect(notes().w3).toBe('Saved as typed.');
+    expect(pg().rpcCalls.filter((call) => call.name === 'set_watch_details')).toHaveLength(1);
   });
 
   it('A7: a single watch with no note opens empty, and saving creates the note on it', async () => {

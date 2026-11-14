@@ -56,6 +56,13 @@ export type WatchDetailsRowsProps = {
    * region rather than two rules a few points apart (founder spec §5: fewer dividers).
    */
   ruled?: boolean;
+  /**
+   * Every control shut, values still shown: the Watch History editor passes it while its
+   * Save is in flight (Codex review, #287). The save writes a snapshot of the draft and a
+   * success closes the editor, so anything changed during the request would be dropped
+   * without a word; shutting the controls means nothing can be.
+   */
+  disabled?: boolean;
 };
 
 type Open = 'who' | 'note' | 'date' | null;
@@ -91,6 +98,7 @@ export function WatchDetailsRows({
   onToggleCompanion,
   note,
   ruled = true,
+  disabled = false,
 }: WatchDetailsRowsProps) {
   const [open, setOpen] = useState<Open>(null);
   const toggle = (row: Exclude<Open, null>) => setOpen((was) => (was === row ? null : row));
@@ -121,10 +129,10 @@ export function WatchDetailsRows({
         label="Who I watched with"
         value={companionValue}
         expanded={open === 'who'}
-        onPress={() => toggle('who')}
+        onPress={disabled ? undefined : () => toggle('who')}
       />
       {open === 'who' ? (
-        <View style={styles.expanded}>
+        <View style={styles.expanded} pointerEvents={disabled ? 'none' : 'auto'}>
           <CompanionPicker
             people={people}
             selected={companionIds}
@@ -142,7 +150,7 @@ export function WatchDetailsRows({
         expanded={open === 'note'}
         // Shut until the stored note and the share preference are both read, so the share
         // state is settled — and on screen — before anything typed can be saved.
-        onPress={noteLoaded ? () => toggle('note') : undefined}
+        onPress={noteLoaded && !disabled ? () => toggle('note') : undefined}
         disabledReason={noteLoaded ? undefined : 'Loading'}
       />
       {open === 'note' && titleNote?.loaded ? (
@@ -166,6 +174,7 @@ export function WatchDetailsRows({
           <NoteInput
             value={note.value}
             label="Note"
+            editable={!disabled}
             // `NoteInput` draws the review's 2,000 ceiling; a watch's column holds 1,000,
             // so the draft stops there rather than failing on Save.
             onChangeText={(next) => note.onChangeText(next.slice(0, note.maxLength))}
@@ -187,10 +196,10 @@ export function WatchDetailsRows({
         // *Earlier*, the same word as the choice that produces it (T0b).
         value={date === null ? 'Earlier' : formatWatchDate(date)}
         expanded={open === 'date'}
-        onPress={() => toggle('date')}
+        onPress={disabled ? undefined : () => toggle('date')}
       />
       {open === 'date' ? (
-        <View style={styles.expanded}>
+        <View style={styles.expanded} pointerEvents={disabled ? 'none' : 'auto'}>
           <WatchDatePicker
             value={date}
             anchor={date ?? today()}

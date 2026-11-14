@@ -498,6 +498,7 @@ function WatchEditor({
 
       <WatchDetailsRows
         ruled={false}
+        disabled={submitting}
         date={date}
         onDate={setDate}
         people={taggableWith(people, companions)}
