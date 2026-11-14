@@ -60,6 +60,8 @@ export type CollectionFilterSheetProps<Axis extends string = string> = {
 
 const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
 
+const SECTION = theme.layout.section;
+
 /**
  * One filter sheet for every collection surface.
  *
@@ -114,7 +116,9 @@ export function CollectionFilterSheet<Axis extends string = string>({
         testID="collection-filter-scroll"
       >
         {sort ? (
-          <View style={styles.sortSection} testID="collection-sort-section">
+          // No gap of its own: `SortMenu` sets its chips on the gutter and a
+          // `headingToControls` (8pt) below its heading itself.
+          <View testID="collection-sort-section">
             <Text variant="headline" accessibilityRole="header" style={styles.part}>
               Sort
             </Text>
@@ -252,13 +256,24 @@ const styles = StyleSheet.create({
   // With Sort inside it, taller, and free to shrink to whatever the sheet's cap leaves
   // above the footer.
   bodyWithSort: { maxHeight: 560, flexShrink: 1 },
-  sortSection: { paddingBottom: theme.space[1] },
   /** The two parts' names: Sort, then Filter, each on the gutter. */
-  part: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
-  // The content's 20pt gap less 8: the Filter heading sits closer to its own sections.
-  filterPart: { marginBottom: -theme.space[2] },
-  content: { paddingBottom: theme.space[4], gap: theme.space[5] },
-  section: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
+  part: { paddingHorizontal: theme.layout.gutter },
+  // The Filter heading sits a heading's distance from its first section, not a section's:
+  // the content's `between` gap, taken back down to `headingToControls`.
+  filterPart: { marginBottom: SECTION.headingToControls - SECTION.between },
+  /**
+   * **The sheet's rhythm, from `theme.layout.section`** (FU1113-B, founder Preview QA).
+   * `above` is the deliberate gap between the drag handle and the first section (GENRE, or
+   * Rating, or Sort), which used to sit straight under the handle; `between` is the one
+   * gap between every pair of sections — Sort, Rating, Genre, Decade, Language — so no two
+   * seams differ.
+   */
+  content: {
+    paddingTop: SECTION.above,
+    paddingBottom: theme.space[4],
+    gap: SECTION.between,
+  },
+  section: { gap: SECTION.headingToControls, paddingHorizontal: theme.layout.gutter },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
   option: {
     flexDirection: 'row',

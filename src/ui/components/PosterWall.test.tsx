@@ -7,7 +7,7 @@ import {
   PosterGrid,
   PosterShelf,
   seasonPillLabel,
-  averagePillText,
+  seasonAverageBadgeText,
   seasonPillText,
   type PosterTile,
 } from './PosterWall';
@@ -384,7 +384,8 @@ describe('the season pill', () => {
 /**
  * **A series poster's two kinds of score** (WS-TVC, founder spec t168u §2): the reader's
  * explicit show ranking in the filled Maroon chip, the mean of their ranked seasons in an
- * outlined chip reading `AVG 8.7` — the same height, at the three-across size.
+ * outlined badge reading `SN AVG 8.7` (FU1113-B, was `AVG 8.7`) — the same height, at the
+ * three-across size.
  */
 describe('the season-average pill', () => {
   const tiles = [
@@ -392,13 +393,16 @@ describe('the season-average pill', () => {
     { id: 'exp', title: 'Severance', score: 9.5, bucket: 'loved' as const, scoreSource: 'explicit' as const },
   ];
 
-  it('reads AVG and the number, outlined Maroon, beside a filled explicit score', async () => {
+  it('reads SN AVG and the number, outlined Maroon, beside a filled explicit score', async () => {
     const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
     const avg = view.getByTestId('poster-average-pill', { includeHiddenElements: true });
     const exp = view.getByTestId('poster-score-pill', { includeHiddenElements: true });
-    expect(view.getByText('AVG 8.7', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('SN AVG 8.7', { includeHiddenElements: true })).toBeTruthy();
+    // No bare `AVG 8.7` anywhere.
+    expect(view.queryByText(/^AVG/, { includeHiddenElements: true })).toBeNull();
     expect(view.getByText('9.5', { includeHiddenElements: true })).toBeTruthy();
-    expect(averagePillText(10)).toBe('AVG 10.0');
+    expect(seasonAverageBadgeText(10)).toBe('SN AVG 10.0');
+    expect(seasonAverageBadgeText(9.4)).toBe('SN AVG 9.4');
 
     const avgStyle = StyleSheet.flatten(avg.props.style) as ViewStyle;
     const expStyle = StyleSheet.flatten(exp.props.style) as ViewStyle;
@@ -410,19 +414,32 @@ describe('the season-average pill', () => {
     expect((avgStyle.paddingVertical as number) + (avgStyle.borderWidth as number)).toBe(
       expStyle.paddingVertical,
     );
-    const avgText = view.getByText('AVG 8.7', { includeHiddenElements: true });
+    const avgText = view.getByText('SN AVG 8.7', { includeHiddenElements: true });
     expect(StyleSheet.flatten(avgText.props.style).color).toBe(theme.semantic.action);
     expect(avgText.props.allowFontScaling).toBe(false);
     expect(avgText.props.numberOfLines).toBe(1);
   });
 
-  it('fits a three-across tile at 320pt', () => {
+  it.each([320, 360])('fits a three-across tile at %ipt, never the full poster width', (width) => {
     // Inter Medium 12pt with the caption's 0.2 tracking: about 6.6pt a glyph for the
-    // widest pill, `AVG 10.0`, so about 53pt of text and 63pt of pill with its padding and
-    // border, against the 84pt a 92pt tile leaves inside its 4pt insets.
-    const tile = (320 - 2 * theme.layout.gutter - 2 * theme.layout.posterGrid.gap) / 3;
-    const pill = averagePillText(10).length * 6.6 + 2 * theme.space[1] + 2;
-    expect(pill).toBeLessThan(tile - 2 * theme.space[1]);
+    // widest badge, `SN AVG 10.0`, so about 73pt of text and 83pt of badge with its padding
+    // and border, against the 84pt a 92pt tile (320pt) or 105pt tile (360pt) leaves inside
+    // its 4pt insets.
+    const tile = (width - 2 * theme.layout.gutter - 2 * theme.layout.posterGrid.gap) / 3;
+    const badge = seasonAverageBadgeText(10).length * 6.6 + 2 * theme.space[1] + 2;
+    expect(badge).toBeLessThan(tile - 2 * theme.space[1]);
+  });
+
+  it('is sized by its text and positioned in the corner, never stretched across the tile', async () => {
+    const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
+    const style = StyleSheet.flatten(
+      view.getByTestId('poster-average-pill', { includeHiddenElements: true }).props.style,
+    ) as ViewStyle;
+    expect(style.position).toBe('absolute');
+    expect(style.left).toBeUndefined();
+    expect(style.width).toBeUndefined();
+    expect(style.right).toBe(theme.space[1]);
+    expect(style.bottom).toBe(theme.space[1]);
   });
 
   it('says it is an average, of how many seasons, before the number', async () => {
