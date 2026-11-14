@@ -117,8 +117,15 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      accessibilityHint={disabled ? disabledReason : undefined}
+      // The caller's props go first so the button's own accessibility can win over them:
+      // spread last, a caller's `accessibilityHint` or `accessibilityState` replaced the
+      // disabled reason and state outright (design-system v3 A.2 #10). The caller's state
+      // is merged, not dropped; its hint is kept unless the button is disabled with a reason.
+      {...rest}
+      accessibilityState={{ ...rest.accessibilityState, disabled: Boolean(disabled) }}
+      accessibilityHint={
+        disabled ? (disabledReason ?? rest.accessibilityHint) : rest.accessibilityHint
+      }
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,
@@ -129,7 +136,6 @@ export function Button({
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
-      {...rest}
     >
       <View pointerEvents="none">
         <Text
