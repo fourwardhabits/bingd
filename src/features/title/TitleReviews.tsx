@@ -13,12 +13,22 @@ import {
 } from '@/features/title/use-title-reviews';
 import {
   Button,
+  EDIT_ICON_NAME,
   EmptyState,
   SegmentedTabs,
   SkeletonRow,
   Text,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+
+/**
+ * **The write-review action's glyph follows what it says** (design-system v3 A.2 #6).
+ * _Write a review_ is an edit, so it takes the shared Edit glyph. _Rank to leave a review_
+ * is the first Rank, so it takes Rank's `star-outline` (§17.3): rule 4 keeps the edit glyph
+ * off Rank.
+ */
+const writeReviewIcon = (viewerRanked: boolean) =>
+  viewerRanked ? EDIT_ICON_NAME : ('star-outline' as const);
 
 export type TitleReviewsProps = {
   reviews: TitleReview[];
@@ -170,7 +180,11 @@ export function TitleReviews({
               style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
               testID="write-review"
             >
-              <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Ionicons
+                name={writeReviewIcon(viewerRanked)}
+                size={theme.layout.icon.sm}
+                color={theme.semantic.action}
+              />
               <Text variant="callout" tone="action">
                 {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
               </Text>
@@ -446,7 +460,11 @@ export function ReviewsPreview({
             style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
             testID="write-review"
           >
-            <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+            <Ionicons
+              name={writeReviewIcon(viewerRanked)}
+              size={theme.layout.icon.sm}
+              color={theme.semantic.action}
+            />
             <Text variant="callout" tone="action">
               {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
             </Text>

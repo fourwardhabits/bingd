@@ -20,9 +20,10 @@ import { theme } from '@/ui/tokens';
  *   §8, 2026-11-13 — they were bare numbers until then);
  * - the label carries the real **rating** count in brackets, as the server reports it,
  *   and only once it has reported it — never a 0 drawn while the number is loading;
- * - a score that does not exist is a dash. Its reason ("Not enough ratings", "No ratings
- *   from people you follow", "Not ranked yet", "Score loading") is what a screen reader
- *   says for that column — it is no longer printed as a second, wrapping line;
+ * - a score that does not exist is a dash. Its reason ("Not enough ratings yet", "No
+ *   ratings yet from people you follow", "Not ranked yet", "Score loading", or "Loading"
+ *   while a count is still being asked for) is what a screen reader says for that column —
+ *   it is no longer printed as a second, wrapping line;
  * - while the three fit side by side they do; a narrow phone at a large text size
  *   stacks them into rows, so nothing is ever clipped.
  */
@@ -67,7 +68,7 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
   if (!you && !bingd && !following) return null;
   const youRanked = you?.score != null;
   const youAverage = !youRanked && you?.average ? you.average : null;
-  // Three columns need about 300pt of 1x text; below that, at this text size, they stack.
+  // Three columns need `STACK_BELOW` (290pt) of 1x text; below that, at this text size, they stack.
   const stacked = width / fontScale < STACK_BELOW;
 
   return (

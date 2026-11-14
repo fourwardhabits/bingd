@@ -13,7 +13,7 @@ import {
   type CollectionFilters,
   type CollectionItem,
 } from '@/features/collection/filters';
-import { bandSizes, formatScore, projectedScore, scoreFor } from '@/features/collection/score';
+import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
 import {
   averageCaption,
@@ -31,6 +31,7 @@ import {
   MediumSelector,
   ScoreBadge,
   SeasonAverageBadge,
+  seasonAverageLabel,
   Sheet,
   SkeletonRow,
   Text,
@@ -574,13 +575,14 @@ export function RankedTitlesSheet({
                 // page does (founder spec t168u §2).
                 secondary={row.average != null ? averageCaption(row.average) : undefined}
                 // The owner's score, in the badge every other list in the app uses —
-                // filled for an explicit ranking, a Maroon ring for a season average.
+                // filled for an explicit ranking, the outlined `SN AVG` badge for a season
+                // average.
                 trailing={
                   row.average != null && row.score != null ? (
                     // The season average's outlined `SN AVG` badge, as on the wall (FU1113-B).
                     <SeasonAverageBadge
                       score={row.score}
-                      accessibilityLabel={`${formatScore(row.score)} out of 10, season average`}
+                      accessibilityLabel={seasonAverageLabel(row.score)}
                       testID="ranked-row-average-badge"
                     />
                   ) : (

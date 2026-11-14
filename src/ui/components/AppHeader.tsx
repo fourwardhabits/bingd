@@ -133,9 +133,10 @@ export function AppHeader({ right, notifications, settings, back }: AppHeaderPro
  * The bell's pressable (a 24pt glyph inside 4pt of padding) came out about 2pt taller than
  * the lockup, which made Feed and Profile 2pt taller than For You, Collection and Search,
  * and put their logo 1pt lower. Reserving the bell's height on every tab, with or without
- * a bell, gives all five the same row. It is a fixed height rather than a minimum so that
- * a platform drawing the glyph a little taller cannot reopen the difference: the bell is
- * centred in it and its hit area (`hitSlop`) is unchanged.
+ * a bell, gives all five the same row. The row's share of it is fixed at this height so
+ * that a platform drawing the glyph a little taller cannot reopen the difference; the box
+ * itself is now `ACTIONS_BOX`, a 44pt minimum that bleeds back to this height (below).
+ * The bell is centred in it and its hit area (`hitSlop`) is unchanged.
  */
 const ACTIONS_HEIGHT = 34;
 /**
@@ -153,6 +154,15 @@ const ACTIONS_BOX = 44;
 const ACTIONS_BLEED = (ACTIONS_BOX - ACTIONS_HEIGHT) / 2;
 
 const styles = StyleSheet.create({
+  left: { flexDirection: 'row', alignItems: 'center' },
+  // The glyph's own edge on the gutter: the 44pt cell reaches 10pt past it to the left.
+  back: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    marginLeft: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   /**
    * **4pt more below the logo, and the same above it** (founder final polish, 2026-11-04).
    *
@@ -166,15 +176,6 @@ const styles = StyleSheet.create({
    * side then moves to a line of its own, still right-aligned and wholly inside the header,
    * rather than overlapping the logo or leaving part of a target outside its parent.
    */
-  left: { flexDirection: 'row', alignItems: 'center' },
-  // The glyph's own edge on the gutter: the 44pt cell reaches 10pt past it to the left.
-  back: {
-    width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget,
-    marginLeft: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   wrap: {
     minHeight: theme.layout.control.headerHeight,
     paddingHorizontal: theme.layout.gutter,

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { fireEvent } from '@testing-library/react-native';
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { StyleSheet } from 'react-native';
 
@@ -63,5 +63,28 @@ describe('EditIcon and EditAction (B9)', () => {
     for (const path of ['src/features/collection/TitleRowActions.tsx', 'src/features/title/TitleActions.tsx']) {
       expect(read(path)).not.toMatch(/EDIT_ICON_NAME|EditIcon|EditAction/);
     }
+  });
+});
+
+/**
+ * **No `create-outline` literal bypasses `EDIT_ICON_NAME`** (design-system v3 A.2 #6), read
+ * from the source so a new literal fails here rather than drifting from the shared glyph.
+ */
+describe('the edit glyph’s one name', () => {
+  it('is spelled as a literal only in EditIcon.tsx', () => {
+    const root = join(__dirname, '../../..');
+    const files = (dir: string): string[] =>
+      readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
+        const path = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) return files(path);
+        return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+      });
+
+    const offenders = [...files('src'), ...files('app')].filter(
+      (path) =>
+        path !== 'src/ui/components/EditIcon.tsx' &&
+        /['"]create-outline['"]/.test(readFileSync(join(root, path), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
   });
 });

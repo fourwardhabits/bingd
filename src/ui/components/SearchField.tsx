@@ -31,13 +31,38 @@ export const SearchField = forwardRef<TextInput, SearchFieldProps>(function Sear
         {...rest}
       />
       {hasValue ? (
-        <Pressable accessibilityRole="button" onPress={onClear} hitSlop={theme.space[2]}>
-          <Ionicons name="close-circle" size={theme.layout.icon.md} color={theme.text.tertiary} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+          onPress={onClear}
+          hitSlop={CLEAR_SLOP}
+        >
+          <Ionicons
+            name="close-circle"
+            size={theme.layout.icon.md}
+            color={theme.text.tertiary}
+          />
         </Pressable>
       ) : null}
     </View>
   );
 });
+
+/**
+ * **The clear button's slop fills the room the row gives it, and no more** (design-system
+ * v3 A.2 #11). Slop only answers inside the parent's bounds, so each side stops at the row:
+ * the gap to the input on the left, the row's own padding on the right, and the row's height
+ * above and below. That is 24 + 8 + 12 = 44pt wide; vertically the 40pt field
+ * (`searchFieldHeight`) is the ceiling, so the target is 44 × 40 without drawing the field
+ * any taller.
+ */
+const CLEAR_VERTICAL_SLOP = (theme.layout.control.searchFieldHeight - theme.layout.icon.md) / 2;
+const CLEAR_SLOP = {
+  top: CLEAR_VERTICAL_SLOP,
+  bottom: CLEAR_VERTICAL_SLOP,
+  left: theme.space[2],
+  right: theme.space[3],
+};
 
 const styles = StyleSheet.create({
   row: {
