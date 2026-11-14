@@ -315,6 +315,37 @@ export const unreadCount = (rows: SentRecommendation[] | undefined) =>
 export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) =>
   (rows ?? []).length >= SENT_LIMIT && (rows ?? []).every((row) => !row.openedAt);
 
+/**
+ * The Sent to You shortcut's badge and its spoken label (Codex review, #290).
+ *
+ * **A floor of zero is still a floor.** The server orders by *opened* only — seen rows stay
+ * in the unopened prefix — so a reader with more than `SENT_LIMIT` unopened recommendations
+ * who has seen the first page holds a page that is all unopened and none unread. The count
+ * in hand is 0 and `unreadIsAtLeast` is true: there may be unread ones past the cap. The
+ * badge used to be drawn only for a count above zero, so those vanished without a word.
+ * Now that state keeps an indicator, *New*, spoken as "more may be new", which is as much
+ * as the page can honestly say.
+ *
+ * **What the client cannot do here.** Reaching those rows needs the server to order seen
+ * rows after unseen ones, or to page, and both are `recommendations_to_me` changes (a
+ * migration); the client cannot ask for a different 200. Until then, opening a title moves
+ * it out of the unopened prefix and lets the next load bring a further row in.
+ */
+export const sentShortcutBadge = (
+  rows: SentRecommendation[] | undefined,
+): { badge: string | null; spoken: string } => {
+  const unread = unreadCount(rows);
+  const atLeast = unreadIsAtLeast(rows);
+  if (unread > 0) {
+    return {
+      badge: `${unread}${atLeast ? '+' : ''}`,
+      spoken: `Sent to You, ${atLeast ? 'at least ' : ''}${unread} new`,
+    };
+  }
+  if (atLeast) return { badge: 'New', spoken: 'Sent to You, more may be new' };
+  return { badge: null, spoken: 'Sent to You' };
+};
+
 /*
  * **Why the test above is still about `openedAt`** (FU1113-E). The server's order is
  * unchanged — unopened first — so it is still the unopened rows that form a prefix, and

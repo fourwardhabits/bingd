@@ -46,8 +46,7 @@ import {
 } from '@/features/recommendations/use-top-rated';
 import {
   asCollectionItem as recommendationAsItem,
-  unreadCount,
-  unreadIsAtLeast,
+  sentShortcutBadge,
   useMarkRecommendationOpened,
   useSentToYou,
   type SentRecommendation,
@@ -850,12 +849,11 @@ export default function RecommendationsScreen() {
    */
 
   // Unread: neither opened nor seen in the list (FU1113-E; founder D5: the count and its
-  // spoken label say unread/new, not unopened).
-  const unread = unreadCount(sentRows);
-  // The server caps this list at 200 and orders unopened first, so a full page of
-  // unopened rows means there may be more unread ones (`use-sent-to-you.ts`). The chip
-  // says so rather than presenting a cap as a total. Independent review 21c.
-  const atLeast = unreadIsAtLeast(sentRows);
+  // spoken label say unread/new, not unopened). The server caps this list at 200 and
+  // orders unopened first, so a full page of unopened rows means there may be more unread
+  // ones (`use-sent-to-you.ts`). The chip says so rather than presenting a cap as a total
+  // (independent review 21c), including when none in hand is unread (Codex review, #290).
+  const sentBadge = sentShortcutBadge(sentRows);
   const activeCount = activeFilterCount(filters);
   // Items, not senders, and the server's own count rather than the length of a capped
   // list — see `useRecommendationRequests`.
@@ -954,11 +952,8 @@ export default function RecommendationsScreen() {
               key: 'sent',
               icon: sentOnly ? 'mail-open' : 'mail-outline',
               label: 'Sent to You',
-              badge: unread > 0 ? `${unread}${atLeast ? '+' : ''}` : null,
-              accessibilityLabel:
-                unread > 0
-                  ? `Sent to You, ${atLeast ? 'at least ' : ''}${unread} new`
-                  : 'Sent to You',
+              badge: sentBadge.badge,
+              accessibilityLabel: sentBadge.spoken,
               selected: sentOnly,
               onPress: () => {
                 // A late stored Top Rated would switch this straight back off.
