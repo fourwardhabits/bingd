@@ -614,7 +614,7 @@ Deno.test('the limits stated here are the limits the migration enforces', async 
   const dir = new URL('../../migrations/', import.meta.url);
   let sql = '';
   for await (const f of Deno.readDir(dir)) {
-    if (f.name.startsWith('20261117000100_')) sql = await Deno.readTextFile(new URL(f.name, dir));
+    if (f.name.startsWith('20261123000100_')) sql = await Deno.readTextFile(new URL(f.name, dir));
   }
   assert(sql, 'migration not found');
   const has = (re: RegExp) => assert(re.test(sql), `migration does not say ${re}`);

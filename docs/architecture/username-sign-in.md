@@ -139,7 +139,11 @@ always has a profile, so it goes to the feed.
 
 ## 4. Data
 
-Migration `supabase/migrations/20261117000100_a_username_that_sends_a_code_and_tells_nobody.sql`.
+Migration `supabase/migrations/20261123000100_a_username_that_sends_a_code_and_tells_nobody.sql`.
+Renumbered from `20261117000100` on 2026-11-14 (wave 2; it had never been applied anywhere) so
+it sorts after staging's `20261121000300` and the reserved `20261121000400` and
+`20261122000100`–`200`; `supabase/tests/username-sign-in.test.mjs` asserts the version is
+unique and that no other migration defines its tables or functions.
 
 `auth_username_challenges` — `id_hash` (SHA-256 hex, PK), `user_id` (null = decoy; FK to
 `auth.users`, cascade), `created_at`, `sent_at`, `expires_at`, `attempts` (0–5),
@@ -274,7 +278,7 @@ Each step is independently reversible, and the constant stays `false` until the 
 | # | Step | How | Verify | Rollback |
 |---|---|---|---|---|
 | 1 | **Staging custom SMTP** | Founder configures in the staging dashboard (not from this repo) | A staging email OTP arrives with six digits | Revert the SMTP setting |
-| 2 | **Staging migration** | Normal reviewed path, `--project-ref fjxhcbowoxuzulwirzyr` | `npm run test:db` green; the four functions exist; anon/authenticated cannot select the tables | New migration dropping the two tables and five functions (nothing else references them) |
+| 2 | **Staging migration** | Normal reviewed path, `20261123000100` only, `--project-ref fjxhcbowoxuzulwirzyr` | `npm run test:db` green; the four functions exist; anon/authenticated cannot select the tables | New migration dropping the two tables and five functions (nothing else references them) |
 | 3 | **Staging function + secret** | Set `USERNAME_SIGN_IN_HASH_KEY` (random ≥ 32 chars) and deploy `username-sign-in` through the normal CI path with a temporary, scoped credential | `supabase functions list` on staging; a `send` returns the generic 200 | `supabase functions delete username-sign-in --project-ref fjxhcbowoxuzulwirzyr` |
 | 4 | **Staging QA** | Preview build with the constant flipped *locally*, never committed; rows below | All rows pass; logs show only outcome classes; confirm the IP header and GoTrue per-IP behaviour (§2) | Nothing to roll back; the shipped constant is still false |
 | 5 | **Production migration** | Normal release path, `--project-ref abheeqyjzekiowkztfxv` | Same as 2 | Same as 2 |

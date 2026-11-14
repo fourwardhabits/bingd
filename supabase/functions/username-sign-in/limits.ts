@@ -1,7 +1,7 @@
 /**
  * The numbers, in one place on the function side.
  *
- * The rate limits themselves are enforced in SQL (20261117000100), where they can be
+ * The rate limits themselves are enforced in SQL (20261123000100), where they can be
  * serialised; they are repeated here only so the docs, the tests and the database can be
  * checked against one another. Changing one means changing all three, deliberately.
  */

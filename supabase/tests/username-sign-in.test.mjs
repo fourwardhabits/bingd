@@ -1,11 +1,14 @@
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createTestDb } from './harness.mjs';
 
 /**
- * Username sign-in, the database half (20261117000100). The Edge Function's own tests
+ * Username sign-in, the database half (20261123000100). The Edge Function's own tests
  * cover the response shape and timing; these cover what the function cannot see:
  * who may touch the tables, which accounts a name resolves to, and the limits.
  *
@@ -412,5 +415,55 @@ describe('retention', () => {
     for (const { j } of rows) {
       assert.doesNotMatch(j, /clear_check|clear\.check|example\.test|203\.0\.113/);
     }
+  });
+});
+
+describe('where the migration sits', () => {
+  // Renumbered 20261117000100 -> 20261123000100 (never applied anywhere) so it lands after
+  // staging's 20261121000300 and the versions reserved for other wave-2 work
+  // (20261121000400, 20261122000100, 20261122000200).
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  const VERSION = '20261123000100';
+  const mine = files.filter((f) => f.startsWith(`${VERSION}_`));
+  const others = files.filter((f) => !f.startsWith(`${VERSION}_`));
+
+  it('exists exactly once, under its new version and not its old one', () => {
+    assert.deepEqual(mine, [`${VERSION}_a_username_that_sends_a_code_and_tells_nobody.sql`]);
+    assert.equal(files.filter((f) => f.startsWith('20261117000100_')).length, 0);
+  });
+
+  it('no two migrations share a version', () => {
+    const versions = files.map((f) => f.split('_')[0]);
+    const dupes = versions.filter((v, i) => versions.indexOf(v) !== i);
+    assert.deepEqual(dupes, []);
+  });
+
+  it('sorts after staging and the reserved versions', () => {
+    for (const v of ['20261121000300', '20261121000400', '20261122000100', '20261122000200']) {
+      assert.ok(VERSION > v, `${VERSION} must sort after ${v}`);
+    }
+  });
+
+  it('no other migration defines its tables or functions', () => {
+    const names = [
+      'auth_username_challenges',
+      'auth_username_attempts',
+      '_username_sign_in_account',
+      'username_sign_in_send',
+      'username_sign_in_verify_begin',
+      'username_sign_in_verify_finish',
+      'username_sign_in_purge',
+    ];
+    const defined = new Set();
+    const re = /create\s+(?:or\s+replace\s+)?(?:function|table)\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?([a-z_0-9]+)/gi;
+    for (const m of readFileSync(join(dir, mine[0]), 'utf8').matchAll(re)) defined.add(m[1].toLowerCase());
+    for (const n of names) assert.ok(defined.has(n), `${mine[0]} should define ${n}`);
+    const clashes = [];
+    for (const f of others) {
+      const sql = readFileSync(join(dir, f), 'utf8');
+      for (const m of sql.matchAll(re)) if (defined.has(m[1].toLowerCase())) clashes.push(`${f}: ${m[1]}`);
+    }
+    assert.deepEqual(clashes, []);
   });
 });
