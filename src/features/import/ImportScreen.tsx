@@ -11,9 +11,9 @@ import { theme } from '@/ui/tokens';
 import { CompletionSummary } from './CompletionSummary';
 import { ExportHelp } from './ExportHelp';
 import { ImportIntro, INTRO_COPY } from './ImportIntro';
-import { PreviewSummary } from './PreviewSummary';
+import { PreviewSummary, QUIET_SLOP } from './PreviewSummary';
 import { ProviderChoice } from './ProviderChoice';
-import { type ImportProvider } from './providers';
+import { PROVIDER_NAME, type ImportProvider } from './providers';
 import {
   providerOfJob,
   useImport,
@@ -196,6 +196,20 @@ export function ImportScreen({
   }, [onboarding, offersChoice, shownJobProvider, opened]);
 
   /**
+   * **To the other service, from a file that belongs to it** (IMP1113-UI polish). Only where
+   * this screen was reached from the choice of service, because only there is the other
+   * service one of the screen's own pages. `reset` first, so the failure and anything held
+   * for it go, then the other service's page.
+   */
+  const switchProvider =
+    chooser && fixedProvider === undefined
+      ? (next: ImportProvider) => {
+          reset();
+          setChosen(next);
+        }
+      : undefined;
+
+  /**
    * The step's exits, with the outcome made honest at the one place both buttons meet.
    *
    * *Not now* is a skip only when the importer **knows** nothing is running. Pressed before
@@ -289,6 +303,7 @@ export function ImportScreen({
             onReset={reset}
             onWatch={watchRunning}
             onRecheck={recheck}
+            onSwitchProvider={switchProvider}
             onLeave={leave}
             onRank={() => router.dismissTo(unrankedMovies())}
             onboarding={step}
@@ -312,6 +327,7 @@ function Body({
   onLeave,
   onRank,
   onRecheck,
+  onSwitchProvider,
   onboarding,
 }: {
   state: ImportPhase;
@@ -327,6 +343,8 @@ function Body({
   onLeave: () => void;
   onRank: () => void;
   onRecheck: () => void;
+  /** To the other service's page. Absent where there is no choice of service. */
+  onSwitchProvider?: (next: ImportProvider) => void;
   onboarding?: ImportOnboarding;
 }) {
   /**
@@ -463,6 +481,7 @@ function Body({
           help={<ExportHelp provider={jobProvider} surface={surface} />}
           onReset={onReset}
           onWatch={onWatch}
+          onSwitchProvider={onSwitchProvider}
         />
       );
   }
@@ -540,6 +559,7 @@ function Failed({
   help,
   onReset,
   onWatch,
+  onSwitchProvider,
   exit,
 }: {
   failure: ImportFailure;
@@ -550,10 +570,13 @@ function Failed({
   help: React.ReactNode;
   onReset: () => void;
   onWatch: () => void;
+  /** To the other service's page, where the screen was reached from the choice. */
+  onSwitchProvider?: (next: ImportProvider) => void;
   /** The onboarding step's way on. */
   exit?: React.ReactNode;
 }) {
-  const { title, detail, showHowTo } = explain(failure, copy);
+  const target = onSwitchProvider ? otherServiceFor(failure) : null;
+  const { title, detail, showHowTo } = explain(failure, copy, target !== null);
 
   const retryable = failure.kind !== 'already_running' && failure.kind !== 'unknown';
   const watchable = failure.kind === 'already_running' && failure.status !== undefined;
@@ -573,15 +596,46 @@ function Failed({
           kind={retryable || watchable ? 'tertiary' : 'primary'}
           onPress={onReset}
         />
+        {target !== null && onSwitchProvider ? (
+          // Quiet and centred, as *Choose a different file* on Ready: `sm` drawn at the
+          // compact height, the slop returning it to the 44pt target.
+          <View style={styles.quiet}>
+            <Button
+              label={`Import from ${PROVIDER_NAME[target]} instead`}
+              kind="tertiary"
+              tone="secondary"
+              size="sm"
+              hitSlop={QUIET_SLOP}
+              onPress={() => onSwitchProvider(target)}
+              testID="import-switch-provider"
+            />
+          </View>
+        ) : null}
       </View>
       {showHowTo ? help : null}
     </View>
   );
 }
 
+/**
+ * The service a refused file most likely belongs to: a ZIP picked on IMDb's page is
+ * Letterboxd's export, and a file that is not a ZIP on Letterboxd's page may well be IMDb's
+ * CSV. Null for every other failure.
+ */
+const otherServiceFor = (failure: ImportFailure): ImportProvider | null =>
+  failure.kind !== 'archive'
+    ? null
+    : failure.reason === 'is_zip'
+      ? 'letterboxd'
+      : failure.reason === 'not_a_zip'
+        ? 'imdb'
+        : null;
+
 function explain(
   failure: ImportFailure,
   copy: Copy = COPY.letterboxd,
+  /** The page offers *Import from … instead*, so the detail can point at it. */
+  canSwitch = false,
 ): {
   title: string;
   detail: string;
@@ -654,8 +708,11 @@ function explain(
     case 'is_zip':
       return {
         title: 'That’s a ZIP, not the IMDb file',
-        detail:
-          'IMDb exports one CSV file. If this is your Letterboxd export, go back and choose Letterboxd instead.',
+        // No "go back" (IMP1113-UI polish): with the choice of service, the button below
+        // does it; without one, the sentence names what to choose.
+        detail: canSwitch
+          ? 'IMDb exports one CSV file. If this is your Letterboxd export, you can import it from Letterboxd instead.'
+          : 'IMDb exports one CSV file. If this is your Letterboxd export, choose Letterboxd instead.',
         showHowTo: true,
       };
     case 'not_imdb':
@@ -682,8 +739,9 @@ function explain(
     case 'not_a_zip':
       return {
         title: 'That’s not the Letterboxd ZIP',
-        detail:
-          'Letterboxd sends a ZIP file. If your computer unzipped it, go back to the original download. A single CSV isn’t enough.',
+        detail: canSwitch
+          ? 'Letterboxd sends a ZIP file. If your computer unzipped it, use the original download. A single CSV isn’t enough. If this is your IMDb ratings export, you can import it from IMDb instead.'
+          : 'Letterboxd sends a ZIP file. If your computer unzipped it, use the original download. A single CSV isn’t enough.',
         showHowTo: true,
       };
     case 'not_letterboxd':
@@ -852,4 +910,5 @@ const styles = StyleSheet.create({
   },
   waitingAction: { alignSelf: 'stretch', marginTop: theme.space[3] },
   centred: { textAlign: 'center' },
+  quiet: { alignItems: 'center' },
 });

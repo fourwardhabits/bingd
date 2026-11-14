@@ -158,16 +158,30 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-/** One footnote with its glyph: information, or (`warning`) something was skipped. */
+/**
+ * One footnote with its glyph: information, or (`warning`) something was skipped.
+ *
+ * A warning reads one step louder (`secondary` ink and glyph) and is announced as one
+ * (*Warning, …*), because the glyph is the only other thing that says so and a screen
+ * reader does not read glyphs.
+ */
 export function Note({ children, warning = false }: { children: string; warning?: boolean }) {
   return (
-    <View style={styles.note}>
+    <View
+      style={styles.note}
+      accessible={warning || undefined}
+      accessibilityLabel={warning ? `Warning, ${children}` : undefined}
+    >
       <Ionicons
         name={warning ? 'alert-circle-outline' : 'information-circle-outline'}
         size={theme.layout.icon.sm}
-        color={theme.text.tertiary}
+        color={warning ? theme.text.secondary : theme.text.tertiary}
       />
-      <Text variant="footnote" tone="tertiary" style={styles.noteText}>
+      <Text
+        variant="footnote"
+        tone={warning ? 'secondary' : 'tertiary'}
+        style={styles.noteText}
+      >
         {children}
       </Text>
     </View>

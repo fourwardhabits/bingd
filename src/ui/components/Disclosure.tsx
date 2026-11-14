@@ -100,7 +100,8 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
     minHeight: theme.layout.minTapTarget,
   },
-  pressed: { opacity: 0.7 },
+  // `Button`'s pressed state, so the two kinds of control answer a press alike.
+  pressed: { opacity: 0.85 },
   label: { flexShrink: 1, flexGrow: 1 },
   trailing: { textAlign: 'right' },
   // The 44pt row already leaves about `space[2]` under a one-line label, so `space[1]` more
