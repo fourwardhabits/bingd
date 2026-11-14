@@ -11,12 +11,20 @@ that will otherwise cost you a wrong number.
 
 Nothing in this document changes the app. It is a reading guide and a dashboard recipe.
 
+> **Updated 2026-11-14 for Onboarding 2.0 (OB-1).** That build adds
+> `onboarding_step_viewed`, sends the missing `profile` completion, adds
+> `first_five_index` and `coach_shown` to onboarding's `ranking_completed`, and adds
+> `notification_permission_result` and `onboarding_people_search_used`. §1, §2 and §4 say
+> what changes and from which build. `onboarding_step_completed` is **not** renamed or
+> reshaped, so its series since September continues unbroken.
+
 ---
 
 ## 1. What is already emitted
 
-Five events matter here. All of them are in `src/lib/analytics.ts`, defined as a closed
-union, so an event not listed there cannot be emitted at all.
+These events matter here. All of them are in `src/lib/analytics.ts`, defined as a closed
+union, so an event not listed there cannot be emitted at all. The last four rows arrive
+with Onboarding 2.0 (OB-1) and are absent from every earlier build.
 
 | Event | Fired where | Means exactly |
 |---|---|---|
@@ -25,6 +33,10 @@ union, so an event not listed there cannot be emitted at all.
 | `onboarding_started` | `use-taste-onboarding.ts`, once, as the phase is written `active` | the first-run flow genuinely became active for this account on this device. **Not** on a remount, **not** on a resume of a flow that was already active |
 | `onboarding_step_completed` | five call sites in `app/onboarding/` | one step was *left*, with `step` and `outcome` |
 | `onboarding_completed` | `use-taste-onboarding.ts`, from the one function all three exits go through | the flow ended, by either exit. `skipped` separates them |
+| `onboarding_step_viewed` | six call sites: `create-profile.tsx` (`profile`), `taste.tsx` picker (`pick`) and Your First Five (`payoff`), `letterboxd.tsx`, `people.tsx` (once its branch is decided), `NotificationStep` | one step was *shown*, with `step` only. Once per step per run in one app session (`features/onboarding/step-viewed.ts`): not on a re-render, a remount or a sheet opening. **A relaunch that resumes a step may send it again**, which is acceptable: read it per person, not per event |
+| `ranking_completed` with `surface: 'onboarding'` | `RankingSheet`, passed the run's context by `taste.tsx` | as everywhere, a placement landed. On onboarding only it also carries `first_five_index` (1–5: which of the five) and `coach_shown` (the first-comparison coach line was on screen). Both are **absent** on every other surface. An empty-band placement with no comparison still emits it and still takes its index |
+| `notification_permission_result` | `NotificationStep`, once, when it settles | `result` is `granted`, `pending`, `undelivered` or `declined` — **Not now and an OS refusal are both `declined`**. `had_follow` is the step's own Feed-or-For-You answer, `false` if it had not arrived yet |
+| `onboarding_people_search_used` | `people.tsx`, once, on Continue, only if a search settled | `searches` (distinct trimmed queries that came back) and `had_results` (any found somebody other than the viewer). Never the query |
 
 Two properties of `onboarding_completed` can be **absent**, and absent means *not known* —
 not zero, not false. `titles_ranked` is missing when the last step was reached before the
@@ -46,12 +58,13 @@ what §5 does.
 ## 2. The two traps in the step event, and they are the whole reason this page exists
 
 `onboarding_step_completed` declares six steps: `profile`, `pick`, `payoff`, `letterboxd`,
-`people`, `notifications`. **Only four of them are ever emitted, and one of those is emitted
-in only one direction.** Verified against every call site on `main` (`abbb45e`):
+`people`, `notifications`. **Before Onboarding 2.0 only five of them were ever emitted, and
+one of those is emitted in only one direction.** Verified against every call site on `main`
+(`abbb45e`), and updated for OB-1:
 
 | `step` | emitted? | with which `outcome` |
 |---|---|---|
-| `profile` | **never** | — |
+| `profile` | **from the Onboarding 2.0 build on** (`create-profile.tsx`, beside `signup_completed`, on `created` only); **never** by any older build | `continued` only |
 | `pick` | yes | **`skipped` only** |
 | `payoff` | yes | `continued` only |
 | `letterboxd` | yes | `continued` and `skipped` |
@@ -71,13 +84,31 @@ Read `pick` as a skip counter and `payoff` as the completion counter, and the fl
 correctly. Read `pick` as "the pick step", and it will look like a step with a 100% skip
 rate, which is an artefact of where the event fires.
 
-**Trap two: `step = 'profile'` will always be zero.** Do not put it in a funnel. The
-equivalent signal is `signup_completed`, which is a different event.
+**Trap two: `step = 'profile'` is sent only from the Onboarding 2.0 build on.** It fires at
+the same moment as `signup_completed` and under the same rule (`created` only, never
+`already_exists`), so for builds that send both the two counts agree. **Older builds never
+sent it**, so a funnel over a date range that includes them will show `profile` far below
+`signup_completed`; that gap is the builds, not drop-off. For any range that crosses the
+release, use `signup_completed` as the profile step, or filter by `app_version`/
+`runtime_version`.
 
-Because `people` and `notifications` only ever report `continued`, drop-off on those two
-steps is visible **only as absence** — somebody who leaves at People emits `letterboxd`
-and then nothing. That is enough to locate them, which is what the question asks; it is not
-enough to distinguish "closed the app" from "is still on the screen".
+**And the view half now exists (OB-1).** `onboarding_step_viewed` is the per-step
+denominator: drop-off on a step is **viewed − completed, per person**, which finally makes
+`people` and `notifications` measurable as more than absence. Count persons, not events —
+a relaunch that resumes a step can send its view twice for one person, and that person still
+either completed it or did not. `pick`'s view is the run's first picker frame, so for the run
+read `pick` viewed against `payoff` completed (with `pick` completed still the bail-outs).
+
+Because `people` and `notifications` only ever report `continued`, on builds before
+Onboarding 2.0 drop-off on those two steps is visible **only as absence** — somebody who
+leaves at People emits `letterboxd` and then nothing. That is enough to locate them, which
+is what the question asks; it is not enough to distinguish "closed the app" from "is still
+on the screen". From OB-1 on, `onboarding_step_viewed` says they reached it.
+
+**Invited versus organic needs no new property.** The `acquisition_source` super-property
+is on every event, and the People step's `onboarding_step_completed.variant` (`connected`,
+`connected_alone` versus `starter_shared`, `starter_active`) already separates an account
+that arrived on an invitation from one that did not.
 
 ---
 
@@ -176,7 +207,28 @@ event, so they are in the property list already.
 
 **New insight** → **Trends** → event `onboarding_step_completed` → **Breakdown** → event
 property **`step`**. Read it with §2's table beside you: `payoff` is the completed-run
-count, `pick` is the bail-out count, `profile` will be zero and is meant to be.
+count, `pick` is the bail-out count, and `profile` is non-zero only for the Onboarding 2.0
+build onward.
+
+### F. Per-step drop-off (Onboarding 2.0 builds only)
+
+1. **New insight** → **Funnel**, *Conversion window* 7 days, filtered to the Onboarding 2.0
+   `app_version` (or later).
+2. Steps, each with a property filter on `step`:
+   `onboarding_step_viewed` (`profile`) → `onboarding_step_completed` (`profile`) →
+   `onboarding_step_viewed` (`pick`) → `onboarding_step_completed` (`payoff`) →
+   `onboarding_step_viewed` (`letterboxd`) → `onboarding_step_completed` (`letterboxd`) →
+   `onboarding_step_viewed` (`people`) → `onboarding_step_completed` (`people`) →
+   `onboarding_step_viewed` (`notifications`) → `onboarding_step_completed`
+   (`notifications`).
+3. PostHog funnels count **persons**, which is exactly the reading a repeated view needs.
+   Each viewed → completed pair is that step's drop-off.
+4. Breakdowns worth a duplicate tile: `acquisition_source` (invited versus organic), and on
+   the People pair, `variant`.
+
+The First Five's inside is on `ranking_completed` where `surface = onboarding`: break down
+by `first_five_index` to see how far into the five people get, and by `coach_shown` to
+compare comparison counts with and without the coach line.
 
 Add a second breakdown on **`outcome`** to separate `letterboxd` skips from continues —
 that is the only step where both directions are emitted and the split is interesting.
@@ -234,7 +286,13 @@ it as a lift.
 
 ---
 
-## 6. Why no new event was added
+## 6. Why no new event was added (2026-09-17)
+
+> **Superseded in part on 2026-11-14.** Onboarding 2.0 (OB-1) added
+> `onboarding_step_viewed` as the per-step denominator, which this section's question did not
+> need and the redesign's does: drop-off per step rather than where somebody was last seen.
+> `onboarding_step_completed` was still **not** renamed or reshaped, and `pick` still does not
+> report `continued`, for the continuity reason given below.
 
 The brief allowed exactly one new event, `onboarding_stage_reached`, if the existing data
 could not answer the question. It can, so none was added.

@@ -8,6 +8,7 @@ import { TAB_ROUTES } from '@/lib/routes';
 
 import { resetRankingOutcome } from './pick-five';
 import { resetOnboardingStages } from './use-onboarding-stage';
+import { resetStepViewedForTests } from './step-viewed';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -89,6 +90,15 @@ const releaseShows = async () => {
 
 const mockRpc = jest.fn();
 const mockReplace = jest.fn();
+/**
+ * What the screen reports (OB-1). The real `track` with no PostHog key is a no-op, so
+ * recording it here changes nothing any other case in this file observes.
+ */
+const mockTrack = jest.fn();
+jest.mock('@/lib/analytics', () => ({
+  ...jest.requireActual('@/lib/analytics'),
+  track: (event: unknown) => mockTrack(event),
+}));
 const mockPrefs = new Map<string, unknown>();
 let mockWriteFails = false;
 /** A preference write that never settles — the Keychain lane of review 47's hang. */
@@ -305,6 +315,8 @@ let mockLedgerReads = 0;
 beforeEach(() => {
   mockAwardOnPlacement = false;
   mockLedgerReads = 0;
+  mockTrack.mockReset();
+  resetStepViewedForTests();
   mockPush.mockReset();
   clearCelebrations();
   // Dismissals acknowledge themselves unless a test says otherwise, which is what a
@@ -1294,6 +1306,52 @@ describe('Your First Five', () => {
     // The step after the payoff, and the stage that says so on a relaunch.
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
     await waitFor(() => expect(mockPrefs.get('user-1.onboarding.stage')).toBe('letterboxd'));
+  });
+});
+
+describe('the run in the onboarding funnel (OB-1)', () => {
+  const events = (name: string) =>
+    mockTrack.mock.calls.map(([event]) => event).filter((event) => event.name === name);
+
+  /** Five turns of the loop from the grid, on the default server, which places outright. */
+  const runFive = async () => {
+    const ids = ['film-1', 'film-2', 'film-3', 'film-4', 'film-5'];
+    starterGrid(ids);
+    const view = await open();
+    const labels = ['Inception', 'Starter 2', 'Starter 3', 'Starter 4', 'Starter 5'];
+    for (const [turn, label] of labels.entries()) {
+      await waitFor(() => expect(view.getByLabelText(label)).toBeTruthy());
+      await fireEvent.press(view.getByLabelText(label));
+      await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+      await chooseBucket(view);
+      await closeReveal(view);
+      if (turn < 4) {
+        await waitFor(() =>
+          expect(view.getByLabelText(new RegExp(`^${turn + 1} of 5 movies ranked`))).toBeTruthy(),
+        );
+      }
+    }
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    return view;
+  };
+
+  it('numbers each placement of the run 1 to 5, counting the empty-band ones', async () => {
+    await runFive();
+
+    const completions = events('ranking_completed');
+    expect(completions.map((event) => event.props.first_five_index)).toEqual([1, 2, 3, 4, 5]);
+    expect(completions.every((event) => event.props.surface === 'onboarding')).toBe(true);
+    // Outright placements show no comparison, so nothing was coached.
+    expect(completions.every((event) => event.props.coach_shown === false)).toBe(true);
+  });
+
+  it('reports the picker and the payoff as viewed once each', async () => {
+    await runFive();
+
+    expect(events('onboarding_step_viewed').map((event) => event.props.step)).toEqual([
+      'pick',
+      'payoff',
+    ]);
   });
 });
 

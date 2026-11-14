@@ -14,6 +14,7 @@ import {
   useAuth,
 } from '@/features/auth';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
+import { useStepViewed } from '@/features/onboarding/step-viewed';
 import { type TasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { track } from '@/lib/analytics';
 import { openLegal } from '@/lib/legal';
@@ -55,6 +56,12 @@ export default function CreateProfileScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
+  /**
+   * `onboarding_step_viewed` for the form (OB-1). The account id is the one the profile
+   * will be created under (`profiles.id` is `auth.users.id`), so the guard's key matches
+   * the later steps'. Not on the under-13 refusal, which is not the step.
+   */
+  useStepViewed(auth.status === 'onboarding' ? auth.userId : 'none', 'profile', !refused);
   const monthRef = useRef<TextInput>(null);
   const dayRef = useRef<TextInput>(null);
   const yearRef = useRef<TextInput>(null);
@@ -213,6 +220,16 @@ export default function CreateProfileScreen() {
         // `created` only. `already_exists` below is a replay of an account that was
         // already there, and counting it would report a second signup for one person.
         track({ name: 'signup_completed' });
+        /**
+         * The profile step's completion, at the same moment and under the same rule
+         * (OB-1, 2026-11-14). It was never sent before this build — the flow's first step
+         * was the one step without a completion — so a funnel over older builds starts
+         * at `pick`. `already_exists` is a replay and sends neither.
+         */
+        track({
+          name: 'onboarding_step_completed',
+          props: { step: 'profile', outcome: 'continued' },
+        });
         /**
          * **A profile the server has just created belongs in the taste flow, and this
          * process knows it without asking** (pre-GTM audit, 2026-09-07).

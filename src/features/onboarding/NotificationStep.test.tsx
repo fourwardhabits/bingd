@@ -2,6 +2,8 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { resetStepViewedForTests } from './step-viewed';
+
 /**
  * The onboarding permission step (founder follow-up part J).
  *
@@ -62,6 +64,12 @@ jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'u1', username: 'sai', display_name: 'Sai' }),
 }));
 
+/** What the step reports (OB-1). `track` without a PostHog key is a no-op either way. */
+const mockTrack = jest.fn();
+jest.mock('@/lib/analytics', () => ({
+  track: (event: unknown) => mockTrack(event),
+}));
+
 import { NotificationStep, shouldShowNotificationStep } from './NotificationStep';
 
 beforeEach(() => {
@@ -74,6 +82,8 @@ beforeEach(() => {
   mockPush.offeredRejects = false;
   mockPush.registered = 0;
   mockPush.offered = 0;
+  mockTrack.mockReset();
+  resetStepViewedForTests();
 });
 
 const open = async (onDone = jest.fn()) => {
@@ -409,5 +419,94 @@ describe('the way forward when the hand-off does not take', () => {
 
     expect(exploding).toHaveBeenCalled();
     expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+});
+
+/**
+ * **`notification_permission_result`, one per visit** (Onboarding 2.0, OB-1, 2026-11-14).
+ *
+ * The settled state, word for word, with one deliberate merge: Not now and an OS refusal
+ * are both `declined`. Never for `asking` or `working`. `had_follow` is the route's own
+ * landing answer, and `false` while it has not arrived.
+ */
+describe('the answer the step reports', () => {
+  const results = () =>
+    mockTrack.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.name === 'notification_permission_result');
+
+  const answer = async (button: string, hadFollow?: boolean) => {
+    const view = await renderWithProviders(
+      <NotificationStep onDone={jest.fn()} hadFollow={hadFollow} />,
+    );
+    await act(async () => {
+      fireEvent.press(view.getByText(button));
+    });
+    return view;
+  };
+
+  it.each([
+    ['granted', 'registered'],
+    ['pending', 'pending'],
+    ['undelivered', 'failed'],
+  ] as const)('reports %s when registration answers %s', async (result, registerResult) => {
+    mockPush.registerResult = registerResult;
+    await answer('Turn on notifications', true);
+
+    await waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0]).toEqual({
+      name: 'notification_permission_result',
+      props: { result, had_follow: true },
+    });
+  });
+
+  it('reports an OS refusal as declined', async () => {
+    mockPush.requestResult = 'blocked';
+    await answer('Turn on notifications', false);
+
+    await waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0].props).toEqual({ result: 'declined', had_follow: false });
+  });
+
+  it('reports Not now as declined, the same word as a refusal', async () => {
+    await answer('Not now', true);
+
+    await waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0].props).toEqual({ result: 'declined', had_follow: true });
+  });
+
+  it('says false for the follow when the landing answer has not arrived', async () => {
+    await answer('Not now');
+
+    await waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0].props.had_follow).toBe(false);
+  });
+
+  it('reports nothing while it is still asking or working', async () => {
+    mockPush.registerResult = 'never';
+    await answer('Turn on notifications', true);
+
+    // `working`: the registration has not settled and the deadline has not passed.
+    expect(results()).toHaveLength(0);
+  });
+
+  it('reports once, however the follow answer changes afterwards', async () => {
+    const view = await answer('Not now', false);
+    await waitFor(() => expect(results()).toHaveLength(1));
+
+    await view.rerender(<NotificationStep onDone={jest.fn()} hadFollow />);
+
+    expect(results()).toHaveLength(1);
+  });
+
+  it('reports the step as viewed once, on its first frame', async () => {
+    const first = await renderWithProviders(<NotificationStep onDone={jest.fn()} />);
+    await first.unmount();
+    await renderWithProviders(<NotificationStep onDone={jest.fn()} />);
+
+    const views = mockTrack.mock.calls.filter(
+      ([event]) => event.name === 'onboarding_step_viewed',
+    );
+    expect(views).toEqual([[{ name: 'onboarding_step_viewed', props: { step: 'notifications' } }]]);
   });
 });

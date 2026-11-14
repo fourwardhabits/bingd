@@ -6,6 +6,7 @@ import { theme } from '@/ui/tokens';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { resetOnboardingStages } from './use-onboarding-stage';
+import { resetStepViewedForTests } from './step-viewed';
 import { starterLine } from './use-starter-people';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -112,6 +113,7 @@ beforeEach(() => {
   mockAttributionFails = false;
   mockTableRows.invite_attributions = [];
   resetOnboardingStages();
+  resetStepViewedForTests();
 
   mockRpc.mockImplementation((fn: string) => {
     if (fn === 'people_mutuals') return Promise.resolve({ data: [], error: null });
@@ -448,5 +450,38 @@ describe('the Continue button at the foot of the step', () => {
       headingAncestors.push(String(node.type));
     }
     expect(headingAncestors.some((type) => /ScrollView/.test(type))).toBe(true);
+  });
+});
+
+/** `onboarding_step_viewed` (OB-1): once the branch is decided, and once per run. */
+describe('the step in the onboarding funnel', () => {
+  const views = () =>
+    mockTrack.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.name === 'onboarding_step_viewed');
+
+  it('reports the step as viewed once its branch is decided, and once across a remount', async () => {
+    const first = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(first.getByText('Start your Feed')).toBeTruthy());
+    await first.unmount();
+    const second = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(second.getByText('Start your Feed')).toBeTruthy());
+
+    expect(views()).toEqual([{ name: 'onboarding_step_viewed', props: { step: 'people' } }]);
+  });
+
+  it('does not report the skeleton in front of the branch as a view', async () => {
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    await renderWithProviders(<PeopleStepScreen />);
+
+    expect(views()).toHaveLength(0);
+  });
+
+  it('reports a failed read as viewed, because the failure is what the step showed', async () => {
+    mockAttributionFails = true;
+    const view = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
+
+    expect(views()).toHaveLength(1);
   });
 });

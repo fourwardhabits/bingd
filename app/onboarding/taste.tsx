@@ -18,6 +18,7 @@ import { PICK_TARGET, setRankingOutcome } from '@/features/onboarding/pick-five'
 import { useStarterMovies } from '@/features/onboarding/use-starter-movies';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { useStepViewed } from '@/features/onboarding/step-viewed';
 import {
   FIRST_FIVE,
   useBeginTasteOnboarding,
@@ -284,6 +285,17 @@ export default function TasteOnboardingScreen() {
    * mount starts on `picking`.
    */
   const payoff = placed >= PICK_TARGET && step.kind !== 'ranking';
+  /**
+   * `onboarding_step_viewed` for the picker (OB-1): the first frame of the run that is the
+   * picker rather than the loading screen, and never for an account about to be sent to the
+   * Feed. Once per run — the guard is in `step-viewed.ts`, so the picker coming back after
+   * each reveal is not five views.
+   */
+  useStepViewed(
+    profile.id,
+    'pick',
+    Boolean(state.data?.needed) && !rankedMovies.isPending && !payoff,
+  );
 
   /**
    * `handoff` -> `ranking`, once the bucket sheet's presentation is actually gone.
@@ -302,7 +314,7 @@ export default function TasteOnboardingScreen() {
       // No bucket means the question was closed rather than answered, so the dismissal
       // was all there was to wait for.
       return current.bucket
-        ? rankingStepFor({ pick: current.pick, bucket: current.bucket })
+        ? rankingStepFor({ pick: current.pick, bucket: current.bucket, index: current.index })
         : { kind: 'picking' };
     });
   }, []);
@@ -375,7 +387,9 @@ export default function TasteOnboardingScreen() {
        * mid-presentation to mount another — the same swap, narrower.
        */
       if (current.kind === 'ranking') return current;
-      return { kind: 'bucket', pick };
+      // Which of the five this title would be, fixed here — the one moment `placed` is
+      // read from this render — and carried through every step after it (OB-1).
+      return { kind: 'bucket', pick, index: placed + 1 };
     });
   };
 
@@ -391,7 +405,7 @@ export default function TasteOnboardingScreen() {
   const backToPicker = () =>
     setStep((current) =>
       current.kind === 'bucket' && Platform.OS === 'ios'
-        ? { kind: 'handoff', pick: current.pick }
+        ? { kind: 'handoff', pick: current.pick, index: current.index }
         : { kind: 'picking' },
     );
 
@@ -686,7 +700,12 @@ export default function TasteOnboardingScreen() {
            */
           setStep((current) => {
             if (current.kind !== 'bucket') return current;
-            const handoff = { kind: 'handoff', pick: current.pick, bucket } as const;
+            const handoff = {
+              kind: 'handoff',
+              pick: current.pick,
+              bucket,
+              index: current.index,
+            } as const;
             /**
              * iOS waits; Android does not, and the branch is here rather than in an effect.
              *
@@ -741,6 +760,16 @@ export default function TasteOnboardingScreen() {
               : null
         }
         visible={step.kind === 'ranking'}
+        /**
+         * Which of the five this is, for `ranking_completed` (OB-1). Fixed when the title
+         * was chosen, so a placement landing — which moves `placed` — cannot renumber the
+         * session it came from. No comparison is coached yet; OB-3 adds the line.
+         */
+        onboardingContext={
+          step.kind === 'ranking' || step.kind === 'returning'
+            ? { index: step.index, coachShown: false }
+            : undefined
+        }
         onShown={sheetShown}
         onDismissed={finishReturn}
         // Dismissed mid-comparison. The session is cancelled by the sheet itself, the
@@ -792,7 +821,12 @@ export default function TasteOnboardingScreen() {
  */
 type RunStep =
   | { kind: 'picking' }
-  | { kind: 'bucket'; pick: TasteSubject }
+  /**
+   * `index` is which of the five the title would be, 1 to 5, fixed when it is chosen and
+   * carried unchanged through `handoff`, `ranking` and `returning` (OB-1). It is the number
+   * `ranking_completed.first_five_index` reports.
+   */
+  | { kind: 'bucket'; pick: TasteSubject; index: number }
   /**
    * The bucket sheet is dismissing and the comparison sheet has not been asked for yet.
    *
@@ -813,7 +847,7 @@ type RunStep =
    *
    * The subject is carried through so nothing has to be recomputed on the far side.
    */
-  | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId }
+  | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId; index: number }
   /**
    * The comparison sheet is up: a comparison, or the reveal that ends one.
    *
@@ -828,7 +862,13 @@ type RunStep =
    * So the run leaves for `returning` only once both are true, whichever order they
    * arrive in.
    */
-  | { kind: 'ranking'; subject: RankingSubject; shown: boolean; closing: boolean }
+  | {
+      kind: 'ranking';
+      subject: RankingSubject;
+      shown: boolean;
+      closing: boolean;
+      index: number;
+    }
   /**
    * The comparison sheet dismissing, with the picker already live behind it.
    *
@@ -842,7 +882,7 @@ type RunStep =
    * itself — the comparison sheet is never *unmounted while presented*, on the placement
    * path or on a dismissal mid-comparison.
    */
-  | { kind: 'returning'; subject: RankingSubject };
+  | { kind: 'returning'; subject: RankingSubject; index: number };
 
 /**
  * The comparison step for a title and the bucket it was just given.
@@ -851,10 +891,15 @@ type RunStep =
  * Android immediately — and two copies of a subject is how the two platforms would come
  * to rank slightly different things.
  */
-const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep => ({
+const rankingStepFor = (from: {
+  pick: TasteSubject;
+  bucket: BucketId;
+  index: number;
+}): RunStep => ({
   kind: 'ranking',
   shown: false,
   closing: false,
+  index: from.index,
   subject: {
     id: from.pick.id,
     title: from.pick.title,
@@ -882,7 +927,7 @@ const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep
 const leaveRankingFor = (step: Extract<RunStep, { kind: 'ranking' }>): RunStep => {
   if (!step.closing) return step;
   if (Platform.OS !== 'ios') return { kind: 'picking' };
-  return step.shown ? { kind: 'returning', subject: step.subject } : step;
+  return step.shown ? { kind: 'returning', subject: step.subject, index: step.index } : step;
 };
 
 /** Five dots and a count, not a percentage. The number is small enough to count. */
@@ -971,6 +1016,9 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
   const { data } = useRankedCollection(profile.id, 'movies');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+  // `onboarding_step_viewed` for the payoff (OB-1). This component is the payoff, so its
+  // first commit is the view; the share sheet opening over it is not a second one.
+  useStepViewed(profile.id, 'payoff');
 
   // Position is 1-based and ascending within the category, and every row here is the same
   // category, so this is the ranking itself rather than a proxy for it.

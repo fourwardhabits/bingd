@@ -2181,6 +2181,59 @@ describe('what a completion is reported as', () => {
 });
 
 /**
+ * **The First Five's position on a completion** (Onboarding 2.0, OB-1, 2026-11-14).
+ *
+ * Onboarding passes which of the five a placement is, and whether it was coached; the
+ * event carries both there and **nowhere else** — absent, not null and not 0, so no
+ * other surface's chart can pick them up.
+ */
+describe('the First Five on a completion', () => {
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+
+  it('carries the index and the coach flag on onboarding', async () => {
+    answering(placement);
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 3, coachShown: false },
+    });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({
+      surface: 'onboarding',
+      first_five_index: 3,
+      coach_shown: false,
+    });
+  });
+
+  it('leaves both out on any other surface, even if a context were passed', async () => {
+    answering(placement);
+    const sheet = await openSheet({
+      surface: 'search',
+      onboardingContext: { index: 3, coachShown: true },
+    });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).not.toHaveProperty('first_five_index');
+    expect(completion()!.props).not.toHaveProperty('coach_shown');
+  });
+
+  it('leaves both out on an ordinary ranking with no context', async () => {
+    answering(placement);
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).not.toHaveProperty('first_five_index');
+    expect(completion()!.props).not.toHaveProperty('coach_shown');
+  });
+});
+
+/**
  * **Which completions ask about the streak.**
  *
  * The streak is derived from `rankings.created_at`, and a correction re-inserted that row

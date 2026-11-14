@@ -12,6 +12,7 @@ import {
   type StarterPerson,
 } from '@/features/onboarding/use-starter-people';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { useStepViewed } from '@/features/onboarding/step-viewed';
 import { mutualsLine } from '@/features/people/use-people';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
@@ -69,6 +70,11 @@ export default function PeopleStepScreen() {
 
   const people = data?.people ?? [];
   const ids = people.map((person) => person.id);
+  /**
+   * `onboarding_step_viewed` (OB-1), once the branch is decided — a list, the invited
+   * acknowledgment, or the failure — and never for the skeleton in front of them.
+   */
+  useStepViewed(profile.id, 'people', !isPending || isError);
   const relationships = useRelationships(ids, profile.id);
 
   /**

@@ -130,9 +130,15 @@ describe('the event vocabulary', () => {
         // 2026-10-28, proactive notifications: one name for a tap on a push or an inbox
         // row. Which one, and what the reader did next, is server-side.
         'notification_opened',
+        // Onboarding 2.0 (OB-1, 2026-11-14): the notification step's settled answer, the
+        // People step's search used, and each step's arrival — the denominator
+        // `onboarding_step_completed` never had per step.
+        'notification_permission_result',
         'onboarding_completed',
+        'onboarding_people_search_used',
         'onboarding_started',
         'onboarding_step_completed',
+        'onboarding_step_viewed',
         // 2026-09-15, the five optional links on a profile header. One name for the
         // whole feature: whether they are tapped at all is the question, and a second
         // event would be measuring something that has not earned one.
@@ -444,6 +450,73 @@ describe('ranking_completed', () => {
         mode: 'start',
       }),
     );
+  });
+});
+
+describe('Onboarding 2.0 analytics (OB-1)', () => {
+  it('carries the step on a view', () => {
+    track({ name: 'onboarding_step_viewed', props: { step: 'people' } });
+
+    expect(mockCapture).toHaveBeenCalledWith('onboarding_step_viewed', expect.anything());
+    expect(propertiesOf()).toMatchObject({ step: 'people' });
+  });
+
+  it('carries the First Five index and the coach flag on an onboarding placement', () => {
+    track({
+      name: 'ranking_completed',
+      props: {
+        media_kind: 'movie',
+        surface: 'onboarding',
+        comparisons: 1,
+        rebucket: false,
+        mode: 'start',
+        skips: 0,
+        first_five_index: 2,
+        coach_shown: true,
+      },
+    });
+
+    expect(propertiesOf()).toMatchObject({ first_five_index: 2, coach_shown: true });
+  });
+
+  it('carries each notification answer and the follow flag', () => {
+    for (const result of ['granted', 'declined', 'pending', 'undelivered'] as const) {
+      mockCapture.mockClear();
+      track({ name: 'notification_permission_result', props: { result, had_follow: true } });
+
+      expect(propertiesOf()).toMatchObject({ result, had_follow: true });
+    }
+  });
+
+  it('carries the People search counts and never the query', () => {
+    track({
+      name: 'onboarding_people_search_used',
+      props: { searches: 2, had_results: true },
+    });
+    expect(propertiesOf()).toMatchObject({ searches: 2, had_results: true });
+
+    // A call site that tried to attach the text: dropped, under either spelling.
+    mockCapture.mockClear();
+    track({
+      name: 'onboarding_people_search_used',
+      props: { searches: 1, had_results: false, query: 'jo', search: '@jo' },
+    } as unknown as AnalyticsEvent);
+    expect(propertiesOf()).not.toHaveProperty('query');
+    expect(propertiesOf()).not.toHaveProperty('search');
+  });
+
+  it('allows none of the new keys to name a person or free text', () => {
+    for (const key of [
+      'first_five_index',
+      'coach_shown',
+      'result',
+      'had_follow',
+      'searches',
+      'had_results',
+    ]) {
+      expect(ALLOWED_PROPERTY_KEYS).toContain(key);
+      expect(FORBIDDEN_PROPERTY_KEYS).not.toContain(key);
+    }
   });
 });
 

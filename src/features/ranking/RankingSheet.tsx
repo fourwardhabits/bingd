@@ -269,6 +269,16 @@ export type RankingSheetProps = {
   onDismissed?: () => void;
   /** iOS has finished presenting. A dismissal asked for now will complete. See Sheet. */
   onShown?: () => void;
+  /**
+   * The First Five run's facts about this placement, for `ranking_completed` alone
+   * (Onboarding 2.0, OB-1, 2026-11-14).
+   *
+   * `index` is which of the five this is, 1 to 5, counted by titles rather than by
+   * comparisons, so an empty-band placement that shows none still takes its number.
+   * `coachShown` is whether the first-comparison coach line was on screen for it.
+   * Read only when `surface` is `onboarding`; every other surface omits both properties.
+   */
+  onboardingContext?: { index: number; coachShown: boolean };
 };
 
 /**
@@ -293,6 +303,7 @@ export function RankingSheet({
   visible = true,
   onDismissed,
   onShown,
+  onboardingContext,
 }: RankingSheetProps) {
   if (!subject) return null;
 
@@ -310,6 +321,7 @@ export function RankingSheet({
       visible={visible}
       onDismissed={onDismissed}
       onShown={onShown}
+      onboardingContext={onboardingContext}
     />
   );
 }
@@ -372,8 +384,18 @@ function Session({
   visible = true,
   onDismissed,
   onShown,
+  onboardingContext,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
+  /**
+   * The run's context, readable from `apply` without joining its dependency list —
+   * which is deliberately the subject, so a parent re-render cannot re-open the session.
+   * Kept current in an effect, as every ref here is.
+   */
+  const onboardingContextRef = useRef(onboardingContext);
+  useEffect(() => {
+    onboardingContextRef.current = onboardingContext;
+  }, [onboardingContext]);
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
   /**
@@ -647,6 +669,14 @@ function Session({
             // How often Too tough was pressed and accepted on the way here. See
             // `skipCount`.
             skips: skipCount.current,
+            // The First Five's position and coach flag (OB-1), on onboarding alone: absent
+            // rather than null or 0 everywhere else, so no other surface's chart moves.
+            ...(surface === 'onboarding' && onboardingContextRef.current
+              ? {
+                  first_five_index: onboardingContextRef.current.index,
+                  coach_shown: onboardingContextRef.current.coachShown,
+                }
+              : {}),
           },
         });
         /**

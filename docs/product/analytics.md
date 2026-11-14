@@ -63,7 +63,10 @@ error rather than a decision somebody makes at 2am before a demo.
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
-| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09; `step: 'letterboxd'` added 2026-09-13) | the account | `step`, `variant`, `outcome` |
+| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09; `step: 'letterboxd'` added 2026-09-13; `step: 'profile'` first sent 2026-11-14, OB-1). **Not renamed**, so the series since September continues | the account | `step`, `variant`, `outcome` |
+| `onboarding_step_viewed` | one step of the first-run flow was **shown**, once per step per run in one app session — not on a re-render, a remount or a sheet opening; a relaunch that resumes a step may send it again (Onboarding 2.0, OB-1, 2026-11-14) | the account | `step` |
+| `notification_permission_result` | the onboarding notification step settled after the reader's choice — never for `asking` or `working` (OB-1) | the account | `result` (`granted` / `declined` / `pending` / `undelivered`; **Not now is `declined`**), `had_follow` |
+| `onboarding_people_search_used` | the People step was left (Continue) after at least one of its `@username` searches settled; at most once per visit (OB-1/OB-6) | the account | `searches`, `had_results` |
 
 ### Core loop
 
@@ -74,7 +77,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `rewatch_decision` | the reader chose *Keep* or *Re-check placement* after saving a rewatch | the collector | `choice` |
 | `watch_history_opened` | the Watch History screen was opened | the collector | `watch_count` |
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
-| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
+| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips`; on `surface: 'onboarding'` only, `first_five_index` (1–5) and `coach_shown` (OB-1, 2026-11-14) — **absent**, not null or 0, everywhere else |
 | `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
 | `refine_target_outcome` | a Refine target's session answered `placed` (T5, `20261019000100`) — one per finished title, never per answer | the ranker | `outcome` (`moved` / `unchanged` / `kept`), `reason`, `comparisons`, `medium`, and why it was offered: `signal_gap`, `signal_contradicted`, `signal_crossed`, `signal_strong` (cleared the card threshold too) |
 | `refine_session_ended` | a Refine sitting ended: the checkpoint's Done (`done`), the server had nothing else worth a look (`exhausted`), or Close mid-round (`close`) | the ranker | `targets`, `moved`, `comparisons`, `ended_by`, `medium` |
@@ -527,6 +530,47 @@ artefact of where the event fires, not a fact about the product. `people` and
 of the next step rather than as a `skipped`. The full reading guide, the two conversion
 windows that separate a pause from an abandonment, and the dashboard recipe are in
 `onboarding-observability.md`.
+
+**From Onboarding 2.0 (OB-1, 2026-11-14) `profile` is sent**, from `create-profile.tsx` at
+the moment `signup_completed` is and under the same rule — `created` only, never
+`already_exists`. Older builds never sent it, so a date range that crosses the release shows
+`profile` below `signup_completed` for reasons that are the builds, not the people.
+
+**`onboarding_step_viewed`** (OB-1) is the other half: drop-off on a step is
+**viewed − completed, per person**. It fires when the step's screen first draws its real
+content — the People step once its branch is decided, never for its skeleton — and its guard
+is process memory keyed by account and step (`features/onboarding/step-viewed.ts`), so a
+remount, a re-render or a sheet opening over the step sends nothing. A relaunch that resumes
+the step can send it a second time, which is accepted rather than persisted away: counted per
+person, a second view changes nothing, whereas a persisted guard that lost a write would
+invent a drop-off. Only `step` is carried.
+
+**`ranking_completed.first_five_index` and `coach_shown`** (OB-1) say which of the First Five a
+placement was and whether the first-comparison coach line was on screen for it. The index
+counts titles, not comparisons, so an empty-band placement — which shows no comparison and
+still emits `ranking_completed` — takes its number. Both are onboarding-only and absent
+elsewhere, so no other surface's chart moves.
+
+**`notification_permission_result`** (OB-1) is what the last step *showed*: `granted` (a token
+was stored), `pending` (permission given, registration still running at the deadline),
+`undelivered` (permission given, the binary cannot deliver), or `declined`. **Not now and an
+OS refusal share `declined`** — both leave the person without a push, and the OS does not say
+which on every platform. `had_follow` is the route's own "at least one approved outgoing
+follow" answer, the one that picks Feed or For You: the query is now asked once, when the
+step mounts, and both the event and the exit read that one answer. **If it has not landed by
+the moment the question settles, `had_follow` is `false`** — an under-report in a known
+direction, never a guess.
+
+**`onboarding_people_search_used`** (OB-1/OB-6) says the People step's inline `@username`
+search was used: `searches` is the number of distinct trimmed queries that settled, and
+`had_results` whether any of them returned somebody other than the viewer. Sent once, on
+Continue, and not at all without a settled search. **Never the query, a handle or who was
+found.** Opening and following from a result are already `member_search_result_opened` and
+`follow_created`, with `surface: 'onboarding'`.
+
+**Invited versus organic needs no new property**: `acquisition_source` is a super-property on
+every event, and the People step's `variant` already separates an invited account
+(`connected`, `connected_alone`) from an organic one (`starter_shared`, `starter_active`).
 
 
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event

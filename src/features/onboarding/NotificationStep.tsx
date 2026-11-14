@@ -8,10 +8,13 @@ import {
   shouldOfferPush,
 } from '@/features/notifications/push-permission';
 import { noteFailure, pushPermission, requestPushPermission } from '@/features/notifications/push';
+import { track } from '@/lib/analytics';
 import { withGrace } from '@/lib/grace';
 import { reportHandled } from '@/lib/monitoring';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+
+import { useStepViewed } from './step-viewed';
 
 /**
  * The last thing onboarding asks: may we notify you.
@@ -66,6 +69,12 @@ import { theme } from '@/ui/tokens';
 export type NotificationStepProps = {
   /** Called once the reader is finished with this step, whichever way they answered. */
   onDone: () => void;
+  /**
+   * Whether the account has at least one approved outgoing follow — the route's own
+   * landing answer, passed down for `notification_permission_result` (OB-1). `undefined`
+   * while that read is still out, which the event reports as `false`.
+   */
+  hadFollow?: boolean;
 };
 
 type State = 'asking' | 'working' | 'granted' | 'pending' | 'undelivered' | 'declined';
@@ -88,9 +97,11 @@ const REGISTRATION_GRACE_MS = 5000;
 /** A preference write is local and quick; a hung one must not trap the screen. */
 const PREF_WRITE_GRACE_MS = 1500;
 
-export function NotificationStep({ onDone }: NotificationStepProps) {
+export function NotificationStep({ onDone, hadFollow }: NotificationStepProps) {
   const profile = useCurrentProfile();
   const [state, setState] = useState<State>('asking');
+  // `onboarding_step_viewed` (OB-1). The question draws on the first frame.
+  useStepViewed(profile.id, 'notifications');
 
   const turnOn = async () => {
     setState('working');
@@ -212,6 +223,31 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
     const timer = setTimeout(handOff, state === 'granted' ? 900 : 1400);
     return () => clearTimeout(timer);
   }, [state, handOff]);
+
+  /**
+   * `notification_permission_result`, once, when the step settles (OB-1, 2026-11-14).
+   *
+   * The settled state is the result, word for word — with one merge that is deliberate:
+   * **Not now and an OS refusal are both `declined`**. Both leave this person without a
+   * push, and that is the question the event answers. Never for `asking` or `working`.
+   *
+   * `had_follow` is read through a ref so the answer landing later does not re-send, and
+   * is `false` when it has not landed by the moment the question settles: an
+   * under-report in a known direction rather than a guess.
+   */
+  const hadFollowNow = useRef(hadFollow);
+  useEffect(() => {
+    hadFollowNow.current = hadFollow;
+  }, [hadFollow]);
+  const reported = useRef(false);
+  useEffect(() => {
+    if (state === 'asking' || state === 'working' || reported.current) return;
+    reported.current = true;
+    track({
+      name: 'notification_permission_result',
+      props: { result: state, had_follow: hadFollowNow.current ?? false },
+    });
+  }, [state]);
 
   return (
     <Screen airy includeBottomInset>
