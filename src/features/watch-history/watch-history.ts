@@ -86,6 +86,22 @@ export function labelFor(events: readonly WatchEvent[], index: number): WatchRow
 export const WATCH_NOTE_MAX_LENGTH = 1000;
 
 /**
+ * A note's length as the database counts it (Codex review, #287). `char_length` counts
+ * code points, and a JS string's `length` counts UTF-16 units, so an emoji is one to the
+ * column and two to `.length`. Every limit on a watch note is in code points.
+ */
+export const watchNoteLength = (note: string): number => Array.from(note).length;
+
+/**
+ * `note` cut to `max` code points. Never splits a surrogate pair, which `slice` on UTF-16
+ * units would, leaving a lone half of an emoji at the end.
+ */
+export const clampWatchNote = (note: string, max: number): string => {
+  const points = Array.from(note);
+  return points.length > max ? points.slice(0, max).join('') : note;
+};
+
+/**
  * A watch's note as `set_watch_details` stores it: trimmed, and empty is no note. The server
  * applies the same rule (`nullif(btrim(p_note), '')`); the client applies it first so it can
  * tell an edit from no edit.

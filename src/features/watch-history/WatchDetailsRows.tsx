@@ -10,6 +10,8 @@ import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
 import { SheetRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+import { clampWatchNote, watchNoteLength } from './watch-history';
+
 /** The same ceiling `set_watch_details` enforces through `watch_tags.max_per_watch`. */
 const MAX_COMPANIONS = 10;
 
@@ -176,15 +178,16 @@ export function WatchDetailsRows({
             label="Note"
             editable={!disabled}
             // `NoteInput` draws the review's 2,000 ceiling; a watch's column holds 1,000,
-            // so the draft stops there rather than failing on Save.
-            onChangeText={(next) => note.onChangeText(next.slice(0, note.maxLength))}
+            // so the draft stops there rather than failing on Save. Counted in code points,
+            // as the column counts, so an emoji at the limit is never cut in half.
+            onChangeText={(next) => note.onChangeText(clampWatchNote(next, note.maxLength))}
             // Nothing saves on blur: the editor's Save writes the watch, or Cancel drops it.
             onBlur={() => {}}
           />
           {/* Private by schema: no Share and no Spoilers, because nobody else reads it. */}
           <Text variant="footnote" tone="tertiary" testID="watch-note-private-hint">
-            {note.value.length >= note.maxLength - NEAR_LIMIT
-              ? `Only you see this note · ${note.value.length}/${note.maxLength}`
+            {watchNoteLength(note.value) >= note.maxLength - NEAR_LIMIT
+              ? `Only you see this note · ${watchNoteLength(note.value)}/${note.maxLength}`
               : 'Only you see this note'}
           </Text>
         </View>

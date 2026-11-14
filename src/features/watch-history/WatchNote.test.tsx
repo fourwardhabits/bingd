@@ -467,6 +467,25 @@ describe('Edit watch → Note edits this watch’s own note', () => {
     expect(notes().w2).toHaveLength(1000);
   });
 
+  /**
+   * **Codex review, #287.** The column's `char_length` counts code points; `.length` counts
+   * UTF-16 units. 999 letters and an emoji is 1,000 to the column and 1,001 to `.length`,
+   * so the editor used to cut the emoji in half and the writer used to refuse the note.
+   */
+  it('counts the limit in code points, so an emoji at the end is kept whole and saved', async () => {
+    const view = await loaded();
+    const editor = await open(view, 'w2');
+    const atLimit = `${'x'.repeat(999)}😀`;
+    await fireEvent.changeText(field(editor), `${atLimit}😀`);
+    expect(field(editor).props.value).toBe(atLimit);
+    expect(editor.getByTestId('watch-note-private-hint').props.children).toBe(
+      'Only you see this note · 1000/1000',
+    );
+    await save(view, 'w2');
+    await waitFor(() => expect(view.queryByTestId('watch-editor-w2')).toBeNull());
+    expect(notes().w2).toBe(atLimit);
+  });
+
   it('sends the companions only when they changed, with this watch’s note alongside', async () => {
     const view = await loaded();
     await fireEvent.press(view.getByTestId('watch-edit-w3'));

@@ -1,4 +1,5 @@
 import {
+  clampWatchNote,
   groupByYear,
   hasHistory,
   historySpan,
@@ -8,6 +9,7 @@ import {
   movementSentence,
   scoresByWatch,
   watchCountLabel,
+  watchNoteLength,
   type WatchEvent,
 } from './watch-history';
 
@@ -298,5 +300,21 @@ describe('historySpan', () => {
   it('is null when every dated watch is on the same day', () => {
     expect(historySpan(['2024-03-04', '2024-03-04'])).toBeNull();
     expect(historySpan(['2024-03-04', null, '2024-03-04', '2024-03-04'])).toBeNull();
+  });
+});
+
+describe('a watch note’s length, in code points as char_length counts (Codex review, #287)', () => {
+  const atLimit = `${'x'.repeat(999)}😀`;
+
+  it('counts an emoji once', () => {
+    expect(atLimit.length).toBe(1001);
+    expect(watchNoteLength(atLimit)).toBe(1000);
+  });
+
+  it('keeps a note at the limit whole and never cuts a surrogate pair', () => {
+    expect(clampWatchNote(atLimit, 1000)).toBe(atLimit);
+    const over = clampWatchNote(`${'x'.repeat(999)}😀😀`, 1000);
+    expect(over).toBe(atLimit);
+    expect(clampWatchNote(`${'x'.repeat(999)}😀`, 999)).toBe('x'.repeat(999));
   });
 });
