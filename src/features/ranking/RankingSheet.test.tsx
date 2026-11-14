@@ -2181,6 +2181,158 @@ describe('what a completion is reported as', () => {
 });
 
 /**
+ * **The First Five's position on a completion** (Onboarding 2.0, OB-1, 2026-11-14).
+ *
+ * Onboarding passes which of the five a placement is, and whether it was coached; the
+ * event carries both there and **nowhere else** — absent, not null and not 0, so no
+ * other surface's chart can pick them up.
+ */
+describe('the First Five on a completion', () => {
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+
+  it('carries the index and the coach flag on onboarding', async () => {
+    answering(placement);
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 3, coachShown: false },
+    });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({
+      surface: 'onboarding',
+      first_five_index: 3,
+      coach_shown: false,
+    });
+  });
+
+  it('leaves both out on any other surface, even if a context were passed', async () => {
+    answering(placement);
+    const sheet = await openSheet({
+      surface: 'search',
+      onboardingContext: { index: 3, coachShown: true },
+    });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).not.toHaveProperty('first_five_index');
+    expect(completion()!.props).not.toHaveProperty('coach_shown');
+  });
+
+  it('leaves both out on an ordinary ranking with no context', async () => {
+    answering(placement);
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).not.toHaveProperty('first_five_index');
+    expect(completion()!.props).not.toHaveProperty('coach_shown');
+  });
+});
+
+/**
+ * **The First Five's coach line** (Onboarding 2.0, OB-3, 2026-11-14): on onboarding's first
+ * comparison when the run asks for it, gone once that pair is answered, never anywhere else.
+ */
+describe('the first-comparison coach line', () => {
+  const coach = /New to this\? Tap the one you liked more\. Too close to call\? Tap/;
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+
+  it('sits under the question on the coached comparison, and tells the run once', async () => {
+    answering(comparison(), placement);
+    const onCoachShown = jest.fn();
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 2, coachShown: true, onCoachShown },
+    });
+
+    await sheet.ready('Film P');
+    expect(sheet.getByText(coach)).toBeTruthy();
+    // Bold inside the line, beside the control it names.
+    expect(within(sheet.getByTestId('comparison-coach')).getByText("Can't decide")).toBeTruthy();
+    const strip = StyleSheet.flatten(sheet.getByTestId('comparison-coach').props.style);
+    expect(strip).toMatchObject({
+      backgroundColor: theme.surface.sunken,
+      borderRadius: theme.radius.control,
+      paddingVertical: theme.space[2],
+      paddingHorizontal: theme.space[3],
+    });
+    expect(onCoachShown).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(sheet.card('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({ first_five_index: 2, coach_shown: true });
+    expect(onCoachShown).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lets Can't decide work with the coach shown, and the next pair is uncoached", async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', skipped: true }), placement);
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 1, coachShown: true },
+    });
+
+    await sheet.ready('Film P');
+    expect(sheet.getByText(coach)).toBeTruthy();
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
+
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    // The mock's catalogue names every opponent Film P, as the skip-count case reads it.
+    await sheet.ready('Film P');
+    expect(sheet.queryByText(coach)).toBeNull();
+  });
+
+  it('is not drawn when the run has not asked for it', async () => {
+    answering(comparison(), placement);
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 3, coachShown: false },
+    });
+
+    await sheet.ready('Film P');
+    expect(sheet.queryByText(coach)).toBeNull();
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({ coach_shown: false });
+  });
+
+  it('is never drawn on any other surface, whatever context is passed', async () => {
+    answering(comparison(), placement);
+    const onCoachShown = jest.fn();
+    const sheet = await openSheet({
+      surface: 'search',
+      onboardingContext: { index: 1, coachShown: true, onCoachShown },
+    });
+
+    await sheet.ready('Film P');
+    expect(sheet.queryByText(coach)).toBeNull();
+    expect(sheet.queryByTestId('comparison-coach')).toBeNull();
+    expect(onCoachShown).not.toHaveBeenCalled();
+  });
+
+  it('is not spent by a session that places without asking anything', async () => {
+    answering(placement);
+    const onCoachShown = jest.fn();
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 1, coachShown: true, onCoachShown },
+    });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    expect(onCoachShown).not.toHaveBeenCalled();
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({ first_five_index: 1, coach_shown: false });
+  });
+});
+
+/**
  * **Which completions ask about the streak.**
  *
  * The streak is derived from `rankings.created_at`, and a correction re-inserted that row

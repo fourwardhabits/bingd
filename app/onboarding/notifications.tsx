@@ -1,5 +1,5 @@
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
@@ -93,22 +93,55 @@ export default function NotificationsStepScreen() {
    * away. Bounded, because it sits between a button press and the navigation it promised,
    * and the build-4 stranding is what happens when something on that path does not settle.
    */
-  const opensOnFeed = () =>
-    withGrace(
-      // An async wrapper rather than `.then` on the builder: PostgREST's builder is a
-      // `PromiseLike` and not a `Promise`, so it does not satisfy `withGrace`'s parameter.
-      // The same shape `taste.tsx` uses for its own bounded pre-exit read.
-      (async () => {
+  /**
+   * **Asked once, from the moment the step mounts** (OB-1, 2026-11-14).
+   *
+   * The same query, issued once and shared: `notification_permission_result` reports this
+   * answer as `had_follow`, and the question settles *before* `finish` runs, so a query
+   * first asked from `finish` could never have answered it. Starting it on mount lets the
+   * analytics read the step's own answer rather than ask a second time. The People step is
+   * behind this screen, so the follows it is counting are already made.
+   *
+   * The bound is unchanged and still taken at the press: `finish` gives the shared answer
+   * `CONNECTION_GRACE_MS` from then, exactly as it gave a fresh request before, so a slow
+   * read is if anything more likely to have landed. A throw is a `false`, as a refusal is.
+   */
+  const followAnswer = useRef<Promise<boolean> | null>(null);
+  const askFollow = useCallback(() => {
+    // An async wrapper rather than `.then` on the builder: PostgREST's builder is a
+    // `PromiseLike` and not a `Promise`, so it does not satisfy `withGrace`'s parameter.
+    // The same shape `taste.tsx` uses for its own bounded pre-exit read.
+    followAnswer.current ??= (async () => {
+      try {
         const { count, error } = await supabase
           .from('follows')
           .select('followee_id', { count: 'exact', head: true })
           .eq('follower_id', profile.id)
           .eq('state', 'approved');
         return !error && (count ?? 0) > 0;
-      })(),
-      CONNECTION_GRACE_MS,
-      false,
-    );
+      } catch {
+        return false;
+      }
+    })();
+    return followAnswer.current;
+  }, [profile.id]);
+
+  /**
+   * The answer as far as it is known, for `notification_permission_result.had_follow`.
+   * `undefined` until it lands; the step reports that as `false` (see `NotificationStep`).
+   */
+  const [hadFollow, setHadFollow] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void askFollow().then((answer) => {
+      if (live) setHadFollow(answer);
+    });
+    return () => {
+      live = false;
+    };
+  }, [askFollow]);
+
+  const opensOnFeed = () => withGrace(askFollow(), CONNECTION_GRACE_MS, false);
 
   const finish = async () => {
     if (departing.current) return;
@@ -195,7 +228,7 @@ export default function NotificationsStepScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <NotificationStep onDone={() => void finish()} />
+      <NotificationStep onDone={() => void finish()} hadFollow={hadFollow} />
     </>
   );
 }

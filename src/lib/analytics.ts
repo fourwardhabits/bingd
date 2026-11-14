@@ -384,6 +384,63 @@ export type AnalyticsEvent =
         outcome: 'continued' | 'skipped';
       };
     }
+  /**
+   * One step of the first-run flow was **shown** (Onboarding 2.0, OB-1, 2026-11-14).
+   *
+   * The other half of `onboarding_step_completed`, and the reason it exists: a completion
+   * says who left a step, and nothing said who reached one. Drop-off per step is
+   * `viewed − completed`, counted per person, which is the funnel this flow was built to
+   * be measured by and could not be.
+   *
+   * **Once per step per run, in one app session**, when the step's screen first draws its
+   * real content: not while it is loading, not on a re-render, not on a remount, and not
+   * when a sheet opens over it (`features/onboarding/step-viewed.ts`). A relaunch that
+   * resumes a step can send it again — the guard is process memory, deliberately — so the
+   * count is per person rather than per event: two views and one completion from one
+   * person is one person who completed.
+   *
+   * `step` is the same closed vocabulary as the completion, so the two join on it. No
+   * other property: a step is a place, and nothing about the person belongs on it.
+   */
+  | { name: 'onboarding_step_viewed'; props: { step: OnboardingStep } }
+  /**
+   * The onboarding notification question settled (OB-1, 2026-11-14).
+   *
+   * `result` is one of four words and is what the step **showed**, not what was tapped:
+   * `granted` is a token minted and stored, `pending` is permission given with the
+   * registration still running at the deadline, `undelivered` is permission given and a
+   * binary that cannot deliver, and `declined` is either the OS refusing **or Not now**.
+   * Those two share a value on purpose: from the product's side both are "this person
+   * will not get a push", and the OS does not say which happened on every platform.
+   *
+   * `had_follow` is the step's own "at least one approved outgoing follow" answer — the
+   * one that decides Feed or For You — read, never re-asked. `false` when that answer has
+   * not arrived yet at the moment the question settles, so it under-reports rather than
+   * guesses (see `analytics.md`).
+   *
+   * Once per visit. Never for `asking` or `working`, which are not answers.
+   */
+  | {
+      name: 'notification_permission_result';
+      props: {
+        result: 'granted' | 'declined' | 'pending' | 'undelivered';
+        had_follow: boolean;
+      };
+    }
+  /**
+   * The People step's inline `@username` search was used (OB-1/OB-6, 2026-11-14).
+   *
+   * Sent once, as the step is left, and only if at least one search settled. `searches` is
+   * how many distinct trimmed queries came back; `had_results` is whether any of them found
+   * somebody other than the viewer. **Never the query, never a handle, never who was
+   * found** — what somebody typed into a people search is the most personal free text in
+   * the flow. Opening a result and following from one are `member_search_result_opened`
+   * and `follow_created`, both with `surface: 'onboarding'`.
+   */
+  | {
+      name: 'onboarding_people_search_used';
+      props: { searches: number; had_results: boolean };
+    }
 
   // --- Core loop ----------------------------------------------------------
   /**
@@ -467,6 +524,20 @@ export type AnalyticsEvent =
         rebucket: boolean;
         mode: RankingMode;
         skips: number;
+        /**
+         * Which of the First Five this placement was, 1 to 5 (OB-1, 2026-11-14).
+         *
+         * **Present only when `surface` is `onboarding`**, and absent — not null, not 0 —
+         * everywhere else, so a chart split by it cannot pick up a ranking from the Log tab.
+         * An empty-band placement with no comparison still takes its number: it is still
+         * the run's first title, and the index counts titles, not comparisons.
+         */
+        first_five_index?: number;
+        /**
+         * Whether the first-comparison coach line was on screen during this placement's
+         * comparisons (OB-1/OB-3). Onboarding only, like `first_five_index`.
+         */
+        coach_shown?: boolean;
       };
     }
   /**
@@ -1257,6 +1328,11 @@ export const ANALYTICS_EVENTS = [
   'onboarding_started',
   'onboarding_completed',
   'onboarding_step_completed',
+  // Onboarding 2.0 (OB-1, 2026-11-14): the step's arrival, the notification answer, and
+  // whether the People step's search was used.
+  'onboarding_step_viewed',
+  'notification_permission_result',
+  'onboarding_people_search_used',
   'title_logged',
   // T3b (2026-09-20). Engagement events: their timestamps are recording times and must
   // never feed a consumption metric (epic §L.2, §P).
@@ -1406,6 +1482,19 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'step',
   'variant',
   'outcome',
+  /**
+   * Onboarding 2.0 (OB-1, 2026-11-14). `first_five_index` is 1 to 5 and `coach_shown` a
+   * boolean, both on onboarding's `ranking_completed` only. `result` is the notification
+   * step's four words and `had_follow` a boolean. `searches` is a count of the People
+   * step's settled queries and `had_results` a boolean — **never the query**, which stays
+   * forbidden under `query` and `search`.
+   */
+  'first_five_index',
+  'coach_shown',
+  'result',
+  'had_follow',
+  'searches',
+  'had_results',
   // People activation (2026-09-08). `mode` is already above — a closed set of words, here
   // `mutuals` or `match`. `source` is how somebody reached People, and is likewise a closed
   // set of four words (`PeopleEntry`): never a person, a handle or a referrer.

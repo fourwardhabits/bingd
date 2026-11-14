@@ -43,10 +43,12 @@ jest.mock('@/lib/analytics', () => ({
   track: (event: unknown) => mockTrack(event),
 }));
 
+const mockFrom = jest.fn();
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
+      mockFrom(table);
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
         select: () => chain,
@@ -96,19 +98,22 @@ jest.mock('@/features/auth', () => ({
  * its two exits.
  */
 jest.mock('./NotificationStep', () => ({
-  NotificationStep: ({ onDone }: { onDone: () => void }) => {
+  // `hadFollow` is drawn so the route's follow answer can be seen arriving (OB-1).
+  NotificationStep: ({ onDone, hadFollow }: { onDone: () => void; hadFollow?: boolean }) => {
     const React = jest.requireActual('react');
     const { Text, Pressable } = jest.requireActual('react-native');
     return React.createElement(
       Pressable,
       { accessibilityRole: 'button', accessibilityLabel: 'finish the step', onPress: onDone },
       React.createElement(Text, null, 'Stay in the loop'),
+      React.createElement(Text, null, `had follow: ${String(hadFollow)}`),
     );
   },
 }));
 
 beforeEach(() => {
   mockReplace.mockReset();
+  mockFrom.mockReset();
   mockPush.mockReset();
   mockNavigation.length = 0;
   clearCelebrations();
@@ -135,6 +140,40 @@ const finish = async () => {
   await fireEvent.press(view.getByLabelText('finish the step'));
   return view;
 };
+
+/**
+ * **The landing answer is the analytics answer** (OB-1, 2026-11-14). The one follow query
+ * is asked when the step mounts and handed to the step for
+ * `notification_permission_result.had_follow`, then awaited again by the exit — one
+ * query, not two.
+ */
+describe('the follow answer the step is given', () => {
+  const followReads = () => mockFrom.mock.calls.filter(([table]) => table === 'follows');
+
+  it('passes an approved follow down as true, and asks once', async () => {
+    mockCounts.follows = 1;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: true')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+    expect(followReads()).toHaveLength(1);
+  });
+
+  it('passes none as false', async () => {
+    mockCounts.follows = 0;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+  });
+
+  it('leaves it unknown while the read has not answered', async () => {
+    mockCountHangs = true;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: undefined')).toBeTruthy());
+  });
+});
 
 describe('where the app opens', () => {
   /**

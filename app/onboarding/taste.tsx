@@ -18,6 +18,7 @@ import { PICK_TARGET, setRankingOutcome } from '@/features/onboarding/pick-five'
 import { useStarterMovies } from '@/features/onboarding/use-starter-movies';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { useStepViewed } from '@/features/onboarding/step-viewed';
 import {
   FIRST_FIVE,
   useBeginTasteOnboarding,
@@ -258,6 +259,12 @@ export default function TasteOnboardingScreen() {
    * either — the count and the supply are answered by one fact rather than two.
    */
   const [confirmed, setConfirmed] = useState<readonly string[]>([]);
+  /**
+   * Whether the first-comparison coach line has been on screen in this run (OB-3). Run
+   * state, not persisted: see `onboardingContext` on the comparison sheet.
+   */
+  const [coachSpent, setCoachSpent] = useState(false);
+  const spendCoach = useCallback(() => setCoachSpent(true), []);
   const rankedIds = new Set([
     ...(rankedMovies.data ?? []).map((entry) => entry.mediaItemId),
     ...confirmed,
@@ -284,6 +291,17 @@ export default function TasteOnboardingScreen() {
    * mount starts on `picking`.
    */
   const payoff = placed >= PICK_TARGET && step.kind !== 'ranking';
+  /**
+   * `onboarding_step_viewed` for the picker (OB-1): the first frame of the run that is the
+   * picker rather than the loading screen, and never for an account about to be sent to the
+   * Feed. Once per run — the guard is in `step-viewed.ts`, so the picker coming back after
+   * each reveal is not five views.
+   */
+  useStepViewed(
+    profile.id,
+    'pick',
+    Boolean(state.data?.needed) && !rankedMovies.isPending && !payoff,
+  );
 
   /**
    * `handoff` -> `ranking`, once the bucket sheet's presentation is actually gone.
@@ -302,7 +320,12 @@ export default function TasteOnboardingScreen() {
       // No bucket means the question was closed rather than answered, so the dismissal
       // was all there was to wait for.
       return current.bucket
-        ? rankingStepFor({ pick: current.pick, bucket: current.bucket })
+        ? rankingStepFor({
+            pick: current.pick,
+            bucket: current.bucket,
+            index: current.index,
+            coach: current.coach,
+          })
         : { kind: 'picking' };
     });
   }, []);
@@ -375,7 +398,10 @@ export default function TasteOnboardingScreen() {
        * mid-presentation to mount another — the same swap, narrower.
        */
       if (current.kind === 'ranking') return current;
-      return { kind: 'bucket', pick };
+      // Which of the five this title would be, fixed here — the one moment `placed` is
+      // read from this render — and carried through every step after it (OB-1). And
+      // whether its session may show the coach line: yes until one has been shown (OB-3).
+      return { kind: 'bucket', pick, index: placed + 1, coach: !coachSpent };
     });
   };
 
@@ -391,7 +417,7 @@ export default function TasteOnboardingScreen() {
   const backToPicker = () =>
     setStep((current) =>
       current.kind === 'bucket' && Platform.OS === 'ios'
-        ? { kind: 'handoff', pick: current.pick }
+        ? { kind: 'handoff', pick: current.pick, index: current.index, coach: current.coach }
         : { kind: 'picking' },
     );
 
@@ -496,12 +522,15 @@ export default function TasteOnboardingScreen() {
         <>
           <View style={styles.intro}>
             <Text variant="title1">
-              {placed === 0 ? 'Pick a movie you have seen' : 'Pick another one'}
+              {placed === 0 ? "Pick a movie you've seen" : 'Pick another one'}
             </Text>
+            {/* The loop in one sentence, before the first pick (Onboarding 2.0, OB-3):
+                how it was, then which you liked more, five times. After it, the one fact
+                the second title adds — that it meets the first. */}
             <Text variant="body" tone="secondary">
               {placed === 0
-                ? 'Rate it, and bingd will ask you to compare. Five of these and your list is started.'
-                : 'Each one gets compared against the ones before it.'}
+                ? 'Say how it was, then pick which you liked more. Five picks and your list is started.'
+                : 'Each one is compared with the ones before it.'}
             </Text>
             <Progress placed={placed} />
           </View>
@@ -509,7 +538,7 @@ export default function TasteOnboardingScreen() {
           <View style={styles.field}>
             <SearchField
               accessibilityLabel="Search for a movie"
-              placeholder="A movie you've seen"
+              placeholder="Search movies"
               value={input}
               onChangeText={setInput}
               onClear={() => setInput('')}
@@ -563,7 +592,7 @@ export default function TasteOnboardingScreen() {
               {grid.length === 0 ? (
                 <View style={styles.status}>
                   <Text variant="body" tone="tertiary">
-                    Search for a movie you have seen.
+                    {"Search for a movie you've seen."}
                   </Text>
                 </View>
               ) : (
@@ -686,7 +715,13 @@ export default function TasteOnboardingScreen() {
            */
           setStep((current) => {
             if (current.kind !== 'bucket') return current;
-            const handoff = { kind: 'handoff', pick: current.pick, bucket } as const;
+            const handoff = {
+              kind: 'handoff',
+              pick: current.pick,
+              bucket,
+              index: current.index,
+              coach: current.coach,
+            } as const;
             /**
              * iOS waits; Android does not, and the branch is here rather than in an effect.
              *
@@ -741,6 +776,24 @@ export default function TasteOnboardingScreen() {
               : null
         }
         visible={step.kind === 'ranking'}
+        /**
+         * Which of the five this is, for `ranking_completed` (OB-1), and whether this
+         * session may coach its first comparison (OB-3). Both were fixed when the title was
+         * chosen, so a placement landing — which moves `placed` — cannot renumber the
+         * session it came from, and the coach being spent cannot pull the line off the
+         * comparison it is on.
+         *
+         * **The coach is spent by being seen, not by being offered.** The first title on a
+         * new account has an empty band and places with no comparison, so offering the line
+         * to "the first session" would waste it on a session that never asks anything. The
+         * sheet reports back when the line was actually on screen; from then on no title in
+         * this run is offered it. Run state only: a relaunch mid-run may show it once more.
+         */
+        onboardingContext={
+          step.kind === 'ranking' || step.kind === 'returning'
+            ? { index: step.index, coachShown: step.coach, onCoachShown: spendCoach }
+            : undefined
+        }
         onShown={sheetShown}
         onDismissed={finishReturn}
         // Dismissed mid-comparison. The session is cancelled by the sheet itself, the
@@ -792,7 +845,13 @@ export default function TasteOnboardingScreen() {
  */
 type RunStep =
   | { kind: 'picking' }
-  | { kind: 'bucket'; pick: TasteSubject }
+  /**
+   * `index` is which of the five the title would be, 1 to 5, fixed when it is chosen and
+   * carried unchanged through `handoff`, `ranking` and `returning` (OB-1). It is the number
+   * `ranking_completed.first_five_index` reports. `coach` is whether that title's
+   * comparison session may show the first-comparison coach line (OB-3), fixed the same way.
+   */
+  | { kind: 'bucket'; pick: TasteSubject; index: number; coach: boolean }
   /**
    * The bucket sheet is dismissing and the comparison sheet has not been asked for yet.
    *
@@ -813,7 +872,7 @@ type RunStep =
    *
    * The subject is carried through so nothing has to be recomputed on the far side.
    */
-  | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId }
+  | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId; index: number; coach: boolean }
   /**
    * The comparison sheet is up: a comparison, or the reveal that ends one.
    *
@@ -828,7 +887,14 @@ type RunStep =
    * So the run leaves for `returning` only once both are true, whichever order they
    * arrive in.
    */
-  | { kind: 'ranking'; subject: RankingSubject; shown: boolean; closing: boolean }
+  | {
+      kind: 'ranking';
+      subject: RankingSubject;
+      shown: boolean;
+      closing: boolean;
+      index: number;
+      coach: boolean;
+    }
   /**
    * The comparison sheet dismissing, with the picker already live behind it.
    *
@@ -842,7 +908,7 @@ type RunStep =
    * itself — the comparison sheet is never *unmounted while presented*, on the placement
    * path or on a dismissal mid-comparison.
    */
-  | { kind: 'returning'; subject: RankingSubject };
+  | { kind: 'returning'; subject: RankingSubject; index: number; coach: boolean };
 
 /**
  * The comparison step for a title and the bucket it was just given.
@@ -851,10 +917,17 @@ type RunStep =
  * Android immediately — and two copies of a subject is how the two platforms would come
  * to rank slightly different things.
  */
-const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep => ({
+const rankingStepFor = (from: {
+  pick: TasteSubject;
+  bucket: BucketId;
+  index: number;
+  coach: boolean;
+}): RunStep => ({
   kind: 'ranking',
   shown: false,
   closing: false,
+  index: from.index,
+  coach: from.coach,
   subject: {
     id: from.pick.id,
     title: from.pick.title,
@@ -882,16 +955,35 @@ const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep
 const leaveRankingFor = (step: Extract<RunStep, { kind: 'ranking' }>): RunStep => {
   if (!step.closing) return step;
   if (Platform.OS !== 'ios') return { kind: 'picking' };
-  return step.shown ? { kind: 'returning', subject: step.subject } : step;
+  return step.shown
+    ? { kind: 'returning', subject: step.subject, index: step.index, coach: step.coach }
+    : step;
 };
 
-/** Five dots and a count, not a percentage. The number is small enough to count. */
+/**
+ * Five dots and a count, not a percentage. The number is small enough to count.
+ *
+ * From the first placement it also says how many are left (Onboarding 2.0, OB-3): *2 of 5 ·
+ * 3 to go*. Not at zero, where "5 to go" restates the target the sentence above just set.
+ */
+function progressLabel(placed: number): { text: string; spoken: string } {
+  if (placed === 0) {
+    return { text: `0 of ${PICK_TARGET}`, spoken: `0 of ${PICK_TARGET} movies ranked` };
+  }
+  const left = PICK_TARGET - placed;
+  return {
+    text: `${placed} of ${PICK_TARGET} · ${left} to go`,
+    spoken: `${placed} of ${PICK_TARGET} movies ranked, ${left} to go`,
+  };
+}
+
 function Progress({ placed }: { placed: number }) {
+  const label = progressLabel(placed);
   return (
     <View
       style={styles.progress}
       accessibilityRole="progressbar"
-      accessibilityLabel={`${placed} of ${PICK_TARGET} movies ranked`}
+      accessibilityLabel={label.spoken}
     >
       {Array.from({ length: PICK_TARGET }, (_, index) => (
         <View
@@ -900,7 +992,7 @@ function Progress({ placed }: { placed: number }) {
         />
       ))}
       <Text variant="footnote" tone="secondary" style={styles.progressLabel}>
-        {`${placed} of ${PICK_TARGET}`}
+        {label.text}
       </Text>
     </View>
   );
@@ -971,6 +1063,9 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
   const { data } = useRankedCollection(profile.id, 'movies');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+  // `onboarding_step_viewed` for the payoff (OB-1). This component is the payoff, so its
+  // first commit is the view; the share sheet opening over it is not a second one.
+  useStepViewed(profile.id, 'payoff');
 
   // Position is 1-based and ascending within the category, and every row here is the same
   // category, so this is the ranking itself rather than a proxy for it.
@@ -991,8 +1086,8 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             Your First Five
           </Text>
           <Text variant="body" tone="secondary">
-            This is just the start. As you rank more, your favorites get clearer and bingd
-            gets a better read on your taste.
+            Your scores move as your list grows. The more you rank, the better bingd knows
+            your taste.
           </Text>
         </View>
 
@@ -1022,6 +1117,32 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             passive pointer went unnoticed, so the question is now its own optional step,
             which Continue opens: `app/onboarding/letterboxd.tsx`. The payoff keeps its one
             action and nothing beneath the five competes with them. */}
+
+        {/**
+         * **Up next** (Onboarding 2.0, OB-4, 2026-11-14): what Continue leads to, said once,
+         * so the five are a start rather than an ending. A statement and not a card to
+         * act on — no link, no recommendations teaser — so it does not compete with the
+         * footer's one primary. Inside the scroll, after the fifth row, so the rows and
+         * this block scroll and the fixed footer never covers either (the 2026-11-02 "every
+         * title shows" rule).
+         *
+         * The section-header token in Maroon rather than `SectionHeader`, which brings its
+         * own gutter and a 44pt row and would double-pad inside the card's padding.
+         */}
+        <View style={styles.upNext} testID="first-five-up-next">
+          <Text
+            variant="sectionHeader"
+            tone="action"
+            accessibilityRole="header"
+            // The token uppercases; the label keeps a screen reader from spelling it out.
+            accessibilityLabel="Up next"
+          >
+            Up next
+          </Text>
+          <Text variant="body">
+            Bring your history, find your friends, then see picks made for your taste.
+          </Text>
+        </View>
       </ScrollView>
 
       <OnboardingFooter>
@@ -1090,6 +1211,14 @@ const styles = StyleSheet.create({
   results: { paddingBottom: theme.space[8] },
   payoff: { paddingBottom: theme.space[2] },
   payoffActions: { flexDirection: 'row', gap: theme.space[2] },
+  upNext: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.card,
+    padding: theme.layout.cardPadding,
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[3],
+    gap: theme.space[1],
+  },
   payoffAction: { flex: 1 },
   rankRow: {
     flexDirection: 'row',

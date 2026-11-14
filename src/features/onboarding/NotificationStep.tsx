@@ -7,11 +7,19 @@ import {
   registerThisDevice,
   shouldOfferPush,
 } from '@/features/notifications/push-permission';
-import { noteFailure, pushPermission, requestPushPermission } from '@/features/notifications/push';
+import {
+  noteFailure,
+  pushPermission,
+  requestPushPermission,
+} from '@/features/notifications/push';
+import { track } from '@/lib/analytics';
 import { withGrace } from '@/lib/grace';
 import { reportHandled } from '@/lib/monitoring';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+
+import { OnboardingHeader } from './OnboardingHeader';
+import { useStepViewed } from './step-viewed';
 
 /**
  * The last thing onboarding asks: may we notify you.
@@ -66,6 +74,12 @@ import { theme } from '@/ui/tokens';
 export type NotificationStepProps = {
   /** Called once the reader is finished with this step, whichever way they answered. */
   onDone: () => void;
+  /**
+   * Whether the account has at least one approved outgoing follow — the route's own
+   * landing answer, passed down for `notification_permission_result` (OB-1). `undefined`
+   * while that read is still out, which the event reports as `false`.
+   */
+  hadFollow?: boolean;
 };
 
 type State = 'asking' | 'working' | 'granted' | 'pending' | 'undelivered' | 'declined';
@@ -88,9 +102,11 @@ const REGISTRATION_GRACE_MS = 5000;
 /** A preference write is local and quick; a hung one must not trap the screen. */
 const PREF_WRITE_GRACE_MS = 1500;
 
-export function NotificationStep({ onDone }: NotificationStepProps) {
+export function NotificationStep({ onDone, hadFollow }: NotificationStepProps) {
   const profile = useCurrentProfile();
   const [state, setState] = useState<State>('asking');
+  // `onboarding_step_viewed` (OB-1). The question draws on the first frame.
+  useStepViewed(profile.id, 'notifications');
 
   const turnOn = async () => {
     setState('working');
@@ -131,7 +147,11 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
         'pending' as const,
       );
       settleFromWorking(
-        outcome === 'registered' ? 'granted' : outcome === 'pending' ? 'pending' : 'undelivered',
+        outcome === 'registered'
+          ? 'granted'
+          : outcome === 'pending'
+            ? 'pending'
+            : 'undelivered',
       );
     } catch (error) {
       // Nothing here is worth interrupting onboarding for. The account exists, the films
@@ -213,107 +233,142 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
     return () => clearTimeout(timer);
   }, [state, handOff]);
 
+  /**
+   * `notification_permission_result`, once, when the step settles (OB-1, 2026-11-14).
+   *
+   * The settled state is the result, word for word — with one merge that is deliberate:
+   * **Not now and an OS refusal are both `declined`**. Both leave this person without a
+   * push, and that is the question the event answers. Never for `asking` or `working`.
+   *
+   * `had_follow` is read through a ref so the answer landing later does not re-send, and
+   * is `false` when it has not landed by the moment the question settles: an
+   * under-report in a known direction rather than a guess.
+   */
+  const hadFollowNow = useRef(hadFollow);
+  useEffect(() => {
+    hadFollowNow.current = hadFollow;
+  }, [hadFollow]);
+  const reported = useRef(false);
+  useEffect(() => {
+    if (state === 'asking' || state === 'working' || reported.current) return;
+    reported.current = true;
+    track({
+      name: 'notification_permission_result',
+      props: { result: state, had_follow: hadFollowNow.current ?? false },
+    });
+  }, [state]);
+
   return (
-    <Screen airy includeBottomInset>
-      <View style={styles.body}>
-        {state === 'granted' ? (
-          <>
-            <Text variant="title1" style={styles.centre}>
-              You are all set
-            </Text>
-            <Text variant="body" tone="secondary" style={styles.centre}>
-              We will let you know when something happens.
-            </Text>
-          </>
-        ) : state === 'pending' ? (
-          <>
-            {/* The bounded-wait branch: permission is on and the outcome is not yet
+    /**
+     * **The flow's header, on every state of the last step** (OB-2, 2026-11-14), so the bar
+     * visibly completes here: the notification question is the finale and fills all four
+     * segments. It sits above the airy, centred layout rather than inside it — `airy` on
+     * `Screen` centres and pads every child, which would float the header mid-screen and
+     * inset its segments a second gutter. The wrapper below is `airy`'s own centring and
+     * gutter, so the question and its answers sit exactly where they did.
+     */
+    <Screen includeBottomInset>
+      <OnboardingHeader step="notifications" />
+      <View style={styles.airy}>
+        <View style={styles.body}>
+          {state === 'granted' ? (
+            <>
+              <Text variant="title1" style={styles.centre}>
+                You’re all set
+              </Text>
+              <Text variant="body" tone="secondary" style={styles.centre}>
+                We’ll let you know when something happens.
+              </Text>
+            </>
+          ) : state === 'pending' ? (
+            <>
+              {/* The bounded-wait branch: permission is on and the outcome is not yet
                 known. It claims neither success nor failure, because at this moment
                 neither is true — registration is still running behind this sentence,
                 and `usePush` retries it on every launch where permission exists. */}
-            <Text variant="title1" style={styles.centre}>
-              Thanks
-            </Text>
-            <Text variant="body" tone="secondary" style={styles.centre}>
-              Still setting up notifications in the background. You will see everything in
-              the app either way.
-            </Text>
-          </>
-        ) : state === 'undelivered' ? (
-          <>
-            {/* The honest branch. It does not say "something went wrong", because
+              <Text variant="title1" style={styles.centre}>
+                Thanks
+              </Text>
+              <Text variant="body" tone="secondary" style={styles.centre}>
+                Still setting up notifications. You’ll see everything in the app either way.
+              </Text>
+            </>
+          ) : state === 'undelivered' ? (
+            <>
+              {/* The honest branch. It does not say "something went wrong", because
                 nothing did from the reader's side — they said yes and the OS agreed.
                 What is missing is on this end, and the inbox genuinely does still
                 work, so that is what the sentence says. */}
-            <Text variant="title1" style={styles.centre}>
-              Thanks
-            </Text>
-            <Text variant="body" tone="secondary" style={styles.centre}>
-              This build cannot send notifications to your lock screen yet. You will still
-              see everything in the app.
-            </Text>
-          </>
-        ) : state === 'declined' ? (
-          <>
-            <Text variant="title1" style={styles.centre}>
-              No problem
-            </Text>
-            <Text variant="body" tone="secondary" style={styles.centre}>
-              You can turn notifications on later in Settings.
-            </Text>
-          </>
-        ) : null}
+              <Text variant="title1" style={styles.centre}>
+                Thanks
+              </Text>
+              <Text variant="body" tone="secondary" style={styles.centre}>
+                This build can’t send notifications to your lock screen yet. You’ll still see
+                everything in the app.
+              </Text>
+            </>
+          ) : state === 'declined' ? (
+            <>
+              <Text variant="title1" style={styles.centre}>
+                No problem
+              </Text>
+              <Text variant="body" tone="secondary" style={styles.centre}>
+                You can turn notifications on later in Settings.
+              </Text>
+            </>
+          ) : null}
 
-        {/**
-         * A way forward that does not depend on the timer, on every settled state.
-         *
-         * These four screens used to carry no controls at all: the pause hands off by
-         * itself, so a button looked like clutter in front of something already leaving.
-         * Independent review 48 named what that costs — if the navigation the hand-off
-         * performs does not take, this is a terminal screen with nothing on it, and the
-         * person is stranded at the end of onboarding with five ranked films on the other
-         * side. The summary before it has always stayed pressable for exactly this
-         * reason; the notification step was the one exit without a second attempt.
-         *
-         * Pressing it after the timer has already fired is harmless: the destination is
-         * the same route either way, and `complete` is idempotent on a flow that has
-         * already ended (`useCompleteTasteOnboarding` guards the second ending).
-         */}
-        {state === 'asking' || state === 'working' ? null : (
-          <View style={styles.actions}>
-            <Button label="Continue" onPress={handOff} />
-          </View>
-        )}
+          {/**
+           * A way forward that does not depend on the timer, on every settled state.
+           *
+           * These four screens used to carry no controls at all: the pause hands off by
+           * itself, so a button looked like clutter in front of something already leaving.
+           * Independent review 48 named what that costs — if the navigation the hand-off
+           * performs does not take, this is a terminal screen with nothing on it, and the
+           * person is stranded at the end of onboarding with five ranked films on the other
+           * side. The summary before it has always stayed pressable for exactly this
+           * reason; the notification step was the one exit without a second attempt.
+           *
+           * Pressing it after the timer has already fired is harmless: the destination is
+           * the same route either way, and `complete` is idempotent on a flow that has
+           * already ended (`useCompleteTasteOnboarding` guards the second ending).
+           */}
+          {state === 'asking' || state === 'working' ? null : (
+            <View style={styles.actions}>
+              <Button label="Continue" onPress={handOff} />
+            </View>
+          )}
 
-        {state === 'asking' || state === 'working' ? (
-          <View style={styles.body}>
-            <Text variant="title1" style={styles.centre}>
-              Stay in the loop
-            </Text>
-            {/* The founder's copy, unchanged. Three examples rather than an exhaustive
+          {state === 'asking' || state === 'working' ? (
+            <View style={styles.body}>
+              <Text variant="title1" style={styles.centre}>
+                Stay in the loop
+              </Text>
+              {/* The founder's copy, unchanged. Three examples rather than an exhaustive
                 list: the point is the shape of the thing, and Settings is where the
                 categories live. */}
-            <Text variant="body" tone="secondary" style={styles.centre}>
-              Know when friends follow you, recommend something, or interact with what you
-              watched.
-            </Text>
+              <Text variant="body" tone="secondary" style={styles.centre}>
+                Know when friends follow you, recommend something, or interact with what you
+                watched.
+              </Text>
 
-            <View style={styles.actions}>
-              <Button
-                label={state === 'working' ? 'One moment…' : 'Turn on notifications'}
-                onPress={() => void turnOn()}
-                disabled={state === 'working'}
-                disabledReason="Asking your phone."
-              />
-              {/* Live during `working`, deliberately. While the OS dialog is up it is
+              <View style={styles.actions}>
+                <Button
+                  label={state === 'working' ? 'One moment…' : 'Turn on notifications'}
+                  onPress={() => void turnOn()}
+                  disabled={state === 'working'}
+                  disabledReason="Asking your phone."
+                />
+                {/* Live during `working`, deliberately. While the OS dialog is up it is
                   unreachable anyway — the dialog is modal — so the only person who can
                   press this mid-work is one the platform has left staring at
                   "One moment…", and they must always have a way out. `settleFromWorking`
                   keeps a late outcome from overwriting the exit. */}
-              <Button label="Not now" kind="tertiary" onPress={notNow} />
+                <Button label="Not now" kind="tertiary" onPress={notNow} />
+              </View>
             </View>
-          </View>
-        ) : null}
+          ) : null}
+        </View>
       </View>
     </Screen>
   );
@@ -340,7 +395,14 @@ export async function shouldShowNotificationStep(offered: boolean): Promise<bool
 }
 
 const styles = StyleSheet.create({
-  body: { flex: 1, justifyContent: 'center', gap: theme.space[4], paddingHorizontal: theme.layout.gutter },
+  // `Screen`'s `airy`, applied below the header: centred, with the gutter.
+  airy: { flex: 1, justifyContent: 'center', paddingHorizontal: theme.layout.gutter },
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: theme.space[4],
+    paddingHorizontal: theme.layout.gutter,
+  },
   centre: { textAlign: 'center' },
   actions: { gap: theme.space[3], paddingTop: theme.space[3] },
 });
