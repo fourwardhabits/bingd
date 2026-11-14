@@ -7,6 +7,31 @@ license: MIT
 
 # Expo Design Systems
 
+<!-- BEGIN bingd project rules (Design System v3). Local addition to a vendored skill
+     (skills-lock.json: expo/skills). An upstream refresh will drop this block; re-add it. -->
+
+> **bingd project rules (Design System v3)** — in this repository these take precedence over the
+> generic guidance below. bingd already has a design system: adopt it, never build a second one.
+>
+> - Read [`docs/design/design-system.md`](../../../docs/design/design-system.md) (v3) before modifying
+>   any UI, and the full agent rules in
+>   [`references/bingd-design-system-v3.md`](./references/bingd-design-system-v3.md).
+> - The seven requirements: (1) consult `docs/design/design-system.md` before modifying UI; (2) find
+>   and reuse the canonical component from its inventory (§17); (3) use the established tokens in
+>   `src/ui/tokens/`; (4) verify responsive layouts at 320pt width and fontScale 2; (5) test
+>   accessibility and interaction states; (6) provide representative visual evidence (screenshots or
+>   test output) in the PR; (7) document justified exceptions in the PR and in the guide.
+> - Hard rules: shared `Button` kinds only; `MediumSelector` for Movies/TV and `ViewModeToggle` for
+>   Poster/List; icon-only `FilterIconButton`; Edit = `EDIT_ICON_NAME` / `EditIcon` / `EditAction`;
+>   Rerank = `RERANK_ICON`, never the edit glyph; browsing sheets = `Sheet size="standard"` with
+>   `DismissFooter`; pairs side by side, stacked primary-first; quiet `tertiary` for secondary
+>   navigation; filled Maroon for an explicit score, outlined for averages (`SN AVG x.x`); existing
+>   typography, spacing and the 44pt `minTapTarget` only.
+> - Review with [`docs/design/ui-review-checklist.md`](../../../docs/design/ui-review-checklist.md) and
+>   fill the UI section of `.github/pull_request_template.md`.
+
+<!-- END bingd project rules (Design System v3) -->
+
 Make every screen in an app draw from one visual source of truth: a token theme and a small set of reusable components. This skill defines where tokens live, what they cover, how reusable components are shaped, and when a repeated view earns promotion into the system.
 
 Sibling skills own the layers around this one:

@@ -1,5 +1,9 @@
 # UI pass plan — Collection, Search, Title, Ranking, Feed, Profile
 
+> **Historical — superseded by [Design System v3](./design-system.md) where they disagree**
+> (2026-11-14). Kept for its record of why screens are shaped as they are. For component rules,
+> tokens and review, use `design-system.md` and the [UI review checklist](./ui-review-checklist.md).
+
 > **Superseded on 2026-08-15, and kept for its audit.** The score-and-surface pass replaced the
 > parts of this plan that describe screens: Parchment is no longer the base surface, the ordinal
 > is no longer the ranking output, and `RankBadge` no longer exists — the score badge took its
