@@ -777,6 +777,17 @@ expectRefused(
   'anon cannot execute recommendations_to_me',
   await rpc('recommendations_to_me', { p_limit: 1 }),
 );
+// 20261121000400 is committed before it is applied (founder approval, D-UC1), so its absence
+// is reported, not failed: PGRST202 here means "not applied yet", not a probe that drifted.
+// Once applied, anon must be refused exactly as for recommendations_to_me.
+{
+  const res = await rpc('recommendations_to_me_page', { p_limit: 1 });
+  if (classify(res) === 'not-found' && /PGRST202/.test(res.body)) {
+    console.log('not applied   recommendations_to_me_page (20261121000400), probe skipped');
+  } else {
+    expectRefused('anon cannot execute recommendations_to_me_page', res);
+  }
+}
 expectRefused(
   'anon cannot execute mark_recommendation_opened',
   await rpc('mark_recommendation_opened', { p_recommendation_id: NIL }),

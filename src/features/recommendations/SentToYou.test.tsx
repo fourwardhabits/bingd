@@ -9,7 +9,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
 import { resetMarkSentSeen } from './use-mark-sent-seen';
-import { SENT_LIMIT, relativeTime } from './use-sent-to-you';
+import { SENT_LIMIT, relativeTime, resetSentToYouSource } from './use-sent-to-you';
 
 const mockPush = jest.fn();
 const mockRpc = jest.fn();
@@ -216,7 +216,9 @@ beforeEach(() => {
   mockPush.mockReset();
   mockRpc.mockReset();
   mockRpcResults = { my_notifications: [], recommendations_to_me: [] };
-  mockRpcErrors = {};
+  // A backend without 20261121000400 unless a test says otherwise: these tests are about the
+  // legacy `recommendations_to_me` path, which the client falls back to on PGRST202.
+  mockRpcErrors = { recommendations_to_me_page: { code: 'PGRST202', message: 'not found' } };
   for (const key of Object.keys(mockRpcDelayMs)) delete mockRpcDelayMs[key];
   mockWatchlist = [];
   mockRanked = [];
@@ -894,5 +896,96 @@ describe('reading Sent to You', () => {
         p_recommendation_id: 'r1',
       }),
     );
+  });
+});
+
+/**
+ * **Unread past the cap is reachable** (#290 Codex P2 #5, 20261121000400). Against a backend
+ * with `recommendations_to_me_page`, seen rows sort after unread ones, so a reader who has
+ * seen a full page of unread recommendations gets the next unread ones on the next fetch —
+ * and until then the shortcut keeps saying more may be new, because the rank it reads is the
+ * fetch-time one, not the optimistic mark.
+ */
+describe('Sent to You on the unread-first backend', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+  const pageCalls = () =>
+    mockRpc.mock.calls.filter(([name]) => name === 'recommendations_to_me_page');
+
+  beforeEach(() => {
+    delete mockRpcErrors.recommendations_to_me_page;
+    resetSentToYouSource();
+    mockRpcResults.mark_recommendations_seen = { status: 'ok', marked: 0 };
+  });
+
+  it('keeps the capped indicator after seeing a full unread page, then brings the next unread first', async () => {
+    mockRpcResults.recommendations_to_me_page = Array.from({ length: SENT_LIMIT }, (_, i) =>
+      recommendation({
+        id: `u${i}`,
+        media_item_id: `film-u${i}`,
+        media_title: `Unread ${i}`,
+        read_rank: 0,
+      }),
+    );
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: `Sent to You, at least ${SENT_LIMIT} new` }),
+      ).toBeTruthy(),
+    );
+    expect(mockRpc).not.toHaveBeenCalledWith('recommendations_to_me', expect.anything());
+
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toMatchObject({ p_ids: expect.arrayContaining(['u0', 'u199']) });
+
+    // Nothing in hand is unread now, but the page was all unread when fetched: more may be.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.getByText('New', { includeHiddenElements: true })).toBeTruthy();
+    // Marking does not refetch, so the rows do not jump under the reader.
+    expect(pageCalls()).toHaveLength(1);
+    expect(view.getByText('Unread 0 (2010)')).toBeTruthy();
+
+    // The next fetch: the five unread rows past the old cap come first, the seen ones after.
+    mockRpcResults.recommendations_to_me_page = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        recommendation({
+          id: `n${i}`,
+          media_item_id: `film-n${i}`,
+          media_title: `Next ${i}`,
+          read_rank: 0,
+        }),
+      ),
+      ...Array.from({ length: SENT_LIMIT - 5 }, (_, i) =>
+        recommendation({
+          id: `u${i}`,
+          media_item_id: `film-u${i}`,
+          media_title: `Unread ${i}`,
+          seen_at: '2026-08-16T09:00:00.000Z',
+          read_rank: 1,
+        }),
+      ),
+    ];
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: ['sent-to-you', 'user-1'] });
+    });
+
+    await waitFor(() => expect(view.getByText('Next 0 (2010)')).toBeTruthy());
+    const titles = view
+      .getAllByText(/\(2010\)$/)
+      .map((node) => [node.props.children].flat().join(''));
+    expect(titles.slice(0, 6)).toEqual([
+      'Next 0 (2010)',
+      'Next 1 (2010)',
+      'Next 2 (2010)',
+      'Next 3 (2010)',
+      'Next 4 (2010)',
+      'Unread 0 (2010)',
+    ]);
+    await waitFor(() => expect(marks()).toHaveLength(2));
+    expect(marks()[1][1]).toMatchObject({ p_ids: ['n0', 'n1', 'n2', 'n3', 'n4'] });
+    // The page now ends in seen rows, so every unread one is in hand: the count is exact.
+    await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
   });
 });
