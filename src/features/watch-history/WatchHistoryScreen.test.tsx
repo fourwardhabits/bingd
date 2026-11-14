@@ -105,9 +105,9 @@ jest.mock('@/features/collection/writes', () => ({
 }));
 
 /**
- * Editing a watch writes the **title's** note (founder decision, 2026-09-25), so the log
- * state is what the editor reads. `private` with writing already in it is the case that
- * matters: no default may republish it.
+ * The title's review, as the log state reads it. Editing a watch must neither show nor
+ * write it (FU1113-A): the watch editor edits `watch_events.note` only, so `saveNote` is
+ * asserted never called from this screen.
  */
 const mockLogState = jest.fn(() => ({
   data: {
@@ -247,31 +247,30 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     expect(view.getByLabelText(/Who I watched with/)).toBeTruthy();
     expect(view.getByLabelText(/Watch date/)).toBeTruthy();
     await fireEvent.press(view.getByLabelText(/^Note/));
+    // This watch has no note: the field opens empty, never on the title's review.
+    expect(view.getByPlaceholderText('What did you think?').props.value).toBe('');
     await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), '  With popcorn.  ');
     await fireEvent.press(view.getByRole('button', { name: 'Save' }));
 
-    // The note goes to `save_note` — the title's one note — not to the watch's own row.
-    await waitFor(() => expect(mockSaveNote).toHaveBeenCalledTimes(1));
-    expect(mockSaveNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mediaItemId: 'film-1',
-        note: 'With popcorn.',
-        noteVisibility: 'private',
-        noteSpoilers: false,
-      }),
-    );
-    // Nothing about the watch itself changed, so neither writer is called.
-    expect(mockDetails).not.toHaveBeenCalled();
+    // The note goes to THIS watch (`set_watch_details`), trimmed — never to `save_note`.
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+    expect(mockDetails).toHaveBeenCalledWith({
+      operationId: 'op-1',
+      watchEventId: 'w1',
+      note: 'With popcorn.',
+      // Companions unchanged: absent leaves them.
+      companionIds: undefined,
+    });
+    expect(mockSaveNote).not.toHaveBeenCalled();
     // The date was not touched, so it is not rewritten, and nothing is re-ranked.
     expect(mockEdit).not.toHaveBeenCalled();
   });
 
   /**
-   * The founder's item 11 (2026-09-25). The controls were missing here because this surface
-   * had been built against `watch_events.note` — owner-only by schema, so there was nothing
-   * for them to do. They are the log sheet's own, from `NoteComposer`.
+   * FU1113-A (2026-11-13). A watch's note is `watch_events.note`, owner-only by schema, so
+   * the review's two claims have nothing to do here; the line says who can read it.
    */
-  it('offers both review claims when editing a watch', async () => {
+  it('offers no review claims on a watch’s own note, only that it is private', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -287,52 +286,36 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Note/));
 
-    expect(view.getByLabelText('This note contains spoilers')).toBeTruthy();
-    expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
-  });
-
-  it('never lets the remembered habit republish a stored private note', async () => {
-    mockHistory.mockReturnValue({
-      isPending: false,
-      data: {
-        count: 1,
-        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
-        details: new Map(),
-        placements: [],
-        posts: [],
-      },
-    });
-    const view = await renderWithProviders(<WatchHistoryScreen />);
-
-    await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByLabelText(/^Note/));
-
-    expect(view.getByText('Only you can read this.')).toBeTruthy();
-    // Opening the composer is not an act: nothing is written until the reader writes.
+    expect(view.getByText('Only you see this note')).toBeTruthy();
+    expect(view.queryByLabelText('This note contains spoilers')).toBeNull();
+    expect(view.queryByLabelText('Share this note as a public review')).toBeNull();
+    // Opening the field is not an act: nothing is written until Save.
     expect(mockSaveNote).not.toHaveBeenCalled();
+    expect(mockDetails).not.toHaveBeenCalled();
   });
 
-  it('publishes only when the reader presses the chip', async () => {
+  it('opens the editor on the note the card shows, and never on the title’s review', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
-        count: 1,
-        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
-        details: new Map(),
+        count: 2,
+        events: [
+          event('w1', '2026-09-01', '2026-09-01T10:00:00Z'),
+          event('w2', '2026-09-20', '2026-09-20T10:00:00Z'),
+        ],
+        details: new Map([['w2', { note: 'Better the second time.', companions: [] }]]),
         placements: [],
         posts: [],
       },
     });
     const view = await renderWithProviders(<WatchHistoryScreen />);
 
-    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByTestId('watch-edit-w2'));
     await fireEvent.press(view.getByLabelText(/^Note/));
-    await fireEvent.press(view.getByLabelText('Share this note as a public review'));
-
-    await waitFor(() => expect(mockSaveNote).toHaveBeenCalledTimes(1));
-    expect(mockSaveNote).toHaveBeenCalledWith(
-      expect.objectContaining({ note: 'Still holds up.', noteVisibility: 'public' }),
+    expect(view.getByPlaceholderText('What did you think?').props.value).toBe(
+      'Better the second time.',
     );
+    expect(view.queryByDisplayValue('Still holds up.')).toBeNull();
   });
 });
 
@@ -653,19 +636,19 @@ describe('a collapsed row', () => {
     });
 
   /**
-   * **The date is the anchor and the score is centred on it** (founder spec §5,
-   * 2026-11-13). The date block — the date, then where it came from — is the left column;
-   * the score circle is the right one, centred on that block, so nothing below the date
-   * (the actions, the editor) can move it.
+   * **The date is the anchor, top-left, and the score top-right** (founder spec §5,
+   * 2026-11-13; hierarchy, FU1113-A). The date block — the date, who it was with, where it
+   * came from — is the left column; the score circle is the right one, top-aligned with the
+   * date row, so nothing below the date (the actions, the editor) can move it.
    */
-  it('anchors the card on the date, with the score alone on the right and centred on it', async () => {
+  it('anchors the card on the date, with the score alone on the right, top-aligned', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     const main = view.getByTestId('watch-main-w1');
     const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
     expect(lead?.props.testID).toBe('watch-lead-w1');
     expect(right?.props.testID).toBe('watch-score-w1');
-    expect(StyleSheet.flatten(main.props.style).alignItems).toBe('center');
+    expect(StyleSheet.flatten(main.props.style).alignItems).toBe('flex-start');
     // The date is the block's first line, in the headline style; Edit is not in it.
     const leadView = view.getByTestId('watch-lead-w1');
     const order = (leadView.children as unknown as { props: { testID?: string } }[]).map(
@@ -687,7 +670,9 @@ describe('a collapsed row', () => {
     const before = mainKids();
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     expect(mainKids()).toEqual(before);
-    expect(StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style).alignItems).toBe('center');
+    expect(StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style).alignItems).toBe(
+      'flex-start',
+    );
   });
 
   /**
@@ -1155,11 +1140,13 @@ describe('Rerank with unsaved watch edits', () => {
     await pressRerank(view);
     await confirm().press('Save');
 
+    // Said inside the editor that kept the edits, not in the page header above it.
     await waitFor(() =>
-      expect(view.getByTestId('watch-history-error').props.children).toBe(
+      expect(view.getByTestId('watch-editor-error-w1').props.children).toBe(
         'Could not save this watch.',
       ),
     );
+    expect(view.queryByTestId('watch-history-error')).toBeNull();
     expect(mockLogSheet.props?.title).toBeNull();
     expect(mockRankingSheet.props?.subject ?? null).toBeNull();
     expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
@@ -1245,36 +1232,53 @@ describe('Rerank with unsaved watch edits', () => {
     expect(mockLogSheet.props?.title).toBeNull();
   });
 
-  it.each(['nothing pending', 'Discard', 'Save'] as const)(
-    'flushes a typed note before the ranking opens (%s)',
-    async (path) => {
-      // The note write is held open, so the test can see whether the sheet waits for it.
-      let noteLands!: (value: { outcome: string; noteVersion: string }) => void;
-      mockSaveNote.mockImplementationOnce(
-        (_input: unknown) =>
-          new Promise<{ outcome: string; noteVersion: string }>((resolve) => (noteLands = resolve)),
-      );
-      const view =
-        path === 'nothing pending'
-          ? await renderWithProviders(<WatchHistoryScreen />)
-          : await editW1();
-      if (path === 'nothing pending') await fireEvent.press(view.getByTestId('watch-edit-w1'));
-      await fireEvent.press(view.getByLabelText(/^Note/));
-      await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), `Note: ${path}`);
-      await pressRerank(view);
-      if (path !== 'nothing pending') await confirm().press(path);
-      await waitFor(() =>
-        expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ note: `Note: ${path}` })),
-      );
-      // While the note is still being written, the ranking has not opened over it.
-      expect(mockLogSheet.props?.title ?? null).toBeNull();
-      await act(async () => {
-        noteLands({ outcome: 'ok', noteVersion: '2026-11-11T00:00:00Z' });
-      });
-      await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
-      expect(mockSaveNote).toHaveBeenCalledTimes(1);
-    },
-  );
+  /**
+   * FU1113-A: the note is this watch's now, saved by Save, so typed text is a pending edit
+   * like the date or the companions — Rerank asks before it can be lost, and nothing is
+   * written behind the reader's back (and never to the title's review).
+   */
+  it('asks for a typed note alone, as for any other unsaved edit', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A typed note.');
+    await pressRerank(view);
+
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(confirm().texts).toEqual(['Cancel', 'Discard', 'Save']);
+    expect(mockLogSheet.props?.title ?? null).toBeNull();
+    expect(mockDetails).not.toHaveBeenCalled();
+    expect(mockSaveNote).not.toHaveBeenCalled();
+  });
+
+  it('Save writes the typed note to this watch, then opens the ranking', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A typed note.');
+    await pressRerank(view);
+    await confirm().press('Save');
+
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(mockDetails).toHaveBeenCalledTimes(1);
+    expect(mockDetails).toHaveBeenCalledWith(
+      expect.objectContaining({ watchEventId: 'w1', note: 'A typed note.', companionIds: undefined }),
+    );
+    expect(mockSaveNote).not.toHaveBeenCalled();
+  });
+
+  it('Discard drops the typed note, writes nothing, and opens the ranking', async () => {
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A typed note.');
+    await pressRerank(view);
+    await confirm().press('Discard');
+
+    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    expect(mockDetails).not.toHaveBeenCalled();
+    expect(mockSaveNote).not.toHaveBeenCalled();
+  });
 
   it('a failed date write also stays in the editor and does not open the ranking', async () => {
     mockEdit.mockImplementationOnce(() =>
@@ -1288,10 +1292,12 @@ describe('Rerank with unsaved watch edits', () => {
     await confirm().press('Save');
 
     await waitFor(() =>
-      expect(view.getByTestId('watch-history-error').props.children).toBe(
+      expect(view.getByTestId('watch-editor-error-w1').props.children).toBe(
         'Could not change the date.',
       ),
     );
+    // A refused date stops the save: the details are not written behind it.
+    expect(mockDetails).not.toHaveBeenCalled();
     expect(mockLogSheet.props?.title).toBeNull();
     expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Earlier', selected: true })).toBeTruthy();
@@ -1361,50 +1367,35 @@ describe('Rerank with unsaved watch edits', () => {
     expect(mockEdit).toHaveBeenCalledTimes(1);
   });
 
-  /** Independent review, 2026-11-13: the collapsed card's Rerank is a new entry point. */
-  it('holds a collapsed card’s Rerank while the save its editor just made is still writing', async () => {
+  /**
+   * FU1113-A: the editor's own Save now waits for the write, so a failure can keep the
+   * draft. While it writes the editor stays open and held; it closes once the write lands,
+   * and only then does the collapsed card offer Rerank again.
+   */
+  it('keeps the editor open and held while its own Save writes, and closes once it lands', async () => {
     let land!: (value: { outcome: string }) => void;
     mockDetails.mockImplementationOnce(
       () => new Promise<{ outcome: string }>((resolve) => (land = resolve)),
     );
     const view = await editW1();
     await fireEvent.press(view.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(view.queryByTestId('watch-editor-w1')).toBeNull());
     await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
 
-    const rerank = within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' });
-    expect(rerank).toBeDisabled();
-    await fireEvent.press(rerank);
+    expect(view.getByTestId('watch-editor-w1')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(view.getByText('Saving…')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await pressRerank(view);
+    expect(alert).not.toHaveBeenCalled();
     expect(mockLogSheet.props?.title ?? null).toBeNull();
 
     await act(async () => {
       land({ outcome: 'ok' });
     });
-    await waitFor(() =>
-      expect(
-        within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' }),
-      ).not.toBeDisabled(),
-    );
-  });
-
-  it('keeps Save’s own word while Rerank only flushes the note', async () => {
-    let flushed!: () => void;
-    mockSaveNote.mockImplementationOnce(
-      () => new Promise((resolve) => (flushed = () => resolve({ outcome: 'ok' }))) as never,
-    );
-    const view = await renderWithProviders(<WatchHistoryScreen />);
-    await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.press(view.getByLabelText(/^Note/));
-    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'A note.');
-    await pressRerank(view);
-
-    // Held, but not "Saving…": nothing about this watch is being written.
-    expect(view.getByRole('button', { name: 'Save' })).toBeDisabled();
-    expect(view.queryByText('Saving…')).toBeNull();
-    await act(async () => {
-      flushed?.();
-    });
-    await waitFor(() => expect(mockLogSheet.props?.title).toEqual(FILM));
+    await waitFor(() => expect(view.queryByTestId('watch-editor-w1')).toBeNull());
+    expect(
+      within(view.getByTestId('watch-actions-w1')).getByRole('button', { name: 'Rerank' }),
+    ).not.toBeDisabled();
+    expect(mockDetails).toHaveBeenCalledTimes(1);
   });
 });
-

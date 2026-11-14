@@ -7,11 +7,33 @@ import { NoteClaims, NoteInput } from '@/features/collection/NoteComposer';
 import type { TitleNote } from '@/features/collection/use-title-note';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
-import { SheetRow } from '@/ui/components';
+import { SheetRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** The same ceiling `set_watch_details` enforces through `watch_tags.max_per_watch`. */
 const MAX_COMPANIONS = 10;
+
+/** How close to a watch note's limit the count appears: the last tenth of 1,000. */
+const NEAR_LIMIT = 100;
+
+/**
+ * Which note the Note row edits — two different objects, never one through the other.
+ *
+ *   title  The title's one note, the review (`user_media.note` via `save_note`), with its
+ *          two claims, Share and Spoilers. *Log another watch* (`LogAnotherWatchSheet`).
+ *   watch  This watch's own note (`watch_events.note` via `set_watch_details`): owner-only
+ *          by schema, so it has no claims, only the line saying so. *Edit watch* in Watch
+ *          History (FU1113-A). The caller holds the draft and writes it on its own Save.
+ */
+export type WatchDetailsNote =
+  | { kind: 'title'; titleNote: TitleNote }
+  | {
+      kind: 'watch';
+      value: string;
+      onChangeText: (next: string) => void;
+      /** The column's limit; typing stops here. */
+      maxLength: number;
+    };
 
 export type WatchDetailsRowsProps = {
   /** `YYYY-MM-DD`, or null for *Earlier* — seen, at a time nobody recorded. */
@@ -23,10 +45,11 @@ export type WatchDetailsRowsProps = {
   companionIds: string[];
   onToggleCompanion: (id: string) => void;
   /**
-   * The title's one note, from `useTitleNote`. The caller owns it because the caller owns
-   * the commit: it must `flush()` when the reader presses Save or picks a bucket.
+   * The note the Note row edits (`WatchDetailsNote`). For `title`, the caller owns the
+   * `useTitleNote` because it owns the commit: it must `flush()` when the reader presses
+   * Save or picks a bucket. For `watch`, the caller owns the draft and its write.
    */
-  titleNote: TitleNote;
+  note: WatchDetailsNote;
   /**
    * The hairline above the rows, which the log sheet draws. A Watch History card's editor
    * draws its own boundary above its header and passes `false`, so the editor is one ruled
@@ -47,16 +70,17 @@ type Open = 'who' | 'note' | 'date' | null;
  * default**, with the same `Add` values. Used by the rewatch sheet and by editing a watch in
  * Watch History, so the two cannot drift from the ordinary log.
  *
- * **The Note row edits the title's one note, with its two claims** (founder decision,
- * 2026-09-25). It used to edit `watch_events.note` — a private diary line, owner-only by
- * schema — which is why "Contains spoilers" and "Share as a review" had nowhere to go here
- * and the two rewatch surfaces read as a downgrade from the ordinary log sheet.
+ * **The Note row edits one of two notes, named by the caller** (`WatchDetailsNote`).
  *
- * There is still exactly one note per title and exactly one place it is published from; what
- * changed is that this is now one of the doors into it rather than a door into something
- * else that looked the same. The field and the chips are `NoteComposer`'s, so the three
- * entry points cannot drift again. `watch_events.note` is untouched and stays owner-only:
- * nothing writes it, and no existing row was rewritten (production held none).
+ * *Log another watch* edits the title's one note, the review, with its two claims (founder
+ * decision, 2026-09-25): there is one note per title and one place it is published from.
+ *
+ * *Edit watch* in Watch History edits **this watch's own note** (FU1113-A, 2026-11-13). The
+ * card shows `watch_events.note`, so the editor behind it must edit that same field: when it
+ * edited the review instead, a watch with its own note opened on a blank field (or on the
+ * review), and typing there rewrote — and could publish — the review. The watch note is
+ * owner-only by schema, so it has no Share or Spoilers, only a line that says so. Text is
+ * never copied between the two notes.
  */
 export function WatchDetailsRows({
   date,
@@ -65,7 +89,7 @@ export function WatchDetailsRows({
   peopleLoading = false,
   companionIds,
   onToggleCompanion,
-  titleNote,
+  note,
   ruled = true,
 }: WatchDetailsRowsProps) {
   const [open, setOpen] = useState<Open>(null);
@@ -77,12 +101,15 @@ export function WatchDetailsRows({
       ? (selected[0]?.name ?? '1 person')
       : `${companionIds.length} people`
     : 'Add';
-  const written = titleNote.note.trim();
+  const titleNote = note.kind === 'title' ? note.titleNote : null;
+  // A watch's own note is the caller's draft, so it is always ready to open.
+  const noteLoaded = titleNote ? titleNote.loaded : true;
+  const written = (titleNote ? titleNote.note : note.kind === 'watch' ? note.value : '').trim();
   const words = written ? written.split(/\s+/).length : 0;
-  const noteValue = !titleNote.loaded
+  const noteValue = !noteLoaded
     ? undefined
     : words
-      ? titleNote.visibility === 'public'
+      ? titleNote?.visibility === 'public'
         ? `Shared · ${words} words`
         : `${words} words`
       : 'Add';
@@ -115,10 +142,10 @@ export function WatchDetailsRows({
         expanded={open === 'note'}
         // Shut until the stored note and the share preference are both read, so the share
         // state is settled — and on screen — before anything typed can be saved.
-        onPress={titleNote.loaded ? () => toggle('note') : undefined}
-        disabledReason={titleNote.loaded ? undefined : 'Loading'}
+        onPress={noteLoaded ? () => toggle('note') : undefined}
+        disabledReason={noteLoaded ? undefined : 'Loading'}
       />
-      {open === 'note' && titleNote.loaded ? (
+      {open === 'note' && titleNote?.loaded ? (
         <View style={[styles.expanded, styles.noteBox]}>
           <NoteInput
             value={titleNote.note}
@@ -132,6 +159,25 @@ export function WatchDetailsRows({
             onVisibility={titleNote.onVisibility}
             onSpoilers={titleNote.onSpoilers}
           />
+        </View>
+      ) : null}
+      {open === 'note' && note.kind === 'watch' ? (
+        <View style={[styles.expanded, styles.noteBox]} testID="watch-note-editor">
+          <NoteInput
+            value={note.value}
+            label="Note"
+            // `NoteInput` draws the review's 2,000 ceiling; a watch's column holds 1,000,
+            // so the draft stops there rather than failing on Save.
+            onChangeText={(next) => note.onChangeText(next.slice(0, note.maxLength))}
+            // Nothing saves on blur: the editor's Save writes the watch, or Cancel drops it.
+            onBlur={() => {}}
+          />
+          {/* Private by schema: no Share and no Spoilers, because nobody else reads it. */}
+          <Text variant="footnote" tone="tertiary" testID="watch-note-private-hint">
+            {note.value.length >= note.maxLength - NEAR_LIMIT
+              ? `Only you see this note · ${note.value.length}/${note.maxLength}`
+              : 'Only you see this note'}
+          </Text>
         </View>
       ) : null}
 

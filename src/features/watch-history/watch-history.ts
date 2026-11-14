@@ -79,6 +79,21 @@ export function labelFor(events: readonly WatchEvent[], index: number): WatchRow
 }
 
 /** Whether the date came from an authoritative import, which the row says out loud. */
+/**
+ * The longest note one watch may carry: `watch_events_note_length` (20261014000100) checks
+ * `char_length(note) <= 1000`. The editor stops typing here and the writer refuses past it,
+ * so the server's check is never what a reader meets.
+ */
+export const WATCH_NOTE_MAX_LENGTH = 1000;
+
+/**
+ * A watch's note as `set_watch_details` stores it: trimmed, and empty is no note. The server
+ * applies the same rule (`nullif(btrim(p_note), '')`); the client applies it first so it can
+ * tell an edit from no edit.
+ */
+export const normalWatchNote = (note: string | null | undefined): string | null =>
+  note?.trim() ? note.trim() : null;
+
 export const isFromDiary = (event: WatchEvent) => event.basis === 'diary';
 
 /**
