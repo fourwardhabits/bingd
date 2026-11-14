@@ -398,3 +398,237 @@ source** for both walls. What to read:
 
 V1 stays the production default; `v2_metadata` and the prototype are both allowlist/rollout
 controlled and off by default; the hybrid stays allowlist-only.
+
+## 11. 2026-11-14 wave-2 reconcile onto the staging line
+
+Branch `claude/wave2-1114-rec-v2`, a **draft, not for merge**. It brings #275
+(`rec/v2-reconcile-1112` @ `7b823d69`, based on `main` `a228c6a5`) onto the wave-2 base
+`claude/wave2-1114-base` @ `5ac03633` (= `staging/integration-1114` pass 4; contains #297 @
+`2859cb75`, checked with `git merge-base --is-ancestor`). **V2 stays off and no migration has
+been applied anywhere**: no Supabase connection of any kind was made, and no production or
+staging data was read.
+
+### 11.1 Method and conflicts
+
+`git merge --no-ff origin/rec/v2-reconcile-1112` onto the base, history kept, no cherry-picks.
+Everything after the merge is a separate commit.
+
+| File | Result | Resolution |
+|---|---|---|
+| `supabase/tests/concurrency/races.test.mjs` | conflict (imports and registration) | **both sides kept**: `reviewHelpful` (base) and `tasteNeighbours` (V2), each imported and registered |
+| `supabase/tests/function-grants.test.mjs` | auto-merged | V2's three entries beside the base's; UNREAD-CAP had **not** landed on the base, so there was no second entry to keep |
+| `supabase/tests/moderation.test.mjs` | auto-merged | as above |
+| every other file | auto-merged | `use-engine.ts` and every V2-owned file are byte-identical to #275's |
+
+### 11.2 Migrations, renumbered again
+
+Staging's latest is `20261121000300`, and `20261121000400` is reserved for unread-cap. Neither V2
+file was ever applied anywhere.
+
+| #275 (2026-11-13) | Wave 2 (2026-11-14) |
+|---|---|
+| `20261116000100_a_wall_in_every_language_you_love.sql` | `20261122000100_a_wall_in_every_language_you_love.sql` |
+| `20261116000200_people_whose_taste_you_share.sql` | `20261122000200_people_whose_taste_you_share.sql` |
+
+References were updated in the A2 migration's text, `recommendation-engine.test.mjs`,
+`taste-neighbours.test.mjs`, `races/taste-neighbours.mjs`, `function-grants.test.mjs`,
+`moderation.test.mjs`, `recommendations-v2.md`, this write-up's §2 table, and two release
+notes (`claim-push-batch-reconciliation.md`, `proactive-notifications.md`). The eval README
+names no migration version, so it needed no change. **Left alone on purpose:** the comment
+"`20261116*` is #275's" in `20261118000100_a_verified_imdb_id_outweighs_a_display_title.sql`
+and its generator (`scripts/migration-generators/imdb-verified-id.mjs`). That migration is on
+the staging line, and editing an applied file to change a comment is worse than a stale
+comment.
+
+Checks, on the branch (197 files):
+
+- **No duplicate 14-digit version**: `ls supabase/migrations | cut -c1-14 | sort | uniq -d` is
+  empty.
+- **No redefinition**: none of the eight functions the two files define
+  (`_recommendation_cohort`, `recommendation_engine`, `catalogue_candidates`,
+  `_scored_rankings`, `_taste_matches`, `_taste_neighbour_weight`, `_refresh_taste_neighbours`,
+  `collaborative_candidates`) is defined by any `2026111[5-9]*` or `2026112*` migration. A2's
+  redefinition of `recommendation_engine()` is of A1's, in the same pair.
+- **Clean apply**: `test:race` applies all 197 files in sort order to a real PostgreSQL 17 and
+  its harness asserts it; `test:db` does the same in PGlite.
+
+```
+20261119000100_a_voice_once_ten_titles_in.sql
+20261120000100_a_show_kept_after_a_season.sql
+20261121000100_a_recommendation_seen_when_listed.sql
+20261121000300_a_request_released_only_to_a_mutual_pair.sql
+                                      (20261121000400 reserved: unread-cap)
+20261122000100_a_wall_in_every_language_you_love.sql
+20261122000200_people_whose_taste_you_share.sql
+```
+
+### 11.3 WS5 consistency against what landed after `a228c6a5`
+
+**Finding: V2 already reads the show-score source V1 reads on this base, so no V2 code
+changed.**
+
+- `_effective_show_score(s)` and the `community_score` eligibility change are both in
+  `20261119000100_a_voice_once_ten_titles_in` (the brief put them in `20261120000100`, which
+  adds `keep_show` / `show_reaffirmations` and the one-per-series profile TV count). The only
+  reader of `_effective_show_scores` is `community_score` (and so `top_rated_titles`). **V1's
+  recommendation paths do not read it.**
+- What V1 reads for a show on this base: the For You client (`use-for-you.ts`) scores
+  `movies`, `tv_seasons` and `tv_shows` rankings directly, each with `scoreFor` against its
+  own pool's bands, and weighs one series as one unit (`seriesUnitWeights`). `taste_match`'s
+  live definition is still `20261114000400_a_show_counted_once`; `social_candidates` is
+  unchanged since `20260828000500`.
+- What V2 reads: `profileEntriesFrom` takes the same three pools with the same weights;
+  `_scored_rankings` is the same band arithmetic over the same rows; `_taste_matches` was
+  re-derived from `20261114000400` (§3) and no later migration redefines `taste_match`. So the
+  rule "if V1 reads `_effective_show_scores`, V2 must too" does not apply.
+- **Keep Show changes no score input.** `keep_show` writes `show_reaffirmations` and nothing
+  else (`keep-show.test.mjs` proves it), so after "season ranked, show kept" both engines read
+  the show's explicit `tv_shows` ranking, which is also what `_effective_show_score` answers
+  (source `explicit`).
+- **A difference worth knowing, not a defect.** For a neighbour who ranked seasons but never
+  the show, the collaborative roll-up takes their **best** season, whereas `community_score`
+  (via `_effective_show_scores`) takes the **mean** of their seasons. Neither is V1: V1 has no
+  per-series roll-up of other people's rankings (`social_candidates` counts Loved rows per
+  title). When the show is ranked, all three agree on the explicit ranking. Changing the
+  roll-up to the mean would change A2's behaviour and is a product decision, so it is
+  recorded here and left alone.
+
+New DB tests, `taste-neighbours.test.mjs` › *a kept show (season ranked, show kept)*, every
+ranking through the real `rank_start` / `rank_answer` flow and kept with a real `keep_show`:
+
+1. *gives V1 and V2 the same score input for the show*: the show's `_scored_rankings` score
+   (V2) equals its `public_scores` score (V1's canonical score of the same row) and
+   `_effective_show_score` (source `explicit`, one ranked season), and the Loved season
+   scores higher than the show, so the fixture can tell them apart.
+2. *keeps the batch Taste equal to `taste_match`* for a reader and a neighbour who kept the
+   show (a real, non-null score).
+3. *takes a kept neighbour's whole-show ranking as their opinion*: two neighbours who ranked
+   the show Not for me, then a season Loved, then kept the show, put evidence **against** the
+   show (negative support, zero endorsers). A roll-up that read the season would fail.
+
+The existing *equals `taste_match` when one person ranks two seasons of a show, or a show and a
+season* fixture is unchanged and passes.
+
+### 11.4 Flags and fallback (unchanged)
+
+`recommendations.v2_engine` is still seeded `"v1"`; `v2_allowlist = []`,
+`v2_allowlist_engine = null` and `v2_rollout_percent = 0` are inert; any error reading the
+engine (including a server without `recommendation_engine`) is V1 (`use-engine.ts`, identical
+to #275); any V2 source read failure falls back to the V1 slate. The merge did not touch
+`use-engine.ts`, so no flag test was added. The existing ones pass:
+`recommendation-engine.test.mjs` › *flags and fallback*, `for-you-engine-v2.test.tsx`, and
+`engine-v2.test.ts`.
+
+### 11.5 Gates (this branch's head)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | 0 errors |
+| `eslint .` | 0 errors, 78 warnings (all pre-existing; 0 in files this branch adds or changes) |
+| `jest` (full) | 346 suites passed, 1 skipped; **6620 passed**, 4 skipped |
+| `npm run test:db` | **3215 / 3215** |
+| `test:race` (`--test-timeout=300000`) | **200 / 200**. R5 passed in the full run, so no solo rerun was needed |
+| `npm run test:race:mutants` | 23 / 23 mutations detected, 2 / 2 controls held |
+| Rec V2 evaluation (`evaluation/`, `engine-v2`, `for-you-engine-v2*`, `tv-shows`, `eval/rec-v2-replay`) | 6 suites, 79 passed, 2 skipped; `export.test.mjs` 3 / 3 |
+| `node eval/rec-v2-replay/run.mjs --synthetic` | exit 0 (pipeline proof only; synthetic, not evidence about readers) |
+| `expo export --platform all` (`EXPO_PUBLIC_SUPABASE_URL=https://ci.invalid`) | exit 0: iOS 2552, Android 2693 and web 2291 modules |
+| `@expo/fingerprint` | **unchanged**: iOS `bf0ce597…`, Android `f4062003…` on both base and head |
+
+The race suites were run as an unprivileged local user, because embedded `initdb` cannot use
+a root-owned temporary directory in this container. That is environmental: no harness file
+changed.
+
+**Pre-existing tests changed:** `races.test.mjs` (merge conflict: both races registered),
+`function-grants.test.mjs` and `moderation.test.mjs` (V2's allow-list entries arrived with the
+merge; their version comments were renumbered). Within #275's own tests, only version
+numbers changed in `recommendation-engine.test.mjs` and `races/taste-neighbours.mjs`, and
+`taste-neighbours.test.mjs` gained the three tests in §11.3. No existing assertion was
+changed, skipped or loosened.
+
+### 11.6 Staging apply plan (written down here, not run)
+
+1. **Index pre-step**, by hand against staging, outside a transaction:
+   ```sql
+   create index concurrently if not exists media_items_catalogue_language
+     on media_items (kind, original_language, popularity desc nulls last)
+     where kind in ('movie', 'series') and poster_path is not null;
+   create index concurrently if not exists media_items_catalogue_decade
+     on media_items (kind, ((extract(year from release_date)::integer / 10) * 10), popularity desc nulls last)
+     where kind in ('movie', 'series') and poster_path is not null;
+   create index concurrently if not exists rankings_by_media_user on rankings (media_item_id, user_id);
+   ```
+   After this, the migrations' `create index if not exists` statements are no-ops.
+2. **`db push --dry-run`** against staging must list exactly `20261122000100` and
+   `20261122000200`, and nothing else. If it lists anything else, stop.
+3. **`db push`** of those two only.
+4. **Verify:**
+   ```sql
+   select version from supabase_migrations.schema_migrations
+    where version in ('20261122000100', '20261122000200');                     -- 2 rows
+   select key, value from app_config where key like 'recommendations.v2_%';    -- v2_engine "v1", [], null, 0
+   select proname from pg_proc where proname in ('recommendation_engine', 'catalogue_candidates',
+     'collaborative_candidates', '_scored_rankings', '_taste_matches', '_taste_neighbour_weight',
+     '_refresh_taste_neighbours', '_recommendation_cohort');                   -- 8 rows
+   select count(*) from taste_neighbours;                                      -- 0 (nothing fills it under v1)
+   ```
+   Then, as any signed-in staging account, `recommendation_engine()` returns `v1` and the For
+   You wall is the V1 wall.
+5. **Rollback** (if needed). This runs in one transaction. It was checked locally on PGlite
+   with every migration applied: afterwards no V2 function, table, index, key or ledger row
+   remains, and `taste_match`, `social_candidates`, `community_score`,
+   `_effective_show_scores` and `keep_show` are untouched. A client on V2 code falls back to
+   V1 when `recommendation_engine` is missing.
+   ```sql
+   begin;
+
+   -- 20261122000200_people_whose_taste_you_share.sql, reverse order
+   drop function if exists collaborative_candidates(text, integer);
+   drop function if exists _refresh_taste_neighbours(uuid);
+   drop function if exists _taste_neighbour_weight(integer, integer, integer);
+   drop table if exists taste_neighbour_refresh;
+   drop table if exists taste_neighbours;            -- takes taste_neighbours_neighbour with it
+   drop function if exists _taste_matches(uuid, uuid[]);
+   drop function if exists _scored_rankings(uuid[], ranking_category, uuid[]);
+   drop index if exists rankings_by_media_user;
+   -- recommendation_engine() is redefined by 000200; it is dropped with 000100 below.
+   delete from app_config where key in (
+     'recommendations.neighbour_probe_titles',
+     'recommendations.neighbour_raters_per_title',
+     'recommendations.neighbour_limit',
+     'recommendations.neighbour_ttl_hours',
+     'recommendations.neighbour_min_match'
+   );
+
+   -- 20261122000100_a_wall_in_every_language_you_love.sql, reverse order
+   drop function if exists catalogue_candidates(text, text[], integer[], integer, integer);
+   drop index if exists media_items_catalogue_decade;
+   drop index if exists media_items_catalogue_language;
+   drop function if exists recommendation_engine();
+   drop function if exists _recommendation_cohort(uuid);
+   delete from app_config where key in (
+     'recommendations.v2_engine',
+     'recommendations.v2_rollout_percent',
+     'recommendations.v2_allowlist',
+     'recommendations.v2_allowlist_engine'
+   );
+
+   -- The two ledger rows, so a later db push can apply the files again.
+   delete from supabase_migrations.schema_migrations
+    where version in ('20261122000200', '20261122000100');
+
+   commit;
+   ```
+   The `app_config` deletes are part of the rollback on purpose. The seeds are
+   `on conflict do nothing`, so a key left at, say, `"v2_metadata"` would survive a later
+   re-push and turn V2 back on for that cohort.
+
+### 11.7 Founder decisions still open
+
+| Decision | Recommended default |
+|---|---|
+| QA allowlist accounts | Founder plus 2–3 QA accounts, **named by the founder** |
+| Land A2 inert, or hold it | **Land it inert** (off, tested; holding it means renumbering a third time) |
+| Accept V2's lower pool recall / cold start as the cost of "following is not taste" | Yes for the allowlist and staged rollout, watched; revisit before 100% |
+| `v2_metadata_social`: "following adds candidates but never score" under the spec's "following alone has no effect" | **Founder's call** (§10.5) |
+| Re-run the real-history replay on this base | **Needs the founder's go-ahead**: the export reads production. Not run here; only `--synthetic` ran |
+| Collaborative roll-up for season-only neighbours: best season (A2 today) or season mean (`community_score`) | Keep best season until the real replay can compare them (§11.3) |
