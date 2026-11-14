@@ -7,13 +7,14 @@ import { ScoresSection } from './ScoresSection';
  * The composition, and the copy rules that have to survive every rearrangement of it.
  *
  * As of the 2026-09-07 founder lock: a SCORES heading, then **three** units in one fixed
- * order — `Your score`, `Following`, `bingd.` — each a circle with its words *beneath*
- * it, on three equal columns of the content width.
+ * order — `Your score`, `bingd`, `Following` since the founder's 2026-09-13 reorder (see
+ * "reads me, then bingd, then the people I follow" below) — each a circle with its words
+ * *beneath* it, on three equal columns of the content width.
  *
  * Three things must not change whatever the layout does next:
  *
  *   - the order, because it is a hierarchy of relevance to one reader (me, then the
- *     people I chose, then the room) and not a leaderboard;
+ *     room, then the people I chose) and not a leaderboard;
  *   - what the section is willing to claim: below the sample threshold there is an empty
  *     circle and a sentence, and never a number, a countdown or a faded figure standing
  *     in for one;
