@@ -54,22 +54,31 @@ export type TitleReviewsProps = {
   /**
    * The immersive page's Reviews tab (Cinematic Editorial, founder phone QA 2026-11-04).
    *
-   * Your published review leads, as a `ReviewCard` with your name, date and the Edit icon
-   * top right (FU1113-F), and the full-width compose button goes. No score circle on
-   * it — yours is already the emphasis in the title module. Everyone else's follow,
-   * unchanged, with yours left out of the list so it is never shown twice. Without a
-   * published review, a compact *Write a review*. Absent, the tab is the original page's.
+   * Your published review leads, as a `ReviewCard` with your name, date, your score
+   * circle and the Edit icon beneath it top right (FU1113-F; score added QA1114-REVIEWS
+   * §2), and the full-width compose button goes. Everyone else's follow, unchanged, with
+   * yours left out of the list so it is never shown twice. Without a published review, a
+   * compact *Write a review*. Absent, the tab is the original page's.
    */
   variant?: 'editorial';
   /**
    * The viewer's own **published** review — their note with public visibility, from their
    * own row, never a private note. Read by the editorial variant only.
+   *
+   * Shown whenever it exists, ranked or not (QA1114-REVIEWS §2): the server allows a
+   * review without a ranking, and everybody else can already read one, so hiding it from
+   * its own author left them no way to see or edit it here.
    */
   ownReview?: {
     text: string;
     hasSpoilers: boolean;
     updatedAt: string | null;
     helpfulCount: number;
+    /**
+     * Your score as everybody else sees it: the `score` on your own `title_reviews_v2`
+     * row (the server's live `score_for`). Null when you have not ranked it — no circle.
+     */
+    score: number | null;
   } | null;
   /**
    * Editorial only: whether Rating can be offered — true only when the Most Helpful list
@@ -143,7 +152,7 @@ export function TitleReviews({
     <View style={styles.tab}>
       {editorial ? (
         <View style={styles.compose}>
-          {ownReview && viewerRanked ? (
+          {ownReview ? (
             <ReviewCard
               testID="your-review"
               review={{
@@ -157,6 +166,7 @@ export function TitleReviews({
                 isOwn: true,
               }}
               avatar={viewer ? { uri: viewer.avatarUri, name: viewer.name } : null}
+              score={ownReview.score}
               onEdit={onWrite}
               collapsedLines={6}
               noun={noun}
@@ -326,7 +336,8 @@ export const REVIEWS_PREVIEW_COUNT = 2;
  * **Reviews, after Cast** (post-QA sprint 2, 2026-11-05): one or two reviews on the
  * title page itself, because what other people thought is a core part of bingd.
  *
- * Your published review first, as the same `ReviewCard` the sheet draws, with its Edit;
+ * Your published review first, as the same `ReviewCard` the sheet draws, with your score
+ * and its Edit;
  * then the most helpful of everybody else's, three lines each, each with its thumbs-up. A
  * whole review, the order controls, Report and the rest are one tap away in the
  * sheet — this is a view of the same server list, not a second one, so it cannot show a
@@ -348,7 +359,8 @@ export function ReviewsPreview({
   viewer,
   helpfulPendingId = null,
 }: ReviewsPreviewProps) {
-  const showOwn = Boolean(ownReview && viewerRanked);
+  // Your published review shows whether or not you ranked it (QA1114-REVIEWS §2).
+  const showOwn = Boolean(ownReview);
   const others = reviews
     .filter((review) => review.userId !== viewerId)
     .slice(0, REVIEWS_PREVIEW_COUNT - (showOwn ? 1 : 0));
@@ -377,6 +389,7 @@ export function ReviewsPreview({
             isOwn: true,
           }}
           avatar={viewer ? { uri: viewer.avatarUri, name: viewer.name } : null}
+          score={ownReview.score}
           onEdit={onWrite}
           collapsedLines={3}
           noun={noun}

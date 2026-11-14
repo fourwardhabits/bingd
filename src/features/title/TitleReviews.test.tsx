@@ -356,7 +356,13 @@ describe('the reviews preview', () => {
       <ReviewsPreview
         {...base}
         reviews={[review({ id: 'mine', userId: VIEWER, text: 'Mine, from the list.' }), ...others]}
-        ownReview={{ text: 'Mine.', hasSpoilers: false, updatedAt: null, helpfulCount: 2 }}
+        ownReview={{
+          text: 'Mine.',
+          hasSpoilers: false,
+          updatedAt: null,
+          helpfulCount: 2,
+          score: null,
+        }}
       />,
     );
     expect(view.getByTestId('your-review')).toBeTruthy();
@@ -414,7 +420,9 @@ describe('the reviews preview', () => {
     expect(helpful.props.accessibilityState).toMatchObject({ selected: true });
   });
 
-  it('says whose your review is by name and date alone, with Edit, no Helpful and no score', async () => {
+  // QA1114-REVIEWS §2: your score is now drawn on your own review; this pins the
+  // unranked case (score null → no circle, D-R2). The ranked case is the next test.
+  it('says whose your review is by name and date alone, with Edit, no Helpful, and no circle unranked', async () => {
     const view = await renderWithProviders(
       <ReviewsPreview
         {...base}
@@ -426,6 +434,7 @@ describe('the reviews preview', () => {
           hasSpoilers: true,
           updatedAt: '2026-10-02T10:00:00.000Z',
           helpfulCount: 0,
+          score: null,
         }}
       />,
     );
@@ -439,12 +448,70 @@ describe('the reviews preview', () => {
     expect(mine.getByTestId('edit-review')).toBeTruthy();
   });
 
+  it('draws your own score on your review, with Edit directly beneath it', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[]}
+        viewer={{ name: 'Sai', avatarUri: null }}
+        ownReview={{
+          text: 'Mine.',
+          hasSpoilers: false,
+          updatedAt: '2026-10-02T10:00:00.000Z',
+          helpfulCount: 0,
+          score: 7.9,
+        }}
+      />,
+    );
+    const stack = within(
+      within(view.getByTestId('your-review')).getByTestId('review-card-stack'),
+    );
+    expect(stack.getByLabelText('7.9 out of 10')).toBeTruthy();
+    expect(stack.getByTestId('edit-review')).toBeTruthy();
+  });
+
+  /**
+   * QA1114-REVIEWS §2: a public review on a title you have not ranked is visible to
+   * everybody else, so it is shown to you too — score-less, with Edit — rather than
+   * hidden behind *Rank to leave a review*.
+   */
+  it('shows your published review on a title you have not ranked, with no circle and Edit', async () => {
+    const onWrite = jest.fn();
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        viewerRanked={false}
+        reviews={[]}
+        onWrite={onWrite}
+        ownReview={{
+          text: 'Unranked but public.',
+          hasSpoilers: false,
+          updatedAt: null,
+          helpfulCount: 0,
+          score: null,
+        }}
+      />,
+    );
+    const mine = within(view.getByTestId('your-review'));
+    expect(mine.getByText('Unranked but public.')).toBeTruthy();
+    expect(mine.queryByTestId('review-card-score')).toBeNull();
+    await fireEvent.press(mine.getByTestId('edit-review'));
+    expect(onWrite).toHaveBeenCalled();
+    expect(view.queryByRole('button', { name: 'Rank to leave a review' })).toBeNull();
+  });
+
   it('says only yours exists when nobody else has written one', async () => {
     const view = await renderWithProviders(
       <ReviewsPreview
         {...base}
         reviews={[]}
-        ownReview={{ text: 'Mine.', hasSpoilers: false, updatedAt: null, helpfulCount: 0 }}
+        ownReview={{
+          text: 'Mine.',
+          hasSpoilers: false,
+          updatedAt: null,
+          helpfulCount: 0,
+          score: null,
+        }}
       />,
     );
     expect(view.getByTestId('reviews-preview-only-yours')).toBeTruthy();

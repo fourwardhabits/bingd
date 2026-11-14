@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar, EditAction, ScoreBadge, SpoilerNote, Text } from '@/ui/components';
+import { scoreBadgeMetrics } from '@/ui/components/ScoreBadge';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -45,7 +46,10 @@ export type ReviewCardProps = {
 
   /** A face beside the name. */
   avatar?: { uri: string | null; name: string } | null;
-  /** The author's live score; absent when they wrote without ranking, or on your own. */
+  /**
+   * The author's live score, yours included (QA1114-REVIEWS §2): null when they wrote
+   * without ranking, which draws what `UNRANKED_REVIEW_SCORE` says.
+   */
   score?: number | null;
   /** From `shouldMask`. Ignored on your own review, which you have obviously read. */
   masked?: boolean;
@@ -69,6 +73,30 @@ export function helpfulCountCopy(count: number): string | null {
   return count === 1 ? '1 person found this helpful' : `${count} people found this helpful`;
 }
 
+/**
+ * **What a review whose author has not ranked the title shows where the score goes**
+ * (D-R2, QA1114-REVIEWS, 2026-11-14; default pending the founder's confirmation).
+ *
+ * - `'none'` (the default, option a): no circle at all; the action rises to the top of
+ *   the same right-hand column, on the same axis it has under a circle.
+ * - `'placeholder'` (option b): a "Not ranked" placeholder in the circle's place. Not
+ *   drawn yet — choosing it is this one line plus the small component `reviewScoreSlot`'s
+ *   `'placeholder'` answer would render.
+ *
+ * Hiding such reviews altogether (option c) is a visibility change and is not this
+ * switch's to make.
+ */
+export type UnrankedReviewScore = 'none' | 'placeholder';
+export const UNRANKED_REVIEW_SCORE: UnrankedReviewScore = 'none';
+
+/** What sits above the action: the author's circle, nothing, or (option b) a placeholder. */
+export function reviewScoreSlot(
+  score: number | null | undefined,
+  unranked: UnrankedReviewScore = UNRANKED_REVIEW_SCORE,
+): 'badge' | UnrankedReviewScore {
+  return score === null || score === undefined ? unranked : 'badge';
+}
+
 /** The date as a review prints it: `14 Nov 2026`, in the reader's locale order. */
 export function formatReviewDate(value: string | null | undefined): string {
   if (!value) return '';
@@ -85,14 +113,28 @@ export function formatReviewDate(value: string | null | undefined): string {
  * is a person's opinion like any other, and yours differs by its control, not its colour.
  *
  *   ┌──────────────────────────────────────────┐
- *   │ (o) Name                   8.4   [action] │   action: Edit (yours) or 👍 (theirs)
- *   │     14 Nov 2026                           │
- *   │ The review text, clamped, … more          │
+ *   │ (o) Name, truncated…              (8.4)  │   the author's score, yours included
+ *   │     14 Nov 2026                  [action] │   action: Edit (yours) or 👍 (theirs)
+ *   │ The review text, at the card's full      │
+ *   │ inner width, clamped, … more              │
  *   │ 3 people found this helpful           ⋯   │   count omitted at 0; ⋯ = Report
  *   └──────────────────────────────────────────┘
  *
+ * **The header** (QA1114-REVIEWS §2, 2026-11-14): who and when on the left, and on the
+ * right one fixed-width column — the score circle with the action directly beneath it,
+ * both centred on the column's axis. The header simply grows to that column's height;
+ * the text is a sibling *below* the header, never beside the column, so a long review
+ * always reads at the full width and the column can never overlap it. A long name
+ * truncates on one line rather than pushing the column. An author who has not ranked the
+ * title has no circle (`UNRANKED_REVIEW_SCORE`), and the action sits alone at the top of
+ * the same column.
+ *
+ * The Helpful *count* stays in the footer, in words, where it has always been; only the
+ * icon is in the column.
+ *
  * No Helpful on your own (the server refuses a self-vote with 42501), no Edit on anybody
- * else's, and no "Your review" heading: your name and date say whose it is.
+ * else's, and no "Your review" heading: your name and date say whose it is. Identical on
+ * Android and iOS: nothing here branches on the platform.
  */
 export function ReviewCard({
   review,
@@ -114,6 +156,23 @@ export function ReviewCard({
 }: ReviewCardProps) {
   const count = helpfulCountCopy(review.helpfulCount);
   const report = review.isOwn ? undefined : onReport;
+  const slot = reviewScoreSlot(score);
+  // Wide enough for the 44pt action and for the circle at the largest text size it
+  // scales to, so neither is ever squeezed by a long name beside it.
+  const stackWidth = Math.max(theme.layout.minTapTarget, scoreBadgeMetrics('sm').diameter);
+
+  const action = review.isOwn ? (
+    onEdit ? (
+      <EditAction onPress={onEdit} accessibilityLabel="Edit your review" testID="edit-review" />
+    ) : null
+  ) : onToggleHelpful ? (
+    <HelpfulToggle
+      selected={review.viewerHelpful}
+      pending={helpfulPending}
+      author={review.username}
+      onToggle={onToggleHelpful}
+    />
+  ) : null;
 
   const who = (
     <>
@@ -159,25 +218,16 @@ export function ReviewCard({
           <View style={styles.who}>{who}</View>
         )}
 
-        {score !== null && !review.isOwn ? <ScoreBadge score={score} size="sm" /> : null}
-
-        {review.isOwn ? (
-          onEdit ? (
-            <View style={styles.action}>
-              <EditAction
-                onPress={onEdit}
-                accessibilityLabel="Edit your review"
-                testID="edit-review"
-              />
-            </View>
-          ) : null
-        ) : onToggleHelpful ? (
-          <HelpfulToggle
-            selected={review.viewerHelpful}
-            pending={helpfulPending}
-            author={review.username}
-            onToggle={onToggleHelpful}
-          />
+        {slot === 'badge' || action ? (
+          <View style={[styles.stack, { width: stackWidth }]} testID="review-card-stack">
+            {/* The circle, or under option (b) the placeholder `reviewScoreSlot` names. */}
+            {slot === 'badge' && score !== null ? (
+              <View testID="review-card-score">
+                <ScoreBadge score={score} size="sm" />
+              </View>
+            ) : null}
+            {action}
+          </View>
         ) : null}
       </View>
 
@@ -260,7 +310,7 @@ function HelpfulToggle({
       // A second tap while the first is in flight would snapshot an optimistic state and
       // could roll back to a mark the server never accepted; see `useSetReviewHelpful`.
       onPress={pending ? undefined : onToggle}
-      style={({ pressed }) => [styles.action, styles.helpful, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
       testID="review-helpful"
     >
       <Ionicons
@@ -273,12 +323,6 @@ function HelpfulToggle({
   );
 }
 
-/**
- * The 44pt action sits flush with the card's padding edge: the target overhangs into the
- * padding by the difference between the target and the 20pt glyph it centres.
- */
-const ACTION_OVERHANG = -(theme.layout.minTapTarget - theme.layout.icon.sm) / 2;
-
 const styles = StyleSheet.create({
   card: {
     gap: theme.space[2],
@@ -290,11 +334,20 @@ const styles = StyleSheet.create({
     borderColor: theme.border.hairline,
     ...theme.elevation.e1,
   },
-  head: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
-  who: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  // Top-aligned: who and when sit level with the circle, and the header is as tall as
+  // the column on the right, so the text below starts under both.
+  head: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[2] },
+  // `minWidth: 0` lets a long name truncate inside the row instead of widening it.
+  who: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   // 1pt: the name and its date read as one two-line label, as on every person row.
-  whoCopy: { flex: 1, gap: 1 },
-  action: { marginRight: ACTION_OVERHANG },
+  whoCopy: { flex: 1, minWidth: 0, gap: 1 },
+  /**
+   * The circle over the action, centred on one axis. The column sits inside the card's
+   * padding (the overhang the lone action used to take into it is gone: a circle above
+   * it would have been pushed into the padding too), so the 44pt targets stay wholly
+   * inside the card and nothing clips them.
+   */
+  stack: { flexShrink: 0, alignItems: 'center' },
   helpful: {
     minWidth: theme.layout.minTapTarget,
     minHeight: theme.layout.minTapTarget,

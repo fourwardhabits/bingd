@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
+import { useCallback } from 'react';
 
 import { track } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
@@ -184,6 +185,30 @@ export function useTitleReviewCount(mediaItemId: string | null) {
       return typeof data === 'number' ? data : 0;
     },
   });
+}
+
+/**
+ * **Reload a title's reviews and their count, for pull-to-refresh** (QA1114-REVIEWS F1,
+ * 2026-11-14).
+ *
+ * Invalidation rather than `refetch()`: React Query v5's `refetch()` ignores `enabled`,
+ * and `['title-reviews', id]` is a prefix, so every sort the sheet has visited and the
+ * Most Helpful preview's `top_desc` entry are covered by one call. Active queries refetch
+ * and the returned promises settle when they land; inactive ones are marked stale and
+ * refetch when next shown. Null (a series, or a page still loading) asks for nothing.
+ */
+export function useRefreshTitleReviews(mediaItemId: string | null) {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (): Promise<void>[] =>
+      mediaItemId
+        ? [
+            queryClient.invalidateQueries({ queryKey: ['title-reviews', mediaItemId] }),
+            queryClient.invalidateQueries({ queryKey: ['title-review-count', mediaItemId] }),
+          ]
+        : [],
+    [queryClient, mediaItemId],
+  );
 }
 
 /**
