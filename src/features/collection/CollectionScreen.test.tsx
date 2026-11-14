@@ -1178,15 +1178,27 @@ describe('the backlog and Refine cards', () => {
     expect(view.queryByText('You have unranked titles')).toBeNull();
   });
 
-  it('Unranked: a persistent Start ranking with the exact count', async () => {
+  /**
+   * QA 11-14 §8: the card is the heading and Start ranking directly under it. Was: "with the
+   * exact count", asserting a "2 movies to rank" line, which the founder removed as
+   * redundant with the segment's own count.
+   */
+  it('Unranked: a persistent Start ranking under the heading, with no count line', async () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('m2', 'movie')];
     mockRpcAnswers.ranking_backlog = backlog(2);
     mockParams.show = 'unranked';
     const view = await open();
 
     await waitFor(() => expect(view.getByTestId('collection-start-ranking-card')).toBeTruthy());
-    expect(view.getByText('Rank your unranked titles')).toBeTruthy();
-    expect(view.getByText('2 movies to rank')).toBeTruthy();
+    const card = within(view.getByTestId('collection-start-ranking-card'));
+    expect(card.getByText('Rank your unranked titles')).toBeTruthy();
+    expect(card.getByRole('button', { name: 'Start ranking' })).toBeTruthy();
+    expect(view.queryByText(/\d+ (movies?|seasons?) to rank/)).toBeNull();
+    // Heading, then the action: nothing else is written on the card.
+    expect(card.getAllByText(/./).map((t) => t.props.children)).toEqual([
+      'Rank your unranked titles',
+      'Start ranking',
+    ]);
     expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 

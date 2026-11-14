@@ -622,15 +622,11 @@ export default function CollectionScreen() {
       )
     ) : active === 'unranked' && backlogOn && backlogTotal > 0 ? (
       /* **Start ranking, persistent on Unranked** (unified design §1): no dismiss, and the
-         ordinary one-title-at-a-time ranking stays below it. The exact count is useful
-         here, because the reader chose to come and look (founder decision 3). */
+         ordinary one-title-at-a-time ranking stays below it. No count line: the segment's
+         own count already says how many (founder QA 11-14, §8), so the action sits
+         straight under the heading. */
       <View style={styles.nudge} testID="collection-start-ranking-card">
         <Text variant="callout">Rank your unranked titles</Text>
-        {/* No explanatory line: the heading, the count and the button already say it
-            three times over (founder QA, 2026-09-22). */}
-        <Text variant="footnote" tone="secondary">
-          {backlogCountLine(backlogTotal, medium)}
-        </Text>
         <View style={styles.nudgeActions}>
           <Button
             label="Start ranking"
@@ -936,13 +932,6 @@ function MyListsLink({ onPress }: { onPress: () => void }) {
       <Ionicons name="chevron-forward" size={14} color={theme.semantic.action} />
     </Pressable>
   );
-}
-
-/** "18 movies to rank" — the exact count, on Unranked only (founder decision 3). */
-function backlogCountLine(total: number, medium: Medium) {
-  const noun =
-    medium === 'movies' ? (total === 1 ? 'movie' : 'movies') : total === 1 ? 'season' : 'seasons';
-  return `${total} ${noun} to rank`;
 }
 
 /**

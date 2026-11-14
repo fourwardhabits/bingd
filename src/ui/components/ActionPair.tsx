@@ -124,6 +124,11 @@ export const PAIR_LABEL_EM: Record<string, number> = {
   Done: 2.534,
   'Rank titles': 5.03,
   Continue: 4.388,
+  // The import pages' Export / Upload pair (QA 11-14, §7).
+  'IMDb Export': 5.955,
+  'Upload IMDb file': 7.981,
+  'Letterboxd Export': 8.686,
+  'Upload Letterboxd file': 10.713,
 };
 /**
  * A label not in the table, per character: above the widest per-character average of the
