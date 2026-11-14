@@ -57,6 +57,7 @@ export {
   type PosterTile,
   SeasonAverageBadge,
   seasonAverageBadgeText,
+  seasonAverageLabel,
   type SeasonAverageBadgeProps,
 } from './PosterWall';
 export {
