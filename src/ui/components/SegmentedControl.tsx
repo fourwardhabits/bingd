@@ -68,6 +68,7 @@ export function SegmentedControl<T extends string>({
             accessibilityState={{ selected, disabled }}
             disabled={disabled}
             onPress={() => onChange(option.id)}
+            hitSlop={OPTION_SLOP}
             style={({ pressed }) => [
               styles.option,
               selected && styles.optionSelected,
@@ -84,6 +85,14 @@ export function SegmentedControl<T extends string>({
   );
 }
 
+/**
+ * The track's padding, above and below, as touch area (design-system v3 A.2 #14). Vertical
+ * only: the options touch across a 2pt gap, and React Native hit-tests siblings last-first,
+ * so horizontal slop would take part of the neighbour's own edge.
+ */
+const TRACK_PADDING = 2;
+const OPTION_SLOP = { top: TRACK_PADDING, bottom: TRACK_PADDING };
+
 const styles = StyleSheet.create({
   group: {
     flexDirection: 'row',
@@ -93,11 +102,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.raised,
     // The container's own border is the outline; the padding is what keeps the
     // selected fill from sitting on top of it.
-    padding: 2,
+    padding: TRACK_PADDING,
     gap: 2,
   },
-  // Equal halves, and tall enough on their own: this is a form field rather than a
-  // control inside a row, so it does not get to lean on `hitSlop` for the 44pt floor.
+  // Equal halves, drawn 4pt under the 44pt floor so the track's 2pt padding can sit
+  // around them. `OPTION_SLOP` gives that padding back as touch area above and below, and
+  // it stays inside the track, so each option answers the full 44pt height.
   option: {
     flex: 1,
     minHeight: theme.layout.minTapTarget - 4,
