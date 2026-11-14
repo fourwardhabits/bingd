@@ -281,9 +281,30 @@ describe('the wall and the list', () => {
 
     // The count is the shortcut's badge now, and its label says it in full.
     await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
     );
     expect(view.getByText('1', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  /**
+   * **D5: the shortcut counts and says unread, as "new"** (founder, 2026-11-13). Unread is
+   * neither opened nor seen in the list (FU1113-E), so a seen-but-unopened row and an
+   * opened row are not counted, and the spoken label says "new", not "unopened".
+   */
+  it('speaks the unread count as new: two unread, one seen, one opened give 2 new', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2' }),
+      recommendation({ id: 'r3', media_item_id: 'film-3', seen_at: '2026-08-16T09:00:00.000Z' }),
+      recommendation({ id: 'r4', media_item_id: 'film-4', opened_at: '2026-08-16T10:00:00.000Z' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+    expect(view.getByText('2', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.queryByLabelText(/unopened/)).toBeNull();
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {
@@ -334,7 +355,7 @@ describe('the wall and the list', () => {
     await waitFor(() => expect(view.getByTestId('sent-unopened-film-2')).toBeTruthy());
     expect(view.queryByTestId('sent-unopened-film-3')).toBeNull();
     expect(view.queryByTestId('sent-unopened-film-1')).toBeNull();
-    expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy();
   });
 
   it('records the open on the way to the title, once', async () => {
@@ -768,7 +789,7 @@ describe('reading Sent to You', () => {
     const view = await renderWithProviders(<RecommendationsScreen />);
 
     await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
     );
     await act(async () => {
       await new Promise((done) => setTimeout(done, 50));
@@ -783,7 +804,7 @@ describe('reading Sent to You', () => {
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
     await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 2 unopened' })).toBeTruthy(),
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
     );
 
     await openSent(view);

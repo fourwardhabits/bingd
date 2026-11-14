@@ -239,7 +239,7 @@ async function inheritedMetadata(
  * **What this cap is, and what it is not.** Independent review 21e asked for the audit
  * and this is its result, so that nobody has to redo it:
  *
- * - It is **not** behind any count that claims to be exact. `unopenedIsAtLeast` below is
+ * - It is **not** behind any count that claims to be exact. `unreadIsAtLeast` below is
  *   the guard, and it is exact rather than defensive because the server orders unopened
  *   first.
  * - It is **not** behind any award. Hype Courier and the rest read
@@ -255,7 +255,7 @@ async function inheritedMetadata(
  *   server served, and independent review asked for both consequences to be written down
  *   rather than discovered.
  *
- *   The first is harmless: a shorter page only ever makes `unopenedIsAtLeast` answer
+ *   The first is harmless: a shorter page only ever makes `unreadIsAtLeast` answer
  *   false where it would have answered true, so the chip says `199` rather than `200+` —
  *   an understatement of a capped list, which is the direction this rule permits. It
  *   cannot overstate.
@@ -322,14 +322,6 @@ export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) =>
  * (and so every unread one) is in hand and the count is exact; only a page that is all
  * unopened can hide more beyond the cap, so only then is the unread count a floor.
  */
-
-/**
- * The names the tab screen imports, kept so `app/(tabs)/recommendations.tsx` needs no edit
- * for FU1113-E (another workstream edits that file in parallel). They now mean **unread**:
- * neither opened nor seen. Rename at the next edit of that screen.
- */
-export const unopenedCount = unreadCount;
-export const unopenedIsAtLeast = unreadIsAtLeast;
 
 /**
  * A recommendation as the shared filter sheet sees it.

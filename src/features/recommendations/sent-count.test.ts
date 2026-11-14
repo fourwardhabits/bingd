@@ -5,8 +5,6 @@ import { renderHookWithProviders } from '@/test-utils/render';
 import {
   SENT_LIMIT,
   isUnread,
-  unopenedCount,
-  unopenedIsAtLeast,
   unreadCount,
   unreadIsAtLeast,
   useSentToYou,
@@ -85,31 +83,31 @@ const list = (unopened: number, opened = 0) => [
 
 describe('how many are unopened', () => {
   it('counts them', () => {
-    expect(unopenedCount(list(3, 5))).toBe(3);
+    expect(unreadCount(list(3, 5))).toBe(3);
   });
 
   it('is nothing for an empty or absent list', () => {
-    expect(unopenedCount([])).toBe(0);
-    expect(unopenedCount(undefined)).toBe(0);
+    expect(unreadCount([])).toBe(0);
+    expect(unreadCount(undefined)).toBe(0);
   });
 });
 
 describe('whether that number is the whole truth', () => {
   it('is exact for an ordinary list', () => {
-    expect(unopenedIsAtLeast(list(3, 5))).toBe(false);
+    expect(unreadIsAtLeast(list(3, 5))).toBe(false);
   });
 
   it('is still exact on a full page that has opened rows on the end of it', () => {
     // The page is full, so the *list* is capped — but the unopened rows are a prefix and
     // that prefix ended before the cap did, so there cannot be another unopened one.
-    expect(unopenedIsAtLeast(list(150, SENT_LIMIT - 150))).toBe(false);
-    expect(unopenedCount(list(150, SENT_LIMIT - 150))).toBe(150);
+    expect(unreadIsAtLeast(list(150, SENT_LIMIT - 150))).toBe(false);
+    expect(unreadCount(list(150, SENT_LIMIT - 150))).toBe(150);
   });
 
   it('is a floor when the whole page is unopened', () => {
     // 200 unopened and nothing else: there is no way to tell this from 201.
-    expect(unopenedIsAtLeast(list(SENT_LIMIT))).toBe(true);
-    expect(unopenedCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
+    expect(unreadIsAtLeast(list(SENT_LIMIT))).toBe(true);
+    expect(unreadCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
   });
 
 });
@@ -127,10 +125,9 @@ describe('unread', () => {
     expect(isUnread(row({ openedAt: seen }))).toBe(false);
   });
 
-  it('is what the dot counts, under both names the screen may import', () => {
+  it('is what the dot counts', () => {
     const rows = [row({ id: 'a' }), row({ id: 'b', seenAt: seen }), ...list(0, 2)];
     expect(unreadCount(rows)).toBe(1);
-    expect(unopenedCount(rows)).toBe(1);
   });
 
   it('is a floor only when the whole full page is unopened, seen or not', () => {
@@ -138,7 +135,6 @@ describe('unread', () => {
     const full = list(SENT_LIMIT).map((r, i) => (i < 50 ? { ...r, seenAt: seen } : r));
     expect(unreadCount(full)).toBe(SENT_LIMIT - 50);
     expect(unreadIsAtLeast(full)).toBe(true);
-    expect(unopenedIsAtLeast(full)).toBe(true);
 
     // An opened row on the page ends the unopened prefix, so the count is exact.
     expect(unreadIsAtLeast(list(SENT_LIMIT - 1, 1))).toBe(false);
@@ -185,7 +181,7 @@ const serverRow = (id: string) => ({
  *
  * The first version of this asserted `SENT_LIMIT === 200` and nothing else, which
  * independent review 21e correctly called out: replacing `p_limit: SENT_LIMIT` with a
- * literal `100` left it green. The constant would still be 200, `unopenedIsAtLeast`
+ * literal `100` left it green. The constant would still be 200, `unreadIsAtLeast`
  * would still compare against 200, and a hundred unopened recommendations would be
  * presented as an exact count of a hundred while the reader had more. A test on a
  * constant proves the constant.
