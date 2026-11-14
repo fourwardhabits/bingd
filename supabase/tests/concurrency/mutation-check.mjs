@@ -81,6 +81,11 @@
  *  17. `mark_recommendations_seen` without its `seen_at is null` guards (20261121000100). A
  *      second mark must move `seen_at` and count the rows again — the "first time wins"
  *      that `races/recommendation-seen.mjs` S1 asserts.
+ *  18. `recommendations_to_me_page` ordering by opened only (20261121000400) — the old
+ *      function's order with a read_rank bolted on. A seen row newer than the unread ones
+ *      must jump back above them, which `recommendation-unread-first.test.mjs` (a) rejects:
+ *      it is the order that strands unread rows past the 200 cap. The honest function is run
+ *      first as a control.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1614,6 +1619,84 @@ end; $$;
   results.push([
     'seen guard dropped -> a second mark counts the row again and moves seen_at',
     second.marked === 1 && +after !== +first,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 18: recommendations_to_me_page ordering by opened only (20261121000400).
+//     The scenario of recommendation-unread-first.test.mjs (a): unread at 1 and 3, seen at 4,
+//     opened at 5. Honest: [unread@3, unread@1, seen, opened]. Mutant: the seen row first.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const scenario = async (label) => {
+    const sender = await fx.createUser();
+    const recipient = await fx.createUser();
+    await fx.mutualFollow(sender, recipient);
+    const s = await db.session('sender');
+    await s.actAs(sender);
+    const ids = [];
+    for (const minute of [1, 3, 4, 5]) {
+      const film = await fx.createMovie(`Mutant 18 ${label} ${minute}`);
+      const sent = (
+        await s.q(`select recommend_title($1, $2, $3) as r`, [crypto.randomUUID(), recipient, film])
+      ).rows[0].r;
+      await db.sql(`update title_recommendations set recommended_at = $2 where id = $1`, [
+        sent.id,
+        new Date(Date.UTC(2026, 10, 1, 12, minute)).toISOString(),
+      ]);
+      ids.push(sent.id);
+    }
+    await s.end();
+    const [unreadOld, unreadNew, seen, opened] = ids;
+    const r = await db.session('recipient');
+    await r.actAs(recipient);
+    await r.q(`select mark_recommendations_seen($1, $2::uuid[])`, [crypto.randomUUID(), [seen]]);
+    await r.q(`select mark_recommendation_opened($1)`, [opened]);
+    const { rows } = await r.q(`select id, read_rank from recommendations_to_me_page(200)`);
+    await r.end();
+    return (
+      JSON.stringify(rows.map((x) => x.id)) ===
+        JSON.stringify([unreadNew, unreadOld, seen, opened]) &&
+      JSON.stringify(rows.map((x) => x.read_rank)) === JSON.stringify([0, 0, 1, 2])
+    );
+  };
+
+  controls.push([
+    'page unread-first order present -> unread, seen, opened (test (a) holds)',
+    (await scenario('honest')) === true,
+  ]);
+
+  await db.sql(`
+    create or replace function recommendations_to_me_page(
+      p_limit integer default 100, p_after_rank smallint default null,
+      p_after_recommended_at timestamptz default null, p_after_id uuid default null)
+    returns table (id uuid, sender_id uuid, sender_username text, sender_display_name text,
+      sender_avatar_path text, media_item_id uuid, media_kind media_kind, media_title text,
+      series_title text, poster_path text, release_date date, genres text[],
+      original_language text, runtime_minutes integer, recommended_at timestamptz,
+      opened_at timestamptz, message text, seen_at timestamptz, read_rank smallint)
+    language sql stable security invoker set search_path = public as $fn$
+      select r.id, r.sender_id, p.username::text, p.display_name, p.avatar_path, m.id, m.kind,
+             m.title, parent.title, m.poster_path, m.release_date, m.genres, m.original_language,
+             m.runtime_minutes, r.recommended_at, recommendation_opened_at(r.id), r.message,
+             recommendation_seen_at(r.id),
+             (case when recommendation_opened_at(r.id) is not null then 2
+                   when recommendation_seen_at(r.id) is not null then 1 else 0 end)::smallint
+        from title_recommendations r
+        join profiles p on p.id = r.sender_id and p.status = 'active'
+        join media_items m on m.id = r.media_item_id
+        left join media_items parent on parent.id = m.parent_id
+       where r.recipient_id = auth.uid()
+       order by (recommendation_opened_at(r.id) is not null), r.recommended_at desc, r.id desc
+       limit least(greatest(coalesce(p_limit, 100), 1), 200);
+    $fn$;`);
+
+  results.push([
+    'page orders by opened only -> a seen row jumps above unread ones (test (a) goes red)',
+    (await scenario('mutant')) === false,
   ]);
 
   await db.close();

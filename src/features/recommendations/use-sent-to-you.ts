@@ -42,6 +42,14 @@ export type SentRecommendation = {
    * `openedAt`: seeing a row clears its "new" state, only opening the title opens it.
    */
   seenAt: string | null;
+  /**
+   * Where the server placed the row when it was fetched (20261121000400): 0 unread, 1 seen
+   * but not opened, 2 opened. `null` when the list came from `recommendations_to_me`, which
+   * orders by opened only and carries no rank. Fetch-time, deliberately: an optimistic seen
+   * mark changes `seenAt` and leaves this alone, so it keeps describing the order the page
+   * actually has until the next fetch.
+   */
+  readRank?: 0 | 1 | 2 | null;
 };
 
 type Row = {
@@ -65,6 +73,8 @@ type Row = {
   message?: string | null;
   /** Absent against a backend older than 20261121000100, which reads as not seen. */
   seen_at?: string | null;
+  /** Only from `recommendations_to_me_page` (20261121000400). */
+  read_rank?: 0 | 1 | 2 | null;
 };
 
 const yearOf = (date: string | null): number | null => {
@@ -74,23 +84,63 @@ const yearOf = (date: string | null): number | null => {
 };
 
 /**
+ * Whether this backend lacks `recommendations_to_me_page`, remembered for the app session.
+ *
+ * The function is a migration (20261121000400) that ships separately from the client, so a
+ * build carrying this code can meet a backend without it. PostgREST answers PGRST202 for an
+ * unknown function (42883 if the call reaches Postgres); either one means "use the old
+ * function", and asking again on every refresh would spend a round trip to hear the same.
+ * A new app session asks again, which is how an applied migration is picked up.
+ */
+let pageUnavailable = false;
+
+/** For tests: forget a fallback a previous test remembered. */
+export function resetSentToYouSource() {
+  pageUnavailable = false;
+}
+
+const isMissingFunction = (error: { code?: string } | null) =>
+  error?.code === 'PGRST202' || error?.code === '42883';
+
+/**
+ * One page of Sent to you, from the unread-first function where the backend has it.
+ *
+ * `recommendations_to_me_page` orders unread (neither opened nor seen) first, then seen,
+ * then opened, so unread rows past the cap become reachable once the ones before them are
+ * seen. `recommendations_to_me` orders by opened only and is kept, exactly as it was, for
+ * backends without the new function and for every client already shipped.
+ */
+async function fetchSentRows(): Promise<Row[]> {
+  if (!pageUnavailable) {
+    const { data, error } = await supabase.rpc('recommendations_to_me_page', {
+      p_limit: SENT_LIMIT,
+    });
+    if (!error) return (data ?? []) as Row[];
+    if (!isMissingFunction(error)) throw error;
+    pageUnavailable = true;
+  }
+
+  const { data, error } = await supabase.rpc('recommendations_to_me', {
+    p_limit: SENT_LIMIT,
+  });
+  if (error) throw error;
+  return (data ?? []) as Row[];
+}
+
+/**
  * The list, in the order the server returns it.
  *
- * Ordering is the database's — unopened first, then newest — and is deliberately not
- * re-sorted here. Two sorts over the same list is how a screen comes to disagree with
- * the badge above it.
+ * Ordering is the database's — unread, then seen, then opened, newest within each, from
+ * `recommendations_to_me_page`; unopened first, then newest, from the legacy
+ * `recommendations_to_me` — and is deliberately not re-sorted here. Two sorts over the same
+ * list is how a screen comes to disagree with the badge above it.
  */
 export function useSentToYou(viewerId: string) {
   return useQuery({
     queryKey: ['sent-to-you', viewerId],
     staleTime: 30_000,
     queryFn: async (): Promise<SentRecommendation[]> => {
-      const { data, error } = await supabase.rpc('recommendations_to_me', {
-        p_limit: SENT_LIMIT,
-      });
-      if (error) throw error;
-
-      const served = (data ?? []) as Row[];
+      const served = await fetchSentRows();
       /**
        * **A title this reader has already ranked is not a recommendation any more.**
        *
@@ -145,6 +195,7 @@ export function useSentToYou(viewerId: string) {
         openedAt: row.opened_at,
         message: row.message ?? null,
         seenAt: row.seen_at ?? null,
+        readRank: row.read_rank ?? null,
       }));
     },
   });
@@ -232,16 +283,17 @@ async function inheritedMetadata(
 /**
  * As many as this list can hold, which is as many as the server will return.
  *
- * `recommendations_to_me` clamps its `p_limit` to 200 (`20260817001300`), so this is the
- * ceiling and not a preference. It was 100, which is half of what was available for no
+ * `recommendations_to_me` clamps its `p_limit` to 200 (`20260817001300`), and so does
+ * `recommendations_to_me_page` (20261121000400), so this is the ceiling and not a preference. It was 100, which is half of what was available for no
  * reason anybody wrote down.
  *
  * **What this cap is, and what it is not.** Independent review 21e asked for the audit
  * and this is its result, so that nobody has to redo it:
  *
  * - It is **not** behind any count that claims to be exact. `unreadIsAtLeast` below is
- *   the guard, and it is exact rather than defensive because the server orders unopened
- *   first.
+ *   the guard, and it is exact rather than defensive because the server's order puts what
+ *   it tests for first (unread first from the page function, unopened first from the
+ *   legacy one).
  * - It is **not** behind any award. Hype Courier and the rest read
  *   `title_recommendations` directly through `readAllByKey` (`awards/use-awards.ts`),
  *   which pages to exhaustion and refuses rather than truncates. This RPC feeds no
@@ -249,8 +301,9 @@ async function inheritedMetadata(
  * - It is **not** behind a completeness assertion. `SentList`'s `total` is only ever
  *   compared to zero, to choose between a list and an empty state.
  * - It **is** a presentation cap on the list itself. A reader with more than two hundred
- *   recommendations sees the two hundred the server ranks highest — unopened first, then
- *   newest — and the rest are not reachable from this screen.
+ *   recommendations sees the two hundred the server ranks highest — unread, then seen, then
+ *   opened, newest within each (unopened first, then newest, from the legacy function) —
+ *   and the rest are not on this screen until reading moves them up.
  * - Since `withoutRanked`, the page the client holds can be **shorter** than the page the
  *   server served, and independent review asked for both consequences to be written down
  *   rather than discovered.
@@ -276,9 +329,10 @@ async function inheritedMetadata(
  *   already running against. Carried with the pagination debt above rather than
  *   approximated here.
  *
- * That last one is **deferred pagination debt, not a wrong number**. Paging it needs a
- * cursor the RPC does not take, which is a migration, and it is carried into Beta
- * Hardening §2 rather than approximated here. What this pass fixed was the number; the
+ * That last one is **deferred pagination debt, not a wrong number**. The server half now
+ * exists — `recommendations_to_me_page` takes a keyset cursor (20261121000400) — but no
+ * "Show more" is drawn yet, so it stays carried into Beta Hardening §2 rather than
+ * approximated here. What this pass fixed was the number; the
  * list stays capped and says nothing false about itself.
  */
 export const SENT_LIMIT = 200;
@@ -302,34 +356,45 @@ export const unreadCount = (rows: SentRecommendation[] | undefined) =>
  *
  * **A capped list may not be presented as a total**, which is the rule this whole pass is
  * about, and this is the one place in the app where the cap is the server's rather than
- * PostgREST's — so it cannot be paged away without a migration. What it can be is honest.
+ * PostgREST's. What it can be is honest, under either server order:
  *
- * The server orders unopened first, so the unopened rows are a prefix of what arrives.
- * That makes the test exact rather than defensive: if the prefix does not fill the page,
- * every unopened recommendation is in hand and the count is the count. Only when the
- * whole page is unopened can there be more, and only then does the chip say "200+".
+ * - **Unread first** (`recommendations_to_me_page`, rows carry `readRank`). The rows that
+ *   were unread when fetched are a prefix. If anything else is on the page, every unread
+ *   row is in hand; only a full page of rank 0 can hide more. Read from the fetch-time
+ *   rank, not live `isUnread`: once the reader sees that page the optimistic marks make
+ *   nothing in hand unread, but the rows past the cap are still unread and still not here,
+ *   so the floor (and the shortcut's "New") must hold until the next fetch brings them.
+ * - **Opened only** (the legacy `recommendations_to_me`, no `readRank`). The unopened rows
+ *   are a prefix, so if the prefix does not fill the page, every unopened recommendation —
+ *   and so every unread one — is in hand. Only a whole page of unopened rows can hide more.
  *
  * Independent review 21c found this one, after the first sweep looked only at PostgREST's
  * cap and not at a limit the app asks for itself.
  */
-export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) =>
-  (rows ?? []).length >= SENT_LIMIT && (rows ?? []).every((row) => !row.openedAt);
+export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) => {
+  const page = rows ?? [];
+  if (page.length < SENT_LIMIT) return false;
+  const ranked = page.some((row) => row.readRank !== undefined && row.readRank !== null);
+  return ranked
+    ? page.every((row) => row.readRank === 0)
+    : page.every((row) => !row.openedAt);
+};
 
 /**
  * The Sent to You shortcut's badge and its spoken label (Codex review, #290).
  *
- * **A floor of zero is still a floor.** The server orders by *opened* only — seen rows stay
- * in the unopened prefix — so a reader with more than `SENT_LIMIT` unopened recommendations
- * who has seen the first page holds a page that is all unopened and none unread. The count
- * in hand is 0 and `unreadIsAtLeast` is true: there may be unread ones past the cap. The
+ * **A floor of zero is still a floor.** A reader with more than `SENT_LIMIT` unread
+ * recommendations who has seen the first page holds a page none of which is unread any
+ * more, while `unreadIsAtLeast` is still true: there may be unread ones past the cap. The
  * badge used to be drawn only for a count above zero, so those vanished without a word.
  * Now that state keeps an indicator, *New*, spoken as "more may be new", which is as much
  * as the page can honestly say.
  *
- * **What the client cannot do here.** Reaching those rows needs the server to order seen
- * rows after unseen ones, or to page, and both are `recommendations_to_me` changes (a
- * migration); the client cannot ask for a different 200. Until then, opening a title moves
- * it out of the unopened prefix and lets the next load bring a further row in.
+ * **How the rows past the cap arrive.** Against `recommendations_to_me_page`
+ * (20261121000400) seen rows sort after unread ones, so the next fetch brings the next
+ * unread rows to the top of the page. Against the legacy `recommendations_to_me`, which
+ * orders by *opened* only, seen rows stay in the unopened prefix and only opening a title
+ * moves one out of it to let a further row in.
  */
 export const sentShortcutBadge = (
   rows: SentRecommendation[] | undefined,
@@ -347,11 +412,11 @@ export const sentShortcutBadge = (
 };
 
 /*
- * **Why the test above is still about `openedAt`** (FU1113-E). The server's order is
- * unchanged — unopened first — so it is still the unopened rows that form a prefix, and
- * unread rows are a subset of them. If any row on the page is opened, every unopened row
- * (and so every unread one) is in hand and the count is exact; only a page that is all
- * unopened can hide more beyond the cap, so only then is the unread count a floor.
+ * **Why the legacy branch above is about `openedAt`** (FU1113-E). `recommendations_to_me`
+ * orders unopened first, so it is the unopened rows that form a prefix there, and unread
+ * rows are a subset of them. If any row on the page is opened, every unopened row (and so
+ * every unread one) is in hand and the count is exact; only a page that is all unopened can
+ * hide more beyond the cap, so only then is the unread count a floor.
  */
 
 /**
