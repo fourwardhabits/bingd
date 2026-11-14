@@ -798,7 +798,9 @@ describe('Edit ranking', () => {
     expect(view.getByText('Remove this watch')).toBeTruthy();
   });
 
-  it('uses the title page’s Edit ranking icon, star-outline', async () => {
+  // The Watch History editor is held for the founder (2026-11-14): its Edit ranking icon stays
+  // swap-vertical-outline in this release; the star-outline swap from 6bab0a6 is reverted.
+  it('keeps the held editor’s Edit ranking icon, swap-vertical-outline', async () => {
     ranked();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
@@ -806,8 +808,8 @@ describe('Edit ranking', () => {
     const glyph = (name: 'star-outline' | 'swap-vertical-outline') =>
       String.fromCodePoint(Ionicons.glyphMap[name] as number);
     const row = within(view.getByTestId('watch-edit-ranking-w1'));
-    expect(row.getByText(glyph('star-outline'))).toBeTruthy();
-    expect(row.queryByText(glyph('swap-vertical-outline'))).toBeNull();
+    expect(row.getByText(glyph('swap-vertical-outline'))).toBeTruthy();
+    expect(row.queryByText(glyph('star-outline'))).toBeNull();
   });
 
   it('is not offered when the title has no ranking to correct', async () => {

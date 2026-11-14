@@ -430,7 +430,7 @@ function WatchEditor({
             <SheetRow
               // The title page's own Edit ranking icon, so the one act reads the same in
               // both places (founder QA, 2026-11-12).
-              icon="star-outline"
+              icon="swap-vertical-outline"
               label="Edit ranking"
               onPress={locked ? undefined : () => editRanking(onEditRanking)}
               disabledReason={locked ? 'Saving' : undefined}
