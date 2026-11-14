@@ -1,6 +1,8 @@
 /**
- * The titles behind a finished IMDb import's summary: `useImdbOutcomes`, over the two
- * sources `outcomes.ts` describes.
+ * The titles behind a finished import's *Unmatched* row: `useUnresolvedRows`, one of the
+ * two sources `outcomes.ts` describes. `CompletionSummary` joins it to this session's parse
+ * with `buildImdbOutcomes` (IMP1113-UI; the per-heading hook it replaced listed shows,
+ * episodes and other kinds too, which the results now give as notes).
  *
  * The titles a finished IMDb import could not match are read from the owner's own rows.
  *
@@ -14,20 +16,12 @@
  * keeps its count rather than a partial list that would not add up.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { withGrace } from '@/lib/grace';
 import { supabase } from '@/lib/supabase';
 
-import {
-  buildImdbOutcomes,
-  outcomeCounts,
-  type OutcomeSection,
-  type UnresolvedRow,
-  type UnresolvedRows,
-} from './outcomes';
-import { sessionImportFor } from './session-outcomes';
-import type { ImportCounts } from './use-import';
+import type { UnresolvedRow, UnresolvedRows } from './outcomes';
 
 /** PostgREST's default `max_rows`. */
 export const UNRESOLVED_PAGE = 1_000;
@@ -116,21 +110,4 @@ export function useUnresolvedRows(
 
   if (key === null) return UNAVAILABLE;
   return result?.key === key ? result.rows : LOADING;
-}
-
-/**
- * Every list-able heading of a finished IMDb job's summary, with its titles where they can
- * be shown and add up (`buildImdbOutcomes`). The parse is this process's only, and the
- * unresolved rows are read once per job; neither is stored anywhere.
- */
-export function useImdbOutcomes(
-  counts: ImportCounts,
-  jobId: string | null | undefined,
-): OutcomeSection[] {
-  const unresolved = useUnresolvedRows(jobId, outcomeCounts(counts).unmatched);
-  const session = sessionImportFor(jobId);
-  return useMemo(
-    () => buildImdbOutcomes({ counts, session, unresolved }),
-    [counts, session, unresolved],
-  );
 }
