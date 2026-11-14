@@ -1,7 +1,9 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { clearCelebrations, hasCelebrations } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
@@ -1272,7 +1274,11 @@ describe('Your First Five', () => {
   it('says what the five bought without explaining the algorithm again', async () => {
     const view = await arrive();
 
-    expect(view.getByText(/This is just the start/)).toBeTruthy();
+    expect(
+      view.getByText(
+        'Your scores move as your list grows. The more you rank, the better bingd knows your taste.',
+      ),
+    ).toBeTruthy();
     expect(view.queryByText(/comes from where this lands/)).toBeNull();
   });
 
@@ -1299,6 +1305,61 @@ describe('Your First Five', () => {
     await waitFor(() =>
       expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).toBe('completed'),
     );
+  });
+
+  /** OB-4 (2026-11-14): what Continue leads to, after the five and inside the scroll. */
+  it('says what is up next, after the five rows and inside the scroll', async () => {
+    const view = await arrive();
+    await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
+
+    const block = view.getByTestId('first-five-up-next');
+    expect(within(block).getByRole('header', { name: 'Up next' })).toBeTruthy();
+    expect(
+      within(block).getByText(
+        'Bring your history, find your friends, then see picks made for your taste.',
+      ),
+    ).toBeTruthy();
+    // A statement, not a fork: nothing in it to press.
+    expect(within(block).queryAllByRole('button')).toHaveLength(0);
+    expect(StyleSheet.flatten(block.props.style)).toMatchObject({
+      backgroundColor: theme.surface.sunken,
+      borderRadius: theme.radius.card,
+      padding: theme.layout.cardPadding,
+      marginHorizontal: theme.layout.gutter,
+      marginTop: theme.space[3],
+      gap: theme.space[1],
+    });
+
+    // Scrolls with the rows; the footer is outside the scroll and holds the two actions.
+    const ancestors: string[] = [];
+    for (let node = block.parent; node; node = node.parent) ancestors.push(String(node.type));
+    expect(ancestors.some((type) => /ScrollView/.test(type))).toBe(true);
+    const footer = view.getByTestId('onboarding-footer');
+    expect(within(footer).queryByTestId('first-five-up-next')).toBeNull();
+    expect(within(footer).getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(within(footer).getByRole('button', { name: 'Share your First Five' })).toBeTruthy();
+  });
+
+  it('keeps Share unavailable until all five rows have loaded', async () => {
+    // Four already placed; the fifth lands while the refetch that would draw it is parked,
+    // so the payoff opens on the run's count of five with four rows in hand.
+    alreadyRanked(4);
+    starterGrid(['film-1']);
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    holdReadsOf('rankings');
+    await chooseBucket(view);
+    await closeReveal(view);
+
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    const share = () => view.getByRole('button', { name: 'Share your First Five' });
+    expect(share().props.accessibilityState.disabled).toBe(true);
+    expect(view.getByTestId('first-five-up-next')).toBeTruthy();
+
+    await act(async () => releaseReadsOf('rankings'));
+    await waitFor(() => expect(share().props.accessibilityState.disabled).toBe(false));
   });
 
   it('continues into the optional Letterboxd step rather than into the app', async () => {

@@ -1086,8 +1086,8 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             Your First Five
           </Text>
           <Text variant="body" tone="secondary">
-            This is just the start. As you rank more, your favorites get clearer and bingd
-            gets a better read on your taste.
+            Your scores move as your list grows. The more you rank, the better bingd knows
+            your taste.
           </Text>
         </View>
 
@@ -1117,6 +1117,32 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             passive pointer went unnoticed, so the question is now its own optional step,
             which Continue opens: `app/onboarding/letterboxd.tsx`. The payoff keeps its one
             action and nothing beneath the five competes with them. */}
+
+        {/**
+         * **Up next** (Onboarding 2.0, OB-4, 2026-11-14): what Continue leads to, said once,
+         * so the five are a start rather than an ending. A statement and not a card to
+         * act on — no link, no recommendations teaser — so it does not compete with the
+         * footer's one primary. Inside the scroll, after the fifth row, so the rows and
+         * this block scroll and the fixed footer never covers either (the 2026-11-02 "every
+         * title shows" rule).
+         *
+         * The section-header token in Maroon rather than `SectionHeader`, which brings its
+         * own gutter and a 44pt row and would double-pad inside the card's padding.
+         */}
+        <View style={styles.upNext} testID="first-five-up-next">
+          <Text
+            variant="sectionHeader"
+            tone="action"
+            accessibilityRole="header"
+            // The token uppercases; the label keeps a screen reader from spelling it out.
+            accessibilityLabel="Up next"
+          >
+            Up next
+          </Text>
+          <Text variant="body">
+            Bring your history, find your friends, then see picks made for your taste.
+          </Text>
+        </View>
       </ScrollView>
 
       <OnboardingFooter>
@@ -1185,6 +1211,14 @@ const styles = StyleSheet.create({
   results: { paddingBottom: theme.space[8] },
   payoff: { paddingBottom: theme.space[2] },
   payoffActions: { flexDirection: 'row', gap: theme.space[2] },
+  upNext: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.card,
+    padding: theme.layout.cardPadding,
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[3],
+    gap: theme.space[1],
+  },
   payoffAction: { flex: 1 },
   rankRow: {
     flexDirection: 'row',
