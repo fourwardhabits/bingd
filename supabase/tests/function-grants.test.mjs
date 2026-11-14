@@ -867,6 +867,18 @@ const ALLOWED = {
   // the caller's own fresh season placement (resolved by `auth.uid()`, so another user's
   // id answers as a missing one), idempotently, and changes no ranking or Feed row.
   'keep_show(uuid)': ['authenticated'],
+
+  // 20261121000100, Sent to You read state (FU1113-E). `mark_recommendations_seen` writes
+  // `seen_at` on the caller's own delivered rows only (`recipient_id = auth.uid()`), at most
+  // 200 ids, with an operation id; somebody else's ids are silently not counted, so it is
+  // neither an oracle nor a way to write about anybody else. `recommendation_seen_at` is the
+  // recipient-only read of that column, which is granted to nobody so the sender cannot use
+  // it as a read receipt; it answers null for any row that is not the caller's and delivered.
+  'mark_recommendations_seen(uuid,uuid[])': ['authenticated'],
+  'recommendation_seen_at(uuid)': ['authenticated'],
+  // The same recipient-only read for `opened_at`, whose column grant 20261121000100 revokes
+  // (FU1113-E O2): a sender could otherwise select it as a read receipt.
+  'recommendation_opened_at(uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {
