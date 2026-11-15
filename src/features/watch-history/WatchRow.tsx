@@ -73,6 +73,14 @@ export type WatchRowProps = {
    * to correct, or while another card's editor is open, and then it is not drawn.
    */
   onEditRanking?: () => void;
+  /**
+   * **Share as a review** (B5): offers THIS watch's saved note to the title's review
+   * composer, as a draft. The caller asks before it replaces an existing review and opens
+   * the composer; nothing is written by this tap, and the watch note is never touched.
+   * Drawn only on a card with a saved note, beside Edit watch and Rerank; absent while any
+   * card's editor is open.
+   */
+  onShareNote?: () => void;
   busy?: boolean;
 };
 
@@ -105,6 +113,10 @@ export type WatchRowProps = {
  *   Rerank              the *current* ranking, through comparisons. No watch is created,
  *                       none is removed, and the scores frozen on earlier watches stay
  *                       frozen (`scoresByWatch`).
+ *
+ * And, on a card with a note, *Share as a review* (B5): not a fourth way to change this
+ * watch but a door to the title's own review composer, opened on this note as a draft.
+ * It writes nothing itself; the watch's note stays private on the watch.
  */
 export function WatchRow({
   event,
@@ -121,6 +133,7 @@ export function WatchRow({
   onSave,
   onRemove,
   onEditRanking,
+  onShareNote,
   busy = false,
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
@@ -187,6 +200,26 @@ export function WatchRow({
           onPress={onEditRanking}
           // A write this screen started (a removal, a save) may still be in flight:
           // the ranking does not open over it (independent review).
+          disabledReason={busy ? 'Saving' : undefined}
+        />
+      ) : null}
+      {/**
+       * **Share as a review, on the action line** (B5). The third of the card's acts, in
+       * the same quiet form, because it is an act on this watch like the other two — and
+       * here rather than inside the editor, because what it shares is the note the card
+       * shows, which is the *saved* one: an editor's unsaved draft is never offered, and the
+       * editor's own header (Rerank · Cancel · Save) stays as it is. Only on a card that has
+       * a note — so it is always on the full-width line under the note (B4), never beside
+       * the score.
+       */}
+      {note && onShareNote ? (
+        <CardAction
+          testID={`watch-share-${event.id}`}
+          icon="people-outline"
+          label="Share as a review"
+          accessibilityLabel={`Share this watch’s note as a review, ${dateLabel}`}
+          accessibilityHint="Opens your review with this note. Nothing is shared until you choose to."
+          onPress={onShareNote}
           disabledReason={busy ? 'Saving' : undefined}
         />
       ) : null}

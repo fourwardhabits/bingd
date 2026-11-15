@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -124,6 +124,22 @@ export default function WatchHistoryScreen() {
   const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const canEditRanking = Boolean(logState.data?.ranked && loggable.data);
+  /**
+   * **Share as a review: a watch's note, offered to the title's one composer** (B5).
+   *
+   * The composer is the log sheet's Note — the very one the title page's *Write a review*
+   * opens, already mounted here for Rerank — so nothing about writing a review is built on
+   * this screen. What this holds is the draft it opens on: the card's saved note, set only
+   * by the card's *Share as a review* and cleared the moment the sheet closes or hands off
+   * to a ranking, so a later Rerank never reopens on it.
+   *
+   * The sheet holds the draft unwritten until its own *Share as a review* (`seedNote`), and
+   * then saves it through `save_note`. `set_watch_details` is not called: the watch's note
+   * stays on the watch, private, exactly as the card shows it.
+   */
+  const [reviewSeed, setReviewSeed] = useState<string | null>(null);
+  // The stored note must be known before it can be asked about, so the act waits for it.
+  const canShareNote = Boolean(loggable.data && logState.data);
 
   /**
    * Memoised rather than defaulted inline: `?? []` builds a NEW array every render, so
@@ -196,8 +212,49 @@ export default function WatchHistoryScreen() {
     setRating(loggable.data);
   };
 
+  /**
+   * Opens the composer on a watch's note — after asking, when it would replace something.
+   *
+   * **A title note that already exists is never overwritten without being asked**, in the
+   * app's own confirm (a native alert, as Rerank's unsaved-edit question and signing out
+   * ask). *Replace* opens the composer with the watch's note in place of the stored one —
+   * still unwritten, so the stored note changes only when the reader then shares. *Cancel*
+   * opens nothing: the reader asked to share this note, and a composer showing the other
+   * one would be a different request; their review is untouched either way, and *Write a
+   * review* on the title page is where it is edited. A stored note that already reads the
+   * same is not a replacement, so it is not asked about. The question names what is stored
+   * — a review when it is shared, a note when it is private — so it says what would go.
+   */
+  const shareNote = (text: string) => {
+    const title = loggable.data;
+    const stored = logState.data;
+    if (!title || !stored) return;
+    const open = () => {
+      setEditingId(null);
+      setError(null);
+      setPlacement(null);
+      setReviewSeed(text);
+      setRating(title);
+    };
+    const existing = stored.note.trim();
+    if (!existing || existing === text.trim()) {
+      open();
+      return;
+    }
+    const noun = stored.noteVisibility === 'public' ? 'review' : 'note';
+    Alert.alert(
+      `Replace your ${noun}?`,
+      `This title already has your ${noun}. Sharing this watch’s note will replace it. Nothing changes until you share.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Replace', style: 'destructive', onPress: open },
+      ],
+    );
+  };
+
   const endRating = () => {
     setRating(null);
+    setReviewSeed(null);
     setPlacement(null);
     reconcile();
     celebrate();
@@ -462,6 +519,13 @@ export default function WatchHistoryScreen() {
                     ? editRanking
                     : undefined
                 }
+                // Like Rerank, not while another card's editor is open: opening the sheet
+                // over it would close that editor and drop its draft without asking.
+                onShareNote={
+                  canShareNote && editingId === null && details?.note
+                    ? () => shareNote(details.note as string)
+                    : undefined
+                }
                 busy={busy}
               />
             </View>
@@ -474,6 +538,7 @@ export default function WatchHistoryScreen() {
         surface="title"
         postRank={placement}
         inWatchHistory
+        seedNote={reviewSeed}
         onClose={endRating}
         onDone={endRating}
         onRank={(bucket, mode) => {
@@ -487,6 +552,7 @@ export default function WatchHistoryScreen() {
             mode,
           });
           setRankedTitle(rating);
+          setReviewSeed(null);
           setPlacement(null);
           setRating(null);
         }}
