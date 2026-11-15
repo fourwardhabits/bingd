@@ -7,7 +7,14 @@ import { theme } from '@/ui/tokens';
 import { buildImdbOutcomes } from './outcomes';
 import { Note, plural } from './PreviewSummary';
 import type { ImportProvider } from './providers';
-import { importedTitles, resultHeadline, resultModel, type ResultModel } from './result-model';
+import {
+  alreadyInBingd,
+  importedTitles,
+  resultHeadline,
+  resultModel,
+  resultSummary,
+  type ResultModel,
+} from './result-model';
 import { sessionImportFor } from './session-outcomes';
 import { UnmatchedDisclosure } from './UnmatchedDisclosure';
 import { useUnresolvedRows } from './use-imdb-outcomes';
@@ -29,11 +36,11 @@ export const failedNote = (failed: number) =>
  * How a finished import went, one card and a way on (IMP1113-UI §D).
  *
  * **Every number is `resultModel`'s**, which is the server's counts renamed; nothing here
- * adds a bucket into another except where the model says so (*Imported movies* is this
- * run's additions and an earlier import's, both unranked, both the import's).
+ * adds a bucket into another except where the model says so (*Already in bingd* is what
+ * was in the collection before this run, by any route — founder QA, 2026-11-16).
  *
- *   Already in bingd   `kept`: ranked or logged here, left exactly as it was
- *   Imported movies    `watched + already`, with *N from an earlier import* under it
+ *   Newly imported     `watched`: what this run added, and nothing else
+ *   Already in bingd   `kept + already`: ranked or logged here, or an earlier import's
  *   Added to watchlist Letterboxd only
  *   Diary entries      Letterboxd only; held, not added
  *   Unmatched          expandable to the titles (`UnmatchedDisclosure`)
@@ -87,26 +94,34 @@ export function CompletionSummary({
     [counts, session, unresolved],
   );
 
-  const imported = importedTitles(model);
-  const previously = model.previouslyImported ?? 0;
+  // Rank titles is offered for every unranked title the import owns, this run's and an
+  // earlier run's: both are in the collection and both still need a ranking. The rows above
+  // say which of them are new; this only decides whether there is anything to rank.
+  const rankable = importedTitles(model);
+  const present = alreadyInBingd(model);
 
   return (
     <View style={styles.block} testID="import-result">
       <Text variant="display" accessibilityRole="header">
         {resultHeadline(model, provider)}
       </Text>
+      <Text variant="body" tone="secondary" testID="result-summary">
+        {resultSummary(model)}
+      </Text>
 
+      {/**
+       * **Three buckets that never overlap** (founder QA, 2026-11-16): what this run added,
+       * what was in bingd before it (an earlier import's titles included), and what did not
+       * match. A repeated file reads 0 new, N already in bingd — never "imported" again.
+       * Newly imported is drawn at zero whenever something else is, so a repeat import
+       * says plainly that nothing was added rather than leaving the row out.
+       */}
       <ResultCard>
-        {model.alreadyPresent ? (
-          <Row label="Already in bingd" value={model.alreadyPresent} testID="result-present" />
+        {model.newlyAdded !== undefined && (model.newlyAdded > 0 || present > 0) ? (
+          <Row label="Newly imported" value={model.newlyAdded} testID="result-imported" />
         ) : null}
-        {imported > 0 ? (
-          <Row
-            label="Imported movies"
-            value={imported}
-            sublabel={previously > 0 ? `${previously} from an earlier import` : undefined}
-            testID="result-imported"
-          />
+        {present > 0 ? (
+          <Row label="Already in bingd" value={present} testID="result-present" />
         ) : null}
         {model.watchlistAdded ? (
           <Row
@@ -131,7 +146,7 @@ export function CompletionSummary({
 
       {onContinue ? (
         <Button label="Continue" onPress={onContinue} />
-      ) : imported > 0 ? (
+      ) : rankable > 0 ? (
         <ActionPair
           secondary={{ label: 'Done', onPress: onDone, testID: 'result-done' }}
           primary={{

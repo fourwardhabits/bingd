@@ -152,7 +152,7 @@ const importSynthetic = async (counts: Record<string, number> = COUNTS) => {
   await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
   await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
   await fireEvent.press(view.getByRole('button', { name: 'Import' }));
-  await waitFor(() => expect(view.getByText(/^Your IMDb history is/)).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
   return view;
 };
 
@@ -175,7 +175,7 @@ const restored = async (counts: Record<string, number> = COUNTS) => {
     <ImportScreen surface="settings" chooser jobId={JOB} />,
   );
   await waitFor(() =>
-    expect(view.getByText(/Your IMDb history|Nothing new came in/)).toBeTruthy(),
+    expect(view.getByText('Import complete')).toBeTruthy(),
   );
   return view;
 };
@@ -266,7 +266,7 @@ describe('the import just sent: Unmatched by title', () => {
     ).toBeTruthy();
     expect(view.getByText(/1 TV episode didn’t come in/)).toBeTruthy();
     expect(view.getByText(/1 title didn’t come in because/)).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 5')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 5')).toBeTruthy();
     await openUnmatched(view);
     for (const name of [
       'Harbour Lights (2011)',
@@ -294,9 +294,9 @@ describe('the import just sent: Unmatched by title', () => {
       unsupported_episode: 1,
     });
     await waitFor(() =>
-      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+      expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy(),
     );
-    expect(view.getByLabelText('Imported movies, 7. 7 from an earlier import')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 0')).toBeTruthy();
     expect(view.queryByRole('button', { name: /^Unmatched/ })).toBeNull();
     expect(mockRowReads).toEqual([]);
   });
@@ -394,7 +394,7 @@ describe('a small screen', () => {
     await openUnmatched(view);
     const texts = [
       view.getByText('12345'),
-      view.getByText('Imported movies'),
+      view.getByText('Newly imported'),
       view.getByText('Unmatched'),
       view.getByText(/A Very Long Title/),
     ];
