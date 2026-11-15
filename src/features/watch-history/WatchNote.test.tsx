@@ -529,8 +529,14 @@ describe('A11: the card reads date, companions, score, note, then its acts', () 
   it('puts the date top-left with the companions directly under it, and the score top-right', async () => {
     const view = await loaded();
     const main = view.getByTestId('watch-main-w3');
-    const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
-    expect(lead?.props.testID).toBe('watch-lead-w3');
+    const [left, right] = main.children as unknown as {
+      props: { testID?: string };
+      children: { props: { testID?: string } }[];
+    }[];
+    // The left column holds the date block first (B4: and the acts after it, when no note
+    // comes between); the score is alone in the right one.
+    expect(left?.props.testID).toBe('watch-lead-column-w3');
+    expect(left?.children[0]?.props.testID).toBe('watch-lead-w3');
     expect(right?.props.testID).toBe('watch-score-w3');
     // Top-aligned, not centred on the block.
     expect(StyleSheet.flatten(main.props.style).alignItems).toBe('flex-start');

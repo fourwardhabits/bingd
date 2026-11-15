@@ -142,6 +142,57 @@ export function WatchRow({
     .filter(Boolean)
     .join(' · ');
 
+  /**
+   * **Where the action line sits: beside the score when nothing comes between** (UI
+   * refinement B4, 2026-11-15).
+   *
+   * The card's top row is the date block and the score circle, top-aligned, so the row is
+   * as tall as the taller of the two. The circle is 40pt (`scoreBadge.sm`, more at large
+   * text) and a date alone is one 22pt `headline` line, so on a watch with no companion
+   * and no provenance the row was the circle's height and the action line, below the row,
+   * started 18pt under the date's last line: empty space that only a companion line
+   * (22 + 4 + 18 = 44pt, taller than the circle) ever filled. Nothing reserved it by
+   * name — it was the circle's height standing in for the date block's.
+   *
+   * So when the next thing after the date block is the action line — the card has no note
+   * and is not being edited — the action line joins the date block's column, beside the
+   * circle: it follows the date or the last metadata line directly, and the card is as
+   * tall as its content or the circle, whichever is taller. The order is unchanged (date,
+   * companions, provenance, acts) and Edit watch and Rerank keep their 44pt targets and
+   * wrap inside the column, never under the circle.
+   *
+   * **With a note the line stays where it was**, under the note at the card's full width
+   * (FU1113-A): the note is prose and keeps the card's whole measure, so it starts below
+   * the circle, and the acts follow it. The editor, too, keeps the card's full width.
+   */
+  const actionsBesideScore = !note && !editing;
+  const actions = (
+    <View
+      style={[styles.actionLine, !actionsBesideScore && styles.actionLineInset]}
+      testID={`watch-actions-${event.id}`}
+    >
+      <CardAction
+        testID={`watch-edit-${event.id}`}
+        icon={EDIT_WATCH_ICON}
+        label="Edit watch"
+        accessibilityLabel={`Edit this watch, ${dateLabel}`}
+        onPress={onEdit}
+      />
+      {onEditRanking ? (
+        <CardAction
+          testID={`watch-rerank-${event.id}`}
+          icon={RERANK_ICON}
+          label={RERANK_LABEL}
+          accessibilityHint="Compares this title again. Records no new watch."
+          onPress={onEditRanking}
+          // A write this screen started (a removal, a save) may still be in flight:
+          // the ranking does not open over it (independent review).
+          disabledReason={busy ? 'Saving' : undefined}
+        />
+      ) : null}
+    </View>
+  );
+
   return (
     /**
      * **Each watch is a card** (UI wave, 2026-11-12): `surface.raised` on Paper,
@@ -153,22 +204,29 @@ export function WatchRow({
        * `headline`; who it was watched with sits directly under it, then where the date
        * came from, both quieter. The score circle is top-aligned with the date row, and
        * nothing in this row changes when the editor opens, so it never moves.
+       *
+       * The date block is sized by its own lines — no height, no minimum, and no line
+       * drawn for a companion who is not there — inside a column that takes what the
+       * score leaves (B4).
        */}
       <View style={styles.main} testID={`watch-main-${event.id}`}>
-        <View style={styles.lead} testID={`watch-lead-${event.id}`}>
-          <Text variant="headline" style={styles.date} testID={`watch-date-${event.id}`}>
-            {primary}
-          </Text>
-          {withLine ? (
-            <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
-              {withLine}
+        <View style={styles.leadColumn} testID={`watch-lead-column-${event.id}`}>
+          <View style={styles.lead} testID={`watch-lead-${event.id}`}>
+            <Text variant="headline" style={styles.date} testID={`watch-date-${event.id}`}>
+              {primary}
             </Text>
-          ) : null}
-          {provenance ? (
-            <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
-              {provenance}
-            </Text>
-          ) : null}
+            {withLine ? (
+              <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
+                {withLine}
+              </Text>
+            ) : null}
+            {provenance ? (
+              <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
+                {provenance}
+              </Text>
+            ) : null}
+          </View>
+          {actionsBesideScore ? actions : null}
         </View>
 
         {score ? (
@@ -219,34 +277,15 @@ export function WatchRow({
           onRemove={onRemove}
           onEditRanking={onEditRanking}
         />
-      ) : (
-        /**
-         * **Edit watch and Rerank, with the watch they belong to** (founder spec §5). Both
-         * are quiet Maroon text actions with their glyphs, each a full 44pt target, on one
-         * line that wraps at large text rather than running past the card.
-         */
-        <View style={styles.actionLine} testID={`watch-actions-${event.id}`}>
-          <CardAction
-            testID={`watch-edit-${event.id}`}
-            icon={EDIT_WATCH_ICON}
-            label="Edit watch"
-            accessibilityLabel={`Edit this watch, ${dateLabel}`}
-            onPress={onEdit}
-          />
-          {onEditRanking ? (
-            <CardAction
-              testID={`watch-rerank-${event.id}`}
-              icon={RERANK_ICON}
-              label={RERANK_LABEL}
-              accessibilityHint="Compares this title again. Records no new watch."
-              onPress={onEditRanking}
-              // A write this screen started (a removal, a save) may still be in flight:
-              // the ranking does not open over it (independent review).
-              disabledReason={busy ? 'Saving' : undefined}
-            />
-          ) : null}
-        </View>
-      )}
+      ) : null}
+
+      {/**
+       * **Edit watch and Rerank, with the watch they belong to** (founder spec §5). Both
+       * are quiet Maroon text actions with their glyphs, each a full 44pt target, on one
+       * line that wraps at large text rather than running past the card. Here, under the
+       * note, only when the card has one; otherwise beside the score, above (B4).
+       */}
+      {editing || actionsBesideScore ? null : actions}
     </View>
   );
 }
@@ -586,10 +625,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
   },
   /**
-   * Takes what the score leaves, so a long date wraps here rather than under the circle.
-   * The metadata lines sit `space[1]` apart at most, so they read as one block with the date.
+   * Takes what the score leaves, so a long date wraps here rather than under the circle —
+   * and so does the action line when it sits here (B4). Grows across, never down: in the
+   * row only its width is flexible, and its height is its content's.
    */
-  lead: { flex: 1, gap: theme.space[1] },
+  leadColumn: { flex: 1, minWidth: 0 },
+  /**
+   * The date block: the date and the metadata under it, sized by its own lines. The lines
+   * sit `space[1]` apart at most, so they read as one block with the date.
+   */
+  lead: { gap: theme.space[1] },
   // The anchor: the card's one line in display weight.
   date: { fontFamily: fontFamily.sansSemibold },
   // The note, below the metadata with modest air above it.
@@ -604,10 +649,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     columnGap: theme.space[4],
-    paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[1],
     paddingBottom: theme.space[1],
   },
+  // Under a note the line is the card's full width, so it takes the card's own gutter; in
+  // the date block's column the top row's gutter already applies.
+  actionLineInset: { paddingHorizontal: theme.layout.gutter },
   // Glyph and word, the word centred in a full 44pt target.
   cardAction: {
     flexDirection: 'row',

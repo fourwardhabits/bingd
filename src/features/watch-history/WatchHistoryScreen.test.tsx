@@ -653,8 +653,14 @@ describe('a collapsed row', () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     const main = view.getByTestId('watch-main-w1');
-    const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
-    expect(lead?.props.testID).toBe('watch-lead-w1');
+    const [left, right] = main.children as unknown as {
+      props: { testID?: string };
+      children: { props: { testID?: string } }[];
+    }[];
+    // The left column holds the date block first (B4: and the acts after it, when no note
+    // comes between); the score is alone in the right one.
+    expect(left?.props.testID).toBe('watch-lead-column-w1');
+    expect(left?.children[0]?.props.testID).toBe('watch-lead-w1');
     expect(right?.props.testID).toBe('watch-score-w1');
     expect(StyleSheet.flatten(main.props.style).alignItems).toBe('flex-start');
     // The date is the block's first line, in the headline style; Edit is not in it.
