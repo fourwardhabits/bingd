@@ -355,8 +355,13 @@ describe('crossing between the two categories', () => {
     await choose(view, 'Recommended TV');
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
-    // Still the list rather than the wall, which is what the chip being on means.
-    expect(view.getByText('Heat (1995)')).toBeTruthy();
+    // Still the list rather than the wall, which is what the chip being on means. The list
+    // follows the medium (founder QA, 2026-11-15), so a film is on Movies' side of it.
+    await waitFor(() => expect(view.getByText('No TV sent your way yet')).toBeTruthy());
+    expect(view.queryByText('Heat (1995)')).toBeNull();
+
+    await choose(view, 'Recommended Movies');
+    await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
   });
 });
 
