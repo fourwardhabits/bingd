@@ -212,6 +212,42 @@ describe('publishing on its own', () => {
     assert.equal(all[1].payload.count, 1);
   });
 
+  it('a sitting that began before the group, however recently it ended, publishes on its own', async () => {
+    // Codex, PR 311: a sitting left open since yesterday must not join today's group.
+    const early = await uuid();
+    await note(early, await rankedMovie('Left open'));
+    await t.sql(
+      `update feed_ranking_titles set placed_at = placed_at - interval '1 day'
+        where event_id = (select id from feed_events
+                           where actor_id = $1 and type = 'ranking_batch_draft')`,
+      [user],
+    );
+    await sitting([await rankedMovie('Today')]);
+    const ended = await finalize(early);
+
+    assert.notEqual(ended.joined, true);
+    const all = await posts();
+    assert.equal(all.filter((row) => row.type === 'ranking_batch').length, 2);
+  });
+
+  it('two sittings ended out of start order are two posts', async () => {
+    const first = await uuid();
+    await note(first, await rankedMovie('Started first'));
+    await t.sql(
+      `update feed_ranking_titles set placed_at = placed_at - interval '2 minutes'
+        where event_id = (select id from feed_events
+                           where actor_id = $1 and type = 'ranking_batch_draft')`,
+      [user],
+    );
+    const second = await uuid();
+    await note(second, await rankedMovie('Started second'));
+
+    await finalize(second); // publishes, starting the group
+    const result = await finalize(first); // began before that group: its own post
+    assert.notEqual(result.joined, true);
+    assert.equal((await posts()).length, 2);
+  });
+
   it('never mixes ladders: a season sitting does not join a movie post', async () => {
     await sitting([await rankedMovie('Film')]);
     await sitting([await rankedSeason('Show')]);

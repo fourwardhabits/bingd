@@ -11,8 +11,11 @@
 --
 -- Now, when a sitting ends, `rank_batch_finalize` looks for the actor's latest published
 -- grouped ranking post **on the same ladder** whose window is still open, and if the sitting
--- **began** inside that window, the sitting's titles join that post instead of publishing a
--- second one. Otherwise it publishes exactly as before.
+-- **began** inside that window (at or after the group's start, before it closes), the
+-- sitting's titles join that post instead of publishing a second one. Otherwise it publishes
+-- exactly as before. Two sittings ended out of start order (two devices, the earlier one
+-- ending second) are therefore two posts: the earlier one began before the group it would
+-- join, and joining it would stretch that group's window backwards.
 --
 --   * **The window** is `feed.ranking_group_minutes` (30) from the group's own first
 --     placement, recorded at publication as `payload.started_at`. Fixed, not sliding; no
@@ -83,11 +86,16 @@ begin
   -- sittings at once must not both publish a new post for the same window.
   perform pg_advisory_xact_lock(hashtextextended('ranking_story:' || auth.uid()::text, 0));
 
+  -- Locked (Codex, PR 311): a comment or reaction being written against the draft holds a
+  -- key-share lock on it until it commits, so this waits for it and the conversation check
+  -- below sees it; and while this holds the row, no new one can be written and then lost
+  -- when a joined draft is deleted.
   select id into v_event
     from feed_events
    where actor_id = auth.uid()
      and type = 'ranking_batch_draft'
-     and payload ->> 'sitting' = p_sitting::text;
+     and payload ->> 'sitting' = p_sitting::text
+     for update;
 
   if v_event is null then
     return _record_operation_result(p_operation_id, jsonb_build_object('status', 'empty'));
@@ -128,6 +136,9 @@ begin
        and e.type = 'ranking_batch'
        and e.payload ? 'started_at'
        and mi.kind = v_kind
+       -- Inside the window from both sides (Codex, PR 311): a sitting that began before the
+       -- group did belongs to no part of it, however recently it ended.
+       and v_started >= (e.payload ->> 'started_at')::timestamptz
        and v_started < (e.payload ->> 'started_at')::timestamptz + v_window
      order by e.causal_at desc, e.id
      limit 1

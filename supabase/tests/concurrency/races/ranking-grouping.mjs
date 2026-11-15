@@ -13,6 +13,10 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  *
  * **RG2. The second finaliser waits on that lock, demonstrated**, rather than happening to
  * run second.
+ *
+ * **RG3. A comment being written on a draft is never lost to a join** (Codex, PR 311). The
+ * finaliser locks the draft row, so it waits for the uncommitted comment, sees it, and
+ * publishes the draft on its own rather than deleting it into the open group.
  */
 export default function suite() {
   const rc = raceContext();
@@ -75,7 +79,7 @@ export default function suite() {
         )
       )[0].k;
 
-    it('RG1: two devices ending two sittings at once leave one post with both', async () => {
+    it('RG1: two devices ending two sittings at once both join the open post', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
       const t1 = await db.session('phone');
@@ -83,6 +87,10 @@ export default function suite() {
       try {
         await t1.actAs(me);
         await t2.actAs(me);
+        // The open group both sittings began inside, so the outcome does not depend on
+        // which device ends first (a sitting that began before a group never joins it).
+        const s0 = await drafted(t1, me);
+        await call(t1, `rank_batch_finalize($1, $2)`, [await newOp(db), s0]);
         const s1 = await drafted(t1, me);
         const s2 = await drafted(t2, me);
 
@@ -92,10 +100,12 @@ export default function suite() {
         ]);
         assert.deepEqual([r1.status, r2.status], ['ok', 'ok']);
 
+        assert.deepEqual([r1.joined, r2.joined], [true, true]);
+
         const rows = await posts(me);
         assert.equal(rows.length, 1, 'RG1: one post, not one per device');
         assert.equal(rows[0].type, 'ranking_batch');
-        assert.equal(rows[0].payload.count, 2);
+        assert.equal(rows[0].payload.count, 3);
       } finally {
         await t1.end();
         await t2.end();
@@ -125,6 +135,53 @@ export default function suite() {
         const rows = await posts(me);
         assert.equal(rows.length, 1);
         assert.equal(rows[0].payload.count, 2);
+      } finally {
+        await t1.rollback().catch(() => {});
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+      }
+    });
+
+    it('RG3: a comment written on a draft as it ends is kept: the draft publishes on its own', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const friend = await fx.createUser();
+      const t1 = await db.session('commenter');
+      const t2 = await db.session('finaliser');
+      try {
+        await t2.actAs(me);
+        const s0 = await drafted(t2, me);
+        await call(t2, `rank_batch_finalize($1, $2)`, [await newOp(db), s0]);
+        const sitting = await newOp(db);
+        const noted = await call(t2, `rank_batch_note($1, $2, $3)`, [
+          await newOp(db),
+          sitting,
+          await ranked(me),
+        ]);
+
+        await t1.actAs(friend);
+        await t1.begin();
+        await call(t1, `add_comment($1, $2, 'mid-sitting', false)`, [
+          await newOp(db),
+          noted.event_id,
+        ]);
+
+        const p2 = fire(t2, `rank_batch_finalize($1, $2)`, [await newOp(db), sitting]);
+        await t2.awaitBlocked({ on: 'transactionid' });
+        await t1.commit();
+        const r2 = (await p2).rows[0].r;
+
+        assert.equal(r2.status, 'ok');
+        assert.notEqual(r2.joined, true, 'RG3: a draft with a conversation is not merged away');
+        const [{ n }] = await db.rows(
+          `select count(*)::int as n from comments where feed_event_id = $1`,
+          [noted.event_id],
+        );
+        assert.equal(n, 1, 'and its comment survives');
+        const [{ type }] = await db.rows(`select type from feed_events where id = $1`, [
+          noted.event_id,
+        ]);
+        assert.equal(type, 'ranking_batch');
       } finally {
         await t1.rollback().catch(() => {});
         await t1.end().catch(() => {});
