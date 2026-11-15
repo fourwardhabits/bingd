@@ -341,12 +341,18 @@ describe('matching an IMDb row', () => {
     assert.equal(await collectionRow(cy, film), undefined);
   });
 
-  it('refuses a mapping whose title is nothing like the row', async () => {
+  // 20261118000100. This used to read "refuses a mapping whose title is nothing like the
+  // row". A catalogue title carries a tt id only because TMDB's own /find named it for that
+  // id, so a display-title difference is not a contradiction (founder spec §3: a verified
+  // external id outweighs display-title equality). Year and kind still veto; see the
+  // neighbouring tests and import-imdb-verified-id.test.mjs.
+  it('places a TMDB-confirmed mapping even when the display titles differ', async () => {
     const id = tt();
-    const film = await movie('Cats', 2019, { imdbId: id });
-    const counts = await importFile(cy, [row('The Godfather', 2019, id)]);
-    assert.equal(counts.unmatched, 1);
-    assert.equal(await collectionRow(cy, film), undefined);
+    const film = await movie('Confirmed Display Title', 2019, { imdbId: id });
+    const counts = await importFile(cy, [row('A Regional Release Title', 2019, id)]);
+    assert.equal(counts.watched, 1);
+    assert.equal(counts.unmatched, 0);
+    assert.ok(await collectionRow(cy, film));
   });
 
   it('never reclassifies: an IMDb Movie whose id names a TV series stays unmatched', async () => {

@@ -269,3 +269,58 @@ test('an invitation still activates at five when the bar is not configured', asy
     await t.close();
   }
 });
+
+/**
+ * 20261119000100. `score.contributor_min_rankings` is the per-contributor threshold for
+ * bingd community scores (founder spec t168u §4): ten rankings in a category before a
+ * user's rankings count toward that category's community scores. It is not
+ * `score.community_min_ratings`, the per-title display threshold, which stays 1.
+ */
+test('the community contributor threshold ships at ten, beside a display threshold of one', async () => {
+  const t = await createTestDb();
+  try {
+    const { rows } = await t.sql(
+      `select key, value from app_config
+        where key in ('score.contributor_min_rankings', 'score.community_min_ratings')
+        order by key`,
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.key, r.value]),
+      [
+        ['score.community_min_ratings', 1],
+        ['score.contributor_min_rankings', 10],
+      ],
+    );
+  } finally {
+    await t.close();
+  }
+});
+
+test('the contributor threshold is still ten when it is not configured', async () => {
+  const t = await createTestDb();
+  try {
+    await t.sql(`delete from app_config where key = 'score.contributor_min_rankings'`);
+
+    const rater = await t.createUser({ username: 'fallback_contributor' });
+    await t.actAs(rater);
+    let seq = 95000;
+    const subject = await t.createMovie('fallback_contributor_subject', seq++);
+    await t.rankToCompletion(subject, 'loved', async (pivot) => pivot);
+    for (let i = 0; i < 8; i += 1) {
+      const film = await t.createMovie(`fallback_contributor_${i}`, seq++);
+      await t.rankToCompletion(film, 'not_for_me', async (pivot) => pivot);
+    }
+    const read = async () =>
+      (await t.sql(`select * from community_score($1)`, [subject])).rows[0].rating_count;
+
+    // With the row gone a scalar read of it is null; a coalesce outside the `from` is what
+    // keeps the default. Nine rankings: not yet a contributor.
+    assert.equal(await read(), 0, 'nine is below the documented default of ten');
+
+    const tenth = await t.createMovie('fallback_contributor_tenth', seq++);
+    await t.rankToCompletion(tenth, 'not_for_me', async (pivot) => pivot);
+    assert.equal(await read(), 1, 'ten is the documented default');
+  } finally {
+    await t.close();
+  }
+});

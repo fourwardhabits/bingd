@@ -520,8 +520,11 @@ export default function ListScreen() {
   // -------------------------------------------------------------------------
 
   if (list.isPending) {
+    // No top edge: the root layout's native-stack header is still showing here (only the
+    // loaded list hides it, by drawing its own bar over the hero), and it has already consumed
+    // the status-bar inset. The Settings root's fix (founder QA, 2026-11-12).
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <View style={styles.loading}>
           <SkeletonRow count={5} />
         </View>
@@ -530,8 +533,9 @@ export default function ListScreen() {
   }
 
   if (!view) {
+    // No top edge, as above: the stack header is still showing.
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <EmptyState
           kind="nothingYet"
           title="List unavailable"

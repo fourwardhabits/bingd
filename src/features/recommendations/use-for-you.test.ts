@@ -112,6 +112,8 @@ describe('choosing anchors for television', () => {
       title: 'Show show-a',
       score: expect.any(Number),
       genres: ['Drama'],
+      // A season's language is its show's, which Engine V2's language coverage reads.
+      language: 'en',
     });
   });
 

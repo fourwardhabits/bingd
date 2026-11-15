@@ -1,5 +1,6 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -31,10 +32,21 @@ const mockPush = jest.fn();
 const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
+      // A backend without 20261121000400, so Sent to you reads `recommendations_to_me`.
+      if (name === 'recommendations_to_me_page') {
+        return Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'not found' } });
+      }
       return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
     },
     from: () => {
@@ -195,10 +207,13 @@ describe('the one selector', () => {
 
     expect(view.queryByText('Titles')).toBeNull();
     expect(view.queryByLabelText('What to look at')).toBeNull();
-    // The only radios on the screen are the Movies | TV switch's two.
+    // The only radios on the screen are the Movies | TV switch's two, and the Poster / List
+    // view toggle's two (FU1113-C), which say how the wall is drawn, not what is on it.
     expect(view.getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
       'Movies',
       'TV',
+      'Poster view',
+      'List view',
     ]);
   });
 
@@ -289,7 +304,7 @@ describe('the title categories', () => {
       expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
     );
     expect(view.getByText(/^Sent to You/)).toBeTruthy();
-    expect(view.getByText('Filters')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters' })).toBeTruthy();
   });
 
   it('still draws them on TV shows', async () => {
@@ -299,7 +314,7 @@ describe('the title categories', () => {
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to You/)).toBeTruthy();
-    expect(view.getByText('Filters')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters' })).toBeTruthy();
   });
 });
 
@@ -318,16 +333,16 @@ describe('crossing between the two categories', () => {
   it('keeps an applied filter', async () => {
     const view = await open();
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
 
     await choose(view, 'Recommended TV');
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
-    expect(view.getByText('Filters · 1')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy();
   });
 
   it('keeps Sent to you turned on', async () => {
@@ -340,8 +355,13 @@ describe('crossing between the two categories', () => {
     await choose(view, 'Recommended TV');
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
-    // Still the list rather than the wall, which is what the chip being on means.
-    expect(view.getByText('Heat (1995)')).toBeTruthy();
+    // Still the list rather than the wall, which is what the chip being on means. The list
+    // follows the medium (founder QA, 2026-11-15), so a film is on Movies' side of it.
+    await waitFor(() => expect(view.getByText('No TV sent your way yet')).toBeTruthy());
+    expect(view.queryByText('Heat (1995)')).toBeNull();
+
+    await choose(view, 'Recommended Movies');
+    await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
   });
 });
 
@@ -375,7 +395,7 @@ describe('the top controls', () => {
     await waitFor(() => expect(view.getByText('Find for a Group')).toBeTruthy());
 
     expect(view.queryByTestId('for-you-controls-scroller')).toBeNull();
-    expect(within(view.getByTestId('for-you-controls')).getByText(/^Filters/)).toBeTruthy();
+    expect(within(view.getByTestId('for-you-controls')).getByRole('button', { name: /^Filters/ })).toBeTruthy();
     const features = view.getByTestId('for-you-shortcuts');
     expect(within(features).getByText('Sent to You')).toBeTruthy();
     expect(within(features).getByText('Find for a Group')).toBeTruthy();

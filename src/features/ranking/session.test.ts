@@ -161,6 +161,22 @@ describe('reading the server\u2019s answer', () => {
     });
   });
 
+  it('says the show was kept when an Update Show link was already spent on a Keep', async () => {
+    // 20261120000100: `_assert_linked_show_update` refuses a kept placement with 23505.
+    // Without its own branch that read as the generic "already has a position" message.
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'the show was already kept for that season' },
+    });
+
+    const step = await rankAgain(subject, 'loved', op, false, null, 'season-placement');
+    expect(step).toMatchObject({
+      state: 'failed',
+      message: 'You already kept your show score for this season.',
+      restart: false,
+    });
+  });
+
   it('reports an activation only when the server says one happened', async () => {
     /**
      * The invite activation bar, and the flag is the server's.

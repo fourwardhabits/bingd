@@ -20,11 +20,13 @@ import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import {
   Button,
+  DismissFooter,
   EmptyScoreBadge,
   EmptyState,
   FilterChip,
   ScoreBadge,
   Sheet,
+  SheetHeader,
   SkeletonRow,
   Text,
   TitleRow,
@@ -141,7 +143,54 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   if (confirmed === null) {
     const groupSize = selected.size + 1;
     return (
-      <Sheet visible onClose={onClose} label="Group Recommendations">
+      <Sheet
+        visible
+        onClose={onClose}
+        label="Group Recommendations"
+        // The standard browsing sheet (FU1113-B): the picker and the picks share one height.
+        size="standard"
+        /**
+         * **The CTA stays pinned, and Close sits quietly under it** (founder spec §4,
+         * 2026-11-13). The picker scrolls above both; the CTA's behaviour is unchanged,
+         * and Close is the sheet's standard, labelled way out — the scrim is hidden from
+         * a screen reader, so a sheet without one leaves VoiceOver nowhere to go.
+         */
+        footer={
+          <>
+            {people.length > 0 ? (
+              <View style={styles.actions}>
+                {/**
+                 * **The disabled button asks for what is missing** (founder, physical QA,
+                 * 2026-09-08).
+                 *
+                 * The sheet opens with the reader already in seat one, so the button used to
+                 * read `Get picks for 1` and be dead — a control offering to do the thing,
+                 * for the number of people currently chosen, that refuses to do it. On a
+                 * device that reads as broken rather than as unmet, and the reader is left to
+                 * infer the rule from a greyed-out number.
+                 *
+                 * So below the minimum it states the requirement as an instruction, and at or
+                 * above it counts. `GROUP_PICKS_MIN_MEMBERS` is the same rule the disabled
+                 * state has always enforced — named, not changed. Nothing about who is asked
+                 * for or what the server is sent moves.
+                 */}
+                <Button
+                  label={
+                    groupSize < GROUP_PICKS_MIN_MEMBERS
+                      ? 'Add someone to get picks'
+                      : `Get picks for ${groupSize}`
+                  }
+                  fit
+                  onPress={() => setConfirmed([...selected])}
+                  disabled={groupSize < GROUP_PICKS_MIN_MEMBERS}
+                  disabledReason="Choose at least one person to watch with."
+                />
+              </View>
+            ) : null}
+            <DismissFooter onPress={onClose} />
+          </>
+        }
+      >
         {/**
          * **One scroller for everything above the action** (independent review 2,
          * title-page sprint, 2026-11-06). At a large text size on a short phone the heading
@@ -156,10 +205,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
           keyboardShouldPersistTaps="handled"
           testID="group-choosing"
         >
-        <View style={styles.header}>
-          <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
-            Group Recommendations
-          </Text>
+        <SheetHeader title="Group Recommendations" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
@@ -185,7 +231,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?
           </Text>
-        </View>
+        </SheetHeader>
 
         {recipients.isPending ? (
           <Text variant="footnote" tone="tertiary" style={styles.status}>
@@ -230,36 +276,6 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
         )}
         </ScrollView>
 
-        {people.length > 0 ? (
-          <View style={styles.actions}>
-            {/**
-             * **The disabled button asks for what is missing** (founder, physical QA,
-             * 2026-09-08).
-             *
-             * The sheet opens with the reader already in seat one, so the button used to
-             * read `Get picks for 1` and be dead — a control offering to do the thing,
-             * for the number of people currently chosen, that refuses to do it. On a
-             * device that reads as broken rather than as unmet, and the reader is left to
-             * infer the rule from a greyed-out number.
-             *
-             * So below the minimum it states the requirement as an instruction, and at or
-             * above it counts. `GROUP_PICKS_MIN_MEMBERS` is the same rule the disabled
-             * state has always enforced — named, not changed. Nothing about who is asked
-             * for or what the server is sent moves.
-             */}
-            <Button
-              label={
-                groupSize < GROUP_PICKS_MIN_MEMBERS
-                  ? 'Add someone to get picks'
-                  : `Get picks for ${groupSize}`
-              }
-              fit
-              onPress={() => setConfirmed([...selected])}
-              disabled={groupSize < GROUP_PICKS_MIN_MEMBERS}
-              disabledReason="Choose at least one person to watch with."
-            />
-          </View>
-        ) : null}
       </Sheet>
     );
   }
@@ -283,11 +299,15 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   ];
 
   return (
-    <Sheet visible onClose={onClose} label="Group Recommendations">
-      <View style={styles.header}>
-        <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
-          Group Recommendations
-        </Text>
+    <Sheet
+      visible
+      onClose={onClose}
+      label="Group Recommendations"
+      size="standard"
+      // Dismiss-only from here: the picks are the content, and each row leads somewhere.
+      footer={<DismissFooter onPress={onClose} />}
+    >
+      <SheetHeader title="Group Recommendations" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">
@@ -299,7 +319,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
             </View>
           ))}
         </View>
-      </View>
+      </SheetHeader>
 
       {slate.isPending ? (
         <SkeletonRow count={5} />
@@ -352,7 +372,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
               />
             </View>
           ) : (
-            <ScrollView style={styles.list}>
+            <ScrollView style={styles.list} testID="group-picks-list">
               {!hasSharedSaves(picks) ? (
                 <Text variant="footnote" tone="tertiary" style={styles.quiet}>
                   Nobody has saved the same titles yet, so these come from everyone&apos;s
@@ -435,20 +455,18 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
 }
 
 /**
- * The sheet's heading grows with the system text size only to 1.5×: at 2× on a 320pt
+ * The sheet's heading grows with the system text size only so far: at 2× on a 320pt
  * phone "Recommendations" no longer fits a line and broke mid-word (title-page sprint,
- * 2026-11-06). Still well above the body text it heads.
+ * 2026-11-06). The cap was 1.5× of the 17pt `headline` — a 25.5pt ceiling. The heading is
+ * the shared 22pt serif `title2` since 2026-11-13, so the cap is restated to hold the same
+ * ceiling rather than the same ratio (1.15 × 22 ≈ 25.3pt; independent review). Still well
+ * above the body text it heads.
  */
-const HEADING_MAX_SCALE = 1.5;
+const HEADING_MAX_SCALE = 1.15;
 
 const styles = StyleSheet.create({
   // Gives way first when the sheet's 90% runs out, so the action below always shows.
   choosing: { flexGrow: 0, flexShrink: 1 },
-  header: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[3],
-    gap: theme.space[2],
-  },
   members: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
   memberChip: {
     paddingHorizontal: theme.space[3],
@@ -464,7 +482,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
   },
   countChips: { flexDirection: 'row', gap: theme.space[2] },
-  list: { maxHeight: 520 },
+  // Shrinks to the room left above the Close footer; no fixed cap (it was 520).
+  list: { flexShrink: 1 },
   quiet: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
   trailing: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },

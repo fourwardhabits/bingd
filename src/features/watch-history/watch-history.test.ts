@@ -1,12 +1,15 @@
 import {
+  clampWatchNote,
   groupByYear,
   hasHistory,
+  historySpan,
   inWatchOrder,
   labelFor,
   movementDirection,
   movementSentence,
   scoresByWatch,
   watchCountLabel,
+  watchNoteLength,
   type WatchEvent,
 } from './watch-history';
 
@@ -276,5 +279,42 @@ describe('scoresByWatch — the opinion held at each watch (founder delta QA, 20
 
   it('has no score for a title that was never ranked', () => {
     expect(scoresByWatch([w1, w2], [], []).size).toBe(0);
+  });
+});
+
+describe('historySpan', () => {
+  it('is the earliest and latest dated watch, whatever order they arrive in', () => {
+    expect(historySpan(['2025-06-01', null, '2024-03-04', '2024-12-25'])).toEqual({
+      first: '2024-03-04',
+      latest: '2025-06-01',
+    });
+  });
+
+  it('is null for one dated watch, undated ones beside it or not (founder QA, 2026-11-12)', () => {
+    expect(historySpan(['2024-03-04'])).toBeNull();
+    expect(historySpan([null, '2024-03-04', null])).toBeNull();
+    expect(historySpan([null, null])).toBeNull();
+    expect(historySpan([])).toBeNull();
+  });
+
+  it('is null when every dated watch is on the same day', () => {
+    expect(historySpan(['2024-03-04', '2024-03-04'])).toBeNull();
+    expect(historySpan(['2024-03-04', null, '2024-03-04', '2024-03-04'])).toBeNull();
+  });
+});
+
+describe('a watch note’s length, in code points as char_length counts (Codex review, #287)', () => {
+  const atLimit = `${'x'.repeat(999)}😀`;
+
+  it('counts an emoji once', () => {
+    expect(atLimit.length).toBe(1001);
+    expect(watchNoteLength(atLimit)).toBe(1000);
+  });
+
+  it('keeps a note at the limit whole and never cuts a surrogate pair', () => {
+    expect(clampWatchNote(atLimit, 1000)).toBe(atLimit);
+    const over = clampWatchNote(`${'x'.repeat(999)}😀😀`, 1000);
+    expect(over).toBe(atLimit);
+    expect(clampWatchNote(`${'x'.repeat(999)}😀`, 999)).toBe('x'.repeat(999));
   });
 });

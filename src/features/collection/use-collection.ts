@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { resolveMetadata, type EmbeddedParent } from '@/lib/media-metadata';
+import { parentOf, resolveMetadata, type EmbeddedParent } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { after, readAllByKey } from '@/lib/read-all';
 import { supabase } from '@/lib/supabase';
@@ -92,6 +92,15 @@ export type RankedEntry = {
    * Null only for a bundle reading a response without the column.
    */
   rankedAt: string | null;
+  /**
+   * The parent series' own poster and year, for a season (WS-TVC, 2026-11-13). The TV
+   * Collection draws one poster per series, and a series somebody ranked only by its
+   * seasons has no row of its own in hand. Read from the same embed as the series'
+   * title, so it costs no request. Null on a film or a show, and on a season whose parent
+   * has no artwork.
+   */
+  seriesPosterPath?: string | null;
+  seriesYear?: number | null;
 };
 
 export type LoggedEntry = {
@@ -141,8 +150,8 @@ export type RankingCategory = 'movies' | 'tv_seasons' | 'tv_shows';
 
 /**
  * A Collection medium: what the Movies | TV switch chooses. **TV is two rankings**,
- * `tv_seasons` and `tv_shows`, drawn together under Candidate A's precedence
- * (`watched-rows.ts`). The TV medium keeps the key `tv_seasons` it has always had, so a
+ * `tv_seasons` and `tv_shows`, drawn together as one poster per series
+ * (`show-projection.ts`). The TV medium keeps the key `tv_seasons` it has always had, so a
  * stored preference, a `?medium=` link and the backlog keep working.
  */
 export type CollectionMedium = 'movies' | 'tv_seasons';
@@ -252,7 +261,10 @@ export async function readRankedCollection(
           .from('rankings')
           .select(
             'media_item_id, bucket, position, category, created_at, ' +
-              'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
+              // WS-TVC (2026-11-13): the parent's `poster_path` and `release_date` ride the
+              // embed that already carries its title, so a series ranked only by its seasons
+              // has its own poster without another request.
+              'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language, poster_path, release_date))',
           )
           .eq('user_id', userId)
           .eq('category', category),
@@ -292,9 +304,22 @@ export async function readRankedCollection(
         position: row.position,
         category: row.category,
         rankedAt: row.created_at ?? null,
+        seriesPosterPath: parentArtwork(shape).posterPath,
+        seriesYear: parentArtwork(shape).year,
       };
     });
 }
+
+/** The embedded parent's poster and year, unwrapped; nulls for anything but a season. */
+const parentArtwork = (shape: MediaShape) => {
+  const parent = parentOf(shape.parent ?? null) as
+    | { poster_path?: string | null; release_date?: string | null }
+    | null;
+  return {
+    posterPath: parent?.poster_path ?? null,
+    year: yearOf(parent?.release_date ?? null),
+  };
+};
 
 /**
  * Everything logged, and which of it has a position.

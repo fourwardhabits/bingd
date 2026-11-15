@@ -2,7 +2,7 @@ import { newOperationId, interpret, type WriteResult } from '@/features/collecti
 import { supabase } from '@/lib/supabase';
 import type { BucketId } from '@/ui/components';
 
-import type { WatchBasis } from './watch-history';
+import { WATCH_NOTE_MAX_LENGTH, watchNoteLength, type WatchBasis } from './watch-history';
 
 /**
  * The watch-history writers (§D.5).
@@ -141,8 +141,15 @@ export async function logRewatch(input: {
 }
 
 /**
- * One viewing's note and companions, from the edit pencil on a Watch History row.
- * `companionIds` undefined leaves the companions alone; an empty array clears them.
+ * One viewing's note and companions, from *Edit watch* on a Watch History card.
+ *
+ * Writes `watch_events.note` on exactly this `watchEventId` and nothing else: never the
+ * title's review (`user_media.note`, `save_note`), never another watch. The note is always
+ * written (trimmed; empty clears it). `companionIds` undefined leaves the companions alone;
+ * an empty array clears them.
+ *
+ * A note past the column's limit is refused here, before the request, so the reader sees
+ * the limit in words rather than a constraint name.
  */
 export async function setWatchDetails(input: {
   operationId: string;
@@ -150,6 +157,13 @@ export async function setWatchDetails(input: {
   note: string | null;
   companionIds?: string[];
 }): Promise<WriteResult> {
+  // In code points, as the column's `char_length` check counts.
+  if (watchNoteLength(input.note?.trim() ?? '') > WATCH_NOTE_MAX_LENGTH) {
+    return {
+      outcome: 'failed',
+      message: `A watch note can be up to ${WATCH_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`,
+    };
+  }
   const { data, error } = await supabase.rpc('set_watch_details', {
     p_operation_id: input.operationId,
     p_watch_event_id: input.watchEventId,

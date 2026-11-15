@@ -141,6 +141,17 @@ export function SortMenu<Axis extends string>({
                 color={theme.text.inverse}
               />
             ) : null}
+            {/* An undirected axis's own glyph, in the arrow's slot (founder QA, 2026-11-12).
+                Maroon on the row's ordinary background, which is unchanged; on the maroon
+                selected row it takes the selected label's inverse ink so it stays visible. */}
+            {!isDirectional(option) && option.glyph ? (
+              <Ionicons
+                name={option.glyph}
+                size={theme.layout.icon.sm}
+                color={selected ? theme.text.inverse : theme.semantic.action}
+                testID={`sort-glyph-${option.axis}`}
+              />
+            ) : null}
           </Pressable>
         );
       })}

@@ -102,3 +102,31 @@ describe('SectionHeader tight', () => {
     );
   });
 });
+
+/** `theme.layout.section` on the header (FU1113-B). */
+describe('SectionHeader spacing', () => {
+  const rowStyle = async (spacing?: React.ComponentProps<typeof SectionHeader>['spacing']) => {
+    const view = await render(<SectionHeader title="Genre" spacing={spacing} />);
+    return StyleSheet.flatten(view.getByLabelText('Genre').props.style);
+  };
+
+  it('adds nothing by default, so every existing header is unchanged', async () => {
+    const style = await rowStyle();
+    expect(style.marginTop).toBeUndefined();
+    expect(style.marginBottom).toBeUndefined();
+  });
+
+  it('true: section.above over it, section.headingToControls under it', async () => {
+    expect(await rowStyle(true)).toMatchObject({
+      marginTop: theme.layout.section.above,
+      marginBottom: theme.layout.section.headingToControls,
+    });
+  });
+
+  it('picks named steps', async () => {
+    expect(await rowStyle({ above: 'between', below: 'controlsToContent' })).toMatchObject({
+      marginTop: theme.layout.section.between,
+      marginBottom: theme.layout.section.controlsToContent,
+    });
+  });
+});

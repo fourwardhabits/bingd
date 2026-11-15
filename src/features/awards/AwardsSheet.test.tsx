@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -176,7 +176,7 @@ const open = async (props: Partial<React.ComponentProps<typeof AwardsSheet>> = {
 /** Opens one award's breakdown. Rows are found by the name they are titled with. */
 const drillInto = async (rowTitle: string) => {
   fireEvent.press(screen.getByLabelText(new RegExp(`^${rowTitle}\\.`)));
-  await waitFor(() => expect(screen.getByText('Close')).toBeTruthy());
+  await waitFor(() => expect(screen.getByLabelText(/^What counts toward/)).toBeTruthy());
 };
 
 describe('the sheet', () => {
@@ -190,16 +190,21 @@ describe('the sheet', () => {
   /**
    * The founder’s second safe-area finding, which was really two.
    *
-   * Done sits under a list of twenty rows that is always taller than the sheet on a
+   * Close sits under a list of twenty rows that is always taller than the sheet on a
    * phone. The list was `flexGrow: 0` and nothing else — and a flex child in React
    * Native does not shrink unless it is told to, so it kept its full measured height
    * and pushed the footer past the bottom of a sheet capped at 90%.
    */
-  it('keeps Done reachable under a list of twenty', async () => {
+  it('keeps Close reachable under a list of twenty', async () => {
     await open();
 
-    const done = screen.getByRole('button', { name: 'Done' });
-    expect(done).toBeTruthy();
+    // The standard quiet footer since 2026-11-13 (founder spec §2B), pinned below the list
+    // in the sheet's footer slot rather than following it inside the content.
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close).toBeTruthy();
+    let node = screen.getByTestId('dismiss-footer').parent;
+    while (node && node.props.testID !== 'sheet-footer') node = node.parent;
+    expect(node?.props.testID).toBe('sheet-footer');
 
     // The list yields the space, rather than the footer being pushed out of the sheet.
     expect(awardList().style.flexShrink).toBe(1);
@@ -209,7 +214,7 @@ describe('the sheet', () => {
   });
 
   it('leaves room under the last award for the sticky footer', async () => {
-    // Without it the twentieth row finishes hard against Done, which is what the
+    // Without it the twentieth row finishes hard against Close, which is what the
     // founder saw as the content running into the footer.
     await open();
 
@@ -880,7 +885,11 @@ describe('a long breakdown is revealed in pages', () => {
     await drillInto('Movie Muncher');
     press('Show 50 more');
     await waitFor(() => expect(screen.getByText('Showing 100 of 400')).toBeTruthy());
-    press('Close');
+    // Both sheets close with the standard footer now; the drill-down's is the one inside
+    // the sheet labelled for the award, which is the one on top.
+    await fireEvent.press(
+      within(screen.getByLabelText(/^What counts toward/)).getByRole('button', { name: 'Close' }),
+    );
 
     await waitFor(() => expect(screen.queryByText(/^Showing /)).toBeNull());
     await drillInto('Movie Muncher');

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { createTestDb } from './harness.mjs';
+import { qualifyForMovies } from './helpers/qualify.mjs';
 
 /**
  * The first-run picker's supply of movies (20260915000100).
@@ -40,6 +41,17 @@ const catalogueMovie = async (title, popularity, db = t) => {
 const rankBelow = (id, bucket, db = t) =>
   db.rankToCompletion(id, bucket, async (pivot) => pivot);
 
+/**
+ * A rater who is an eligible community contributor (20261119000100): ten not_for_me filler
+ * movies, through the real engine, before the test's own rankings. Fillers have no poster,
+ * so the popularity half never offers one, and one rater each, so none clears the floor.
+ */
+const rater = async (username, db = t, opts = {}) => {
+  const id = await db.createUser({ username, ...opts });
+  await qualifyForMovies(db, id);
+  return id;
+};
+
 const starters = async (limit = 60, db = t) =>
   (await db.sql(`select * from starter_movies($1)`, [limit])).rows;
 
@@ -73,7 +85,7 @@ describe('starter_movies', () => {
   it('leads with the broadly ranked titles, in score order, agreeing with community_score', async () => {
     const raters = [];
     for (let i = 0; i < 6; i += 1) {
-      raters.push(await t.createUser({ username: `starter${i}` }));
+      raters.push(await rater(`starter${i}`));
     }
 
     const best = await movie('Broadly Loved');
@@ -116,7 +128,8 @@ describe('starter_movies', () => {
      * it is `loved`, alone in its band, so it scores 10.0, which is the highest number
      * the ordering knows.
      */
-    const solo = await t.createUser({ username: 'lonevoice' });
+    // Eligible (20261119000100), so the refusal below is the floor's and nothing else's.
+    const solo = await rater('lonevoice');
     const fluke = await movie('One Persons Ten');
     await t.actAs(solo);
     await rankBelow(fluke, 'loved');
@@ -148,6 +161,13 @@ describe('starter_movies', () => {
      * top member has sixteen.
      */
     await ownDatabase(async (db) => {
+      // 20261119000100: the percentile is asserted over exactly the counts built here, so
+      // the contributor threshold is pinned to 1 rather than adding ten one-rater filler
+      // titles per person to the distribution. Eligibility of the floor is asserted in
+      // community-eligibility.test.mjs.
+      await db.sql(
+        `update app_config set value = '1'::jsonb where key = 'score.contributor_min_rankings'`,
+      );
       const raters = [];
       for (let i = 0; i < 16; i += 1) {
         raters.push(await db.createUser({ username: `pct${i}` }));
@@ -285,9 +305,9 @@ describe('starter_movies', () => {
     await ownDatabase(async (db) => {
       const raters = [];
       for (let i = 0; i < 8; i += 1) {
-        raters.push(await db.createUser({ username: `pop2${i}` }));
+        raters.push(await rater(`pop2${i}`, db));
       }
-      const hidden = await db.createUser({ username: 'hiddenstarter', visibility: 'private' });
+      const hidden = await rater('hiddenstarter', db, { visibility: 'private' });
 
       const film = await movie('Counted Once Only', db);
       for (const who of raters) {

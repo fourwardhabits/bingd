@@ -104,13 +104,13 @@ describe('the episode rail at Android widths', () => {
     expect(StyleSheet.flatten(scroller.props.style).maxHeight).toBe(560);
   });
 
-  it('names the sheet for a screen reader, and closes on Done', async () => {
+  it('names the sheet for a screen reader, and closes on Close', async () => {
     await renderAt(360);
     await fireEvent.press(screen.getByTestId('episode-card-2'));
 
     expect(screen.getByLabelText('Season 2 · Episode 2, Episode title 2')).toBeTruthy();
     expect(screen.getByRole('header', { name: 'Episode title 2' })).toBeTruthy();
-    await fireEvent.press(screen.getByText('Done'));
+    await fireEvent.press(screen.getByText('Close'));
     expect(screen.queryByTestId('episode-sheet')).toBeNull();
   });
 

@@ -1,6 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { Share, useWindowDimensions } from 'react-native';
 
+import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { ANDROID_NAV_INSET, renderWithProviders } from '@/test-utils/render';
 import { StyleSheet } from 'react-native';
 import { theme } from '@/ui/tokens';
@@ -1026,5 +1027,33 @@ describe('nobody to recommend to', () => {
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
     expect(view.getByPlaceholderText('Search your friends')).toBeTruthy();
     expect(view.queryByTestId('recommend-empty')).toBeNull();
+  });
+});
+
+/**
+ * **The clear button answers 44 × 44 here, and the field has not moved** (A11Y-44,
+ * design-system v3 A.2 #11). `SearchField`'s box is now 44pt around the 40pt field it
+ * draws; this call site gives the extra 4pt back from space already around the field, so
+ * the drawn field is the same distance from what is above and below it as before (the header's `space[3]` padding above, `space[2]` above the people).
+ * Laid out from the rendered styles (`hit-rect.ts`).
+ */
+describe('the people search field', () => {
+  it('gives Clear a 44pt target and keeps the field where it was', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'bo', 'Bo')];
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await fireEvent.changeText(view.getByPlaceholderText('Search your friends'), 'a');
+    const input = view.getByPlaceholderText('Search your friends') as unknown as Host;
+    // input → drawn field → SearchField → PeoplePicker's search → the sheet's body.
+    let root = input;
+    for (let i = 0; i < 4; i += 1) root = parentView(root);
+    const site = searchFieldSite(root, input, 360);
+
+    expect(site.clear.height).toBeGreaterThanOrEqual(44);
+    expect(site.clear.width).toBeGreaterThanOrEqual(44);
+    expect(site.row.height).toBe(40);
+    expect(site.spaceAbove).toBe(12);
+    expect(site.spaceBelow).toBe(8);
+    expect(site.insideParent).toBe(true);
   });
 });

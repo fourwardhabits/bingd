@@ -38,6 +38,7 @@ import {
   useLoggedCollection,
   type RankingCategory,
 } from '@/features/collection/use-collection';
+import { projectShow } from '@/features/collection/show-projection';
 import { useMyScores, useTitleScore } from '@/features/collection/use-score';
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
 import { useWatchlistToggle } from '@/features/collection/use-watchlist-toggle';
@@ -56,9 +57,11 @@ import {
 import {
   RankingSheet,
   type RankingSubject,
+  type ShowDecision,
   type UpdateShowLink,
 } from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
+import { RERANK_ICON, RERANK_LABEL } from '@/features/watch-history/rerank';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { AddToListSheet } from '@/features/lists/AddToListSheet';
@@ -82,6 +85,7 @@ import { GenreLine } from '@/features/title/GenreLine';
 import { TrailerRail } from '@/features/title/TrailerRail';
 import { trailerPreviewsByDefault } from '@/features/title/trailer-previews';
 import { useCredits } from '@/features/title/use-credits';
+import { seasonCountLabel } from '@/features/title/season-count';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { ReviewsPreview, TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
@@ -91,6 +95,7 @@ import {
   orderByRating,
   reviewsComplete,
   serverSortOf,
+  useRefreshTitleReviews,
   useSetReviewHelpful,
   useTitleReviewCount,
   useTitleReviews,
@@ -122,6 +127,7 @@ import { compactName } from '@/lib/titles';
 import {
   Avatar,
   CastStrip,
+  DismissFooter,
   EmptyState,
   LoadingScreen,
   Poster,
@@ -362,6 +368,13 @@ export default function TitleScreen() {
     showId: string;
     linkedPlacementId: string;
   } | null>(null);
+  /**
+   * WS-TVC (founder spec t168u §3B): the Update Show / Keep Show decision a season's reveal
+   * left open when the reader took *Add details*. Held for the post-rank details sheet,
+   * which offers both in place of Done; cleared on every way out of that sheet, so a
+   * dismissal records nothing and nothing carries into a later log.
+   */
+  const [pendingShowDecision, setPendingShowDecision] = useState<ShowDecision | null>(null);
   /**
    * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
    *
@@ -748,13 +761,31 @@ export default function TitleScreen() {
    * that does nothing while the tab is closed, so a pull from Cast still spends nothing —
    * the gate stays inside the hook that owns it rather than being restated here.
    */
+  // Also gates the series-only reads below (`rankedSeasons`, `myScores`, ...).
+  const isSeriesTitle = data?.title?.kind === 'series';
+  // The title whose reviews a pull reloads: none on a series, which has no reviews.
+  const refreshReviews = useRefreshTitleReviews(isSeriesTitle ? null : titleId);
   const pull = usePullRefresh(
     // Memoised, because the hook's callback depends on it: a new array-builder every
     // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
     // page.
+    // Seasons only on a whole-show page. Anywhere else `useSeasons` was handed no series
+    // and its queryFn is `skipToken`, and refetching that would only put it in an error
+    // state (React Query v5's `refetch()` ignores `enabled`).
+    //
+    // Reviews and their count (QA1114-REVIEWS F1, 2026-11-14): a review another account
+    // published did not appear on pull, because nothing here asked. Invalidated rather
+    // than refetched, for the same `enabled` reason as seasons, by prefix so every sort
+    // and the Most Helpful preview come back together; `useRefreshTitleReviews` says how.
     useCallback(
-      () => [refetch(), seasons.refetch(), personal.refetch(), similar.refetch()],
-      [refetch, seasons, personal, similar],
+      () => [
+        refetch(),
+        ...(isSeriesTitle ? [seasons.refetch()] : []),
+        personal.refetch(),
+        similar.refetch(),
+        ...refreshReviews(),
+      ],
+      [refetch, seasons, personal, similar, isSeriesTitle, refreshReviews],
     ),
   );
   // The score is derived from the band, so this needs the whole category's
@@ -786,7 +817,6 @@ export default function TitleScreen() {
    * these seasons this person has already ranked. Fetched only for a series, so a film
    * page does not pay for a list it has no use for.
    */
-  const isSeriesTitle = data?.title?.kind === 'series';
   const rankedSeasons = useRankedCollection(profile.id, 'tv_seasons', {
     enabled: isSeriesTitle,
   });
@@ -804,6 +834,19 @@ export default function TitleScreen() {
   const seasonWatchlist = useWatchlistToggle(profile.id, 'title');
   /** Each season's logged bucket, so a season row's `+` can resume an unfinished placement. */
   const loggedForSeasons = useLoggedCollection(profile.id, { enabled: isSeriesTitle });
+  /**
+   * WS-TVC (founder spec t168u §2): on a series page with no explicit show ranking, the
+   * reader's personal slot shows the mean of their ranked seasons — the same effective
+   * score the Collection poster carries (`projectShow`), over the whole season pool already
+   * read above. Null for a film, a season, or a series none of whose seasons is ranked.
+   */
+  const seasonAverage = useMemo(
+    () =>
+      isSeriesTitle && data?.title?.id && rankedSeasons.data
+        ? projectShow(data.title.id, rankedSeasons.data, [])
+        : null,
+    [isSeriesTitle, data?.title?.id, rankedSeasons.data],
+  );
 
   /**
    * How far the page has scrolled, as one animated value.
@@ -843,8 +886,11 @@ export default function TitleScreen() {
   );
 
   if (!hasId) {
+    // No top edge: the root layout's native-stack header is still showing here (only the
+    // loaded page hides it, by drawing its own bar over the hero), and it has already consumed
+    // the status-bar inset. The Settings root's fix (founder QA, 2026-11-12).
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <EmptyState
           kind="nothingMatches"
           title="Title not found"
@@ -858,16 +904,18 @@ export default function TitleScreen() {
   // page's height depends on whether there is a backdrop, an overview, a cast,
   // seasons — so a skeleton here would guess wrong and relayout anyway.
   if (isPending) {
+    // No top edge, as above: the stack header is still showing.
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <LoadingScreen />
       </Screen>
     );
   }
 
   if (isError || !data?.title) {
+    // No top edge, as above: the stack header is still showing.
     return (
-      <Screen includeBottomInset>
+      <Screen includeBottomInset edges={['left', 'right']}>
         <EmptyState
           kind="couldNotLoad"
           title="Could not load this title"
@@ -1026,7 +1074,10 @@ export default function TitleScreen() {
    * 2026-11-07): season number, episode count, then year, in that order, on both layouts.
    * The count is the season's own `episode_count` and is absent when TMDB has none (or
    * reports zero — see `lengthOf`); it is never a runtime. It moved off the metadata line
-   * below, so it is said once. A series' line is unchanged: its year alone.
+   * below, so it is said once. A series' line is unchanged: its year alone. Its count of
+   * seasons is the length slot of the metadata line below (visual refine, 2026-11-12), so
+   * the Original page reads `2019` over `TV-MA · 1 season · Creator`, the same order the
+   * Cinematic module line says in one: `2019 · TV-MA · 1 season`.
    *
    * **One separator for the whole identity block** (founder grammar lock, 2026-09-07).
    * It was a comma here and a middle dot on the line below, which made two adjacent lines
@@ -1038,7 +1089,13 @@ export default function TitleScreen() {
    * surfaces with one line to say the whole name in. Here there is a hierarchy to put it
    * in.
    */
-  const lengthLabel = lengthOf(title.kind, title.runtime_minutes, title.episode_count);
+  const lengthLabel = lengthOf(
+    title.kind,
+    title.runtime_minutes,
+    title.episode_count,
+    // The series page's own season list (`useSeasons` above): no request of its own.
+    seasonCountLabel(seasons),
+  );
   const identitySubtitle = isSeason
     ? [displayTitle ?? title.title, lengthLabel, year].filter(Boolean).map(String).join(SEP)
     : year
@@ -1046,7 +1103,8 @@ export default function TitleScreen() {
       : null;
 
   /**
-   * `TV-MA · 9 episodes · Craig Mazin`, or `PG-13 · 145 min · Destin Daniel Cretton`.
+   * `TV-MA · 9 episodes · Craig Mazin`, `PG-13 · 145 min · Destin Daniel Cretton`, or for a
+   * whole show `TV-MA · 1 season · Craig Mazin`.
    *
    * Certification first: it is the fact somebody scans for before deciding whether to put
    * a film on. `descriptive.certification` rather than the column, so a season inherits
@@ -1055,9 +1113,10 @@ export default function TitleScreen() {
    * it (`lib/media-metadata.ts`).
    *
    * Then the length, which is a *different measure* per kind: a film's runtime, a
-   * season's episode count. That is the rule `20260820000400` established for the feed,
-   * applied here for the first time — the line used to print a runtime for a season,
-   * which is a column TMDB does not fill, so the segment was simply missing.
+   * season's episode count, a series' count of seasons (2026-11-12). That is the rule
+   * `20260820000400` established for the feed, applied here for the first time — the
+   * line used to print a runtime for a season, which is a column TMDB does not fill, so
+   * the segment was simply missing.
    *
    * Then the credit, **and which credit is decided by the kind of title, with no
    * cross-fallback in either direction** (founder grammar lock, 2026-09-07).
@@ -1764,6 +1823,9 @@ export default function TitleScreen() {
           viewerId={profile.id}
           ratingAvailable={inSheet && ratingAvailable}
           truncated={inSheet && !reviewsComplete(serverRows)}
+          // Your own card carries your name and picture, as everybody else's carries theirs.
+          viewer={reviewViewer}
+          helpfulPendingId={helpfulPendingId}
           // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
           // published review first, from your own row — a public note and nothing else.
           variant={immersive ? 'editorial' : undefined}
@@ -1771,6 +1833,14 @@ export default function TitleScreen() {
         />
     );
   };
+
+  /** The reader as their own review card names them (FU1113-F). */
+  const reviewViewer = {
+    name: profile.display_name || profile.username,
+    avatarUri: avatarUri(profile.avatar_path),
+  };
+  /** The one review whose Helpful write is in flight, if any. */
+  const helpfulPendingId = setHelpful.isPending ? (setHelpful.variables?.reviewId ?? null) : null;
 
   /** Rating needs every review in hand; a list at the server's ceiling may not be all. */
   const ratingAvailable = immersive && reviewsComplete(helpfulReviews.data);
@@ -2076,10 +2146,11 @@ export default function TitleScreen() {
       : null,
   });
   /**
-   * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 9 episodes · 2023 ·
-   * TV-MA`. The year leads, as the brief asks. A film's director has its own quiet line
-   * under it (`directedBy`); a season or series has none, because a season's Director
-   * credit is an episode's and TMDB has no single director for a show.
+   * The module's metadata line: `2023 · R · 125m`, `Season 1 · 9 episodes · 2023 ·
+   * TV-MA`, or for a whole show `2019 · TV-MA · 1 season` (its count of seasons is the
+   * series' length, 2026-11-12). The year leads, as the brief asks. A film's director
+   * has its own quiet line under it (`directedBy`); a season or series has none, because
+   * a season's Director credit is an episode's and TMDB has no single director for a show.
    */
   const moduleMeta = [
     isSeason ? identitySubtitle : year ? String(year) : null,
@@ -2093,8 +2164,9 @@ export default function TitleScreen() {
    * The facts behind the Cinematic page's More details (final title refinement,
    * 2026-11-06), closed until asked for. Only what the module does not already say: no
    * genres or director, and a film's runtime is already on its metadata line — a season's
-   * or series' line counts episodes instead, so their minutes are still news. The rank
-   * keeps its denominator, which the module's short form leaves out (PRD §10).
+   * line counts episodes and a series' counts seasons instead, so their minutes are still
+   * news. The rank keeps its denominator, which the module's short form leaves out (PRD
+   * §10).
    */
   const moreDetails = (
     [
@@ -2164,19 +2236,25 @@ export default function TitleScreen() {
       watched: watched.data,
     });
 
-  /** The reader's own published review, from their own row — a public note, never a private one. */
+  /**
+   * The reader's own published review, from their own row — a public note, never a private one.
+   *
+   * **Its score is the one everybody else sees** (QA1114-REVIEWS §2, 2026-11-14): the
+   * `score` on the reader's own `title_reviews_v2` row, which is the server's live
+   * `score_for()` band score. Only while that row has not loaded yet does it fall back to
+   * `useTitleScore`'s client-side copy of the same band arithmetic, and only for a ranked
+   * title; otherwise null, which draws no circle (D-R2). Never an invented number.
+   */
+  const ownReviewRow = (helpfulReviews.data ?? reviews.data ?? []).find(
+    (review) => review.userId === profile.id,
+  );
   const ownPublishedReview = hasReview
     ? {
         text: noteText,
         hasSpoilers: Boolean(data.logged?.note_has_spoilers),
-        updatedAt:
-          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
-            ?.updatedAt ??
-          data.logged?.note_updated_at ??
-          null,
-        helpfulCount:
-          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
-            ?.helpfulCount ?? 0,
+        updatedAt: ownReviewRow?.updatedAt ?? data.logged?.note_updated_at ?? null,
+        helpfulCount: ownReviewRow?.helpfulCount ?? 0,
+        score: ownReviewRow ? ownReviewRow.score : data.ranked ? (titleScore.score ?? null) : null,
       }
     : null;
 
@@ -2268,6 +2346,14 @@ export default function TitleScreen() {
                     score,
                     pending: Boolean(data.ranked) && score == null,
                     onPress: () => (data.ranked ? setManaging(true) : rank()),
+                    // WS-TVC: an unranked series with ranked seasons shows their mean.
+                    average:
+                      isSeries && !data.ranked && seasonAverage
+                        ? {
+                            score: seasonAverage.display,
+                            count: seasonAverage.rankedSeasonCount,
+                          }
+                        : null,
                   }
                 : null
             }
@@ -2388,12 +2474,11 @@ export default function TitleScreen() {
               noun={title.kind === 'season' ? 'season' : 'movie'}
               // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
               // own name and picture on your review, and the same thumbs-up the sheet offers
-              // under everybody else's. Your score is the module's, so it is not repeated.
+              // under everybody else's. Your review carries your score too, as everybody
+              // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
               onToggleHelpful={toggleHelpful}
-              viewer={{
-                name: profile.display_name || profile.username,
-                avatarUri: avatarUri(profile.avatar_path),
-              }}
+              helpfulPendingId={helpfulPendingId}
+              viewer={reviewViewer}
             />,
             {
               action:
@@ -2519,6 +2604,10 @@ export default function TitleScreen() {
         visible={reviewsOpen}
         onClose={() => setReviewsOpen(false)}
         label={`Reviews of ${displayTitle ?? title.title}`}
+        // The standard browsing sheet (FU1113-F, on B's contract): a fixed 80%, the cards
+        // scrolling above a pinned Close that never covers the last one.
+        size="standard"
+        footer={<DismissFooter onPress={() => setReviewsOpen(false)} />}
         onDismissed={() => {
           if (!pendingReviewWrite.current) return;
           pendingReviewWrite.current = false;
@@ -2532,12 +2621,11 @@ export default function TitleScreen() {
         </View>
         <ScrollView
           testID="reviews-sheet-list"
-          style={styles.castScroll}
+          style={styles.reviewsSheetScroll}
           contentContainerStyle={styles.reviewsSheetList}
         >
           {reviewList({ inSheet: true })}
         </ScrollView>
-        <SheetDone onPress={() => setReviewsOpen(false)} />
       </Sheet>
     </>
   );
@@ -3049,10 +3137,18 @@ export default function TitleScreen() {
            This is the half the founder physically hit: a reader who takes *Add details*
            finishes here rather than on the reveal, and the payoff used to be held by a
            ranking sheet that had already unmounted. Empty queue, nothing happens. */
+        // WS-TVC: the open show decision, only on the post-rank sheet it was carried to.
+        showDecision={placement ? pendingShowDecision : null}
+        onUpdateShow={(link) => {
+          // The details have landed (LogSheet's barrier); the show's correction opens.
+          setPendingShowDecision(null);
+          updateShow(link);
+        }}
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setPendingShowLink(null);
+          setPendingShowDecision(null);
           celebrate();
         }}
         onClose={() => {
@@ -3061,6 +3157,8 @@ export default function TitleScreen() {
           setActionError(null);
           // Leaving the show's band chooser without choosing abandons Update Show.
           setPendingShowLink(null);
+          // And leaving the details sheet records no show decision (§3E).
+          setPendingShowDecision(null);
           celebrate();
         }}
         onRank={(bucket, mode, context) => {
@@ -3158,6 +3256,8 @@ export default function TitleScreen() {
           setOpenWriting(null);
           setOpenSection(null);
           setPlacement(result);
+          // WS-TVC: Add details does not resolve the show; the decision rides along.
+          setPendingShowDecision(result.showDecision ?? null);
           setLoggingTitle(rankedTitle);
         }}
         onUpdateShow={updateShow}
@@ -3377,13 +3477,14 @@ export default function TitleScreen() {
                  * `value` on a `SheetRow` sets beside the label and truncates at phone width,
                  * which is a founder decision this menu already carries.
                  */}
-                {/* The star is kept from the row this replaces, and so is its behaviour:
-                    straight into the log sheet, where the band chooser is. Leads the group
-                    because correcting a rating is the common act and logging a second
-                    viewing is the rare one. */}
+                {/* **Rerank** (founder spec §5, 2026-11-13; it was *Edit ranking*), with the
+                    left/right arrows — the star is the initial Rank's alone. Behaviour kept:
+                    straight into the log sheet, where the band chooser is, and no watch is
+                    recorded. Leads the group because correcting a rating is the common act
+                    and logging a second viewing is the rare one. */}
                 <SheetRow
-                  icon="star-outline"
-                  label="Edit ranking"
+                  icon={RERANK_ICON}
+                  label={RERANK_LABEL}
                   onPress={() => {
                     setManaging(false);
                     openLog();
@@ -3618,9 +3719,15 @@ function videoTitle(video: { name: string; type: string; official: boolean }) {
 /**
  * How long the thing is, in whichever unit its kind is measured in.
  *
- * `145 min` for a film, `9 episodes` for a season, and nothing at all for a series —
- * neither number a series could print is the truth, since the rankable unit is the
- * season (PRD §10) and a series' total episode count is not what anybody is deciding on.
+ * `145 min` for a film, `9 episodes` for a season, and `3 seasons` for a series.
+ *
+ * **A series is measured in seasons** (visual refine, 2026-11-12). This used to return
+ * nothing for a series, on the reasoning that neither a runtime nor a total episode count
+ * is what anybody is deciding on. That decision is replaced for the series page: how many
+ * seasons a show has *is* what a reader weighs before starting it. The count comes from the
+ * page's own season list (`seasonCountLabel`), excludes specials, and is absent, never
+ * `0 seasons`, until that list has answered with at least one real season. A series'
+ * total episode count is still not printed.
  *
  * **Zero is not one and not none.** A season TMDB reports as having no episodes has not
  * aired, and `0 episodes` on this line reads as a fact about the show rather than as data
@@ -3636,6 +3743,8 @@ function lengthOf(
   kind: 'movie' | 'season' | 'series',
   runtimeMinutes: number | null | undefined,
   episodeCount: number | null | undefined,
+  /** A series' `1 season` / `N seasons`, already gated on its list (`seasonCountLabel`). */
+  seasonCount: string | null,
 ): string | null {
   if (kind === 'movie') {
     return positive(runtimeMinutes) ? `${Math.trunc(runtimeMinutes as number)} min` : null;
@@ -3645,7 +3754,7 @@ function lengthOf(
     const count = Math.trunc(episodeCount as number);
     return `${count} ${count === 1 ? 'episode' : 'episodes'}`;
   }
-  return null;
+  return seasonCount;
 }
 
 /** A number worth printing. See {@link lengthOf} for why zero is excluded. */
@@ -3750,6 +3859,8 @@ const styles = StyleSheet.create({
   immersiveCircleCopy: { flex: 1, gap: 2 },
   castSheet: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   reviewsSheetList: { paddingBottom: theme.space[2] },
+  // Takes the standard sheet's room left under the heading and above the pinned Close.
+  reviewsSheetScroll: { flex: 1 },
   castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
   castList: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },

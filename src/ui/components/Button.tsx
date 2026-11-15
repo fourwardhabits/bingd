@@ -26,10 +26,18 @@ type Kind = 'primary' | 'secondary' | 'tertiary' | 'outline';
  * A notification offering Follow back was using `md`, which is the same physical
  * control a screen uses for its primary act — 48pt tall with 20pt of padding either
  * side, sitting under a 56pt row and very nearly doubling its height. `sm` is 36pt
- * and still clears the 44pt target with the `hitSlop` its caller passes, because slop
- * is the right tool for a control inside a list and a taller box is not.
+ * and clears the 44pt target with vertical `hitSlop`, because slop is the right tool
+ * for a control inside a list and a taller box is not. `Button` applies that slop
+ * itself (`SM_SLOP`) when the caller passes none (design-system v3 A.2 #7); a caller's
+ * own `hitSlop` still wins. Slop only answers inside the parent's bounds, so a parent
+ * with no room above or below the button clips it (see the A.2 #7 PR for the sites).
  */
 type Size = 'md' | 'sm';
+
+/** `(44 - 36) / 2` above and below: what lifts an `sm` button to the tap target. */
+const SM_VERTICAL_SLOP =
+  (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2;
+const SM_SLOP = { top: SM_VERTICAL_SLOP, bottom: SM_VERTICAL_SLOP };
 
 /**
  * How loudly the label reads, where the default is wrong.
@@ -88,6 +96,15 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
    * short label, and shrinking type is a thing to do deliberately.
    */
   fit?: boolean;
+  /**
+   * **`snug`: the side inset for a pair that shares one row** (FU1113-D, founder spec
+   * 2026-11-13). Same height, type and radius as the size; only the minimum padding either
+   * side drops to `space[2]`. For a button that fills a width its caller has already
+   * proven holds the label on one line (the season reveal's Add details | Update Show
+   * Ranking at 360pt), so the extra width is the button's, not padding's. Never shrinks
+   * type, never sets a line cap. Default `standard` is exactly what every caller gets.
+   */
+  inset?: 'standard' | 'snug';
 };
 
 export function Button({
@@ -98,6 +115,7 @@ export function Button({
   disabled,
   disabledReason,
   fit = false,
+  inset = 'standard',
   ...rest
 }: ButtonProps) {
   if (disabled && !disabledReason && __DEV__) {
@@ -107,18 +125,26 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      accessibilityHint={disabled ? disabledReason : undefined}
+      // The caller's props go first so the button's own accessibility can win over them:
+      // spread last, a caller's `accessibilityHint` or `accessibilityState` replaced the
+      // disabled reason and state outright (design-system v3 A.2 #10). The caller's state
+      // is merged, not dropped; its hint is kept unless the button is disabled with a reason.
+      {...rest}
+      accessibilityState={{ ...rest.accessibilityState, disabled: Boolean(disabled) }}
+      accessibilityHint={
+        disabled ? (disabledReason ?? rest.accessibilityHint) : rest.accessibilityHint
+      }
+      hitSlop={rest.hitSlop ?? (size === 'sm' ? SM_SLOP : undefined)}
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,
         styles[size],
         styles[kind],
         fit && styles.fit,
+        inset === 'snug' && styles.snug,
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
-      {...rest}
     >
       <View pointerEvents="none">
         <Text
@@ -150,7 +176,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   md: { minHeight: theme.layout.buttonMinHeight, paddingHorizontal: theme.space[5] },
-  sm: { minHeight: 36, paddingHorizontal: theme.space[4] },
+  sm: {
+    minHeight: theme.layout.control.compactAction.visibleHeight,
+    paddingHorizontal: theme.space[4],
+  },
   primary: { backgroundColor: theme.semantic.action },
   secondary: {
     backgroundColor: theme.surface.raised,
@@ -168,6 +197,7 @@ const styles = StyleSheet.create({
   },
   // Applied after the size, so it overrides whichever one is in play.
   fit: { paddingHorizontal: theme.space[3] },
+  snug: { paddingHorizontal: theme.space[2] },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
 });

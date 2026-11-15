@@ -395,7 +395,9 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
   },
   headerTitle: { flex: 1 },
-  field: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
+  // `space[2]` around the drawn field, as before: `SearchField`'s 44pt box holds 2pt of it
+  // above and below the 40pt field, for its clear button's target (A11Y-44, A.2 #11).
+  field: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] - 2 },
   rows: { paddingBottom: theme.space[4] },
   error: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
   row: {

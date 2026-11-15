@@ -1,5 +1,6 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -37,6 +38,13 @@ let mockRpcResults: Record<string, unknown> = {};
 let mockTables: Record<string, unknown[]> = {};
 let mockSingle: Record<string, unknown> = {};
 const mockReads: Record<string, number> = {};
+
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {

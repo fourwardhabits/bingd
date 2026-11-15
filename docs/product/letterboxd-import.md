@@ -237,8 +237,8 @@ fingerprint returns to `b860e0b5…` at 170 sources exactly.
 | Wire payload and page bounds | `src/features/import/payload.ts` |
 | Bytes to preview | `src/features/import/read-archive.ts` |
 | State machine | `src/features/import/use-import.ts` |
-| Screen | `src/features/import/ImportScreen.tsx` |
-| Export instructions | `src/features/import/HowToExportSheet.tsx` |
+| Screen | `src/features/import/ImportScreen.tsx`, with `ImportIntro`, `PreviewSummary`, `CompletionSummary` and `UnmatchedDisclosure` beside it |
+| Export instructions | `src/features/import/ExportHelp.tsx` (an inline disclosure since IMP1113-UI; was `HowToExportSheet.tsx`) |
 | Route | `app/settings/import.tsx` |
 | Foundations, provenance, pipeline | `supabase/migrations/20260917000{100,200,300}*.sql` |
 | Retention and byte bound | `supabase/migrations/20260917000400*.sql` |

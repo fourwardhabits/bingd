@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
+import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { GroupPicksSheet } from './GroupPicksSheet';
@@ -294,6 +295,33 @@ describe('choosing the group', () => {
   });
 });
 
+/**
+ * **The clear button answers 44 × 44 here, and the field has not moved** (A11Y-44,
+ * design-system v3 A.2 #11). `SearchField`'s box is now 44pt around the 40pt field it
+ * draws; PeoplePicker gives the extra 4pt back from space already around the field (the
+ * header's `space[3]` padding above, its own `space[2]` above the people), so the drawn
+ * field is where it was. Laid out from the rendered styles (`hit-rect.ts`).
+ */
+describe('the people search field', () => {
+  it('gives Clear a 44pt target and keeps the field where it was', async () => {
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+    await waitFor(() => expect(screen.getByText('Abby')).toBeTruthy());
+    await fireEvent.changeText(screen.getByPlaceholderText('Search your friends'), 'a');
+    const input = screen.getByPlaceholderText('Search your friends') as unknown as Host;
+    // input → drawn field → SearchField → PeoplePicker's search → the scroller's content.
+    let root = input;
+    for (let i = 0; i < 4; i += 1) root = parentView(root);
+    const site = searchFieldSite(root, input, 360);
+
+    expect(site.clear.height).toBeGreaterThanOrEqual(44);
+    expect(site.clear.width).toBeGreaterThanOrEqual(44);
+    expect(site.row.height).toBe(40);
+    expect(site.spaceAbove).toBe(12);
+    expect(site.spaceBelow).toBe(8);
+    expect(site.insideParent).toBe(true);
+  });
+});
+
 describe('the results', () => {
   it('names the group and counts the picks', async () => {
     await openResults();
@@ -479,6 +507,46 @@ describe('analytics', () => {
     for (const leak of ['u-abby', 'u-john', 'viewer-1', 'Abby', 'abby', 'John']) {
       expect(raw).not.toContain(leak);
     }
+  });
+});
+
+/**
+ * **The shared sheet structure** (founder spec §4, 2026-11-13): the standard header, the
+ * CTA pinned in the footer with the quiet Close under it, and a results list that shrinks
+ * to the room above the footer rather than to a fixed cap. The CTA's behaviour and the
+ * recommendation logic are not this test's subject and are unchanged.
+ */
+describe('the sheet around it', () => {
+  it('pins the CTA and the Close footer below the picker, outside its scroll', async () => {
+    const sheetProps = props();
+    await renderWithProviders(<GroupPicksSheet {...sheetProps} />);
+    await waitFor(() => expect(screen.getByText('Abby')).toBeTruthy());
+
+    const footer = screen.getByTestId('sheet-footer');
+    expect(within(footer).getByRole('button', { name: /add someone|get picks/i })).toBeTruthy();
+    expect(within(footer).getByRole('button', { name: 'Close' })).toBeTruthy();
+    expect(within(screen.getByTestId('group-choosing')).queryByRole('button', { name: 'Close' })).toBeNull();
+
+    await fireEvent.press(within(footer).getByRole('button', { name: 'Close' }));
+    expect(sheetProps.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes from the results with the same footer, and caps no list height', async () => {
+    const sheetProps = await openResults();
+    await waitFor(() => expect(screen.getByTestId('group-picks-list')).toBeTruthy());
+
+    const list = StyleSheet.flatten(screen.getByTestId('group-picks-list').props.style);
+    expect(list.maxHeight).toBeUndefined();
+    expect(list.flexShrink).toBe(1);
+    expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Close' }));
+    expect(sheetProps.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('heads both steps with the shared serif sheet title', async () => {
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+    expect(screen.getByRole('header', { name: 'Group Recommendations' })).toBeTruthy();
   });
 });
 

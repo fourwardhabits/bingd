@@ -28,6 +28,12 @@ jest.mock('./use-awards', () => ({
   useAwards: () => mockAwards,
 }));
 
+// The breakdown's rows are `AwardsSheet.test`'s subject; here only that a tap opens it.
+jest.mock('./progress', () => ({
+  ...jest.requireActual('./progress'),
+  breakdownFor: () => ({ sections: [], emptyLabel: 'Nothing counted yet' }),
+}));
+
 jest.mock('./use-award-unlocks', () => ({
   useAwardUnlocks: (_userId: string | null, options: { enabled?: boolean } = {}) => {
     mockUnlocksEnabled = options.enabled;
@@ -307,5 +313,36 @@ describe('the heading size', () => {
   it('is the standard 12pt otherwise', async () => {
     const view = await open({ viewerId: 'me', userId: 'them' });
     expect(sizeOf(view)).toBe(12);
+  });
+});
+
+/**
+ * **An award on the shelf opens what it means** (founder spec §7, 2026-11-13): its
+ * criteria and progress, in the same drill-down the full sheet opens from its row.
+ */
+describe('a tap on an earned award', () => {
+  const { AWARD_TRACKS } = jest.requireActual('./tracks') as typeof import('./tracks');
+  const real = (over: Partial<AwardProgress> = {}): AwardProgress => ({
+    ...award(AWARD_TRACKS[0]!.key, 1, 'Movie Muncher'),
+    countLabel: '120 / 200',
+    detailLine: 'Next: Watch 200 movies',
+    ...over,
+  });
+
+  it('opens its criteria and progress, and closes back to the profile', async () => {
+    mockAwards = { ...settled([real()]), data: { awards: [real()], facts: {} } } as never;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Movie Muncher')).toBeTruthy());
+    const slot = view.getByRole('button', { name: /^Movie Muncher\. Gold earned\./ });
+    expect(slot.props.accessibilityHint).toMatch(/what this award means/);
+    await fireEvent.press(slot);
+
+    await waitFor(() => expect(view.getByLabelText('What counts toward Movie Muncher')).toBeTruthy());
+    expect(view.getByText('120 / 200 · Next: Watch 200 movies')).toBeTruthy();
+    expect(view.getByTestId('award-breakdown-badge')).toBeTruthy();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(view.queryByLabelText('What counts toward Movie Muncher')).toBeNull());
   });
 });

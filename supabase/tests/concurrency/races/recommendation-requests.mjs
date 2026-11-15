@@ -29,6 +29,13 @@ import { inbox, newOp, raceContext } from './_shared.mjs';
  * bring anything back, and a sweep that arrives after a release must not take back
  * something already delivered.
  *
+ * **R-D1. A release needs a mutual pair at the moment it runs (20261121000300).** The
+ * sender's unfollow and the recipient's follow-back on a held pair both take `_lock_pair`, so
+ * one runs entirely before the other. Unfollow first: the release finds no sender edge and
+ * the Request stays held. Follow first: the release ran while both edges were approved, and
+ * the later unfollow leaves the delivered row where it is (the never-demote rule). Never a
+ * row delivered by a release that ran without both edges.
+ *
  * **R5. Block wins.** Whichever order block and the release land in, the recipient can
  * see nothing from the blocked account afterwards — and no pending row survives to be
  * released by some later follow.
@@ -479,5 +486,111 @@ export default function suite() {
       assert.equal(delivered.length, 0, 'R5: but profiles_read drops the sender while blocked');
       assert.equal(requests.length, 0);
     });
+
+    for (const first of ['unfollow', 'follow']) {
+      it(`R-D1: the sender's unfollow and the recipient's follow-back race (${first} takes the pair lock first)`, async () => {
+        const { db, fx } = ctx;
+        const sender = await fx.createUser();
+        const recipient = await fx.createUser();
+        await oneWay(fx, db, sender, recipient);
+        await sendAs(db, sender, recipient, await fx.createMovie(`D1 Race ${first}`));
+        assert.deepEqual(
+          (await rowsBetween(db, sender, recipient)).map((r) => r.state),
+          ['pending'],
+          'fixture: one held Request',
+        );
+
+        const pairKey = await db.pairKey(sender, recipient);
+        const ctl = await db.controller();
+        await ctl.holdPair(sender, recipient);
+
+        const tUnfollow = await db.session('sender-unfollows');
+        await tUnfollow.actAs(sender);
+        const tFollow = await db.session('recipient-follows');
+        await tFollow.actAs(recipient);
+
+        const startUnfollow = async () => {
+          await tUnfollow.begin();
+          const p = tUnfollow.start(`select unfollow($1, $2) as r`, [await newOp(db), recipient]);
+          await tUnfollow.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
+          // Wrapped: an async function returning the pending query would wait for it.
+          return { done: p };
+        };
+        const startFollow = async () => {
+          await tFollow.begin();
+          const p = tFollow.start(`select follow($1, $2) as r`, [await newOp(db), sender]);
+          await tFollow.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
+          return { done: p };
+        };
+
+        const edges = async () => ({
+          senderToRecipient:
+            (
+              await db.rows(
+                `select state from follows where follower_id = $1 and followee_id = $2`,
+                [sender, recipient],
+              )
+            )[0]?.state ?? null,
+          recipientToSender:
+            (
+              await db.rows(
+                `select state from follows where follower_id = $1 and followee_id = $2`,
+                [recipient, sender],
+              )
+            )[0]?.state ?? null,
+        });
+
+        if (first === 'unfollow') {
+          const pU = await startUnfollow();
+          const pF = await startFollow();
+          await ctl.releasePair(sender, recipient);
+          await pU.done;
+          await tUnfollow.commit();
+          await pF.done;
+          await tFollow.commit();
+
+          assert.deepEqual(await edges(), { senderToRecipient: null, recipientToSender: 'approved' });
+          assert.deepEqual(
+            (await rowsBetween(db, sender, recipient)).map((r) => r.state),
+            ['pending'],
+            'R-D1: the pair was not mutual when the release ran, so the Request stays held',
+          );
+          const { delivered, requests } = await screens(db, recipient);
+          assert.equal(delivered.length, 0);
+          assert.equal(requests.length, 1);
+        } else {
+          const pF = await startFollow();
+          const pU = await startUnfollow();
+          await ctl.releasePair(sender, recipient);
+          await pF.done;
+          await tFollow.commit();
+
+          // The follow has committed and the unfollow, now holding the pair lock, has not:
+          // what is committed is the release, made while both edges were approved.
+          assert.deepEqual(await edges(), {
+            senderToRecipient: 'approved',
+            recipientToSender: 'approved',
+          });
+          assert.deepEqual(
+            (await rowsBetween(db, sender, recipient)).map((r) => r.state),
+            ['delivered'],
+            'R-D1: released while mutual',
+          );
+
+          await pU.done;
+          await tUnfollow.commit();
+          assert.deepEqual(await edges(), { senderToRecipient: null, recipientToSender: 'approved' });
+          assert.deepEqual(
+            (await rowsBetween(db, sender, recipient)).map((r) => r.state),
+            ['delivered'],
+            'R-D1: a later unfollow does not demote what was delivered (never-demote rule)',
+          );
+        }
+
+        await tUnfollow.end();
+        await tFollow.end();
+        await ctl.end();
+      });
+    }
   });
 }

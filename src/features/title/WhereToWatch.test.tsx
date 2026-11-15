@@ -294,16 +294,16 @@ describe('the sheet', () => {
     expect(name.props.numberOfLines).toBe(2);
   });
 
-  it('closes on Done', async () => {
+  it('closes on Close', async () => {
     const view = await openSheet();
-    await fireEvent.press(view.getByText('Done'));
+    await fireEvent.press(view.getByText('Close'));
 
     await waitFor(() => expect(view.queryByText('STREAM')).toBeNull());
   });
 
   it('closes on the Android hardware back button', async () => {
     // `Sheet` hides its scrim from the accessibility tree on the understanding that
-    // back and the Done control are both real exits. This is the one of the two that
+    // back and the Close control are both real exits. This is the one of the two that
     // no test can reach by pressing something.
     const view = await openSheet();
     // There is no query for "the Modal" and no element inside it that back presses:
@@ -335,8 +335,8 @@ describe('nothing here leaves the app', () => {
     await waitFor(() => expect(view.getByText('STREAM')).toBeTruthy());
     expect(view.queryByText('View watch options')).toBeNull();
     expect(mockOpenURL).not.toHaveBeenCalled();
-    // Done is still there, so the sheet is never a room with no door.
-    expect(view.getByText('Done')).toBeTruthy();
+    // Close is still there, so the sheet is never a room with no door.
+    expect(view.getByText('Close')).toBeTruthy();
   });
 
   it('hands nothing to the operating system from anywhere on the sheet', async () => {
@@ -375,7 +375,7 @@ describe('what it costs', () => {
 
     await fireEvent.press(view.getByTestId('where-to-watch'));
     await waitFor(() => expect(view.getByText('STREAM')).toBeTruthy());
-    await fireEvent.press(view.getByText('Done'));
+    await fireEvent.press(view.getByText('Close'));
     await waitFor(() => expect(view.queryByText('STREAM')).toBeNull());
 
     expect(mockFetch).toHaveBeenCalledTimes(1);

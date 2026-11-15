@@ -239,9 +239,12 @@ export function useTopRated(userId: string, medium: Medium, enabled: boolean) {
     queryKey: topRatedKey(userId, medium),
     enabled: enabled && Boolean(userId),
     /**
-     * Five minutes, the number `useCommunityScore` already uses for the same aggregate.
-     * A community mean moves when *other* people rank, which is not something this
-     * reader's own activity should be refetching a wall over.
+     * Five minutes. A community mean mostly moves when *other* people rank. The one way
+     * this reader moves it — crossing the ten-rankings contributor threshold
+     * (20261119000100) — is handled on this device by `invalidateAfterCollectionChange`,
+     * which invalidates `['top-rated', userId]` by prefix. Unlike `useCommunityScore` (a
+     * minute, with a focus refetch) this wall does not refetch on focus: it is an
+     * infinite query, and a focus refetch would re-read every loaded page.
      */
     staleTime: 5 * 60_000,
     initialPageParam: null as TopRatedCursor | null,

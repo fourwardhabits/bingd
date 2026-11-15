@@ -233,5 +233,18 @@ const styles = StyleSheet.create({
   intro: { gap: theme.space[3], alignItems: 'flex-start' },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
-  more: { alignItems: 'center', gap: theme.space[1] },
+  /**
+   * **The 4pt under the password button is inside this column, and takes no room**
+   * (A11Y-44, design-system v3 A.2 #7). `sm` gives 4pt of slop above and below; the gap
+   * holds the top 4, but nothing was below the button, so the bottom 4 was clipped and it
+   * answered 40pt. The padding holds it, and the matching negative margin hands the same
+   * 4pt back, so the column centres exactly where it did; the 4pt sits in the screen's
+   * own bottom padding (`space[4]` at least), inside its bounds.
+   */
+  more: {
+    alignItems: 'center',
+    gap: theme.space[1],
+    paddingBottom: theme.space[1],
+    marginBottom: -theme.space[1],
+  },
 });

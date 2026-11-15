@@ -547,6 +547,10 @@ export default function PublicProfileScreen() {
             viewerId={viewer.id}
             userId={subjectId}
             onSeeAll={() => setAwardsOpen(true)}
+            // A badge on the shelf opens its own criteria; its rows lead where the full
+            // sheet's do (founder spec §7, 2026-11-13).
+            onPressTitle={(id) => router.push(`/title/${id}`)}
+            onPressProfile={(handle) => router.push(`/u/${handle}`)}
           />
 
           <TopRanked

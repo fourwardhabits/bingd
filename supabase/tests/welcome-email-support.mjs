@@ -49,7 +49,11 @@ export const AUTH_COLUMNS_SQL = `
     add column if not exists email_confirmed_at timestamptz,
     add column if not exists banned_until       timestamptz,
     add column if not exists deleted_at         timestamptz,
-    add column if not exists is_anonymous       boolean not null default false;
+    add column if not exists is_anonymous       boolean not null default false,
+    -- Read by the H-2 trigger (20261124000100) whenever a test confirms an address.
+    add column if not exists encrypted_password   varchar(255),
+    add column if not exists confirmation_sent_at timestamptz,
+    add column if not exists recovery_sent_at     timestamptz;
 `;
 
 /** Opens the cohort window: delivery on, and the cutoff a week back. */

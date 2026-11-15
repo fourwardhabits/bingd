@@ -2,16 +2,27 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { avatarUri, posterUri } from '@/lib/images';
-import { Button, EmptyState, Sheet, Text, TitleRow, UserRow } from '@/ui/components';
+import {
+  Button,
+  DismissFooter,
+  EmptyState,
+  Sheet,
+  SheetHeader,
+  Text,
+  TitleRow,
+  UserRow,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+import { AwardBadge } from './AwardBadge';
 import type { AwardProgress } from './progress';
+import { TierDots } from './TierDots';
 import type { Breakdown, BreakdownRow } from './tracks';
 
 /**
  * How many rows are mounted before the reader asks for more.
  *
- * **The cap is on what is *mounted*, not on what is scrollable.** `maxHeight: 380` below
+ * **The cap is on what is *mounted*, not on what is scrollable.** The list's flex below
  * bounds the viewport and nothing else: a `ScrollView` mounts every child it is given, so
  * before this cap existed, opening Movie Muncher on a collection at its gold tier mounted
  * **a thousand `TitleRow`s and started a thousand poster requests** in one frame. That is
@@ -42,6 +53,11 @@ export type AwardBreakdownSheetProps = {
   onPressTitle?: (mediaItemId: string) => void;
   onPressProfile?: (username: string) => void;
   onClose: () => void;
+  /**
+   * Draws the badge beside the title. For an award opened straight from a profile's
+   * preview row, where no list row above has already shown it (founder spec §7).
+   */
+  showBadge?: boolean;
 };
 
 /**
@@ -80,6 +96,7 @@ export function AwardBreakdownSheet({
   onPressTitle,
   onPressProfile,
   onClose,
+  showBadge = false,
 }: AwardBreakdownSheetProps) {
   const total = breakdown.sections.reduce((sum, section) => sum + section.rows.length, 0);
   const [shown, setShown] = useState(PAGE);
@@ -112,15 +129,29 @@ export function AwardBreakdownSheet({
   const remaining = total - Math.min(shown, total);
 
   return (
-    <Sheet visible onClose={onClose} label={`What counts toward ${award.title}`}>
-      <View style={styles.head}>
-        <Text variant="title2">{award.title}</Text>
+    <Sheet
+      visible
+      onClose={onClose}
+      label={`What counts toward ${award.title}`}
+      footer={<DismissFooter onPress={onClose} />}
+    >
+      <SheetHeader
+        title={award.title}
+        accessory={
+          showBadge ? (
+            <View style={styles.badge} testID="award-breakdown-badge">
+              <AwardBadge badge={award.badge} earned={award.earnedTier != null} />
+              {award.unavailable ? null : <TierDots earnedTierIndex={award.earnedTierIndex} />}
+            </View>
+          ) : null
+        }
+      >
         {/* The award's own progress line and nothing else. Repeating the description
             would be the sheet explaining what the row above it already said. */}
         <Text variant="footnote" tone="secondary">
           {award.unavailable ? award.detailLine : `${award.countLabel} · ${award.detailLine}`}
         </Text>
-      </View>
+      </SheetHeader>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
         {total === 0 ? (
@@ -191,9 +222,6 @@ export function AwardBreakdownSheet({
         )}
       </ScrollView>
 
-      <View style={styles.actions}>
-        <Button label="Close" kind="secondary" onPress={onClose} />
-      </View>
     </Sheet>
   );
 }
@@ -273,15 +301,12 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  head: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-    paddingBottom: theme.space[3],
-    gap: theme.space[1],
-  },
-  // Bounded, so a thousand films does not push the Close control off a sheet that is
-  // already capped at 90% of the screen. The same figure the goals drill-down uses.
-  list: { maxHeight: 380 },
+  // Exactly the badge's own size, so `TierDots` positions against its bottom edge.
+  badge: { width: theme.layout.awardBadge, height: theme.layout.awardBadge },
+  // Shrinks to the room left above the Close footer, so a thousand films scroll under the
+  // header and over the footer rather than pushing either off the sheet. No fixed cap: a
+  // cap is what left these lists cramped on a tall phone (founder spec §4, 2026-11-13).
+  list: { flexShrink: 1 },
   listContent: { paddingBottom: theme.space[2] },
   empty: { paddingHorizontal: theme.layout.gutter },
   sectionHead: {
@@ -310,11 +335,4 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.rowMinHeight,
   },
   plainLabel: { flex: 1 },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
 });

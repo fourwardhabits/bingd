@@ -252,7 +252,7 @@ The rules that follow from the table:
 5. **Use the shared primitives.** `Screen` for the safe area, `Sheet` for modals, and `theme.layout.gutter` and the `space` scale for every inset. Do not use device checks, platform-specific magic numbers or measured-height hacks to make one phone look right.
 6. **Chips and labels wrap.** A wrapping chip group uses `flexDirection: 'row', flexWrap: 'wrap', gap: space[2]`, and each chip is capped at `maxWidth: '100%'`, so a long label at a large accessibility text size wraps instead of running off the panel.
 
-Tests hold these rules where they were broken: `GenreRow.test.tsx` (sheet inset, wrapping, long labels, shrinking scroll), `MatchExplainer.test.tsx` (sheet inset), `HowToExportSheet.test.tsx` (inset, footer outside the scroll, bottom padding), and `ImportScreen.test.tsx` with `LetterboxdStep.test.tsx` (a fresh scroll body per phase, and the same page on return). A new sheet or phase-switching screen should add the equivalent assertion.
+Tests hold these rules where they were broken: `GenreRow.test.tsx` (sheet inset, wrapping, long labels, shrinking scroll), `MatchExplainer.test.tsx` (sheet inset), `HowToExportSheet.test.tsx` (inset, footer outside the scroll, bottom padding; retired with the sheet in IMP1113-UI, when the export help became the inline `Disclosure` in `ExportHelp.tsx`), and `ImportScreen.test.tsx` with `LetterboxdStep.test.tsx` (a fresh scroll body per phase, and the same page on return). A new sheet or phase-switching screen should add the equivalent assertion.
 
 ---
 

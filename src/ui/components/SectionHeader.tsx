@@ -60,6 +60,29 @@ export type SectionHeaderProps = {
    * never sit over one.
    */
   tight?: boolean;
+  /**
+   * **The section rhythm, from `theme.layout.section`** (FU1113-B). `true` puts
+   * `section.above` over the heading and `section.headingToControls` under it; an object
+   * picks which of the token's steps to apply. Absent (the default) adds nothing, so every
+   * existing header is unchanged.
+   */
+  spacing?: boolean | { above?: SectionSpacingStep; below?: SectionSpacingStep };
+};
+
+/** A step of `theme.layout.section`, by name. */
+export type SectionSpacingStep = keyof typeof theme.layout.section;
+
+/** The margins a `spacing` value resolves to — exported so a hand-built heading can match. */
+export const sectionSpacing = (spacing: SectionHeaderProps['spacing']) => {
+  if (!spacing) return null;
+  const { above, below } =
+    spacing === true
+      ? { above: 'above' as const, below: 'headingToControls' as const }
+      : spacing;
+  return {
+    marginTop: above ? theme.layout.section[above] : 0,
+    marginBottom: below ? theme.layout.section[below] : 0,
+  };
 };
 
 export type SectionHeaderSize = 'standard' | 'large';
@@ -86,10 +109,11 @@ export function SectionHeader({
   fit = false,
   wrap = false,
   tight = false,
+  spacing,
 }: SectionHeaderProps) {
   return (
     <View
-      style={[styles.row, wrap && styles.wrap, tight && styles.tight]}
+      style={[styles.row, wrap && styles.wrap, tight && styles.tight, sectionSpacing(spacing)]}
       accessibilityRole="header"
       // Uppercasing is a style, not a spelling. Without this a screen reader
       // spells out "T O P  R A N K E D".

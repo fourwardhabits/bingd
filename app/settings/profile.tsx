@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { Stack, useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
+import { useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -13,7 +14,7 @@ import {
 } from '@/features/profile/social-links';
 import { useAccountWrites } from '@/features/settings/use-account';
 import { queryKeys } from '@/lib/query';
-import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
+import { Field, KeyboardScreen, SaveButton, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** The bio's ceiling, matching `profiles.bio_shape`. */
@@ -59,10 +60,27 @@ type LinkDraft = Record<SocialNetwork, string>;
  * accessibility hint rather than visible copy, so a disabled Save would be a control
  * that had stopped working without saying so. Pressing it reveals every error instead,
  * which is the version where the screen answers the tap.
+ *
+ * ---------------------------------------------------------------------------
+ * SAVE IN THE HEADER (founder, 2026-11-12)
+ *
+ * The one Save was at the end of the form, under five social-link boxes, so somebody who
+ * had changed their bio had to close the keyboard and scroll past everything they had not
+ * touched to reach it. It is the header's text action now, the same tertiary `Button` as
+ * Settings' Close, and it calls the same `save()` under the same rule — enabled when
+ * something changed and the name, handle and bio are acceptable, still enabled with a bad
+ * link because pressing it is what reveals the link's error. The header is outside
+ * `KeyboardScreen`, so it is on screen whatever is being typed into. Nothing autosaves.
+ *
+ * **Leaving with unsaved edits asks first.** Back, the swipe and Android's hardware back
+ * all go through `usePreventRemove` (React Navigation's `beforeRemove`, which also tells
+ * the native stack to hold the gesture): *Keep editing* stays, *Discard* leaves. Not
+ * asked when nothing has changed, and not asked on the way out after a save.
  */
 export default function EditProfileScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const { saveProfile, busy } = useAccountWrites();
 
@@ -146,6 +164,30 @@ export default function EditProfileScreen() {
   const valid =
     trimmedName.length > 0 && trimmedHandle.length >= 3 && trimmedBio.length <= BIO_MAX;
 
+  /**
+   * Set the moment a save has been written, before `router.back()`.
+   *
+   * The drafts still differ from the profile this render was drawn with until the refetch
+   * lands, so `changed` alone would ask somebody who has just saved whether to discard what
+   * they saved. A ref rather than state, because the back happens in the same tick.
+   */
+  const saved = useRef(false);
+
+  usePreventRemove(changed, ({ data }) => {
+    if (saved.current) {
+      navigation.dispatch(data.action);
+      return;
+    }
+    Alert.alert('Discard your changes?', 'Your profile edits have not been saved.', [
+      { text: 'Keep editing', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: () => navigation.dispatch(data.action),
+      },
+    ]);
+  });
+
   const save = async () => {
     setError(null);
 
@@ -182,6 +224,7 @@ export default function EditProfileScreen() {
         return;
       }
 
+      saved.current = true;
       await queryClient.invalidateQueries({ queryKey: queryKeys.myProfile(profile.id) });
       router.back();
     };
@@ -213,10 +256,47 @@ export default function EditProfileScreen() {
      */
     <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
-        options={{ headerShown: true, title: 'Edit Profile', headerBackTitle: 'Back' }}
+        options={{
+          headerShown: true,
+          title: 'Edit Profile',
+          headerBackTitle: 'Back',
+          // **The standard Save** (founder spec §2A, 2026-11-13): compact filled Maroon at
+          // the top right, the slimmer Rank button's shape, where a grey tertiary word was.
+          // Same conditions as before; it also ignores a second tap while the first lands.
+          headerRight: () => (
+            <SaveButton
+              saving={busy}
+              accessibilityLabel={busy ? 'Saving changes' : 'Save changes'}
+              onPress={() => void save()}
+              disabled={!changed || !valid}
+              disabledReason={
+                busy
+                  ? 'Saving your changes'
+                  : !valid
+                    ? 'Fill in a name and a handle first'
+                    : 'Nothing has changed yet'
+              }
+            />
+          ),
+        }}
       />
 
       <KeyboardScreen contentContainerStyle={styles.page}>
+        {/* At the top of the form now that Save is in the header: under the control that
+            was pressed, and next to the handle, which is what a refusal is usually about. */}
+        {error ? (
+          <View style={styles.error}>
+            <Text
+              variant="footnote"
+              tone="action"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {error}
+            </Text>
+          </View>
+        ) : null}
+
         <AvatarPicker />
 
         <View style={styles.section}>
@@ -266,13 +346,16 @@ export default function EditProfileScreen() {
 
         <View style={styles.section}>
           <SectionHeader title="Social links" />
-          <View style={styles.body}>
-            {/* Said once, above the five. The boxes accept the same forms as before —
-                a username, an @handle, a profile link — without a line under each one
-                explaining it (founder, 2026-09-16). */}
-            <Text variant="caption" tone="tertiary">
-              Optional. Add a handle or link.
-            </Text>
+          {/* Said once, above the five, and **set with its heading rather than with the
+              fields** (founder spec §7, 2026-11-13): the note reads as the heading's
+              subtitle, and the five boxes below get a field interval of their own
+              instead of starting one gap under a caption. The boxes accept the same forms
+              as before — a username, an @handle, a profile link — without a line under
+              each one explaining it (founder, 2026-09-16). */}
+          <Text variant="caption" tone="tertiary" style={styles.sectionNote}>
+            Optional. Add a handle or link.
+          </Text>
+          <View style={[styles.body, styles.linkFields]} testID="social-link-fields">
 
             {SOCIAL_NETWORKS.map((network) => {
               const result = normalized[network];
@@ -299,23 +382,6 @@ export default function EditProfileScreen() {
             })}
           </View>
         </View>
-
-        <View style={[styles.body, styles.footer]}>
-          {error ? (
-            <Text variant="footnote" tone="action">
-              {error}
-            </Text>
-          ) : null}
-
-          <Button
-            label={busy ? 'Saving…' : 'Save changes'}
-            onPress={() => void save()}
-            disabled={busy || !changed || !valid}
-            disabledReason={
-              !valid ? 'Fill in a name and a handle first' : 'Nothing has changed yet'
-            }
-          />
-        </View>
       </KeyboardScreen>
     </Screen>
   );
@@ -329,7 +395,10 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     paddingTop: theme.space[3],
   },
-  // A section's gap above Save rather than a field's, so the button reads as the end of
-  // the form and not as one more row of the Social links section.
-  footer: { paddingTop: theme.layout.sectionGap },
+  error: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  // Pulled up under the heading's 44pt row, so it reads as that heading's subtitle.
+  sectionNote: { paddingHorizontal: theme.layout.gutter, marginTop: -theme.space[2] },
+  // A labelled field is two lines and a box: they need more air between them than
+  // the 12pt that separates a caption from what it describes.
+  linkFields: { gap: theme.space[4], paddingTop: theme.space[4] },
 });

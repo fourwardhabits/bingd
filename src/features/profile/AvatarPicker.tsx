@@ -80,23 +80,36 @@ export function AvatarPicker() {
     <View style={styles.block}>
       <Text variant="subhead">Profile picture</Text>
 
-      <View style={styles.row}>
-        <Avatar
-          size="lg"
-          uri={profile.avatarUri}
-          name={profile.display_name || profile.username}
-        />
-        <View style={styles.actions}>
+      <Avatar size="lg" uri={profile.avatarUri} name={profile.display_name || profile.username} />
+
+      {/**
+       * **The app's ordinary action row** (founder QA, 2026-11-12), where this used to be
+       * two controls stacked beside the picture in two different styles. The same `Button`
+       * kinds and order as every other pair — Filters & Sort's *Clear all · Apply*, the goal
+       * sheet's *Cancel · Save*: the secondary act on the left, the Maroon one on the right.
+       * Under the picture rather than beside it, so the pair fits side by side at 320pt;
+       * it wraps, like Filters & Sort's, at the largest text sizes.
+       */}
+      <View style={styles.actions} testID="avatar-actions">
+        {profile.avatarUri ? (
           <Button
-            label={busy ? 'Working…' : profile.avatarUri ? 'Change' : 'Choose a picture'}
+            label="Remove"
             kind="secondary"
+            size="sm"
+            hitSlop={COMPACT_SLOP}
             disabled={busy}
-            onPress={() => void choose()}
+            disabledReason="Updating your picture."
+            onPress={() => void remove()}
           />
-          {profile.avatarUri ? (
-            <Button label="Remove" kind="tertiary" disabled={busy} onPress={() => void remove()} />
-          ) : null}
-        </View>
+        ) : null}
+        <Button
+          label={busy ? 'Working…' : profile.avatarUri ? 'Change' : 'Choose a picture'}
+          size="sm"
+          hitSlop={COMPACT_SLOP}
+          disabled={busy}
+          disabledReason="Updating your picture."
+          onPress={() => void choose()}
+        />
       </View>
 
       <Text variant="footnote" tone="tertiary">
@@ -106,6 +119,17 @@ export function AvatarPicker() {
   );
 }
 
+/**
+ * **Less bulky, same target** (founder spec §7, 2026-11-13). The pair is drawn at
+ * `Button`'s small size — 36pt, the slimmer Rank button's height — and this slop gives the
+ * 8pt back, so each is still a 44pt target. Same kinds, same order, same words: only
+ * their size changed.
+ */
+const COMPACT_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.compactAction.visibleHeight) / 2,
+} as const;
+
 const styles = StyleSheet.create({
   block: {
     marginTop: theme.space[6],
@@ -114,6 +138,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.raised,
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[4] },
-  actions: { flex: 1, gap: theme.space[2], alignItems: 'flex-start' },
+  // The vertical padding holds the slop *inside* the row's box: Android delivers no touch
+  // outside a parent's bounds, so slop that overhung the row would be decoration.
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space[2],
+    paddingVertical: COMPACT_SLOP.top,
+  },
 });

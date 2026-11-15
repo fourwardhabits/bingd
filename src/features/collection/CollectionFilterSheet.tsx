@@ -51,9 +51,16 @@ export type CollectionFilterSheetProps<Axis extends string = string> = {
     /** Pressing Shuffle while on it reshuffles; it stays enabled, with a hint saying so. */
     onRepeatUndirected?: () => void;
   };
+  /**
+   * What the sheet is announced as. Defaults to the reader's own collection; a profile's
+   * Collection sheet over somebody else's ranking names theirs instead.
+   */
+  label?: string;
 };
 
 const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
+
+const SECTION = theme.layout.section;
 
 /**
  * One filter sheet for every collection surface.
@@ -81,6 +88,7 @@ export function CollectionFilterSheet<Axis extends string = string>({
   onApply,
   onClose,
   sort,
+  label,
 }: CollectionFilterSheetProps<Axis>) {
   const [draft, setDraft] = useState<CollectionFilters>(value);
 
@@ -93,7 +101,7 @@ export function CollectionFilterSheet<Axis extends string = string>({
     <Sheet
       visible
       onClose={onClose}
-      label={sort ? 'Filter and sort your collection' : 'Filter your collection'}
+      label={label ?? (sort ? 'Filter and sort your collection' : 'Filter your collection')}
     >
       {/**
        * **Sort and Filter scroll together** (independent review, UI cohesion pass). Sort was
@@ -108,7 +116,9 @@ export function CollectionFilterSheet<Axis extends string = string>({
         testID="collection-filter-scroll"
       >
         {sort ? (
-          <View style={styles.sortSection} testID="collection-sort-section">
+          // No gap of its own: `SortMenu` sets its chips on the gutter and a
+          // `headingToControls` (8pt) below its heading itself.
+          <View testID="collection-sort-section">
             <Text variant="headline" accessibilityRole="header" style={styles.part}>
               Sort
             </Text>
@@ -198,7 +208,11 @@ export function CollectionFilterSheet<Axis extends string = string>({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * One facet's heading and its options, on the gutter. Exported for the person page's
+ * Filmography sheet (FU1113-C), so its Decade section is this one rather than a copy.
+ */
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
       <Text variant="sectionHeader" tone="action">
@@ -209,7 +223,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Option({
+/** One option in a facet: a hairline chip, filled Maroon when chosen. Shared as `Section`. */
+export function Option({
   label,
   count,
   selected,
@@ -246,13 +261,24 @@ const styles = StyleSheet.create({
   // With Sort inside it, taller, and free to shrink to whatever the sheet's cap leaves
   // above the footer.
   bodyWithSort: { maxHeight: 560, flexShrink: 1 },
-  sortSection: { paddingBottom: theme.space[1] },
   /** The two parts' names: Sort, then Filter, each on the gutter. */
-  part: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
-  // The content's 20pt gap less 8: the Filter heading sits closer to its own sections.
-  filterPart: { marginBottom: -theme.space[2] },
-  content: { paddingBottom: theme.space[4], gap: theme.space[5] },
-  section: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
+  part: { paddingHorizontal: theme.layout.gutter },
+  // The Filter heading sits a heading's distance from its first section, not a section's:
+  // the content's `between` gap, taken back down to `headingToControls`.
+  filterPart: { marginBottom: SECTION.headingToControls - SECTION.between },
+  /**
+   * **The sheet's rhythm, from `theme.layout.section`** (FU1113-B, founder Preview QA).
+   * `above` is the deliberate gap between the drag handle and the first section (GENRE, or
+   * Rating, or Sort), which used to sit straight under the handle; `between` is the one
+   * gap between every pair of sections — Sort, Rating, Genre, Decade, Language — so no two
+   * seams differ.
+   */
+  content: {
+    paddingTop: SECTION.above,
+    paddingBottom: theme.space[4],
+    gap: SECTION.between,
+  },
+  section: { gap: SECTION.headingToControls, paddingHorizontal: theme.layout.gutter },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
   option: {
     flexDirection: 'row',

@@ -38,6 +38,7 @@ function creditsOf(fixture: PersonFixture): PersonCredit[] {
       year: item.release_date ? Number(item.release_date.slice(0, 4)) : null,
       releaseDate: item.release_date,
       posterPath: item.poster_path,
+      backdropPath: null,
       role: entry.role,
       as: entry.as,
       crewRole: entry.crew_role,

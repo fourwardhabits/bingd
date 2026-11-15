@@ -173,7 +173,7 @@ const skipped = [];
  *
  * There is exactly one legitimate use and it is worth naming, because "skip" is otherwise the
  * word a red suite gets turned green with. `bingd-nonprod` holds 1,027 movies and **zero**
- * `tv_season` and `tv_series` rows, so M2's season semantics cannot be exercised there at all
+ * `season` and `series` rows, so M2's season semantics cannot be exercised there at all
  * — not because anything is broken, but because the seed run that filled that project fetched
  * films only.
  *
@@ -259,6 +259,45 @@ const rankToCompletion = async (token, mediaItemId, bucket) => {
     state = answer.body;
   }
   return { ok: Boolean(state?.done), result: state };
+};
+
+/**
+ * The Reviews tab for one title as `token` reads it, through `title_reviews_v2`.
+ *
+ * The run's titles come from the deployed catalogue, so a title can already carry other
+ * accounts' public Reviews; callers look for their own row by `user_id`, never by
+ * position. The RPC has no offset or cursor and clamps `p_limit` to 100, so it cannot be
+ * paged: this reads `top_desc` (the tab's default) at that cap, and when the answer is
+ * full — possibly truncated — reads `recent_desc` too, where a Review just published or
+ * just edited sits at the top whatever its helpful count. `alwaysBothSorts` reads both
+ * regardless. Rows are merged by `user_id` (one note per account per title).
+ */
+const REVIEWS_PAGE_CAP = 100;
+const reviewsFor = async (token, mediaItemId, { alwaysBothSorts = false } = {}) => {
+  const read = (sort) =>
+    rpc(token, 'title_reviews_v2', {
+      p_media_item_id: mediaItemId,
+      p_sort: sort,
+      p_limit: REVIEWS_PAGE_CAP,
+    });
+  const top = await read('top_desc');
+  const topRows = Array.isArray(top.body) ? top.body : [];
+  const truncated = topRows.length >= REVIEWS_PAGE_CAP;
+  const recent = truncated || alwaysBothSorts ? await read('recent_desc') : null;
+  const recentRows = recent && Array.isArray(recent.body) ? recent.body : [];
+
+  const byUser = new Map();
+  for (const row of [...topRows, ...recentRows]) {
+    if (!byUser.has(row.user_id)) byUser.set(row.user_id, row);
+  }
+  const ok =
+    top.status === 200 && Array.isArray(top.body) &&
+    (recent === null || (recent.status === 200 && Array.isArray(recent.body)));
+  const detail =
+    `top_desc ${top.status} ${topRows.length} row(s)${truncated ? ' (at the cap)' : ''}` +
+    (recent ? `, recent_desc ${recent.status} ${recentRows.length} row(s)` : '') +
+    (ok ? '' : ` ${JSON.stringify(top.body)?.slice(0, 120)} ${JSON.stringify(recent?.body)?.slice(0, 120)}`);
+  return { ok, rows: [...byUser.values()], detail };
 };
 
 // ---------------------------------------------------------------------------
@@ -1057,17 +1096,19 @@ try {
     // `tv_shows` pool (it was refused under AD-1 until then). The catalogue may hold no
     // season at all, which is a skip rather than a pass, so both are reported honestly.
     //
-    // KNOWN, NOT CHANGED HERE: the two filters below name kinds that do not exist
-    // (`media_kind` is movie | series | season) and the bucket 'liked' is not a
-    // `taste_bucket`, so this block has always skipped. Correcting them would run two
-    // untested rank_start writes against production for the first time; that is its own
-    // change (see #266).
-    const seasons = await get(a.token, 'media_items?kind=eq.tv_season&select=id,title&limit=1');
+    // FIXED 2026-11-14 (fix/acceptance-kinds-1114): the filters used to name kinds that do
+    // not exist (`tv_season` / `tv_series`; `media_kind` is movie | series | season) and the
+    // bucket 'liked', which is not a `taste_bucket` (loved | fine | not_for_me), so this
+    // block always skipped. Both `rank_start` calls are made by run-scoped account A, whose
+    // whole history goes with it through `delete_account` at the end, like every other write
+    // in this file. NOTE for a `--target production` run: these are now two rank_start
+    // writes there too (by the same throwaway account), which they never were before (#266).
+    const seasons = await get(a.token, 'media_items?kind=eq.season&select=id,title&limit=1');
     const season = (seasons.body ?? [])[0];
     if (!season) {
       skip(
         'a season can be ranked',
-        'this project holds no tv_season rows. `npm run seed:fetch` fetches series and ' +
+        'this project holds no season rows. `npm run seed:fetch` fetches series and ' +
           'seasons, and the run that filled bingd-nonprod fetched films only — so M2 has ' +
           'never been exercised against a deployed database. A production catalogue with ' +
           'no television is a launch decision, not a test condition.',
@@ -1075,7 +1116,7 @@ try {
     } else {
       const started = await rpc(a.token, 'rank_start', {
         p_media_item_id: season.id,
-        p_bucket: 'liked',
+        p_bucket: 'loved',
         p_operation_id: uuid(),
       });
       check(
@@ -1085,14 +1126,14 @@ try {
       );
     }
 
-    const series = await get(a.token, 'media_items?kind=eq.tv_series&select=id&limit=1');
+    const series = await get(a.token, 'media_items?kind=eq.series&select=id&limit=1');
     const show = (series.body ?? [])[0];
     if (!show) {
-      skip('and so can a whole series', 'this project holds no tv_series rows either');
+      skip('and so can a whole series', 'this project holds no series rows either');
     } else {
       const showStarted = await rpc(a.token, 'rank_start', {
         p_media_item_id: show.id,
-        p_bucket: 'liked',
+        p_bucket: 'loved',
         p_operation_id: uuid(),
       });
       check('and so can a whole series', showStarted.status === 200, JSON.stringify(showStarted.body)?.slice(0, 120));
@@ -1142,6 +1183,25 @@ try {
         JSON.stringify(bSees.body)?.slice(0, 160),
       );
 
+      // QA1114: B's Reviews tab for this title BEFORE A publishes. `titleId` is a deployed
+      // catalogue title, not one this run made, so other accounts' public Reviews may
+      // already be on it (QA accounts, the social fixture, earlier runs). The checks below
+      // are about A's row and the change A's publish makes, measured against this baseline
+      // — never "the tab holds exactly one row".
+      const baselineCount = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      const baselineReviews = await reviewsFor(b.token, titleId);
+      const baseline = Number.isInteger(baselineCount.body) ? baselineCount.body : null;
+      check(
+        'B’s Reviews tab for the title is readable before A publishes',
+        baselineCount.status === 200 && baseline !== null && baselineReviews.ok,
+        `count ${baselineCount.status} ${JSON.stringify(baselineCount.body)}; rows ${baselineReviews.detail}`,
+      );
+      check(
+        'and it has no Review of A’s while A’s note is private',
+        baselineReviews.ok && !baselineReviews.rows.some((row) => row.user_id === a.id),
+        baselineReviews.detail,
+      );
+
       // Then a real Review — a note somebody chose to publish — and the report on it.
       const published = await rpc(a.token, 'save_note', {
         p_operation_id: uuid(),
@@ -1152,6 +1212,49 @@ try {
         p_note_spoilers: false,
       });
       check('a note can be published as a Review', published.status === 200, JSON.stringify(published.body)?.slice(0, 160));
+
+      // QA1114: the Review read from the OTHER account, through the Reviews tab's own RPC.
+      // The expected score is the server's: `public_scores` (score_for over band_bounds,
+      // the same derivation title_reviews_v2 quotes) read by A for A's own pair, and null
+      // when A has no ranking on this title — `titleId` is A's first logged row, which this
+      // run may or may not have ranked, so the script asks rather than assumes.
+      const aRanking = await get(a.token, `rankings?select=media_item_id&user_id=eq.${a.id}&media_item_id=eq.${titleId}`);
+      const aRanked = (aRanking.body ?? []).length > 0;
+      const aScores = await rpc(a.token, 'public_scores', {
+        p_user_ids: [a.id],
+        p_media_item_ids: [titleId],
+      });
+      const aScoreRow = (aScores.body ?? [])[0];
+      const expectedScore = aRanked && aScoreRow?.score != null ? Number(aScoreRow.score) : null;
+      check(
+        'A’s own score for the title is readable (or the title is unranked)',
+        aRanking.status === 200 && aScores.status === 200 && (aRanked ? expectedScore !== null : !aScoreRow),
+        `ranked=${aRanked} ${JSON.stringify(aScores.body)?.slice(0, 160)}`,
+      );
+
+      const bReviews = await reviewsFor(b.token, titleId);
+      const bRow = bReviews.rows.find((row) => row.user_id === a.id);
+      check(
+        'B sees A’s Review in the Reviews tab',
+        bReviews.ok &&
+          bRow !== undefined &&
+          bRow.username === a.username &&
+          bRow.note === 'Acceptance run: a published review.' &&
+          Boolean(bRow.updated_at),
+        bRow ? `${bReviews.detail} A’s row: ${JSON.stringify(bRow).slice(0, 200)}` : bReviews.detail,
+      );
+      check(
+        aRanked ? 'and it carries A’s current score' : 'and, unranked, it carries no score',
+        bRow !== undefined && (bRow.score == null ? null : Number(bRow.score)) === expectedScore,
+        `expected ${expectedScore}, got ${JSON.stringify(bRow?.score)}`,
+      );
+
+      const bCount = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      check(
+        'and the tab’s count for B rose by 1',
+        bCount.status === 200 && baseline !== null && bCount.body === baseline + 1,
+        `${bCount.status} baseline ${baseline}, now ${JSON.stringify(bCount.body)}`,
+      );
 
       const reviewRow = await get(a.token, `user_media?select=id&media_item_id=eq.${titleId}`);
       const reviewId = (reviewRow.body ?? [])[0]?.id;
@@ -1175,6 +1278,38 @@ try {
         p_reason: 'other',
       });
       check('but not their own', own.status >= 400, JSON.stringify(own.body)?.slice(0, 120));
+
+      // QA1114: un-publishing takes it out of B's Reviews tab and B's count. After the
+      // report checks, which need the review public; nothing later in the run reads it.
+      // The base is the version the publish returned, so a conflict here is a real one.
+      const unpublished = await rpc(a.token, 'save_note', {
+        p_operation_id: uuid(),
+        p_media_item_id: titleId,
+        p_note: 'Acceptance run: a published review.',
+        p_base_updated_at: published.body?.note_version ?? null,
+        p_note_visibility: 'private',
+        p_note_spoilers: null,
+      });
+      check(
+        'A can set the Review back to private',
+        unpublished.status === 200 && unpublished.body?.status === 'ok',
+        JSON.stringify(unpublished.body)?.slice(0, 160),
+      );
+
+      // Always read under both sorts here: absence from a list the RPC truncated proves
+      // nothing, and `recent_desc` is where a row A touched last would sit at the top.
+      const bAfter = await reviewsFor(b.token, titleId, { alwaysBothSorts: true });
+      const bCountAfter = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      check(
+        'and B’s Reviews tab no longer has it',
+        bAfter.ok && !bAfter.rows.some((row) => row.user_id === a.id),
+        bAfter.detail,
+      );
+      check(
+        'and B’s count is back to what it was',
+        bCountAfter.status === 200 && baseline !== null && bCountAfter.body === baseline,
+        `${bCountAfter.status} baseline ${baseline}, now ${JSON.stringify(bCountAfter.body)}`,
+      );
     }
 
     // A comment, and the report on that. B's activity is readable by A at this point in

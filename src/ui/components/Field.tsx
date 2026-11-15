@@ -67,9 +67,11 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
       <View style={styles.row}>
         <TextInput
           ref={input}
+          // The error is spoken once, in the label; the hint only when there is no error,
+          // which is also when the caption shows it (design-system v3 A.2 #26).
           accessibilityLabel={error ? `${label}. ${error}` : label}
           accessibilityLabelledBy={`${id}-label`}
-          accessibilityHint={description}
+          accessibilityHint={error ? undefined : hint}
           placeholderTextColor={theme.text.tertiary}
           onFocus={handleFocus}
           {...rest}
@@ -103,8 +105,20 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
           </Pressable>
         ) : null}
       </View>
+      {/* The hint caption is drawn, not spoken: the input says it as its hint.
+          The error caption is hidden from VoiceOver only (`accessibilityElementsHidden` is
+          iOS's), where the input's label already says it. TalkBack reads a populated
+          EditText's text rather than its label (Codex P2 on #302), so on Android the error
+          caption stays readable and is announced when it appears (`importantForAccessibility`
+          and `accessibilityLiveRegion` are Android's). */}
       {description ? (
-        <Text variant="caption" tone={error ? 'action' : 'tertiary'}>
+        <Text
+          variant="caption"
+          tone={error ? 'action' : 'tertiary'}
+          importantForAccessibility={error ? 'yes' : 'no'}
+          accessibilityLiveRegion={error ? 'polite' : undefined}
+          accessibilityElementsHidden
+        >
           {description}
         </Text>
       ) : null}

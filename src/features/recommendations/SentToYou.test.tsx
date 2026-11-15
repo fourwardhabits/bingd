@@ -1,5 +1,6 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
+import { prefStore } from '@/test-utils/prefs-store';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -7,7 +8,8 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
-import { relativeTime } from './use-sent-to-you';
+import { resetMarkSentSeen } from './use-mark-sent-seen';
+import { SENT_LIMIT, relativeTime, resetSentToYouSource } from './use-sent-to-you';
 
 const mockPush = jest.fn();
 const mockRpc = jest.fn();
@@ -30,6 +32,13 @@ const mockRpcDelayMs: Record<string, number> = {};
  * mutant survived because the integration was missing, not because an assertion was weak.
  */
 const mockReads: Record<string, number> = {};
+
+/**
+ * Hermetic: For You remembers its selection per account (2026-11-12), and the real store's
+ * memory mirror would carry one test's Top Rated or TV into the next. See `prefs-store`.
+ */
+jest.mock('@/lib/prefs', () => jest.requireActual('@/test-utils/prefs-store').prefsModule);
+beforeEach(() => prefStore.reset());
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -106,6 +115,10 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, replace: () => {}, back: () => {} }),
   Stack: { Screen: () => null },
 }));
+
+// A real string, as on a device: `mark_recommendations_seen` sends one per attempt (FU1113-E).
+let mockOperation = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `operation-${++mockOperation}` }));
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
@@ -203,12 +216,17 @@ beforeEach(() => {
   mockPush.mockReset();
   mockRpc.mockReset();
   mockRpcResults = { my_notifications: [], recommendations_to_me: [] };
-  mockRpcErrors = {};
+  // A backend without 20261121000400 unless a test says otherwise: these tests are about the
+  // legacy `recommendations_to_me` path, which the client falls back to on PGRST202.
+  mockRpcErrors = { recommendations_to_me_page: { code: 'PGRST202', message: 'not found' } };
   for (const key of Object.keys(mockRpcDelayMs)) delete mockRpcDelayMs[key];
   mockWatchlist = [];
   mockRanked = [];
   mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
+  resetMarkSentSeen();
+  // Re-tapping's tests leave the tab unfocused, and an unfocused tab marks nothing.
+  mockNavigation.focused = true;
 });
 
 describe('the wall and the list', () => {
@@ -265,9 +283,51 @@ describe('the wall and the list', () => {
 
     // The count is the shortcut's badge now, and its label says it in full.
     await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
     );
     expect(view.getByText('1', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  /**
+   * **D5: the shortcut counts and says unread, as "new"** (founder, 2026-11-13). Unread is
+   * neither opened nor seen in the list (FU1113-E), so a seen-but-unopened row and an
+   * opened row are not counted, and the spoken label says "new", not "unopened".
+   */
+  it('speaks the unread count as new: two unread, one seen, one opened give 2 new', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2' }),
+      recommendation({ id: 'r3', media_item_id: 'film-3', seen_at: '2026-08-16T09:00:00.000Z' }),
+      recommendation({ id: 'r4', media_item_id: 'film-4', opened_at: '2026-08-16T10:00:00.000Z' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+    expect(view.getByText('2', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.queryByLabelText(/unopened/)).toBeNull();
+  });
+
+  /**
+   * **Codex review, #290.** A full page of unopened rows, every one already seen: nothing in
+   * hand is unread, but the server orders by opened only, so unread rows may sit past the
+   * cap. The shortcut keeps an indicator rather than going blank.
+   */
+  it('keeps an indicator when a capped page is all seen but unopened', async () => {
+    mockRpcResults.recommendations_to_me = Array.from({ length: SENT_LIMIT }, (_, i) =>
+      recommendation({
+        id: `r${i}`,
+        media_item_id: `film-${i}`,
+        seen_at: '2026-08-16T09:00:00.000Z',
+      }),
+    );
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.getByText('New', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {
@@ -291,9 +351,34 @@ describe('the wall and the list', () => {
     await openSent(view);
 
     await waitFor(() => expect(view.getByText('Heat (2010)')).toBeTruthy());
-    // The unopened one carries the mark; the opened one does not.
-    expect(view.getByTestId('sent-unopened-film-2')).toBeTruthy();
+    const titles = view
+      .getAllByText(/\(2010\)$/)
+      .map((node) => [node.props.children].flat().join(''));
+    expect(titles).toEqual(['Heat (2010)', 'Inception (2010)']);
+  });
+
+  it('tints only what is unread, and a failed mark leaves it tinted (FU1113-E)', async () => {
+    // The mark fails, so the server's own word stands: the unopened, unseen row keeps the
+    // tint and the dot; the opened one and the already-seen one never had them.
+    mockRpcErrors.mark_recommendations_seen = { code: '08006', message: 'unreachable' };
+    mockRpcResults.recommendations_to_me = [
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Heat' }),
+      recommendation({ id: 'r3', media_item_id: 'film-3', seen_at: '2026-08-16T09:00:00.000Z' }),
+      recommendation({ id: 'r1', media_item_id: 'film-1', opened_at: '2026-08-16T10:00:00.000Z' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendations_seen', {
+        p_operation_id: expect.any(String),
+        p_ids: ['r2'],
+      }),
+    );
+    await waitFor(() => expect(view.getByTestId('sent-unopened-film-2')).toBeTruthy());
+    expect(view.queryByTestId('sent-unopened-film-3')).toBeNull();
     expect(view.queryByTestId('sent-unopened-film-1')).toBeNull();
+    expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy();
   });
 
   it('records the open on the way to the title, once', async () => {
@@ -435,12 +520,12 @@ describe('the shared filter state', () => {
     const view = await renderWithProviders(<RecommendationsScreen />);
 
     // Choose Comedy on For you.
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
 
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
 
     // Switch tabs. The founder's example: Comedy stays on, and only the Comedy
     // recommendation survives.
@@ -448,7 +533,7 @@ describe('the shared filter state', () => {
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     expect(view.queryByText('Hereditary (2010)')).toBeNull();
-    expect(view.getByText('Filters · 1')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy();
   });
 
   it('offers one obvious Clear all', async () => {
@@ -457,7 +542,7 @@ describe('the shared filter state', () => {
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -476,7 +561,7 @@ describe('the shared filter state', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Horror')).toBeTruthy());
     await fireEvent.press(view.getByText('Horror'));
     await fireEvent.press(view.getByText('Apply'));
@@ -551,6 +636,8 @@ describe('a recommendation the reader has already ranked', () => {
 
     const view = await renderWithProviders(<RecommendationsScreen />);
     await openSent(view);
+    // Seasons are on the TV side of the switch (founder QA, 2026-11-15).
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
 
     // Having watched Season 1 says nothing about Season 2, which is the same identity
     // rule the spoiler mask and the watchlist already use.
@@ -648,7 +735,7 @@ describe('re-tapping the For You tab', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await fireEvent.press(view.getByText('Filters'));
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
     await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
@@ -658,7 +745,7 @@ describe('re-tapping the For You tab', () => {
 
     // Going back to the top of a section is not a reason to throw away what somebody
     // chose. The same rule Collection's own note states about its medium and filters.
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
   });
 
   it('stays where it is when the press arrives from another tab', async () => {
@@ -712,5 +799,277 @@ describe('a note in the row', () => {
         p_recommendation_id: 'r1',
       }),
     );
+  });
+});
+
+/**
+ * Sent to You read state (FU1113-E, 20261121000100). Unread is neither opened nor seen;
+ * the list being on screen, loaded, marks what it draws as seen — and nothing else.
+ */
+describe('reading Sent to You', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+
+  it('does not mark anything while For You is on screen', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
+  });
+
+  it('clears the dot and the tint for what it loaded, once', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Heat' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toEqual({ p_operation_id: expect.any(String), p_ids: ['r1', 'r2'] });
+    await waitFor(() => expect(view.queryByTestId('sent-unopened-film-1')).toBeNull());
+    expect(view.queryByTestId('sent-unopened-film-2')).toBeNull();
+    expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy();
+    // Both rows are still listed: reading removes nothing.
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.getByText('Heat (2010)')).toBeTruthy();
+    expect(marks()).toHaveLength(1);
+  });
+
+  it('never opens, adds, dismisses or saves anything by reading', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    const others = mockRpc.mock.calls
+      .map(([name]) => name as string)
+      .filter((name) =>
+        /mark_recommendation_opened|add_recommendation|dismiss|watchlist|rank/.test(name),
+      );
+    expect(others).toEqual([]);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('marks nothing while another tab is the focused one', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    // The tab is mounted while another one is selected. (Focus changes after mount arrive
+    // as focus/blur events, which `use-mark-sent-seen.test.tsx` drives; this stand-in
+    // navigator only reports `isFocused`.)
+    mockNavigation.focused = false;
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
+    expect(view.getByTestId('sent-unopened-film-1')).toBeTruthy();
+  });
+
+  it('marks nothing when the list failed to load', async () => {
+    mockRpcErrors.recommendations_to_me = { code: '08006', message: 'unreachable' };
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Could not load these')).toBeTruthy());
+    expect(marks()).toHaveLength(0);
+  });
+
+  it('still records the open of a row it has marked seen', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+
+    await fireEvent.press(view.getByText('Inception (2010)'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
+        p_recommendation_id: 'r1',
+      }),
+    );
+  });
+});
+
+/**
+ * **Unread past the cap is reachable** (#290 Codex P2 #5, 20261121000400). Against a backend
+ * with `recommendations_to_me_page`, seen rows sort after unread ones, so a reader who has
+ * seen a full page of unread recommendations gets the next unread ones on the next fetch —
+ * and until then the shortcut keeps saying more may be new, because the rank it reads is the
+ * fetch-time one, not the optimistic mark.
+ */
+describe('Sent to You on the unread-first backend', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+  const pageCalls = () =>
+    mockRpc.mock.calls.filter(([name]) => name === 'recommendations_to_me_page');
+
+  beforeEach(() => {
+    delete mockRpcErrors.recommendations_to_me_page;
+    resetSentToYouSource();
+    mockRpcResults.mark_recommendations_seen = { status: 'ok', marked: 0 };
+  });
+
+  it('keeps the capped indicator after seeing a full unread page, then brings the next unread first', async () => {
+    mockRpcResults.recommendations_to_me_page = Array.from({ length: SENT_LIMIT }, (_, i) =>
+      recommendation({
+        id: `u${i}`,
+        media_item_id: `film-u${i}`,
+        media_title: `Unread ${i}`,
+        read_rank: 0,
+      }),
+    );
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: `Sent to You, at least ${SENT_LIMIT} new` }),
+      ).toBeTruthy(),
+    );
+    expect(mockRpc).not.toHaveBeenCalledWith('recommendations_to_me', expect.anything());
+
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toMatchObject({ p_ids: expect.arrayContaining(['u0', 'u199']) });
+
+    // Nothing in hand is unread now, but the page was all unread when fetched: more may be.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.getByText('New', { includeHiddenElements: true })).toBeTruthy();
+    // Marking does not refetch, so the rows do not jump under the reader.
+    expect(pageCalls()).toHaveLength(1);
+    expect(view.getByText('Unread 0 (2010)')).toBeTruthy();
+
+    // The next fetch: the five unread rows past the old cap come first, the seen ones after.
+    mockRpcResults.recommendations_to_me_page = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        recommendation({
+          id: `n${i}`,
+          media_item_id: `film-n${i}`,
+          media_title: `Next ${i}`,
+          read_rank: 0,
+        }),
+      ),
+      ...Array.from({ length: SENT_LIMIT - 5 }, (_, i) =>
+        recommendation({
+          id: `u${i}`,
+          media_item_id: `film-u${i}`,
+          media_title: `Unread ${i}`,
+          seen_at: '2026-08-16T09:00:00.000Z',
+          read_rank: 1,
+        }),
+      ),
+    ];
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: ['sent-to-you', 'user-1'] });
+    });
+
+    await waitFor(() => expect(view.getByText('Next 0 (2010)')).toBeTruthy());
+    const titles = view
+      .getAllByText(/\(2010\)$/)
+      .map((node) => [node.props.children].flat().join(''));
+    expect(titles.slice(0, 6)).toEqual([
+      'Next 0 (2010)',
+      'Next 1 (2010)',
+      'Next 2 (2010)',
+      'Next 3 (2010)',
+      'Next 4 (2010)',
+      'Unread 0 (2010)',
+    ]);
+    await waitFor(() => expect(marks()).toHaveLength(2));
+    expect(marks()[1][1]).toMatchObject({ p_ids: ['n0', 'n1', 'n2', 'n3', 'n4'] });
+    // The page now ends in seen rows, so every unread one is in hand: the count is exact.
+    await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
+  });
+});
+
+/**
+ * **Sent to You follows the Movies / TV switch** (founder QA, 2026-11-15). Movies lists
+ * films; TV lists whole series and single seasons. What the other side holds is not drawn,
+ * so it is not marked seen: it stays unread until the reader switches to it.
+ */
+describe('Sent to You and the Movies / TV switch', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+  const mixed = () => [
+    recommendation(),
+    recommendation({
+      id: 'r2',
+      media_item_id: 'tlou-s1',
+      media_kind: 'season',
+      media_title: 'Season 1',
+      series_title: 'The Last of Us',
+    }),
+    recommendation({
+      id: 'r3',
+      media_item_id: 'severance',
+      media_kind: 'series',
+      media_title: 'Severance',
+    }),
+  ];
+
+  it('lists films on Movies, and series and seasons on TV', async () => {
+    mockRpcResults.recommendations_to_me = mixed();
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    expect(view.queryByText('The Last of Us, S1 (2010)')).toBeNull();
+    expect(view.queryByText(/Severance/)).toBeNull();
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+
+    await waitFor(() => expect(view.getByText('The Last of Us, S1 (2010)')).toBeTruthy());
+    expect(view.getByText(/Severance/)).toBeTruthy();
+    expect(view.queryByText('Inception (2010)')).toBeNull();
+  });
+
+  it('marks only the side on screen, and the other side when the reader switches to it', async () => {
+    mockRpcResults.recommendations_to_me = mixed();
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 3 new' })).toBeTruthy(),
+    );
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toEqual({ p_operation_id: expect.any(String), p_ids: ['r1'] });
+    // The TV rows were not on screen, so they are still new.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+
+    await waitFor(() => expect(marks()).toHaveLength(2));
+    expect([...(marks()[1][1] as { p_ids: string[] }).p_ids].sort()).toEqual(['r2', 'r3']);
+    // Seeing is not opening.
+    expect(mockRpc.mock.calls.some(([name]) => name === 'mark_recommendation_opened')).toBe(
+      false,
+    );
+  });
+
+  it('says the other side has them, rather than blaming a filter', async () => {
+    mockRpcResults.recommendations_to_me = [mixed()[1]];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('No movies sent your way yet')).toBeTruthy());
+    expect(view.getByText('Switch to TV to see what people have sent you.')).toBeTruthy();
+    expect(view.queryByText('Nothing matches your filters')).toBeNull();
+    expect(view.queryByText('Nothing sent your way yet')).toBeNull();
+    // Nothing was drawn, so nothing was marked.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
   });
 });

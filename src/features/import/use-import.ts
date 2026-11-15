@@ -48,6 +48,7 @@ import type { AnyStagingRow } from './payload';
 import { asProvider, type ImportProvider } from './providers';
 import { readArchive, type ArchivePreview, type ReadFailure } from './read-archive';
 import { readImdbCsv, type ImdbPreview, type ImdbReadReason } from './read-imdb';
+import { forgetSessionImport, rememberSessionImport } from './session-outcomes';
 
 /** Either provider's preview. An IMDb one says so; a Letterboxd one predates the field. */
 export type ImportPreview = ArchivePreview | ImdbPreview;
@@ -75,6 +76,12 @@ export type ImportJobStatus = {
    * for itself and from a server older than the column; both read as Letterboxd.
    */
   readonly provider?: ImportProvider;
+  /**
+   * Which job this is, when it was read from the server. Lets the summary read the job's
+   * own unresolved rows and find this process's parse of the file (`session-outcomes.ts`).
+   * Absent from a status the client made up for itself. Memory only, like the rest.
+   */
+  readonly jobId?: string;
 };
 
 /**
@@ -292,11 +299,12 @@ type JobRow = {
   provider?: string | null;
 };
 
-const asStatus = (row: JobRow): ImportJobStatus => ({
+const asStatus = (row: JobRow, jobId: string): ImportJobStatus => ({
   status: row.status as ImportJobStatus['status'],
   counts: row.counts ?? {},
   completedAt: row.completed_at,
   ...(row.provider ? { provider: asProvider(row.provider) } : {}),
+  jobId,
 });
 
 /**
@@ -315,7 +323,7 @@ async function readJob(jobId: string): Promise<ImportJobStatus | null> {
     if (answer === STALLED) return null;
     const { data, error } = answer;
     if (error || data === null) return null;
-    return asStatus(data as JobRow);
+    return asStatus(data as JobRow, jobId);
   } catch {
     return null;
   }
@@ -341,7 +349,7 @@ async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | '
     const { data, error } = answer;
     if (error) return 'unreadable';
     if (data === null) return 'gone';
-    return asStatus(data as JobRow);
+    return asStatus(data as JobRow, jobId);
   } catch {
     return 'unreadable';
   }
@@ -393,28 +401,11 @@ async function findLiveJob(): Promise<
     if (error) return 'unreadable';
     if (data === null) return null;
     const row = data as JobRow & { id: string };
-    return { id: row.id, status: asStatus(row) };
+    return { id: row.id, status: asStatus(row, row.id) };
   } catch {
     return 'unreadable';
   }
 }
-
-/**
- * How long a finished import is still the thing you came here to see.
- *
- * A window rather than an acknowledgement flag, because the flag would need durable
- * per-device state for a screen somebody opens twice. A day is comfortably longer than any
- * import takes and comfortably shorter than "for ever", which is the only answer that would
- * make this annoying — and the summary it restores now offers a way on to another archive,
- * so even inside the window it is never a dead end.
- */
-const RECENT_COMPLETION_MS = 24 * 60 * 60 * 1000;
-
-const completedRecently = (completedAt: string | null): boolean => {
-  if (completedAt === null) return false;
-  const at = Date.parse(completedAt);
-  return Number.isFinite(at) && Date.now() - at < RECENT_COMPLETION_MS;
-};
 
 /**
  * Where a job that has already ended belongs on this screen.
@@ -579,20 +570,30 @@ export function useImport(
         return;
       }
 
-      const finished = live.status.completedAt !== null;
-      nothingRunning.current = finished;
-      // A job that finished long ago is history, not news. Picking it up would mean opening
-      // the importer onto last month's summary every time.
-      if (finished && !completedRecently(live.status.completedAt)) return;
+      // **A finished job is history, not a screen** (founder, QA 11-14, §6). Settings ▸
+      // Import always opens on the importer when nothing is running and no job is named:
+      // the latest job finishing a minute ago or a month ago makes no difference, and there
+      // is no window and no cooldown. It used to restore a job that ended within a day,
+      // which reopened Settings ▸ Import ▸ IMDb on "Your IMDb history is already here"
+      // instead of the page that lets somebody pick a newer export. The job row stays where
+      // it is (history, dedupe and recovery are the server's), its summary is still shown
+      // when it finishes in front of somebody (the poll) and when a link names it (`?job=`),
+      // and picking a file again is the same idempotent import it always was.
+      //
+      // It can still have ended while nobody was watching (the screen left mid-import, so
+      // no poll saw it end), so the caches it changed are refreshed all the same: the
+      // Collection tab should not wait for a relaunch to show what it imported.
+      if (live.status.completedAt !== null) {
+        nothingRunning.current = true;
+        invalidateAfterImport(queryClient);
+        return;
+      }
 
+      // Still running: pick it up, so "you can close the app and come back" stays true.
+      nothingRunning.current = false;
       jobRef.current = live.id;
-      if (finished) invalidateAfterImport(queryClient);
       setState((current) =>
-        current.phase === 'idle'
-          ? finished
-            ? phaseForEnded(live.status)
-            : { phase: 'working', status: live.status }
-          : current,
+        current.phase === 'idle' ? { phase: 'working', status: live.status } : current,
       );
     })();
 
@@ -728,6 +729,8 @@ export function useImport(
     const jobId = jobRef.current;
     jobRef.current = null;
     unconfirmed.current = null;
+    // The parse held for the last summary goes with it (`session-outcomes.ts`).
+    forgetSessionImport();
     settle({ phase: 'idle' });
 
     if (jobId === null) return;
@@ -833,6 +836,11 @@ export function useImport(
           settle({ phase: 'failed', failure: { kind: 'already_running', status: existing } });
           return;
         }
+
+        // **The file, held in memory for this job's summary only** (`session-outcomes.ts`).
+        // The server deletes the shows, episodes and other types it cannot place when the
+        // job settles, so this parse is the only place their names survive. Never stored.
+        if (imdb) rememberSessionImport(jobId, (preview as ImdbPreview).normalised.titles);
 
         track({
           name: 'import_started',

@@ -14,15 +14,18 @@ export type CommunityScore = {
  * What everyone else scored this exact title.
  *
  * Beli's comparison of your rating against the room is the thing being answered here,
- * and four properties of the founder's brief are enforced server-side rather than
+ * and the properties of the founder's brief are enforced server-side rather than
  * assembled from parts on the client:
  *
  *   - it derives from current rankings, not from the score snapshotted into a feed
  *     event — that one records what a moment was, which is right for an activity item
  *     and wrong for an average;
- *   - it aggregates the exact media item, so a season is never blended into its
- *     parent series, and a series has an aggregate of its own that is always empty
- *     because a series cannot be ranked (PRD §10);
+ *   - a season's aggregate is that season's rankings alone, never blended into its
+ *     parent series; a whole show's aggregate is one effective score per person (their
+ *     show ranking, else the mean of their ranked seasons) since 20261119000100;
+ *   - it counts a person only once they have ten rankings in the title's category
+ *     (movies, or TV = seasons + shows; `score.contributor_min_rankings`), so the count
+ *     is eligible contributors, not everyone who ranked it (20261119000100);
  *   - it counts only public, active accounts the caller could also read one by one,
  *     so it discloses nothing the schema did not already;
  *   - it returns null rather than a misleading number when too few people have rated —
@@ -30,9 +33,21 @@ export type CommunityScore = {
  *     (`score.community_min_ratings`, now 1) and this hook has never known it: the
  *     server withholds, and the client draws what it is given.
  *
- * All four live in `community_score` (20260816000000, 20260816000100). This hook
+ * All of them live in `community_score` (20260816000000, 20260816000100,
+ * 20261119000100). The reader's own score never comes from here: it is
+ * `scoreFor` over their own bands, and shows from their first ranking. This hook
  * exists to call it, and deliberately computes nothing.
  */
+/** How long a community score is served without asking again (20261119000100). */
+export const COMMUNITY_SCORE_STALE_MS = 60_000;
+
+/**
+ * The cache key, account first. `invalidateAfterCollectionChange` invalidates the
+ * `['community-score', userId]` prefix, so the shape is part of that contract.
+ */
+export const communityScoreKey = (userId: string, mediaItemId: string | null) =>
+  ['community-score', userId, mediaItemId] as const;
+
 export function useCommunityScore(mediaItemId: string | null, userId: string) {
   return useQuery({
     /**
@@ -48,11 +63,25 @@ export function useCommunityScore(mediaItemId: string | null, userId: string) {
      * `logState` — and the same fix. Independent review found this one at 10, from the
      * inconsistency with `useFollowingScore` beside it.
      */
-    queryKey: ['community-score', userId, mediaItemId],
+    queryKey: communityScoreKey(userId, mediaItemId),
     enabled: Boolean(mediaItemId),
-    // A community average moves when other people rank, not when this user does, so
-    // it does not need the freshness the user's own score does.
-    staleTime: 5 * 60_000,
+    /**
+     * **A minute, and refetched when the app comes back to the foreground**
+     * (20261119000100, founder spec t168u §4G and §4K-14).
+     *
+     * It used to be five minutes on the reasoning that this average moves when other
+     * people rank, not when this reader does. Contributor eligibility broke that: a
+     * reader's rankings count only from their tenth in the category, so the ranking that
+     * crosses nine to ten (or the removal that crosses back) moves this number on every
+     * title they ranked in it. On this device `invalidateAfterCollectionChange` handles
+     * that by prefix. On the reader's *other* device nothing can tell the cache, and the
+     * global `refetchOnWindowFocus` is off, so this query opts in alone: returning to the
+     * app refetches it once it is a minute old, through the AppState focus manager wired
+     * in `app/_layout.tsx`. The server stores nothing to refresh, so the refetch is the
+     * whole fix.
+     */
+    staleTime: COMMUNITY_SCORE_STALE_MS,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<CommunityScore | null> => {
       const { data, error } = await supabase.rpc('community_score', {
         p_media_item_id: mediaItemId,

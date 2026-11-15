@@ -135,7 +135,7 @@ const orderOf = async (
 type Node = { props?: Record<string, unknown>; children?: (Node | string)[] };
 
 /** The Ionicons glyph a name draws: the jest renderer prints the glyph, not the name. */
-const glyph = (name: 'arrow-up-outline' | 'arrow-down-outline') =>
+const glyph = (name: 'arrow-up-outline' | 'arrow-down-outline' | 'shuffle-outline') =>
   String.fromCodePoint(Ionicons.glyphMap[name] as number);
 
 /** Every icon glyph drawn inside a node. */
@@ -302,6 +302,51 @@ describe.each(['poster', 'list'] as const)('in %s view', (mode) => {
   });
 
   describe('Shuffle', () => {
+    /**
+     * **A Shuffle glyph where the other rows' arrows go** (founder QA, 2026-11-12): to the
+     * right of the label, Maroon on the row's ordinary background — which is unchanged —
+     * and the selected label's inverse ink on the Maroon selected row, so it stays visible.
+     */
+    const glyphColour = (radio: Node) =>
+      (
+        StyleSheet.flatten(
+          within(radio as never).getByTestId('sort-glyph-shuffle').props.style as never,
+        ) as { color?: string }
+      ).color;
+
+    it('draws a Maroon Shuffle glyph after the label, on the ordinary background', async () => {
+      const view = await draw();
+      await openSheet(view);
+      const radio = sortRadio(view, 'Shuffle');
+      expect(radio.props.accessibilityState).toMatchObject({ selected: false });
+      expect(glyphsIn(radio)).toEqual([glyph('shuffle-outline')]);
+      expect(glyphColour(radio)).toBe(theme.semantic.action);
+      // The row itself is untouched: the same background every unselected option has.
+      expect(styleOf(radio).backgroundColor).toBe(theme.surface.raised);
+      expect(styleOf(radio).backgroundColor).toBe(
+        styleOf(sortRadio(view, /^Title/)).backgroundColor,
+      );
+      // The label first, the glyph to its right.
+      const children = radio.children as unknown as Node[];
+      expect(within(radio).getByText('Shuffle')).toBeTruthy();
+      expect(glyphsIn(children.at(-1)!)).toEqual([glyph('shuffle-outline')]);
+      // No other unselected row grew a glyph.
+      expect(glyphsIn(sortRadio(view, /^Title/))).toEqual([]);
+    });
+
+    it('keeps the glyph visible on the Maroon selected row, in the label’s inverse ink', async () => {
+      const view = await draw({ initial: { sort: { axis: 'shuffle', direction: 'desc' } } });
+      await openSheet(view);
+      const radio = sortRadio(view, 'Shuffle');
+      expect(radio.props.accessibilityState).toMatchObject({ selected: true });
+      expect(styleOf(radio).backgroundColor).toBe(theme.semantic.action);
+      expect(glyphsIn(radio)).toEqual([glyph('shuffle-outline')]);
+      expect(glyphColour(radio)).toBe(theme.text.inverse);
+      // Still one press, still the reshuffle hint: the glyph changes nothing it does.
+      expect(radio.props.accessibilityLabel).toBe('Shuffle');
+      expect(radio.props.accessibilityHint).toBe('Tap again to reshuffle');
+    });
+
     it('has no reshuffle button in the toolbar, before or after shuffling', async () => {
       const view = await draw({ initial: { sort: { axis: 'shuffle', direction: 'desc' } } });
       expect(view.queryByTestId('collection-reshuffle', BEHIND)).toBeNull();

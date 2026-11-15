@@ -43,6 +43,9 @@
  * for the axes it declares, and `sort.test.ts` pins the machine.
  */
 
+import type { Ionicons } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
+
 /** Descending is high→low, new→old, Z→A. Ascending is the reverse, in every axis. */
 export type SortDirection = 'desc' | 'asc';
 
@@ -81,6 +84,13 @@ export type SortAxisSpec<Axis extends string> = {
    * because pressing it again *does* something, and without a hint nothing says what.
    */
   repeatHint?: string;
+  /**
+   * For an axis with no `directions`: a small glyph the sort menu draws to the right of its
+   * label, in the slot a directional row's arrow takes (founder QA, 2026-11-12 — Shuffle's
+   * `shuffle-outline`). Display only; it never changes what the row does or says aloud.
+   * Absent means the row is the label alone, as before.
+   */
+  glyph?: ComponentProps<typeof Ionicons>['name'];
 };
 
 /** Whether this axis has two states to move between. */
@@ -156,4 +166,30 @@ export function directionWords<Axis extends string>(
   direction: SortDirection,
 ): string | null {
   return spec.directions ? spec.directions[direction] : null;
+}
+
+/**
+ * **What a screen reader hears for a Filters & Sort icon** (FU1113-C): the control's name,
+ * the order in force and how many filters are on, in one sentence — "Filters and sort.
+ * Sorted by Rating, highest first. No filters". The icon draws none of it, so the words
+ * carry what the arrow and the count bubble show.
+ *
+ * One definition for Collection, Profile Collection and a person's Filmography, which each
+ * had (or would have had) their own copy.
+ */
+export function filterSortSpoken<Axis extends string>(
+  axes: readonly SortAxisSpec<Axis>[],
+  sort: SortState<Axis>,
+  activeFilters: number,
+): string {
+  const spec = axes.find((option) => option.axis === sort.axis);
+  const order = spec
+    ? spec.directions
+      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
+      : `Sorted by ${spec.label}`
+    : null;
+  const filters = activeFilters
+    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
+    : 'No filters';
+  return ['Filters and sort', order, filters].filter(Boolean).join('. ');
 }

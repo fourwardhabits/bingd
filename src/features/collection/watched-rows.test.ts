@@ -294,85 +294,144 @@ describe('TV seasons and whole shows in one collection', () => {
   const tv = (seasons: RankedEntry[], shows: RankedEntry[], log: LoggedEntry[] = []) =>
     watchedItems(seasons, log, 'tv_seasons', shows);
 
-  it('shows the show alone when only the show is ranked', () => {
+  /**
+   * **One poster per series** (WS-TVC, founder spec t168u §2, replacing Candidate A). The
+   * poster is the series, its score the explicit show ranking or else the mean of the
+   * ranked seasons; seasons are never posters here.
+   */
+  it('draws the show alone when only the show is ranked', () => {
     const items = tv([], [show('shameless')]);
     expect(ids(items)).toEqual(['shameless']);
-    expect(items[0]).toMatchObject({ kind: 'series', score: 10, category: 'tv_shows' });
+    expect(items[0]).toMatchObject({
+      kind: 'series',
+      score: 10,
+      category: 'tv_shows',
+      showScore: { source: 'explicit', n: 1, sumTenths: 100 },
+    });
   });
 
-  it('shows S1 alone when only S1 is ranked', () => {
-    expect(ids(tv([season('s1', 'shameless', 1)], []))).toEqual(['s1']);
+  it('draws the series, not S1, when only S1 is ranked', () => {
+    const items = tv([season('s1', 'shameless', 1)], []);
+    expect(ids(items)).toEqual(['shameless']);
+    expect(items[0]).toMatchObject({
+      kind: 'series',
+      title: 'shameless',
+      score: 10,
+      showScore: { source: 'average', n: 1, rankedSeasonCount: 1 },
+    });
   });
 
-  it('shows both seasons when S1 and S2 are ranked', () => {
+  it('draws one poster for S1 and S2, at their mean', () => {
     const items = tv(
       [season('s1', 'shameless', 1), season('s2', 'shameless', 2, { position: 2 })],
       [],
     );
-    expect(ids(items)).toEqual(['s1', 's2']);
+    expect(ids(items)).toEqual(['shameless']);
+    // 10.0 and 7.0 in a loved band of two.
+    expect(items[0]).toMatchObject({ score: 8.5, showScore: { source: 'average', n: 2 } });
   });
 
-  it('shows S1 and hides the show when both are ranked', () => {
-    expect(ids(tv([season('s1', 'shameless', 1)], [show('shameless')]))).toEqual(['s1']);
+  it('draws one poster at the explicit score when the show and a season are both ranked', () => {
+    const items = tv(
+      [season('s1', 'shameless', 1), season('s2', 'shameless', 2, { position: 2 })],
+      [show('shameless', { bucket: 'fine' })],
+    );
+    expect(ids(items)).toEqual(['shameless']);
+    expect(items[0]).toMatchObject({
+      score: 6.9,
+      showScore: { source: 'explicit', rankedSeasonCount: 2 },
+    });
   });
 
-  it('shows every ranked season and no show poster when several seasons are ranked', () => {
+  it('draws every series once, however many seasons each has', () => {
     const items = tv(
       [
         season('s4', 'shameless', 4),
         season('s5', 'shameless', 5, { position: 2 }),
         season('s10', 'shameless', 10, { position: 3 }),
+        season('b1', 'barry', 1, { position: 4 }),
       ],
       [show('shameless'), show('other', { position: 2 })],
     );
-    expect(ids(items).sort()).toEqual(['other', 's10', 's4', 's5']);
+    expect(ids(items).sort()).toEqual(['barry', 'other', 'shameless']);
   });
 
-  it('never lets a hidden show come back through the logged half', () => {
+  it('absorbs the logged show and its logged seasons into the ranked poster', () => {
     const items = tv(
       [season('s1', 'shameless', 1)],
-      [show('shameless')],
+      [],
+      [
+        logged({ mediaItemId: 'shameless', kind: 'series', title: 'Shameless', bucket: 'loved' }),
+        logged({ mediaItemId: 's1', kind: 'season', seriesId: 'shameless', bucket: 'loved' }),
+        logged({ mediaItemId: 's2', kind: 'season', seriesId: 'shameless', bucket: null }),
+      ],
+    );
+    expect(ids(items)).toEqual(['shameless']);
+  });
+
+  it('draws one unranked poster per series for logged TV nobody ranked', () => {
+    const items = tv(
+      [],
+      [],
       [
         logged({
-          mediaItemId: 'shameless',
-          kind: 'series',
-          title: 'Shameless',
-          bucket: 'loved',
+          mediaItemId: 'x2',
+          kind: 'season',
+          seriesId: 'x',
+          seriesTitle: 'Show X',
+          seasonNumber: 2,
+          watchedOn: '2026-03-01',
+        }),
+        logged({
+          mediaItemId: 'x1',
+          kind: 'season',
+          seriesId: 'x',
+          seriesTitle: 'Show X',
+          seasonNumber: 1,
+          watchedOn: '2026-05-01',
         }),
       ],
     );
-    expect(ids(items)).toEqual(['s1']);
+    expect(ids(items)).toEqual(['x']);
+    expect(items[0]).toMatchObject({
+      kind: 'series',
+      title: 'Show X',
+      score: null,
+      // The series' latest watch, whichever season it was.
+      watchedOn: '2026-05-01',
+      unfinished: false,
+    });
   });
 
   it('scores each pool against its own bands, never pooled', () => {
-    // Two loved seasons and one loved show. Pooled, the show would share a band of three
-    // and score below 10; on its own it is a band of one and scores the high.
+    // Two loved seasons of `a` and one loved show `b`. Pooled, the show would share a band
+    // of three and score below 10; on its own it is a band of one and scores the high.
     const items = tv(
       [season('s1', 'a', 1), season('s2', 'a', 2, { position: 2 })],
       [show('b')],
     );
     const by = new Map(items.map((item) => [item.mediaItemId, item.score]));
     expect(by.get('b')).toBe(10);
-    expect(by.get('s1')).toBe(10);
-    expect(by.get('s2')).toBe(7);
+    expect(by.get('a')).toBe(8.5);
   });
 
   it('puts no artificial score on a show nobody ranked', () => {
-    const items = tv([season('s1', 'a', 1)], []);
-    expect(items.find((item) => item.mediaItemId === 'a')).toBeUndefined();
+    const items = tv([], [], [logged({ mediaItemId: 'a', kind: 'series', bucket: null })]);
+    expect(items[0]).toMatchObject({ mediaItemId: 'a', score: null });
+    expect(items[0]?.showScore ?? null).toBeNull();
   });
 
-  it('never compares a show’s ordinal with a season’s when their scores tie', () => {
-    // Both print 10.0 at position 1 of their own pool. The tie falls to a fixed pool order
-    // (seasons, then shows) and then the id, whatever the ordinals say.
+  it('orders by the exact effective score, then explicit before average, in both directions', () => {
+    // `a` averages 10.0 and 7.0 = 8.5 exactly; `b` is an explicit show in a loved band of
+    // three at rank 2 = 8.5. Equal, so the explicit show leads either way.
     const items = tv(
-      [season('s9', 'z', 9, { position: 1 })],
-      [show('a-show', { position: 1 })],
+      [season('a1', 'a', 1), season('a2', 'a', 2, { position: 2 })],
+      [show('x'), show('b', { position: 2 }), show('y', { position: 3 })],
     );
-    const sorted = sortItems(items, { axis: 'rating', direction: 'desc' });
-    expect(ids(sorted)).toEqual(['s9', 'a-show']);
-    const reversed = sortItems(items, { axis: 'rating', direction: 'asc' });
-    expect(ids(reversed)).toEqual(['s9', 'a-show']);
+    const desc = ids(sortItems(items, { axis: 'rating', direction: 'desc' }));
+    expect(desc.indexOf('b')).toBeLessThan(desc.indexOf('a'));
+    const asc = ids(sortItems(items, { axis: 'rating', direction: 'asc' }));
+    expect(asc.indexOf('b')).toBeLessThan(asc.indexOf('a'));
   });
 
   it('keeps Movies to films, and gives Movies no shows even if some are passed', () => {

@@ -6,7 +6,7 @@ import { compactName } from '@/lib/titles';
 import { Text, TitleRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import { relativeTime, type SentRecommendation } from './use-sent-to-you';
+import { isUnread, relativeTime, type SentRecommendation } from './use-sent-to-you';
 
 export type SentToYouListProps = {
   rows: SentRecommendation[];
@@ -36,7 +36,9 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
       {rows.map((row) => {
         const name = compactName(row) ?? row.title;
         const isSaved = saved.has(row.mediaItemId);
-        const unopened = !row.openedAt;
+        // Unread: neither opened nor seen listed here (FU1113-E). The tint, the dot and the
+        // spoken "New" all follow it.
+        const unopened = isUnread(row);
 
         return (
           <View

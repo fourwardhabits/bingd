@@ -157,7 +157,13 @@ export default function PrivacyScreen() {
     );
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12), the Settings root's fix for the same reason
+     * `notifications.tsx` records: this screen shows a native-stack header, which already consumes
+     * the status-bar inset, so `Screen`'s default `top` edge added the same inset a second time
+     * below it. Left and right still apply; only the top edge is the header's.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen options={{ headerShown: true, title: 'Privacy', headerBackTitle: 'Back' }} />
 
       <ScrollView contentContainerStyle={styles.page}>

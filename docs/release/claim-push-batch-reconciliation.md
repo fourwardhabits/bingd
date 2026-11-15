@@ -75,7 +75,10 @@ an environment that is current with `main`, a plain `db push` applies all six in
 
 - If a newer-dated migration has already been applied there, the CLI refuses #254's four
   older files until `--include-all` is passed. Candidates are #249's `20261110000100` and the
-  Engine V2 `20261111000100` / `20261111000200`.
+  Engine V2 `20261111000100` / `20261111000200` (never applied anywhere; renumbered to
+  `20261116000100` / `20261116000200` on `rec/v2-reconcile-1112`, then to
+  `20261122000100` / `20261122000200` on the wave-2 staging line, so they now sort after
+  production's latest and no longer need `--include-all`).
 - In that case, run `db push --include-all --dry-run` and confirm it lists exactly these six
   files, as in `letterboxd-production-promotion.md`.
 - **`--include-all` helps only when the newer migrations are also in the local directory.**

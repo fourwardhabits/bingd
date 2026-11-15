@@ -37,7 +37,9 @@ export type IconToggleProps<T extends string> = {
 };
 
 /**
- * Two glyphs in one segmented cell: pick a way of looking at this screen.
+ * Two or three glyphs in one segmented group: pick a way of looking at this screen. Its
+ * caller today is the Feed's Feed | Leaderboard | People; Collection's Poster | List is
+ * `ViewModeToggle` now.
  *
  * ---------------------------------------------------------------------------
  * WHY THIS IS A SHARED COMPONENT AND NOT A SECOND COPY
@@ -85,9 +87,10 @@ export type IconToggleProps<T extends string> = {
  *
  * The arithmetic holds at three on the narrowest phone this app supports. Each cell is
  * `minTapTarget - space[2]` = 36pt wide, so the group is 108pt plus two hairlines; on a
- * 320pt screen the row's other side has 108pt of the 288pt between the gutters left over
- * for a heading, and `SectionHeader`'s `sectionHeader` variant truncates rather than
- * wrapping. `touch-targets.test.tsx` is where the 44pt claim is asserted.
+ * 320pt screen that leaves under 180pt of the 288pt between the gutters for the heading
+ * beside it, a `SectionHeader size="large"`: Leaderboard and Discover people pass `fit` so
+ * they shrink rather than wrap. `touch-targets.test.tsx` is where the 44pt claim is
+ * asserted.
  *
  * `radiogroup` rather than a switch, because a switch implies on/off and neither of
  * these has an off state — the reader is always looking at one of the two.

@@ -77,7 +77,7 @@ describe('GenreLine', () => {
     expect(screen.getByText('Science Fiction · Action & Adventure · Mystery · Thriller')).toBeTruthy();
 
     // A labelled way out, for a screen reader that cannot reach the scrim.
-    await fireEvent.press(screen.getByRole('button', { name: 'Done' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByTestId('genre-sheet')).toBeNull());
   });
 

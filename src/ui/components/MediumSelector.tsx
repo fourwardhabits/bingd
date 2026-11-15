@@ -35,9 +35,10 @@ export type MediumSelectorProps<T extends string = Medium> = {
    * Override what a category is called on this screen.
    *
    * The visible category is "TV" (external-beta polish) even though the rankable unit
-   * underneath remains the individual season. For You still overrides to "TV shows" —
-   * TMDB answers "similar" about a series and never about a season, so its wall holds
-   * shows and says so. One control, two accurate labels, rather than two controls.
+   * underneath remains the individual season. For You overrode it to "TV shows" until
+   * 2026-09-14 (TMDB answers "similar" about a series and never about a season, so its
+   * wall held shows and said so); no caller passes `labels` today, and the prop stays for
+   * the next screen whose unit differs. One control, accurate labels, not two controls.
    */
   labels?: Partial<Record<T, string>>;
   /**
@@ -380,6 +381,16 @@ export function MediumSelector<T extends string = Medium>({
   );
 }
 
+/**
+ * **The selected option's treatment, named once** (FU1113-B): a sunken ground and Maroon
+ * ink. `ViewModeToggle` reads these rather than copying them, so its selected cell and a
+ * selected menu option here cannot drift apart.
+ */
+export const MEDIUM_SELECTED = {
+  background: theme.surface.sunken,
+  ink: theme.semantic.action,
+} as const;
+
 /** How long an open waits for the control's position before using the fallback. */
 const MEASURE_TIMEOUT_MS = 120;
 const CHEVRON_HEADING = 18;
@@ -481,7 +492,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
   },
-  optionSelected: { backgroundColor: theme.surface.sunken },
+  optionSelected: { backgroundColor: MEDIUM_SELECTED.background },
   menu: {
     position: 'absolute',
     overflow: 'hidden',

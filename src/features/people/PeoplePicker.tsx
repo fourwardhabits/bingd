@@ -232,7 +232,18 @@ function List({
 }
 
 const styles = StyleSheet.create({
-  search: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  /**
+   * The field sits where it did, with `space[2]` below it. `SearchField`'s 44pt box is 2pt
+   * taller than the drawn field above and below, for its clear button's target (A11Y-44,
+   * A.2 #11): the top 2pt lies in the bottom padding of the sheet's header above (`space[3]`
+   * in both callers, Recommend and Group Recommendations), and the bottom 2pt comes out of
+   * this padding. The people list does not move.
+   */
+  search: {
+    paddingHorizontal: theme.layout.gutter,
+    marginTop: -2,
+    paddingBottom: theme.space[2] - 2,
+  },
   listContent: { paddingHorizontal: theme.layout.gutter },
   row: {
     flexDirection: 'row',

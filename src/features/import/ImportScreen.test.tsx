@@ -1,7 +1,10 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
 
+import { StyleSheet } from 'react-native';
+
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { ImportScreen } from './ImportScreen';
 
@@ -187,18 +190,40 @@ beforeEach(() => {
 });
 
 describe('before a file is chosen', () => {
-  it('says what is read and what is never opened', async () => {
+  /**
+   * IMP1113-UI: the page says what comes in (films, diary, watchlist) and that nothing
+   * already ranked changes. The always-visible privacy block and how-to card were removed
+   * by the founder (t175u/t177u); this used to assert the privacy sentence and now asserts
+   * that it is gone, with the steps one tap away instead.
+   */
+  /**
+   * QA 11-14 §7: the shorter, behaviour-accurate Letterboxd copy (watched films join the
+   * collection unranked; watchlist titles join the watchlist; scores unchanged), a `title1`
+   * heading, and Export beside Upload. Was: the longer body ("Import the films you’ve
+   * watched…") under a `display` heading with one Upload Letterboxd ZIP button.
+   */
+  it('says what comes in, with the steps behind a collapsed disclosure', async () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    expect(screen.getByText(/movies you.+watched/)).toBeTruthy();
-    expect(screen.getByText(/never open your reviews/)).toBeTruthy();
-    // The retention promise, which is Contract V3 §14 and the thing somebody is deciding on.
-    expect(screen.getByText(/ZIP stays on your phone/)).toBeTruthy();
-    // **And the links, which an earlier draft of this sentence left out.** `filmUri` and
-    // every `diaryUri` do cross the wire and are kept permanently — the diary one is half
-    // the primary key that makes a re-import a no-op. Asserted here because the failure
-    // mode is a privacy sentence quietly drifting into being untrue.
-    expect(screen.getByText(/Letterboxd links/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Bring over your watched films, diary, and watchlist. Watched films join your collection unranked, ready to rank. Watchlist titles join your watchlist. Existing scores stay the same.',
+      ),
+    ).toBeTruthy();
+    // The one deviation from the founder's suggested sentence: nothing says "titles join
+    // your collection", because watchlist titles do not.
+    expect(screen.queryByText(/Titles join your collection/)).toBeNull();
+    expect(
+      StyleSheet.flatten(screen.getByText('Bring over your Letterboxd history').props.style),
+    ).toMatchObject(theme.typography.title1);
+    expect(screen.getByRole('button', { name: 'Letterboxd Export' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Upload Letterboxd file' })).toBeTruthy();
+    expect(screen.queryByText(/ZIP stays on your phone/)).toBeNull();
+    expect(screen.queryByText('How to get your file')).toBeNull();
+    expect(screen.queryByText('Choose a different service')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Need help getting the file?', expanded: false }),
+    ).toBeTruthy();
   });
 
   it('counts the entry point once', async () => {
@@ -221,7 +246,7 @@ describe('choosing an export', () => {
   it('returns from the preview on a new scroll body, not the preview’s', async () => {
     mockPicked = exportZip(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
     await waitFor(() => expect(screen.getByText('Ready to import')).toBeTruthy());
 
     type HostNode = { props: Record<string, unknown>; parent: HostNode | null };
@@ -234,21 +259,29 @@ describe('choosing an export', () => {
     expect(previewScroll).toBeTruthy();
 
     await fireEvent.press(screen.getByText('Choose a different file'));
-    await waitFor(() => expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
 
-    expect(scrollAbove('Bring your Letterboxd history')).not.toBe(previewScroll);
+    expect(scrollAbove('Bring over your Letterboxd history')).not.toBe(previewScroll);
   });
 
   it('previews the counts and sends nothing yet', async () => {
     mockPicked = exportZip(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() => expect(screen.getByText(/Here.+s what we found/)).toBeTruthy());
     expect(screen.getByText('Ready to import')).toBeTruthy();
-    expect(screen.getByText('Watched films')).toBeTruthy();
-    expect(screen.getByText('Import 2 films')).toBeTruthy();
+    expect(screen.getByLabelText('Movies, 2')).toBeTruthy();
+    // IMP1113-UI: no Ratings row, no Unmatched guess, and the J5 fallback line instead.
+    expect(screen.queryByText('Ratings')).toBeNull();
+    expect(screen.queryByText(/Unmatched/)).toBeNull();
+    expect(
+      screen.getByText('Anything we can’t match will be listed after the import.'),
+    ).toBeTruthy();
+    expect(screen.getByText('Import')).toBeTruthy();
     // The whole point of a preview: the decision has not been made yet.
     expect(mockRpc).not.toHaveBeenCalled();
     expect(mockTrack).toHaveBeenCalledWith({
@@ -261,7 +294,7 @@ describe('choosing an export', () => {
     mockPicked = exportZip(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() => expect(screen.getByText(/Here.+s what we found/)).toBeTruthy());
     expect(screen.queryByText(/secret/)).toBeNull();
@@ -272,7 +305,7 @@ describe('choosing an export', () => {
     mockPicked = strToU8(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() => expect(screen.getByText(/not the Letterboxd ZIP/)).toBeTruthy());
     expect(screen.getByText(/unzipped it/)).toBeTruthy();
@@ -286,7 +319,7 @@ describe('choosing an export', () => {
     mockPicked = zipSync({ 'holiday.txt': strToU8('hello') });
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() => expect(screen.getByText(/isn.+t from Letterboxd/)).toBeTruthy());
   });
@@ -295,7 +328,7 @@ describe('choosing an export', () => {
     mockPicked = exportZip('Date,Name,Year,Letterboxd URI\n');
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() => expect(screen.getByText(/nothing in that file yet/)).toBeTruthy());
   });
@@ -304,7 +337,7 @@ describe('choosing an export', () => {
     mockPicked = null;
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
 
     await waitFor(() =>
       expect(mockTrack).toHaveBeenCalledWith({
@@ -313,7 +346,7 @@ describe('choosing an export', () => {
       }),
     );
     // No apology for a decision somebody made on purpose.
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
   });
 });
 
@@ -323,9 +356,9 @@ describe('uploading', () => {
     mockRpcResults = { import_create: 'job-1', import_status: null };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText(/You can close bingd\./)).toBeTruthy());
 
@@ -358,9 +391,9 @@ describe('uploading', () => {
     mockRpcErrors = { import_stage: { message: 'network' } };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
     // `import_create` reuses the open job and `import_rows_once` makes a re-sent page free,
@@ -378,9 +411,9 @@ describe('uploading', () => {
     mockRpcLost = new Set(['import_stage']);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
   });
@@ -400,9 +433,9 @@ describe('uploading', () => {
     mockRpcLost = new Set(['import_ready']);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText('We couldn’t check your import')).toBeTruthy());
     expect(screen.queryByText(/didn.+t finish sending/)).toBeNull();
@@ -432,13 +465,14 @@ describe('when it is over', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    // The unresolved sentence: a partial import must not read as a complete one.
-    expect(screen.getByText(/couldn.+t find 1 film/)).toBeTruthy();
+    // The unresolved count: a partial import must not read as a complete one. A row since
+    // IMP1113-UI (*Unmatched*, expandable), where it was a sentence.
+    expect(screen.getByRole('button', { name: 'Unmatched, 1 title' })).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
       props: { applied: 1, unresolved: 1, provider: 'letterboxd' },
@@ -480,19 +514,20 @@ describe('when it is over', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText('Added as watched')).toBeTruthy());
-    expect(screen.getByLabelText('1 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Already in bingd')).toBeTruthy();
+    // IMP1113-UI (`resultModel`): *Already in bingd* is `kept` alone, and an earlier
+    // import's films are *Imported movies* with their own sublabel, because they are the
+    // import's and still unranked, where `kept` is somebody's own.
+    await waitFor(() => expect(screen.getByText('Imported movies')).toBeTruthy());
+    expect(screen.getByLabelText('Imported movies, 2. 1 from an earlier import')).toBeTruthy();
+    expect(screen.getByLabelText('Already in bingd, 1')).toBeTruthy();
     // Named as diary entries, because it is the one number that is not a count of films.
-    expect(screen.getByLabelText('3 Diary entries saved')).toBeTruthy();
-    // And the rule that explains why an import never overwrites a ranking.
-    expect(screen.getByText(/start unranked/)).toBeTruthy();
+    expect(screen.getByLabelText('Diary entries, 3')).toBeTruthy();
     // A zero is left out rather than drawn.
-    expect(screen.queryByText('Added to your watchlist')).toBeNull();
+    expect(screen.queryByText('Added to watchlist')).toBeNull();
   });
 
   it('does not claim a history arrived when nothing did', async () => {
@@ -515,16 +550,17 @@ describe('when it is over', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() =>
       expect(screen.getByText('Your Letterboxd history is already here')).toBeTruthy(),
     );
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
-    // Nothing arrived, so there is nothing to rank.
-    expect(screen.queryByText('Rank imported movies')).toBeNull();
+    // Nothing the import owns is unranked, so Done is the only way on.
+    expect(screen.queryByText('Rank titles')).toBeNull();
+    expect(screen.getByText('Done')).toBeTruthy();
   });
 
   it('says nothing was added, not "already here", when nothing matched', async () => {
@@ -547,16 +583,16 @@ describe('when it is over', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText('Nothing was added')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Nothing new came in')).toBeTruthy());
     expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
-    // The unmatched line still says why.
-    expect(screen.getByText(/couldn.+t find 2 films/)).toBeTruthy();
-    expect(screen.queryByText('Rank imported movies')).toBeNull();
+    // The unmatched count is still there to say why.
+    expect(screen.getByRole('button', { name: 'Unmatched, 2 titles' })).toBeTruthy();
+    expect(screen.queryByText('Rank titles')).toBeNull();
   });
 });
 
@@ -585,12 +621,19 @@ describe('an import that is already happening', () => {
     expect(mockFrom).toHaveBeenCalledWith('import_jobs');
   });
 
-  it('shows the summary when the import finished while they were away', async () => {
+  /**
+   * **QA 11-14 §6: a finished job is history, not a screen.** Was: "shows the summary when
+   * the import finished while they were away", which asserted the 24-hour restore. The
+   * founder's rule replaces it: with nothing running and no job named, Settings ▸ Import
+   * opens on the importer, however recently the last job ended. The job row is not touched
+   * (no discard, no delete), and picking a file is offered at once: no cooldown.
+   */
+  it('opens on the importer, not the summary, when the last import finished a minute ago', async () => {
     mockLiveJob = {
       data: {
         id: 'job-live',
         status: 'done',
-        counts: { applied: 2, watched: 2, watchlist: 0, viewings: 0 },
+        counts: { applied: 0, watched: 0, already: 2, watchlist: 0, viewings: 0 },
         completed_at: new Date(Date.now() - 60_000).toISOString(),
       },
       error: null,
@@ -598,10 +641,105 @@ describe('an import that is already happening', () => {
 
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    await waitFor(() =>
+      expect(screen.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
+    expect(screen.queryByText(/history is already here/)).toBeNull();
+    expect(screen.queryByText(/history is in/)).toBeNull();
+    expect(screen.queryByText('Import another file')).toBeNull();
+    // History, not something to clean up: the job is neither discarded nor read again.
+    expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_discard');
+    expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_status');
+  });
+
+  it('opens on the importer for a job that finished moments ago, too: there is no window', async () => {
+    mockLiveJob = {
+      data: {
+        id: 'job-live',
+        status: 'done',
+        counts: { applied: 2, watched: 2 },
+        completed_at: new Date(Date.now() - 1_000).toISOString(),
+      },
+      error: null,
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
+    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+  });
+
+  /**
+   * The reimport after a prior success: the intro offers the picker straight away, and the
+   * same file again is the same idempotent import, whose finished job says *already here*
+   * because it is in front of the reader, in this session.
+   */
+  it('lets somebody import the same file again straight after a finished import, and says already here', async () => {
+    mockLiveJob = {
+      data: {
+        id: 'job-before',
+        status: 'done',
+        counts: { applied: 2, watched: 2 },
+        completed_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+      error: null,
+    };
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: JOB,
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 0, watched: 0, already: 2 },
+              completed_at: new Date().toISOString(),
+            };
+      },
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
+
+    await waitFor(() =>
+      expect(screen.getByText('Your Letterboxd history is already here')).toBeTruthy(),
+    );
+    expect(mockRpc.mock.calls.map(([name]) => name)).toContain('import_create');
+  });
+
+  it('says the history is in when a newer file added films', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: JOB,
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 1, watched: 1, already: 1 },
+              completed_at: new Date().toISOString(),
+            };
+      },
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
+
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    // And a way on, so a restored summary is not a dead end for somebody holding a second
-    // archive.
-    expect(screen.getByText('Import another file')).toBeTruthy();
+    expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
+    expect(screen.getByLabelText('Imported movies, 2. 1 from an earlier import')).toBeTruthy();
   });
 
   /**
@@ -624,7 +762,7 @@ describe('an import that is already happening', () => {
   });
 
   it('leaves an import that finished long ago alone', async () => {
-    // Restoring it would mean opening the importer onto last month's summary for ever.
+    // As it always did; since QA 11-14 §6 a job that finished a minute ago is left alone too.
     mockLiveJob = {
       data: {
         id: 'job-old',
@@ -638,7 +776,7 @@ describe('an import that is already happening', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
   });
 
   it('ignores a half-staged job, because there is nothing to show for it', async () => {
@@ -652,7 +790,7 @@ describe('an import that is already happening', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
   });
 
   it('still offers the importer when the lookup itself fails', async () => {
@@ -663,7 +801,7 @@ describe('an import that is already happening', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
   });
 
   it('refuses the second archive out loud rather than swallowing it', async () => {
@@ -683,9 +821,9 @@ describe('an import that is already happening', () => {
     };
 
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() => expect(screen.getByText('An import is already running')).toBeTruthy());
     // The sentence says what happened to *this* file, not what the other one is doing.
@@ -709,9 +847,9 @@ describe('an import that is already happening', () => {
     };
 
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
+    await fireEvent.press(screen.getByText('Upload Letterboxd file'));
+    await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import'));
     await waitFor(() => expect(screen.getByText('An import is already running')).toBeTruthy());
 
     await fireEvent.press(screen.getByText('See the import that’s running'));
@@ -750,16 +888,16 @@ describe('opened for a named import', () => {
   });
 
   it('shows the summary of a finished import, however long ago it finished', async () => {
-    // Months old: the 24-hour restore window is for an unprompted reopen, not for a job
-    // somebody asked for by name.
+    // Months old: a job somebody asked for by name is shown however long ago it ended,
+    // while an unprompted open never restores one (QA 11-14, §6).
     mockRpcResults = {
       import_status: job('done', { counts: { applied: 19, watched: 19, watchlist: 2 } }),
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    expect(screen.getByLabelText('19 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Added to your watchlist')).toBeTruthy();
+    expect(screen.getByLabelText('Imported movies, 19')).toBeTruthy();
+    expect(screen.getByLabelText('Added to watchlist, 2')).toBeTruthy();
   });
 
   it('shows a failed import as a failure, with a way to try again', async () => {
@@ -769,7 +907,7 @@ describe('opened for a named import', () => {
     await waitFor(() =>
       expect(screen.getByText('We couldn’t finish your Letterboxd import')).toBeTruthy(),
     );
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
   });
 
@@ -780,7 +918,7 @@ describe('opened for a named import', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('We couldn’t check your import')).toBeTruthy());
-    expect(screen.queryByText('Choose Letterboxd ZIP')).toBeNull();
+    expect(screen.queryByText('Upload Letterboxd file')).toBeNull();
     // Not a claim that it is still running: a finished job reads the same way offline.
     expect(screen.queryByText(/still running/)).toBeNull();
 
@@ -801,7 +939,9 @@ describe('opened for a named import', () => {
       <ImportScreen surface="settings" jobId="not-a-job" />,
     );
 
-    await waitFor(() => expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText('Bring over your Letterboxd history')).toBeTruthy(),
+    );
     expect(mockRpc).not.toHaveBeenCalledWith('import_status', { p_job_id: 'not-a-job' });
   });
 
@@ -812,13 +952,19 @@ describe('opened for a named import', () => {
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('import_status', { p_job_id: GONE }),
     );
-    expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy();
-    expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
+    expect(screen.getByText('Bring over your Letterboxd history')).toBeTruthy();
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
   });
 });
 
-describe('restoring an import that ended while they were away', () => {
-  it('restores a failed import as a failure, not as a summary', async () => {
+/**
+ * QA 11-14 §6. Was: "restoring an import that ended while they were away", which restored a
+ * failed job as a failure within the 24-hour window. A failed job is not active, so an
+ * unprompted open now shows the importer, as for a finished one; the failure is still shown
+ * when a link names the job ("shows a failed import as a failure" above).
+ */
+describe('an import that ended while they were away', () => {
+  it('opens on the importer, not the failure, when nothing names the job', async () => {
     mockLiveJob = {
       data: {
         id: 'job-dead',
@@ -830,15 +976,15 @@ describe('restoring an import that ended while they were away', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
-    await waitFor(() =>
-      expect(screen.getByText('We couldn’t finish your Letterboxd import')).toBeTruthy(),
-    );
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
+    expect(screen.queryByText('We couldn’t finish your Letterboxd import')).toBeNull();
     expect(screen.queryByText(/history is in/)).toBeNull();
   });
 });
 
 describe('the way on', () => {
-  it('leads with Rank imported movies, which opens Collection on Unranked', async () => {
+  it('offers Rank titles beside Done, which opens Collection on Unranked', async () => {
     mockRpcResults = {
       import_status: {
         status: 'done',
@@ -848,11 +994,10 @@ describe('the way on', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('Rank imported movies')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Rank titles')).toBeTruthy());
     expect(screen.getByText('Done')).toBeTruthy();
-    expect(screen.getByText('Import another file')).toBeTruthy();
 
-    await fireEvent.press(screen.getByText('Rank imported movies'));
+    await fireEvent.press(screen.getByText('Rank titles'));
     expect(mockDismissTo).toHaveBeenCalledWith({
       pathname: '/(tabs)/collection',
       params: { show: 'unranked' },
@@ -918,7 +1063,7 @@ describe('the words', () => {
   };
 
   const headlines: Record<string, string> = {
-    entry: 'Bring your Letterboxd history',
+    entry: 'Bring over your Letterboxd history',
     running: 'Importing your Letterboxd history',
     finished: 'Your Letterboxd history is in',
     failed: 'We couldn’t finish your Letterboxd import',
@@ -934,7 +1079,11 @@ describe('the words', () => {
       // The phase's own headline first, so the absences are read off the right screen.
       await waitFor(() => expect(screen.getByText(headlines[phase]!)).toBeTruthy());
 
-      expect(screen.queryAllByText(/match|process|payload|\brows?\b/i)).toHaveLength(0);
+      // *Unmatched* and *can't match* are the founder's own words since IMP1113-UI (the
+      // results row and the J5 preview line); the pipeline's words are still banned.
+      expect(
+        screen.queryAllByText(/matching|\bmatched\b|process|payload|\brows?\b/i),
+      ).toHaveLength(0);
       expect(screen.queryAllByText(/—/)).toHaveLength(0);
     },
   );

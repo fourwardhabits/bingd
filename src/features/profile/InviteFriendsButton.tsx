@@ -36,9 +36,16 @@ import { Button } from '@/ui/components';
  */
 export function InviteFriendsButton({
   size = 'md',
+  kind = 'primary',
 }: {
   /** `sm` in the owner's compact action row (marquee cohesion sprint). */
   size?: 'md' | 'sm';
+  /**
+   * `secondary` where something else on the same footer is the one Maroon fill — the
+   * onboarding People step, whose Continue is primary (Onboarding 2.0, OB-6). Defaults
+   * to `primary`, so Profile and every other caller are unchanged.
+   */
+  kind?: 'primary' | 'secondary';
 } = {}) {
   /**
    * **"Opening…" covers the mint and nothing after it.**
@@ -96,6 +103,7 @@ export function InviteFriendsButton({
   return (
     <Button
       label={opening ? 'Opening…' : 'Invite friends'}
+      kind={kind}
       fit
       size={size}
       hitSlop={size === 'sm' ? { top: 4, bottom: 4 } : undefined}

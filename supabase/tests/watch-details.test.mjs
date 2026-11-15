@@ -244,6 +244,81 @@ describe('a viewing with its own details', () => {
     await t.actAs(user);
     assert.equal((await details(eventId)).note, 'Mine');
   });
+
+  // FU1113-A: Watch History's *Edit watch → Note* now writes through this function.
+
+  it('refuses somebody else’s viewing with P0002, and leaves its note and companions', async () => {
+    const film = await movie('Not yours, coded');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    const { watch_event_id: eventId } = await logAgain(film, 'Mine', [friend]);
+
+    await t.actAs(stranger);
+    const error = await call(`set_watch_details($1, $2, 'hijack', $3)`, [await op(), eventId, []]).then(
+      () => null,
+      (e) => e,
+    );
+    assert.ok(error, 'another account edited the viewing');
+    assert.equal(error.code, 'P0002');
+    await t.actAs(user);
+    assert.deepEqual(await details(eventId), { note: 'Mine', companions: [friend] });
+  });
+
+  it('is idempotent: a repeated operation id is already applied and writes nothing again', async () => {
+    const film = await movie('Replayed edit');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    const { watch_event_id: eventId } = await logAgain(film, 'Before', []);
+    const id = await op();
+
+    const first = await call(`set_watch_details($1, $2, $3, null)`, [id, eventId, 'After']);
+    assert.equal(first.status, 'ok');
+    // A later edit, then the first one replayed (a retry after a lost reply).
+    await call(`set_watch_details($1, $2, $3, null)`, [await op(), eventId, 'Later']);
+    const replay = await call(`set_watch_details($1, $2, $3, null)`, [id, eventId, 'After']);
+    assert.equal(replay.status, 'already_applied');
+    assert.equal((await details(eventId)).note, 'Later', 'the replay overwrote a later edit');
+  });
+
+  it('writes only the named viewing: other viewings and the title review stay as they were', async () => {
+    const film = await movie('Three viewings');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    const second = (await logAgain(film, 'Second', [])).watch_event_id;
+    const third = (await logAgain(film, 'Third time, on the big screen', [friend])).watch_event_id;
+    await t.sql(
+      `update user_media set note = 'The review', note_visibility = 'public', note_has_spoilers = true
+        where user_id = $1 and media_item_id = $2`,
+      [user, film],
+    );
+    const snapshot = async () => ({
+      review: (
+        await t.sql(
+          `select note, note_visibility, note_has_spoilers from user_media
+            where user_id = $1 and media_item_id = $2`,
+          [user, film],
+        )
+      ).rows[0],
+      events: (
+        await t.sql(
+          `select id, note from watch_events where user_id = $1 and media_item_id = $2 order by recorded_at, id`,
+          [user, film],
+        )
+      ).rows,
+      feed: (await t.sql(`select count(*)::int as n from feed_events where actor_id = $1`, [user])).rows[0].n,
+    });
+    const before = await snapshot();
+
+    await call(`set_watch_details($1, $2, $3, null)`, [await op(), third, 'Edited third']);
+
+    const afterEdit = await snapshot();
+    assert.deepEqual(afterEdit.review, before.review, 'a watch edit touched the title review');
+    assert.equal(afterEdit.feed, before.feed, 'a watch edit posted to the feed');
+    assert.equal(afterEdit.events.length, before.events.length, 'a watch edit added a viewing');
+    for (const row of afterEdit.events) {
+      const was = before.events.find((r) => r.id === row.id);
+      assert.equal(row.note, row.id === third ? 'Edited third' : was.note);
+    }
+    assert.equal((await details(second)).note, 'Second');
+    assert.deepEqual((await details(third)).companions, [friend]);
+  });
 });
 
 // ---------------------------------------------------------------------------

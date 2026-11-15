@@ -1,5 +1,6 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
+import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 
 /**
@@ -237,5 +238,78 @@ describe('the rows', () => {
 
     await waitFor(() => expect(view.getByText('person1')).toBeTruthy());
     expect(view.queryByText('Someone')).toBeNull();
+  });
+});
+
+/**
+ * **The shared sheet structure** (founder spec §4, 2026-11-13): the search stays in the
+ * header, the list shrinks to the room above the footer rather than to a fixed cap, and
+ * the one way out is the standard Close footer — not a second Close in the header.
+ */
+describe('the sheet around the list', () => {
+  it('has exactly one Close, the footer, and it closes', async () => {
+    mockRpc.pages = [pageOf(1, 3)];
+    const onClose = jest.fn();
+    const view = await open({ onClose });
+    await waitFor(() => expect(view.getByText('Person 1')).toBeTruthy());
+
+    expect(view.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+    expect(view.getByTestId('dismiss-footer')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches the last row of a long list, with the footer outside the scroll', async () => {
+    mockRpc.pages = [pageOf(1, 40)];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Person 40')).toBeTruthy());
+
+    const { StyleSheet } = jest.requireActual('react-native');
+    const footer = view.getByTestId('dismiss-footer');
+    let scroller = view.getByText('Person 40').parent;
+    while (scroller && scroller.type !== 'RCTScrollView') scroller = scroller.parent;
+    expect(scroller).toBeTruthy();
+    // No fixed cap left on the list: it is the sheet's content area that bounds it.
+    expect(StyleSheet.flatten(scroller?.props.style).maxHeight).toBeUndefined();
+    let up = footer.parent;
+    while (up) {
+      expect(up).not.toBe(scroller);
+      up = up.parent;
+    }
+  });
+});
+
+/**
+ * **The clear button answers 44 × 44 here, and the field has not moved** (A11Y-44,
+ * design-system v3 A.2 #11). `SearchField`'s box is now 44pt around the 40pt field it
+ * draws; this call site gives the extra 4pt back from space already around the field, so
+ * the drawn field is the same distance from what is above and below it as before (the header's `space[2]` gap above, its `space[3]` padding below).
+ * Laid out from the rendered styles (`hit-rect.ts`).
+ */
+describe('the search field', () => {
+  it('gives Clear a 44pt target and keeps the field where it was in the header', async () => {
+    mockRpc.pages = [[person(1)]];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Person 1')).toBeTruthy());
+    await act(async () => {
+      fireEvent.changeText(view.getByLabelText('Search followers'), 'person');
+    });
+    const input = view.getByLabelText('Search followers') as unknown as Host;
+    // input → drawn field → SearchField → the local wrapper → the sheet header.
+    let header = input;
+    for (let i = 0; i < 4; i += 1) header = parentView(header);
+    expect(header.props.testID).toBe('sheet-header');
+    const site = searchFieldSite(header, input, 360);
+
+    expect(site.clear.height).toBeGreaterThanOrEqual(44);
+    expect(site.clear.width).toBeGreaterThanOrEqual(44);
+    expect(site.row.height).toBe(40);
+    // `space[2]` from the title row (the header's gap), and the header's content ends at
+    // the drawn field, with its `space[3]` of padding below.
+    expect(site.spaceAbove).toBe(8);
+    expect(site.spaceBelow).toBe(0);
+    const headerBox = site.clear.boxes.get(header)!;
+    expect(headerBox.top + headerBox.height - (site.row.top + site.row.height)).toBe(12);
+    expect(site.insideParent).toBe(true);
   });
 });

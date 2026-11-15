@@ -1,8 +1,10 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { AppState, StyleSheet } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
+import { controlRowSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { addDays, addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
@@ -935,7 +937,6 @@ describe('a successful autosave says nothing', () => {
   it('mounts no status at all before anything is being saved', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     expect(sheet.queryByText('Saving…')).toBeNull();
     // And no reserved box either. It existed only to stop the label moving the rows,
     // and a blank slot for a label that never comes is dead space on every open.
@@ -957,7 +958,6 @@ describe('a successful autosave says nothing', () => {
 
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
 
     // The debounce is real — see the lane's own note on why fake timers poison this
@@ -978,7 +978,6 @@ describe('a successful autosave says nothing', () => {
     // carrying the text, exactly as before.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
     expect(callsTo('log_watched')[0][1].p_note).toBe('a thought worth keeping');
@@ -990,7 +989,6 @@ describe('a successful autosave says nothing', () => {
     // screen or take one away.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     for (const text of ['o', 'on', 'one', 'one t', 'one tw', 'one two']) {
       await fireEvent.changeText(sheet.note(), text);
       expect(sheet.queryByText('Saving…')).toBeNull();
@@ -1031,7 +1029,6 @@ describe('the autosave lane', () => {
     // the strand outlives the test. 1200ms of real waiting is the honest version.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'one');
     await fireEvent.changeText(sheet.note(), 'one two');
     await fireEvent.changeText(sheet.note(), 'one two three');
@@ -1062,7 +1059,6 @@ describe('the autosave lane', () => {
   it('moves to the assigning writer the moment its own write has created the row', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'first thought');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1084,7 +1080,6 @@ describe('the autosave lane', () => {
     // it last sent, and a clear against that is a change.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'a passing thought');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1109,7 +1104,6 @@ describe('the autosave lane', () => {
     // is the contract: typing, however continuous, cannot stay unsaved.
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     const started = Date.now();
     let draft = 'no';
     while (callsTo('log_watched').length === 0 && Date.now() - started < 10_000) {
@@ -1133,7 +1127,6 @@ describe('the autosave lane', () => {
     failing('log_watched', { code: '08007', message: 'connection lost' });
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await fireEvent.changeText(sheet.note(), 'the first attempt');
     await fireEvent(sheet.note(), 'blur');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1300,6 +1293,32 @@ describe('what a note says about itself', () => {
   const reviewToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
     sheet.getByLabelText('Share this note as a public review');
 
+  /**
+   * **Both claims answer 44pt in the composer, and nothing in it moves** (A11Y-44,
+   * design-system v3 A.2 #12). Measured in the real note box (gutter padding, `space[2]`
+   * gap) at 360pt, where the two chips wrap, and at a width where they share a line; the
+   * chips stay `space[2]` from the field above and the caption below (`hit-rect.ts`).
+   */
+  it('gives both claims a 44pt target without moving the chips or the gaps', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    const chips = [
+      sheet.getByLabelText('This note contains spoilers'),
+      sheet.getByLabelText('Share this note as a public review'),
+    ] as unknown as Host[];
+    for (const width of [360, 1000]) {
+      const site = controlRowSite(chips, width);
+      expect(site.wrapped).toBe(width === 360);
+      for (const [index, hit] of site.hits.entries()) {
+        expect(site.chips[index]!.height).toBe(theme.layout.control.chipHeight);
+        expect(hit.height).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      }
+      if (site.wrapped) expect(site.hits[0]!.bottom).toBeLessThanOrEqual(site.hits[1]!.top);
+      expect(site.spaceAbove).toBe(theme.space[2]);
+      expect(site.spaceBelow).toBe(theme.space[2]);
+    }
+  });
+
   it('opens a first-ever note private: publishing is the reader’s own act', async () => {
     /**
      * **Private again, by the founder's rule of 2026-11-04.** It opened shared from
@@ -1309,7 +1328,6 @@ describe('what a note says about itself', () => {
      */
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() =>
       expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false),
     );
@@ -1393,7 +1411,6 @@ describe('what a note says about itself', () => {
     );
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() =>
       expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false),
     );
@@ -2511,6 +2528,83 @@ describe('the one Note row', () => {
     expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
   });
 
+  /**
+   * **QA1114-REVIEWS: every own review write refreshes the title's Reviews.**
+   *
+   * The list (by prefix, so every sort and the Most Helpful preview's `top_desc` entry)
+   * and the tab's count live under two roots, and both must be invalidated after a
+   * create, an edit and a private → public publish — the three ways a reader's own
+   * review comes to exist or change from this sheet. `invalidate.test.ts` pins the
+   * helper; this pins that the sheet's writers actually reach it.
+   */
+  const reviewKeysInvalidated = (spy: jest.SpyInstance) => {
+    const keys = spy.mock.calls.map(([filters]) => (filters as { queryKey?: unknown })?.queryKey);
+    return {
+      list: keys.some((key) => JSON.stringify(key) === JSON.stringify(['title-reviews', filmA.id])),
+      count: keys.some(
+        (key) => JSON.stringify(key) === JSON.stringify(['title-review-count', filmA.id]),
+      ),
+    };
+  };
+
+  it('invalidates the review list and count after a private → public publish', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    await fireEvent.press(shareChip(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
+  it('invalidates the review list and count after editing a published review', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'shared already',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('shared already'));
+    await fireEvent.changeText(sheet.note(), 'shared already, and edited');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({ p_note_visibility: 'public' });
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
+  it('invalidates the review list and count after creating a first public review', async () => {
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'a first review');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note_visibility).toBe('public');
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
   it('takes it back on a second tap, keeping the text', async () => {
     // The stand-in behaves like the server: the first save really stores `public`, so
     // the refetch behind it returns the published state and the second tap is judged
@@ -2828,7 +2922,6 @@ describe('the remembered share choice', () => {
   it('opens a first-ever note private', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() => expect(shareOn(sheet)).toBe(false));
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
   });
@@ -2837,7 +2930,6 @@ describe('the remembered share choice', () => {
     mockPrefs.set('user-1.notes.share-default', 'public');
     const sheet = await open(filmA);
     await sheet.openNotes();
-
     await waitFor(() => expect(shareOn(sheet)).toBe(false));
   });
 
@@ -3525,5 +3617,335 @@ describe('the watch-history row', () => {
     await settle();
     expect(view.queryByRole('button', { name: 'Watched 2 times' })).toBeNull();
     expect(view.queryByRole('button', { name: 'Watch date' })).toBeNull();
+  });
+});
+
+/**
+ * **Update Show or Keep Show, after the details** (WS-TVC, founder spec t168u §3B/§3E).
+ *
+ * A season's reveal that offered Update Show and was left by *Add details* has not
+ * resolved the show. The post-rank sheet carries that decision in place of Done: the
+ * details the reader adds land first (the same barrier a bucket tap waits on), then
+ * Update Show opens the show's correction with the link, or Keep Show records the
+ * reaffirmation and ends the flow. Leaving the sheet any other way records nothing.
+ */
+describe('the show decision a season ranking left open', () => {
+  const placed = { score: 9.1, position: 2, category: 'tv_seasons' };
+  const decision = {
+    showId: 'show-1',
+    bucket: 'loved' as const,
+    linkedPlacementId: 'placement-s2',
+    showScore: 9.5,
+  };
+  const season: LoggableTitle = {
+    ...filmA,
+    id: 'season-2',
+    title: 'Show · Season 2',
+    kind: 'season',
+  };
+
+  /** FU1113-D D3/D4: the act's own words, no score, the eligible flow has no Done. */
+  it('offers full-width Update Show Ranking and centred Keep Show Ranking, no score, in place of Done', async () => {
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow: jest.fn(),
+    });
+
+    await waitFor(() => expect(sheet.getByTestId('log-show-decision')).toBeTruthy());
+    const update = sheet.getByRole('button', { name: 'Update Show Ranking' });
+    const keep = sheet.getByRole('button', { name: 'Keep Show Ranking' });
+    expect(update).toBe(sheet.getByTestId('log-update-show'));
+    expect(keep).toBe(sheet.getByTestId('log-keep-show'));
+    expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(sheet.queryByText(/Show 9\.5/)).toBeNull();
+    expect(sheet.queryByText(/Show \d/)).toBeNull();
+
+    // Update: the filled primary, standard size, stretched across the form (its column
+    // centres nothing). Keep: its own row, centred across the same width, under it.
+    const updateStyle = StyleSheet.flatten(update.props.style);
+    expect(updateStyle.backgroundColor).toBe(theme.semantic.action);
+    expect(updateStyle.minHeight).toBe(theme.layout.buttonMinHeight);
+    expect(updateStyle.alignSelf).toBeUndefined();
+    const column = StyleSheet.flatten(sheet.getByTestId('log-show-decision').props.style);
+    expect(column.alignItems).toBeUndefined();
+    expect(column.flexDirection).toBeUndefined();
+    const keepRow = sheet.getByTestId('log-keep-row');
+    expect(StyleSheet.flatten(keepRow.props.style).alignItems).toBe('center');
+    expect(within(keepRow).getByRole('button', { name: 'Keep Show Ranking' })).toBe(keep);
+    expect(StyleSheet.flatten(keep.props.style).backgroundColor).toBe('transparent');
+  });
+
+  it('keeps the same labels when the show score is not known', async () => {
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: { ...decision, showScore: null },
+      onUpdateShow: jest.fn(),
+    });
+
+    await waitFor(() =>
+      expect(sheet.getByRole('button', { name: 'Update Show Ranking' })).toBeTruthy(),
+    );
+    expect(sheet.getByRole('button', { name: 'Keep Show Ranking' })).toBeTruthy();
+  });
+
+  it('keeps the ordinary Done when no decision was carried', async () => {
+    const sheet = await open(season, { postRank: placed });
+
+    await waitFor(() => expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy());
+    expect(sheet.queryByTestId('log-show-decision')).toBeNull();
+  });
+
+  it('lands a typed note before Update Show hands over the link', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string) => {
+      order.push(name);
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+    const onUpdateShow = jest.fn(() => order.push('update-show'));
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+    });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'the finale earns it');
+
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+
+    await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+    expect(onUpdateShow).toHaveBeenCalledWith({
+      showId: 'show-1',
+      bucket: 'loved',
+      linkedPlacementId: 'placement-s2',
+    });
+    expect(order.indexOf('log_watched')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('log_watched')).toBeLessThan(order.indexOf('update-show'));
+    expect(callsTo('keep_show')).toHaveLength(0);
+  });
+
+  it('keeps once on a double tap, after the details, and then finishes', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string) => {
+      order.push(name);
+      return Promise.resolve({
+        data:
+          name === 'keep_show'
+            ? { status: 'kept', created: true, kept_at: 'now' }
+            : { status: 'ok' },
+        error: null,
+      });
+    });
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'still a ten');
+
+    await act(async () => {
+      fireEvent.press(sheet.getByTestId('log-keep-show'));
+      fireEvent.press(sheet.getByTestId('log-keep-show'));
+    });
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(callsTo('keep_show')).toHaveLength(1);
+    expect(callsTo('keep_show')[0][1]).toEqual({ p_season_placement_id: 'placement-s2' });
+    expect(order.indexOf('log_watched')).toBeLessThan(order.indexOf('keep_show'));
+  });
+
+  it('stays open with the reason when Keep Show is refused, and can try again', async () => {
+    failing('keep_show', { code: 'P0002', message: 'stale' });
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await waitFor(() => expect(sheet.getByTestId('log-keep-show')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+
+    await waitFor(() => expect(sheet.getByTestId('log-keep-error')).toBeTruthy());
+    expect(
+      sheet.getByText('This season’s ranking has moved on, so there is nothing to keep.'),
+    ).toBeTruthy();
+    expect(onDone).not.toHaveBeenCalled();
+    // Nothing optimistic: both choices are still there.
+    expect(sheet.getByTestId('log-update-show')).toBeTruthy();
+
+    mockRpc.mockResolvedValue({
+      data: { status: 'kept', created: true, kept_at: 'now' },
+      error: null,
+    });
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(callsTo('keep_show')).toHaveLength(2);
+  });
+
+  it('holds the first decision once when a detail failed meanwhile', async () => {
+    failing('log_watched', { code: '22023', message: 'note refused' });
+    const onUpdateShow = jest.fn();
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+    });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'will be refused');
+
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await waitFor(() => expect(sheet.getByText('note refused')).toBeTruthy());
+    expect(onUpdateShow).not.toHaveBeenCalled();
+
+    // The second tap goes on: nothing above is required to decide the show.
+    await fireEvent.press(sheet.getByTestId('log-update-show'));
+    await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not finish a later sheet when a Keep Show reply lands after closing', async () => {
+    // Independent review (WS-TVC): the reply of a Keep sent before the sheet closed must
+    // not run `onDone` for whatever the reader has open by then.
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) =>
+      name === 'keep_show'
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    const onDone = jest.fn();
+    const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+    await waitFor(() => expect(sheet.getByTestId('log-keep-show')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByTestId('log-keep-show'));
+    await waitFor(() => expect(callsTo('keep_show')).toHaveLength(1));
+    await sheet.show(null);
+    await act(async () => {
+      answer({ data: { status: 'kept', created: true, kept_at: 'now' }, error: null });
+    });
+    await settle();
+
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Independent review (Codex P2 on #286): a note still saving when Update Show or Keep
+   * Show is tapped holds the decision at the details barrier. A sheet closed while it
+   * waits must not go on to open the show's correction or send the reaffirmation.
+   */
+  describe('when the sheet closes while a detail is still saving', () => {
+    /** `log_watched` stays in flight until the test answers it; everything else is ok. */
+    const holdingTheNote = () => {
+      let answer: () => void = () => {};
+      mockRpc.mockImplementation((name: string) =>
+        name === 'log_watched'
+          ? new Promise((resolve) => {
+              answer = () => resolve({ data: { status: 'ok' }, error: null });
+            })
+          : Promise.resolve({
+              data:
+                name === 'keep_show'
+                  ? { status: 'kept', created: true, kept_at: 'now' }
+                  : { status: 'ok' },
+              error: null,
+            }),
+      );
+      return () => answer();
+    };
+
+    it('does not open Update Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(onUpdateShow).not.toHaveBeenCalled();
+    });
+
+    it('does not send Keep Show after the sheet is gone', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await sheet.show(null);
+      await act(async () => {
+        answerNote();
+      });
+      await settle();
+
+      expect(callsTo('keep_show')).toHaveLength(0);
+      expect(onDone).not.toHaveBeenCalled();
+    });
+
+    it('still hands over Update Show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onUpdateShow = jest.fn();
+      const sheet = await open(season, {
+        postRank: placed,
+        showDecision: decision,
+        onUpdateShow,
+      });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-update-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(onUpdateShow).not.toHaveBeenCalled();
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onUpdateShow).toHaveBeenCalledTimes(1));
+    });
+
+    it('still keeps the show once the save lands, while the sheet stays open', async () => {
+      const answerNote = holdingTheNote();
+      const onDone = jest.fn();
+      const sheet = await open(season, { postRank: placed, showDecision: decision, onDone });
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'still saving');
+
+      await fireEvent.press(sheet.getByTestId('log-keep-show'));
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(callsTo('keep_show')).toHaveLength(0);
+      await act(async () => {
+        answerNote();
+      });
+
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      expect(callsTo('keep_show')).toHaveLength(1);
+    });
+  });
+
+  it('records nothing when the sheet is dismissed', async () => {
+    const onClose = jest.fn();
+    const onUpdateShow = jest.fn();
+    const sheet = await open(season, {
+      postRank: placed,
+      showDecision: decision,
+      onUpdateShow,
+      onClose,
+    });
+    await waitFor(() => expect(sheet.getByTestId('log-show-decision')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Close'));
+    await settle();
+
+    expect(callsTo('keep_show')).toHaveLength(0);
+    expect(onUpdateShow).not.toHaveBeenCalled();
   });
 });

@@ -213,7 +213,14 @@ export default function ActivityScreen() {
   if (!viewerId) return <LoadingScreen />;
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder QA, 2026-11-12), the Settings root's fix for the same reason
+     * `settings/notifications.tsx` records: this screen shows a native-stack header (here and on
+     * the root layout's `activity/[id]`), which already consumes the status-bar inset, so
+     * `Screen`'s default `top` edge added the same inset a second time below it. Left and right
+     * still apply; only the top edge is the header's.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       {/* "Comments" and not "(tabs)". The founder photographed an Expo route-group label
           in a back button once already; `ui/navigation.ts` carries the fix for the root
           stack, and a screen declaring its own title has to say it here too. */}
