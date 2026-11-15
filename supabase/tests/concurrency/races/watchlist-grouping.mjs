@@ -17,6 +17,11 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  *
  * **WG3. Two devices saving the same title at once announce it once.** The second reads
  * membership after the lock, finds the title, and adds nothing; both calls succeed.
+ *
+ * **WG4. A catalogue delete of a group's first title waits for a save joining it** (Codex,
+ * PR 310). The save holds the actor key uncommitted; the delete's trigger must block on that
+ * key, then see the new member, keep the post with it as representative, and not let the
+ * cascade take the post and its conversation.
  */
 export default function suite() {
   const rc = raceContext();
@@ -95,6 +100,52 @@ export default function suite() {
         assert.equal(rows.length, 1, 'WG2: the second device joined the first post');
         assert.equal(rows[0].members, 2);
         assert.equal(rows[0].payload.count, 2);
+      } finally {
+        await t1.rollback().catch(() => {});
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+      }
+    });
+
+    it('WG4: deleting a one-title group’s representative waits for a save joining it, and keeps the post', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const friend = await fx.createUser();
+      const [a, b] = [await fx.createMovie('WG4 A'), await fx.createMovie('WG4 B')];
+      const t1 = await db.session('saver');
+      const t2 = await db.session('operator');
+      try {
+        await t1.actAs(me);
+        await call(t1, save, [await newOp(db), a]);
+        const [post] = await posts(me);
+        // The conversation that must survive.
+        await t1.actAs(friend);
+        await call(t1, `add_comment($1, $2, 'keep this', false)`, [await newOp(db), post.id]);
+        await t1.actAs(me);
+
+        await t1.begin();
+        await call(t1, save, [await newOp(db), b]);
+
+        const p2 = t2.start(`delete from media_items where id = $1`, [a]);
+        await t2.awaitBlocked({ on: 'advisory', advisoryKey: await storyKey(me) });
+        await t1.commit();
+        await p2;
+
+        const rows = await posts(me);
+        assert.equal(rows.length, 1, 'WG4: the post survived');
+        assert.equal(rows[0].id, post.id);
+        assert.equal(rows[0].members, 1);
+        assert.equal(rows[0].payload.count, 1);
+        const [{ rep }] = await db.rows(
+          `select media_item_id as rep from feed_events where id = $1`,
+          [post.id],
+        );
+        assert.equal(rep, b, 'the surviving member is now the representative');
+        const [{ n }] = await db.rows(
+          `select count(*)::int as n from comments where feed_event_id = $1`,
+          [post.id],
+        );
+        assert.equal(n, 1, 'and its conversation is intact');
       } finally {
         await t1.rollback().catch(() => {});
         await t1.end().catch(() => {});

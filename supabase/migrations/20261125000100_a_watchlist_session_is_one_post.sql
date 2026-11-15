@@ -323,8 +323,20 @@ declare
   v_next  uuid;
 begin
   for v_group in
-    select distinct wt.event_id from feed_watchlist_titles wt where wt.media_item_id = old.id
+    select distinct wt.event_id, wt.actor_id
+      from feed_watchlist_titles wt
+     where wt.media_item_id = old.id
   loop
+    -- The writer's own lock, then the post's row (Codex, PR 310): a save joining this group
+    -- in a transaction that has not committed holds `watchlist_story:<actor>`, so this waits
+    -- for it, and the membership read below runs after it in a fresh snapshot and sees the
+    -- member it added. Without this, a one-title group gaining its second title at the same
+    -- moment looked single, was skipped, and the cascade then took the whole post and its
+    -- conversation. (A save of the very title being deleted can deadlock with this; Postgres
+    -- aborts one of the two, and nothing is lost by either retrying.)
+    perform pg_advisory_xact_lock(hashtextextended('watchlist_story:' || v_group.actor_id::text, 0));
+    perform 1 from feed_events where id = v_group.event_id for update;
+
     select wt.media_item_id
       into v_next
       from feed_watchlist_titles wt
