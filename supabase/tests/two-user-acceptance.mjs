@@ -261,6 +261,45 @@ const rankToCompletion = async (token, mediaItemId, bucket) => {
   return { ok: Boolean(state?.done), result: state };
 };
 
+/**
+ * The Reviews tab for one title as `token` reads it, through `title_reviews_v2`.
+ *
+ * The run's titles come from the deployed catalogue, so a title can already carry other
+ * accounts' public Reviews; callers look for their own row by `user_id`, never by
+ * position. The RPC has no offset or cursor and clamps `p_limit` to 100, so it cannot be
+ * paged: this reads `top_desc` (the tab's default) at that cap, and when the answer is
+ * full — possibly truncated — reads `recent_desc` too, where a Review just published or
+ * just edited sits at the top whatever its helpful count. `alwaysBothSorts` reads both
+ * regardless. Rows are merged by `user_id` (one note per account per title).
+ */
+const REVIEWS_PAGE_CAP = 100;
+const reviewsFor = async (token, mediaItemId, { alwaysBothSorts = false } = {}) => {
+  const read = (sort) =>
+    rpc(token, 'title_reviews_v2', {
+      p_media_item_id: mediaItemId,
+      p_sort: sort,
+      p_limit: REVIEWS_PAGE_CAP,
+    });
+  const top = await read('top_desc');
+  const topRows = Array.isArray(top.body) ? top.body : [];
+  const truncated = topRows.length >= REVIEWS_PAGE_CAP;
+  const recent = truncated || alwaysBothSorts ? await read('recent_desc') : null;
+  const recentRows = recent && Array.isArray(recent.body) ? recent.body : [];
+
+  const byUser = new Map();
+  for (const row of [...topRows, ...recentRows]) {
+    if (!byUser.has(row.user_id)) byUser.set(row.user_id, row);
+  }
+  const ok =
+    top.status === 200 && Array.isArray(top.body) &&
+    (recent === null || (recent.status === 200 && Array.isArray(recent.body)));
+  const detail =
+    `top_desc ${top.status} ${topRows.length} row(s)${truncated ? ' (at the cap)' : ''}` +
+    (recent ? `, recent_desc ${recent.status} ${recentRows.length} row(s)` : '') +
+    (ok ? '' : ` ${JSON.stringify(top.body)?.slice(0, 120)} ${JSON.stringify(recent?.body)?.slice(0, 120)}`);
+  return { ok, rows: [...byUser.values()], detail };
+};
+
 // ---------------------------------------------------------------------------
 // The third agreement: what the database calls itself
 //
@@ -1144,6 +1183,25 @@ try {
         JSON.stringify(bSees.body)?.slice(0, 160),
       );
 
+      // QA1114: B's Reviews tab for this title BEFORE A publishes. `titleId` is a deployed
+      // catalogue title, not one this run made, so other accounts' public Reviews may
+      // already be on it (QA accounts, the social fixture, earlier runs). The checks below
+      // are about A's row and the change A's publish makes, measured against this baseline
+      // — never "the tab holds exactly one row".
+      const baselineCount = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
+      const baselineReviews = await reviewsFor(b.token, titleId);
+      const baseline = Number.isInteger(baselineCount.body) ? baselineCount.body : null;
+      check(
+        'B’s Reviews tab for the title is readable before A publishes',
+        baselineCount.status === 200 && baseline !== null && baselineReviews.ok,
+        `count ${baselineCount.status} ${JSON.stringify(baselineCount.body)}; rows ${baselineReviews.detail}`,
+      );
+      check(
+        'and it has no Review of A’s while A’s note is private',
+        baselineReviews.ok && !baselineReviews.rows.some((row) => row.user_id === a.id),
+        baselineReviews.detail,
+      );
+
       // Then a real Review — a note somebody chose to publish — and the report on it.
       const published = await rpc(a.token, 'save_note', {
         p_operation_id: uuid(),
@@ -1174,22 +1232,16 @@ try {
         `ranked=${aRanked} ${JSON.stringify(aScores.body)?.slice(0, 160)}`,
       );
 
-      const bReviews = await rpc(b.token, 'title_reviews_v2', {
-        p_media_item_id: titleId,
-        p_sort: 'top_desc',
-        p_limit: 25,
-      });
-      const bRows = Array.isArray(bReviews.body) ? bReviews.body : [];
-      const bRow = bRows[0];
+      const bReviews = await reviewsFor(b.token, titleId);
+      const bRow = bReviews.rows.find((row) => row.user_id === a.id);
       check(
-        'B sees exactly A’s Review in the Reviews tab',
-        bReviews.status === 200 &&
-          bRows.length === 1 &&
-          bRow?.user_id === a.id &&
-          bRow?.username === a.username &&
-          bRow?.note === 'Acceptance run: a published review.' &&
-          Boolean(bRow?.updated_at),
-        `${bReviews.status} ${JSON.stringify(bReviews.body)?.slice(0, 200)}`,
+        'B sees A’s Review in the Reviews tab',
+        bReviews.ok &&
+          bRow !== undefined &&
+          bRow.username === a.username &&
+          bRow.note === 'Acceptance run: a published review.' &&
+          Boolean(bRow.updated_at),
+        bRow ? `${bReviews.detail} A’s row: ${JSON.stringify(bRow).slice(0, 200)}` : bReviews.detail,
       );
       check(
         aRanked ? 'and it carries A’s current score' : 'and, unranked, it carries no score',
@@ -1199,9 +1251,9 @@ try {
 
       const bCount = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
       check(
-        'and the tab’s count for B is 1',
-        bCount.status === 200 && bCount.body === 1,
-        `${bCount.status} ${JSON.stringify(bCount.body)}`,
+        'and the tab’s count for B rose by 1',
+        bCount.status === 200 && baseline !== null && bCount.body === baseline + 1,
+        `${bCount.status} baseline ${baseline}, now ${JSON.stringify(bCount.body)}`,
       );
 
       const reviewRow = await get(a.token, `user_media?select=id&media_item_id=eq.${titleId}`);
@@ -1244,21 +1296,19 @@ try {
         JSON.stringify(unpublished.body)?.slice(0, 160),
       );
 
-      const bAfter = await rpc(b.token, 'title_reviews_v2', {
-        p_media_item_id: titleId,
-        p_sort: 'top_desc',
-        p_limit: 25,
-      });
+      // Always read under both sorts here: absence from a list the RPC truncated proves
+      // nothing, and `recent_desc` is where a row A touched last would sit at the top.
+      const bAfter = await reviewsFor(b.token, titleId, { alwaysBothSorts: true });
       const bCountAfter = await rpc(b.token, 'title_review_count', { p_media_item_id: titleId });
       check(
         'and B’s Reviews tab no longer has it',
-        bAfter.status === 200 && Array.isArray(bAfter.body) && bAfter.body.length === 0,
-        `${bAfter.status} ${JSON.stringify(bAfter.body)?.slice(0, 160)}`,
+        bAfter.ok && !bAfter.rows.some((row) => row.user_id === a.id),
+        bAfter.detail,
       );
       check(
-        'and B’s count is 0',
-        bCountAfter.status === 200 && bCountAfter.body === 0,
-        `${bCountAfter.status} ${JSON.stringify(bCountAfter.body)}`,
+        'and B’s count is back to what it was',
+        bCountAfter.status === 200 && baseline !== null && bCountAfter.body === baseline,
+        `${bCountAfter.status} baseline ${baseline}, now ${JSON.stringify(bCountAfter.body)}`,
       );
     }
 
