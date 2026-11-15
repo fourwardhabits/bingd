@@ -28,6 +28,7 @@ import watchHistory from './races/watch-history.mjs';
 import scaleHardening from './races/scale-hardening.mjs';
 import refine from './races/refine.mjs';
 import reviewHelpful from './races/review-helpful.mjs';
+import tasteNeighbours from './races/taste-neighbours.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -70,6 +71,7 @@ seriesWatchlist();
 watchHistory();
 refine();
 reviewHelpful();
+tasteNeighbours();
 listMove();
 listAdd();
 welcomeEmail();

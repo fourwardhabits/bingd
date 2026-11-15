@@ -311,6 +311,8 @@ describe('the privacy boundary', () => {
         liked_titles: 27,
         anchors_used: 8,
         pool_size: 130,
+        engine: 'v2_metadata',
+        wall_languages: 4,
       },
     });
 
@@ -321,6 +323,9 @@ describe('the privacy boundary', () => {
       liked_titles: 27,
       anchors_used: 8,
       pool_size: 130,
+      // Engine V2's two (2026-11-10), asserted for the same reason.
+      engine: 'v2_metadata',
+      wall_languages: 4,
     });
   });
 
