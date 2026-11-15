@@ -1,5 +1,5 @@
 {
-  "$comment": "Reconstructed 2026-11-15 from PR text only (fourwardhabits/bingd#296 comment 6877856995); no EAS read was possible from the audit session. Group IDs and the iOS runtime were recorded as 8-character prefixes, so this manifest cannot pass and lists why in knownProblems. Replace with `node scripts/release-manifest.mjs live preview` output once someone logged in to EAS runs it.",
+  "$comment": "Reconstructed 2026-11-15 from PR text (fourwardhabits/bingd#296 comment 6877856995); group IDs and the iOS runtime completed the same day from eas update:list / update:view. Android stayed on this until the 2026-11-15 paired publish; iOS was replaced by two iOS-only publishes (d702d098, then e6e7b241).",
   "lane": "preview",
   "channel": "preview",
   "gitSha": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
@@ -13,17 +13,17 @@
   "platforms": {
     "android": {
       "updateId": "01a1da2e-79fe-7b25-9612-76c62d8f5c1b",
-      "groupId": "0fc7e363",
+      "groupId": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
       "runtimeVersion": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
       "gitCommitHash": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
-      "binary": "Preview Android build 11, EAS build c25cbaf6 (prefix)"
+      "binary": "Preview Android 1.1.0 (11), EAS build c25cbaf6-e749-466d-86ee-1b55f6bbcd42"
     },
     "ios": {
       "updateId": "01a1da2e-79fe-760d-ad0f-de885e30f4c7",
-      "groupId": "60fc013e",
-      "runtimeVersion": "ef07f4b8",
+      "groupId": "60fc013e-fa30-4b33-8e59-14b702a85781",
+      "runtimeVersion": "ef07f4b898dc935a022f24c388a75358aa4fcc23",
       "gitCommitHash": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
-      "binary": "Preview iOS build 9, EAS build 4295384b (prefix)"
+      "binary": "Preview iOS 1.1.0 (9), EAS build 4295384b-398a-4a49-8c57-63bed0b8c23e"
     }
   },
   "verification": {
@@ -32,9 +32,5 @@
     "androidDevice": "founder staging pass 4",
     "iosDevice": "superseded: the iPhone later showed #286 (d702d098) behaviour; how it got there is not recorded"
   },
-  "knownProblems": [
-    "android: groupId must be a full UUID",
-    "ios: runtimeVersion must be a full fingerprint hash",
-    "ios: groupId must be a full UUID"
-  ]
+  "knownProblems": []
 }

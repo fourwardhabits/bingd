@@ -14,8 +14,13 @@
   "preview": {
     "android": {
       "runtime": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
-      "build": "d63cfd52-1f00-4927-80dc-b1d225e31717",
-      "version": "1.1.0 (10)"
+      "build": "c25cbaf6-e749-466d-86ee-1b55f6bbcd42",
+      "version": "1.1.0 (11)"
+    },
+    "ios": {
+      "runtime": "ef07f4b898dc935a022f24c388a75358aa4fcc23",
+      "build": "4295384b-398a-4a49-8c57-63bed0b8c23e",
+      "version": "1.1.0 (9)"
     }
   }
 }

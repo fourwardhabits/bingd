@@ -1,0 +1,45 @@
+{
+  "$comment": "Preview as EAS served it immediately before the 2026-11-15 paired publish of cd79227d, read with release-manifest live preview. Mixed-commit by design of the selective QA: Android pass 4, iOS #306 published alone. Rollback targets: both platforms to pass 4 (groups 0fc7e363 android, 60fc013e ios, both 5ac03633), or iOS back to exactly this state (group 4721ebbe).",
+  "lane": "preview",
+  "channel": "preview",
+  "gitSha": "mixed:5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4,e6e7b241fa1903fdae59d44321d2a4a9da6c8143",
+  "status": "published",
+  "backend": {
+    "ref": "fjxhcbowoxuzulwirzyr",
+    "name": "bingd-staging"
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1da2e-79fe-7b25-9612-76c62d8f5c1b",
+      "groupId": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
+      "runtimeVersion": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
+      "gitCommitHash": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
+      "createdAt": "2026-11-14T13:10:41.406Z",
+      "message": "Preview 1114 pass 4 (5ac03633): interim + #297 Codex-wave fixes + acceptance fix; staging"
+    },
+    "ios": {
+      "updateId": "01a1de53-1752-7abc-9e4f-98e644155058",
+      "groupId": "4721ebbe-b6cc-418b-bfad-e876b2fcb344",
+      "runtimeVersion": "ef07f4b898dc935a022f24c388a75358aa4fcc23",
+      "gitCommitHash": "e6e7b241fa1903fdae59d44321d2a4a9da6c8143",
+      "createdAt": "2026-11-15T08:29:09.842Z",
+      "message": "#286 candidate e6e7b241 (#292 labels + Profile TV Shows one line), iOS only, staging; temporary over pass 4"
+    }
+  },
+  "rollback": {
+    "samePair": {
+      "android": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
+      "ios": "60fc013e-fa30-4b33-8e59-14b702a85781",
+      "gitSha": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4"
+    },
+    "exactPrevious": {
+      "android": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
+      "ios": "4721ebbe-b6cc-418b-bfad-e876b2fcb344"
+    }
+  },
+  "knownProblems": [
+    "gitSha must be a full commit hash, got \"mixed:5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4,e6e7b241fa1903fdae59d44321d2a4a9da6c8143\"",
+    "mixed-commit: android was published from 5ac03633, not mixed:5a",
+    "mixed-commit: ios was published from e6e7b241, not mixed:5a"
+  ]
+}
