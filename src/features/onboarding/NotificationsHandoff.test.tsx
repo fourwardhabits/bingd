@@ -19,9 +19,9 @@ import NotificationsScreen from '../../../app/onboarding/notifications';
  * A follow on the People step offers the permission in context and writes `push.offered`
  * whatever the answer. The onboarding step used to render regardless, so somebody who had
  * just turned notifications on was asked again on the next screen. These run the real
- * eligibility rule (`shouldShowNotificationStep` → `shouldOfferPush`) against the OS
- * permission and the offered flag, and check that a skip ends the flow through the same
- * path Continue does.
+ * eligibility rule and the real `pushPermission` against the platform's answer (the native
+ * permission read and whether this is a device) and the offered flag, and check that a skip
+ * ends the flow through the same path Continue does.
  */
 
 const mockReplace = jest.fn();
@@ -31,6 +31,8 @@ const mockPrefs = new Map<string, unknown>();
 const mockCounts: Record<string, number> = {};
 const mockFollowReads: (number | 'hang')[] = [];
 let mockPermission: () => Promise<PushPermission> = () => Promise.resolve('undetermined');
+/** Whether this is a device that can receive push at all (a simulator is not). */
+let mockIsDevice = true;
 
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
@@ -83,11 +85,31 @@ jest.mock('@/features/auth', () => ({
   UseDifferentAccountButton: () => null,
 }));
 
-// The OS answer, and nothing else about push: the eligibility rule itself is the real one.
-jest.mock('@/features/notifications/push', () => ({
-  ...jest.requireActual('@/features/notifications/push'),
-  pushPermission: () => mockPermission(),
+/**
+ * The platform, and nothing above it: `pushPermission` and the eligibility rule are the
+ * real ones. `mockPermission` names the state the OS would report, translated into the
+ * native read's own shape; a rejection is the native read failing, which the real
+ * `pushPermission` reports and turns into `unavailable` (Codex, PR 308).
+ */
+jest.mock('expo-device', () => ({
+  get isDevice() {
+    return mockIsDevice;
+  },
 }));
+jest.mock('expo-notifications', () => ({
+  __esModule: true,
+  IosAuthorizationStatus: { PROVISIONAL: 3 },
+  getPermissionsAsync: () =>
+    mockPermission().then((permission) => {
+      if (permission === 'unavailable') throw new Error('unexpected: no read on a simulator');
+      return {
+        granted: permission === 'granted',
+        canAskAgain: permission === 'undetermined',
+        ios: { status: permission === 'granted' ? 2 : 0 },
+      };
+    }),
+}));
+jest.mock('@/lib/monitoring', () => ({ reportHandled: () => {} }));
 
 /** The question reduced to its exit; the eligibility rule beside it is the real one. */
 jest.mock('./NotificationStep', () => ({
@@ -111,6 +133,7 @@ beforeEach(() => {
   for (const key of Object.keys(mockCounts)) delete mockCounts[key];
   mockFollowReads.length = 0;
   mockPermission = () => Promise.resolve('undetermined');
+  mockIsDevice = true;
   clearCelebrations();
   resetOnboardingStages();
   resetTasteIntent();
@@ -156,7 +179,7 @@ describe('skipping the question that was already answered', () => {
     expect(view.queryByText('Stay in the loop')).toBeNull();
   });
 
-  it.each(['granted', 'blocked', 'unavailable'] as const)(
+  it.each(['granted', 'blocked'] as const)(
     'OS permission already %s before any offer: finishes without asking',
     async (permission) => {
       mockPermission = () => Promise.resolve(permission);
@@ -165,6 +188,21 @@ describe('skipping the question that was already answered', () => {
       expect(view.queryByText('Stay in the loop')).toBeNull();
     },
   );
+
+  it('a simulator, with no push at all: finishes without asking', async () => {
+    mockIsDevice = false;
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await expectEndedOnce(TAB_ROUTES.forYou);
+    expect(view.queryByText('Stay in the loop')).toBeNull();
+  });
+
+  it('a failed permission read after the question was already put: does not ask again', async () => {
+    offeredOnPeople();
+    mockPermission = () => Promise.reject(new Error('native module missing'));
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await expectEndedOnce(TAB_ROUTES.forYou);
+    expect(view.queryByText('Stay in the loop')).toBeNull();
+  });
 
   it('shows a short wait while it finds out, never the question flashing away', async () => {
     let answer: (p: PushPermission) => void = () => {};
@@ -216,10 +254,16 @@ describe('asking when the question has not been put', () => {
     ]);
   });
 
-  it('asks when the permission cannot be read, rather than stranding the flow', async () => {
+  /**
+   * The native read rejecting on a real device. The production `pushPermission` catches it
+   * and says `unavailable`, the simulator's word, so the step must not read that as "no push
+   * here" and finish silently (Codex, PR 308): not knowing asks.
+   */
+  it('asks when the permission cannot be read on a device, rather than skipping', async () => {
     mockPermission = () => Promise.reject(new Error('native module missing'));
     const view = await renderWithProviders(<NotificationsScreen />);
     await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('asks when the permission read does not answer in time', async () => {

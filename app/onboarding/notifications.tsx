@@ -4,8 +4,9 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
-import { NotificationStep, shouldShowNotificationStep } from '@/features/onboarding/NotificationStep';
-import { pushAlreadyOffered } from '@/features/notifications/push-permission';
+import { NotificationStep } from '@/features/onboarding/NotificationStep';
+import { canReceivePush, pushPermission } from '@/features/notifications/push';
+import { pushAlreadyOffered, shouldOfferPush } from '@/features/notifications/push-permission';
 import {
   useAdvanceStage,
   useOnboardingStage,
@@ -70,7 +71,7 @@ const ELIGIBILITY_GRACE_MS = 1500;
 /**
  * **Whether this account should meet "Stay in the loop" at all** (founder QA, 2026-11-16).
  *
- * The question is the shared one (`shouldShowNotificationStep` → `shouldOfferPush`): only
+ * The question is the shared one (`shouldOfferPush`, as `shouldShowNotificationStep` asks it): only
  * while the OS permission is undetermined and bingd has never put it. A follow on the
  * People step offers the same permission in context and records `push.offered` whatever
  * the answer, so somebody who just turned notifications on — or said Not now — is not
@@ -80,14 +81,24 @@ const ELIGIBILITY_GRACE_MS = 1500;
  * Granted here is not taken to mean a token is registered: this only decides whether to
  * ask. Registration stays the contextual prompt's, best effort, and nothing on the skip
  * path claims it succeeded. A read that fails or does not answer in time asks, as before.
+ *
+ * **A failed read is not "no push here".** `pushPermission` never throws: a native read
+ * that rejects is reported and comes back as `unavailable`, the same word a simulator
+ * gets. On a device that can receive push, `unavailable` can only mean the read failed,
+ * so it is treated as not knowing — and not knowing asks, unless bingd has already put
+ * the question (`push.offered`), which is the one thing this step exists not to repeat.
+ * The shared `shouldOfferPush` is left as it is: the contextual primer is right to stay
+ * quiet on a failed read, because it interrupts something else.
  */
+async function eligibility(): Promise<boolean> {
+  const [offered, permission] = await Promise.all([pushAlreadyOffered(), pushPermission()]);
+  if (permission === 'unavailable' && canReceivePush()) return !offered;
+  return shouldOfferPush({ permission, offered });
+}
+
 async function shouldAsk(): Promise<boolean> {
   try {
-    return await withGrace(
-      pushAlreadyOffered().then((offered) => shouldShowNotificationStep(offered)),
-      ELIGIBILITY_GRACE_MS,
-      true,
-    );
+    return await withGrace(eligibility(), ELIGIBILITY_GRACE_MS, true);
   } catch {
     return true;
   }

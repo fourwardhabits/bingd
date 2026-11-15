@@ -111,10 +111,16 @@ jest.mock('@/features/auth', () => ({
  * What this file is about is what happens *after* either answer, so the step is reduced to
  * its two exits.
  */
+// These tests are about the exits of a step that is asked; whether it is asked at all is
+// `NotificationsHandoff.test.tsx`'s subject (founder QA, 2026-11-16). A device whose
+// permission is still undetermined is one that is asked.
+jest.mock('@/features/notifications/push', () => ({
+  ...jest.requireActual('@/features/notifications/push'),
+  canReceivePush: () => true,
+  pushPermission: () => Promise.resolve('undetermined'),
+}));
+
 jest.mock('./NotificationStep', () => ({
-  // These tests are about the exits of a step that is asked; whether it is asked at all is
-  // `NotificationsHandoff.test.tsx`'s subject (founder QA, 2026-11-16).
-  shouldShowNotificationStep: () => Promise.resolve(true),
   // `hadFollow` is drawn so the route's follow answer can be seen arriving (OB-1).
   NotificationStep: ({ onDone, hadFollow }: { onDone: () => void; hadFollow?: boolean }) => {
     const React = jest.requireActual('react');
