@@ -7,6 +7,8 @@ import {
   StyleSheet,
   View,
   useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 
 import { formatScore, type Bucket } from '@/features/collection/score';
@@ -42,7 +44,8 @@ export type PosterTile = {
    * **Which kind of score a series poster carries** (WS-TVC, founder spec t168u §2). The TV
    * Collection draws one poster per series: `explicit` is the reader's own show ranking, in
    * the filled Maroon chip every score uses; `average` is the mean of their ranked seasons,
-   * drawn as an **outlined** chip reading `AVG 8.7`. Absent is `explicit`.
+   * drawn as an **outlined** badge reading `SN AVG 8.7` (`SeasonAverageBadge`). Absent is
+   * `explicit`.
    */
   scoreSource?: 'explicit' | 'average';
   /** For an `average`: how many ranked seasons it is the mean of, for the spoken label. */
@@ -360,24 +363,17 @@ function Tile({
           blurhash={tile.blurhash}
           width={width}
         />
-        {score != null ? (
+        {score != null && average && tile.season == null ? (
+          // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
+          <SeasonAverageBadge score={score} style={styles.chipPosition} testID="poster-average-pill" />
+        ) : score != null ? (
           <View
             // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
             // wall the old bucket tint was at its worst: nine tiles, three colours,
             // none of them the poster's, all of them restating a number already
             // printed on top of them. A season's pill inverts it: Parchment, Maroon.
-            style={[
-              styles.chip,
-              tile.season != null && styles.seasonChip,
-              average && styles.averageChip,
-            ]}
-            testID={
-              tile.season != null
-                ? 'poster-season-pill'
-                : average
-                  ? 'poster-average-pill'
-                  : 'poster-score-pill'
-            }
+            style={[styles.chip, tile.season != null && styles.seasonChip]}
+            testID={tile.season != null ? 'poster-season-pill' : 'poster-score-pill'}
             // Already in the label above, and a chip that announces itself
             // separately makes every tile two stops instead of one.
             accessibilityElementsHidden
@@ -385,15 +381,11 @@ function Tile({
           >
             <Text
               variant="caption"
-              tone={tile.season != null || average ? 'action' : 'inverse'}
+              tone={tile.season != null ? 'action' : 'inverse'}
               allowFontScaling={false}
               numberOfLines={1}
             >
-              {tile.season != null
-                ? seasonPillText(tile.season, score)
-                : average
-                  ? averagePillText(score)
-                  : formatScore(score)}
+              {tile.season != null ? seasonPillText(tile.season, score) : formatScore(score)}
             </Text>
           </View>
         ) : null}
@@ -490,10 +482,77 @@ export const seasonPillText = (season: number, score: number) =>
   `${seasonPillLabel(season)} - ${formatScore(score)}`;
 
 /**
- * An average pill's whole text: `AVG 8.7` (WS-TVC). One place, so the pill and its tests
- * cannot drift apart.
+ * **A season average's badge text: `SN AVG 9.4`** (FU1113-B). It replaces `AVG 9.4`, which
+ * read as a generic average; "SN" says it is the mean of the reader's *season* rankings.
+ * The one place the format is written, so every badge and its tests agree.
  */
-export const averagePillText = (score: number) => `AVG ${formatScore(score)}`;
+export const seasonAverageBadgeText = (score: number) => `SN AVG ${formatScore(score)}`;
+
+export type SeasonAverageBadgeProps = {
+  score: number;
+  /** Positioning from the caller (a poster's corner); never the badge's own look. */
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+  /** Makes the badge a button (a list row's score opens the title, as a circle does). */
+  onPress?: () => void;
+  /**
+   * What a screen reader hears. Without `onPress` the badge is silent unless this is
+   * given — a tile's label already carries the score; a list row's badge does not.
+   */
+  accessibilityLabel?: string;
+};
+
+/**
+ * **The season-average badge, shared by every poster wall and list row** (FU1113-B).
+ *
+ * Outlined Maroon — a 1pt Maroon border and Maroon `SN AVG 9.4` on the raised white ground
+ * — beside the explicit score's filled Maroon chip with light numerals, at the same height
+ * (the border is inside the box, so the padding gives it back). The white ground is not
+ * decoration: a hollow badge over poster art would put Maroon on whatever the poster is.
+ *
+ * **Compact, never full width.** It is sized by its text, which does not scale with the
+ * reader's text size on a tile (the 2:3 artwork does not either), so the widest value,
+ * `SN AVG 10.0`, fits a three-across tile on a 320pt phone with its 4pt insets.
+ */
+export function SeasonAverageBadge({
+  score,
+  style,
+  testID = 'season-average-badge',
+  onPress,
+  accessibilityLabel,
+}: SeasonAverageBadgeProps) {
+  // On a tile the tile's own label says the score, so the badge is silent there; a list
+  // row's badge is the only place the number is, so given a label it states it.
+  const spoken = !onPress && accessibilityLabel != null;
+  const badge = (
+    <View
+      style={[styles.chip, styles.averageChip, onPress ? null : style]}
+      testID={testID}
+      accessible={spoken || undefined}
+      accessibilityRole={spoken ? 'text' : undefined}
+      accessibilityLabel={spoken ? accessibilityLabel : undefined}
+      accessibilityElementsHidden={!onPress && !spoken}
+      importantForAccessibility={onPress || spoken ? 'auto' : 'no-hide-descendants'}
+    >
+      <Text variant="caption" tone="action" allowFontScaling={false} numberOfLines={1}>
+        {seasonAverageBadgeText(score)}
+      </Text>
+    </View>
+  );
+  if (!onPress) return badge;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? `Season average, ${formatScore(score)} out of 10`}
+      onPress={onPress}
+      // The badge is about 24pt tall; the slop lifts it to the 44pt target.
+      hitSlop={theme.space[3]}
+      style={({ pressed }) => [style, pressed && styles.pressed]}
+    >
+      {badge}
+    </Pressable>
+  );
+}
 
 const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
@@ -558,6 +617,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: inkAlpha(0.6),
   },
+  // Where a tile's score sits: its bottom-right corner, 4pt in.
+  chipPosition: { position: 'absolute', right: theme.space[1], bottom: theme.space[1] },
   chip: {
     position: 'absolute',
     right: theme.space[1],
@@ -578,13 +639,18 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   /**
-   * A season average's pill: outlined Maroon — a Maroon border and Maroon `AVG 8.7` — the
+   * A season average's badge: outlined Maroon — a Maroon border and Maroon `SN AVG 8.7` — the
    * same height as the filled chip (the border is inside the box, so the padding gives it
    * back). Its ground is the raised white surface rather than nothing: a hollow chip over
    * poster artwork would put Maroon text on whatever the poster is, which on dark art is
    * unreadable. Existing tokens only.
    */
   averageChip: {
+    // The badge's own box; a caller positions it (`chipPosition` on a tile).
+    position: 'relative',
+    right: 0,
+    bottom: 0,
+    alignSelf: 'flex-start',
     backgroundColor: theme.surface.raised,
     borderWidth: 1,
     borderColor: theme.semantic.score,

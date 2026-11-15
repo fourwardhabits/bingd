@@ -1,16 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
-import { Text } from './Text';
+import { FilterIconButton } from './FilterIconButton';
 
 /**
  * **A browsing page's content toolbar**: its marquee title on the left gutter and its tools
  * on the right one (founder, marquee cohesion sprint, 2026-11-07).
  *
- *     Watched ▾                          ⚙ Filters   ▦ ☰
- *     Recommended ▾                                ⚙ Filters
+ *     Watched ▾                                   ⚙   ▦ ☰
+ *     Recommended ▾                                     ⚙
  *
  * Collection and For You draw their top controls through this, so the two pages share one
  * height, one baseline and one padding rather than agreeing by hand.
@@ -23,8 +22,8 @@ import { Text } from './Text';
  * leaves with the content rather than standing over it.
  *
  * `edgeInset` is how far the last tool's own padding reaches past its glyph, so that glyph
- * lands on the gutter: 12pt for a 44pt icon cell around a 20pt glyph, 8pt for a text
- * action.
+ * lands on the gutter: 12pt for a 44pt icon cell around a 20pt glyph (Filters is one since
+ * FU1113-B), 8pt for a text action.
  */
 export function ContentToolbar({
   title,
@@ -46,12 +45,12 @@ export function ContentToolbar({
 }
 
 /**
- * **Filters, the compact action** (For You's since the nav cohesion sprint; Collection's
- * since the marquee cohesion sprint): the options glyph and the word, in secondary ink, a
- * 44pt target with no outline. With filters on it turns Maroon and counts them, and says
- * so to a screen reader as a selected state.
+ * **Filters, the compact action** — icon-only since FU1113-B (2026-11-13).
  *
- * The sort in force is not written beside it: the sheet it opens says that, one tap away.
+ * It renders `FilterIconButton`: the options glyph alone in a 44pt cell, Maroon with a
+ * count when filters are on, and that state spoken. Its props are unchanged so every
+ * caller went icon-only without an edit; `label` is now only what a screen reader hears
+ * ("Filters & Sort" is said "Filters and sort").
  */
 export function FiltersAction({
   activeCount,
@@ -63,38 +62,30 @@ export function FiltersAction({
 }: {
   activeCount: number;
   onPress: () => void;
-  /**
-   * The word. "Filters" on For You; "Filters & Sort" on Collection, whose sheet holds the
-   * sort as well (founder Preview QA, 2026-11-07).
-   */
+  /** The spoken name. "Filters" on For You; "Filters & Sort" on Collection. Never printed. */
   label?: string;
-  /** Defaults to "Filters" or "Filters, 2 on". */
+  /** Overrides the spoken name entirely; it is then expected to state the count itself. */
   accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
 }) {
-  const on = activeCount > 0;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? (on ? `Filters, ${activeCount} on` : 'Filters')}
-      accessibilityHint={accessibilityHint}
-      accessibilityState={{ selected: on }}
+    <FilterIconButton
+      activeCount={activeCount}
       onPress={onPress}
-      style={({ pressed }) => [styles.filters, pressed && styles.pressed]}
+      accessibilityLabel={accessibilityLabel ?? spokenFilterLabel(label)}
+      announceCount={accessibilityLabel == null}
+      accessibilityHint={accessibilityHint}
       testID={testID}
-    >
-      <Ionicons
-        name="options-outline"
-        size={theme.layout.icon.sm}
-        color={on ? theme.semantic.action : theme.text.secondary}
-      />
-      <Text variant="subhead" tone={on ? 'action' : 'secondary'} numberOfLines={1}>
-        {on ? `${label} · ${activeCount}` : label}
-      </Text>
-    </Pressable>
+    />
   );
 }
+
+/** "Filters & Sort" → "Filters and sort": how the word is said, not how it was printed. */
+const spokenFilterLabel = (label: string) => {
+  const [first, ...rest] = label.replace(/\s*&\s*/g, ' and ').split(' ');
+  return [first, ...rest.map((word) => word.toLowerCase())].join(' ');
+};
 
 const styles = StyleSheet.create({
   row: {
@@ -120,12 +111,4 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     maxWidth: '100%',
   },
-  filters: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[1],
-    minHeight: theme.layout.minTapTarget,
-    paddingHorizontal: theme.space[2],
-  },
-  pressed: { opacity: 0.6 },
 });

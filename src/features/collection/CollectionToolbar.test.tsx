@@ -85,7 +85,9 @@ describe('the toolbar', () => {
     const bar = view.getByTestId('collection-toolbar');
 
     expect(within(bar).getByText('Watched marquee')).toBeTruthy();
-    expect(within(bar).getByText('Filters & Sort')).toBeTruthy();
+    // Icon-only since FU1113-B: the word is spoken, never printed.
+    expect(within(bar).queryByText(/^Filters/)).toBeNull();
+    expect(within(bar).getByTestId('collection-filter-sort')).toBeTruthy();
     expect(within(bar).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
       'Poster view',
       'List view',
@@ -106,7 +108,8 @@ describe('the toolbar', () => {
     const size = StyleSheet.flatten(
       typeof action.props.style === 'function' ? action.props.style({ pressed: false }) : action.props.style,
     );
-    expect(size.minHeight).toBe(theme.layout.minTapTarget);
+    expect(size.width).toBe(theme.layout.minTapTarget);
+    expect(size.height).toBe(theme.layout.minTapTarget);
   });
 
   it('lets the tools wrap under the marquee rather than cut the marquee short', async () => {
@@ -244,8 +247,10 @@ describe('the Filter and sort sheet', () => {
 
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByTestId('collection-count', BEHIND).props.children).toBe('2 of 4'));
-    const label = view.getByText('Filters & Sort · 1', BEHIND);
-    expect(StyleSheet.flatten(label.props.style).color).toBe(theme.semantic.action);
+    // On: the glyph's count bubble shows how many, in Maroon (FU1113-B).
+    const count = view.getByTestId('collection-filter-sort-count', BEHIND);
+    expect(StyleSheet.flatten(count.props.style).backgroundColor).toBe(theme.semantic.action);
+    expect(within(count).getByText('1', BEHIND)).toBeTruthy();
     expect(view.getByTestId('collection-filter-sort', BEHIND).props.accessibilityLabel).toMatch(/1 filter on$/);
     expect(view.getByTestId('collection-filter-sort', BEHIND).props.accessibilityState).toMatchObject({
       selected: true,
@@ -262,7 +267,7 @@ describe('the Filter and sort sheet', () => {
     await fireEvent.press(view.getByText('Clear all'));
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByTestId('collection-count', BEHIND).props.children).toBe('4 titles'));
-    expect(view.getByText('Filters & Sort', BEHIND)).toBeTruthy();
+    expect(view.queryByTestId('collection-filter-sort-count', BEHIND)).toBeNull();
     expect(view.getByTestId('collection-filter-sort', BEHIND).props.accessibilityLabel).toMatch(/Sorted by Title.*No filters$/);
   });
 

@@ -113,7 +113,7 @@ export function TopRanked({
     /**
      * **One tile per series** (WS-TVC): the series' poster and name, its effective score,
      * and the pill that says which kind of score it is — filled for an explicit show
-     * ranking, outlined `AVG` for the mean of its ranked seasons. Seasons are never tiles.
+     * ranking, outlined `SN AVG` for the mean of its ranked seasons. Seasons are never tiles.
      */
     const seriesTile = (p: ShowProjection) => ({
       id: p.seriesId,

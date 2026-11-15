@@ -33,6 +33,26 @@ export const layout = {
    *  full-bleed surface in the app (design-system.md §7). */
   gutter: space[4],
   sectionGap: space[6],
+  /**
+   * **The vertical rhythm of a section, named once** (FU1113-B, 2026-11-13).
+   *
+   *   above              a section's top edge to whatever ends above it — a sheet's drag
+   *                      handle or title, or the page's previous block.
+   *   headingToControls  a section heading to its own controls (chips, toggles).
+   *   controlsToContent  those controls to the content they act on.
+   *   between            one section's end to the next section's heading.
+   *
+   * Every value is a step of `space`, so this is a vocabulary rather than new numbers:
+   * screens that agreed by hand now agree by name, and a filter sheet's Genre / Decade /
+   * Language / Rating gaps are equal because they are the same token. `between` is
+   * `sectionGap`'s value on purpose — one section interval in the app.
+   */
+  section: {
+    above: space[4],
+    headingToControls: space[2],
+    controlsToContent: space[3],
+    between: space[6],
+  },
   cardPadding: space[4],
   /** Efficient surfaces: Rankings, Search. */
   rowMinHeight: 56,

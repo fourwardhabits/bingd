@@ -13,7 +13,7 @@ import {
   type CollectionFilters,
   type CollectionItem,
 } from '@/features/collection/filters';
-import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
+import { bandSizes, formatScore, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
 import {
   averageCaption,
@@ -29,6 +29,7 @@ import {
   FilterChip,
   FiltersAction,
   ScoreBadge,
+  SeasonAverageBadge,
   SegmentedTabs,
   Sheet,
   SheetHeader,
@@ -436,9 +437,9 @@ export function RankedTitlesSheet({
       visible
       onClose={onClose}
       label={whose}
-      // The densest list in the app's sheets: it gets the whole 90%, and keeps it while
-      // its tabs, sorts and filters change what is in it.
-      density="dense"
+      // The densest list in the app's sheets: the standard 80% (FU1113-B), kept while its
+      // tabs, sorts and filters change what is in it.
+      size="standard"
       footer={<DismissFooter onPress={onClose} />}
     >
       <SheetHeader title={whose}>
@@ -570,11 +571,16 @@ export function RankedTitlesSheet({
                 // The owner's score, in the badge every other list in the app uses —
                 // filled for an explicit ranking, a Maroon ring for a season average.
                 trailing={
-                  <ScoreBadge
-                    score={row.score}
-                    bucket={row.bucket}
-                    variant={row.average != null ? 'outlined' : 'filled'}
-                  />
+                  row.average != null && row.score != null ? (
+                    // The season average's outlined `SN AVG` badge, as on the wall (FU1113-B).
+                    <SeasonAverageBadge
+                      score={row.score}
+                      accessibilityLabel={`${formatScore(row.score)} out of 10, season average`}
+                      testID="ranked-row-average-badge"
+                    />
+                  ) : (
+                    <ScoreBadge score={row.score} bucket={row.bucket} variant="filled" />
+                  )
                 }
                 divided
                 onPress={() => onPressTitle(row.mediaItemId)}

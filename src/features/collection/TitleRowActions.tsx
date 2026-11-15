@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import type { Bucket } from '@/features/collection/score';
-import { ScoreBadge } from '@/ui/components';
+import { formatScore, type Bucket } from '@/features/collection/score';
+import { ScoreBadge, SeasonAverageBadge } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 export type TitleRowActionsProps = {
@@ -18,6 +18,11 @@ export type TitleRowActionsProps = {
      * reader's own explicit score is `filled`, the default.
      */
     variant?: 'filled' | 'outlined';
+    /**
+     * A series' season average (FU1113-B): drawn as the outlined `SN AVG 9.4` badge the
+     * poster wall uses, rather than a circle, so list and wall say the same thing.
+     */
+    average?: boolean;
   } | null;
   /** On the reader's Watchlist. Null when unknown, which hides the bookmark. */
   saved: boolean | null;
@@ -66,6 +71,19 @@ export function TitleRowActions({
   onToggleWatchlist,
   rankable = true,
 }: TitleRowActionsProps) {
+  if (score?.average) {
+    return (
+      <View style={styles.actions} testID="title-row-actions-ranked">
+        <SeasonAverageBadge
+          score={score.score}
+          onPress={onRank}
+          accessibilityLabel={`${name}, season average, ${formatScore(score.score)} out of 10`}
+          testID="title-row-average-badge"
+        />
+      </View>
+    );
+  }
+
   if (score) {
     return (
       <View style={styles.actions} testID="title-row-actions-ranked">
