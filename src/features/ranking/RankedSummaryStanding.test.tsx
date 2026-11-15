@@ -434,7 +434,12 @@ describe('the Refine summary (re-ranking titles already ranked)', () => {
     await waitFor(() => expect(view.getByLabelText('Choose Ronin')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Choose Ronin'));
 
-    await waitFor(() => expect(view.getByText('2 titles checked')).toBeTruthy());
+    // Three scripted round trips (answer, next candidate, nothing waiting) land before the
+    // summary draws. The default 1 s budget timed out once on a loaded release-gate runner
+    // (2026-11-15) with the screen still on the second pair, so the wait is given room.
+    await waitFor(() => expect(view.getByText('2 titles checked')).toBeTruthy(), {
+      timeout: 5000,
+    });
     await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(2));
     expect(rowText(view)).toEqual(['Heat · #16 in Movies · 8.7', 'Ronin · #12 in Movies · 9.1']);
     expect(view.queryByText('#15 in Movies')).toBeNull();

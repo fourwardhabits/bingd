@@ -349,9 +349,10 @@ describe('the reviews preview', () => {
 
 /**
  * **A series' season average in the personal slot** (WS-TVC, founder spec t168u §2;
- * FU1113-B): the same `ScoreCircle` as every other metric, outlined, labelled "Season
- * Average" in place of "Your score" — no `AVG` in the circle, no "Average of N ranked
- * seasons" paragraph. The season count is only spoken.
+ * FU1113-B; UI refinement B1, 2026-11-15): the same `ScoreCircle` as every other metric,
+ * outlined, labelled "Your score" with a quieter "Season average" line under it — no
+ * `AVG` in the circle, no "Average of N ranked seasons" paragraph. The season count is
+ * only spoken.
  */
 describe('the season average in Your score', () => {
   /** Every string under a node, nested Text included. */
@@ -371,10 +372,11 @@ describe('the season average in Your score', () => {
     const view = await render(<ImmersiveScores you={{ score: 9.2 }} bingd={null} following={null} />);
     expect(circle(view, '9.2').backgroundColor).toBe(theme.semantic.score);
     expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
-    expect(view.queryByText('Your score (SN avg)')).toBeNull();
+    expect(view.queryByText('Season average')).toBeNull();
+    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
   });
 
-  it('seasons only: the outlined circle, labelled Your score (SN avg), with no paragraph and no AVG', async () => {
+  it('seasons only: the outlined circle, labelled Your score over Season average, with no paragraph and no AVG', async () => {
     const view = await render(
       <ImmersiveScores
         you={{ score: null, average: { score: 8.7, count: 3 } }}
@@ -389,21 +391,100 @@ describe('the season average in Your score', () => {
     // The number alone inside the circle.
     expect(view.getByText('8.7')).toBeTruthy();
     expect(view.queryByText(/AVG/)).toBeNull();
-    // "Your score (SN avg)" replaces "Your score" (founder QA 11-14 §4; was "Season
-    // Average"); no caption paragraph.
-    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe(
-      'Your score (SN avg)',
+    // Two lines (B1, 2026-11-15; was the one line "Your score (SN avg)"): the label is
+    // "Your score", as for an explicit score, and "Season average" is the caption under it.
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(textOf(view.getByTestId('immersive-score-you-caption').props.children)).toBe(
+      'Season average',
     );
+    expect(view.queryByText(/SN avg/)).toBeNull();
     expect(view.queryByText('Season Average')).toBeNull();
-    expect(view.queryByText('Your score')).toBeNull();
     expect(view.queryByText(/ranked seasons?$/)).toBeNull();
-    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
     // The count survives for a screen reader.
     expect(
       view.getByLabelText(
-        /^Your score \(SN avg\)\. Average of 3 ranked seasons\. 8\.7 out of 10/,
+        /^Your score, season average\. Average of 3 ranked seasons\. 8\.7 out of 10/,
       ),
     ).toBeTruthy();
+  });
+
+  it('sets the second line quieter and smaller than the label, both centred under the circle', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={{ score: null, average: { score: 8.7, count: 3 } }}
+        bingd={{ score: 8.4, ratingCount: 12 }}
+        following={{ score: null, ratingCount: 0 }}
+      />,
+    );
+    const label = StyleSheet.flatten(view.getByTestId('immersive-score-you-label').props.style);
+    const caption = StyleSheet.flatten(view.getByTestId('immersive-score-you-caption').props.style);
+    // The label is the strip's own label treatment, the same as bingd's.
+    const bingd = StyleSheet.flatten(view.getByTestId('immersive-score-bingd-label').props.style);
+    expect(label.fontSize).toBe(bingd.fontSize);
+    expect(label.color).toBe(bingd.color);
+    expect(label.color).toBe(theme.text.secondary);
+    // The second line is one step down in size and ink.
+    expect(caption.fontSize).toBe(theme.typography.caption.fontSize);
+    expect(caption.fontSize as number).toBeLessThan(label.fontSize as number);
+    expect(caption.color).toBe(theme.text.tertiary);
+    expect(label.textAlign).toBe('center');
+    expect(caption.textAlign).toBe('center');
+    // Neither is cut to one line.
+    expect(view.getByTestId('immersive-score-you-caption').props.numberOfLines).not.toBe(1);
+  });
+
+  it('stacks before "Season average" would break onto a third line, and not otherwise', async () => {
+    const rn = jest.requireActual('react-native') as typeof import('react-native');
+    const dims = jest.spyOn(rn, 'useWindowDimensions');
+    const withAverage = (
+      <ImmersiveScores
+        you={{ score: null, average: { score: 8.7, count: 3 } }}
+        bingd={{ score: 8.4, ratingCount: 128 }}
+        following={{ score: 7.9, ratingCount: 3 }}
+      />
+    );
+    const explicit = (
+      <ImmersiveScores
+        you={{ score: 9.2, average: { score: 8.7, count: 3 } }}
+        bingd={{ score: 8.4, ratingCount: 128 }}
+        following={{ score: 7.9, ratingCount: 3 }}
+      />
+    );
+    const direction = (view: Awaited<ReturnType<typeof render>>) =>
+      StyleSheet.flatten(view.getByTestId('immersive-scores').props.style).flexDirection;
+    try {
+      // 320pt at 1x: a third of the strip is narrower than "Season average", so the strip
+      // takes its row layout and the two lines sit beside the circle.
+      dims.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1 });
+      const narrow = await render(withAverage);
+      expect(direction(narrow)).toBe('column');
+      expect(textOf(narrow.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+      expect(textOf(narrow.getByTestId('immersive-score-you-caption').props.children)).toBe(
+        'Season average',
+      );
+      // The explicit score at the same width keeps three columns: the earlier stack is the
+      // season average's alone.
+      const explicitNarrow = await render(explicit);
+      expect(direction(explicitNarrow)).toBe('row');
+      expect(explicitNarrow.queryByTestId('immersive-score-you-caption')).toBeNull();
+
+      // 375pt at 1x: both lines fit a third, so three columns.
+      dims.mockReturnValue({ width: 375, height: 812, scale: 3, fontScale: 1 });
+      expect(direction(await render(withAverage))).toBe('row');
+
+      // 375pt at a large text size: stacked again.
+      dims.mockReturnValue({ width: 375, height: 812, scale: 3, fontScale: 1.3 });
+      expect(direction(await render(withAverage))).toBe('column');
+
+      // 320pt at 2x text: stacked, and the lines may wrap but are never truncated.
+      dims.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 2 });
+      const largest = await render(withAverage);
+      expect(direction(largest)).toBe('column');
+      expect(largest.getByTestId('immersive-score-you-label').props.numberOfLines).toBe(2);
+      expect(largest.getByTestId('immersive-score-you-caption').props.numberOfLines).toBe(2);
+    } finally {
+      dims.mockRestore();
+    }
   });
 
   it('says "1 ranked season" for one, to a screen reader', async () => {
@@ -419,7 +500,10 @@ describe('the season average in Your score', () => {
     );
     expect(circle(view, '9.5').backgroundColor).toBe(theme.semantic.score);
     expect(view.queryByLabelText('8.1 out of 10')).toBeNull();
-    expect(view.queryByText('Your score (SN avg)')).toBeNull();
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(view.queryByText('Season average')).toBeNull();
+    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
+    expect(view.getByLabelText(/^Your score\. 9\.5 out of 10/)).toBeTruthy();
     expect(view.queryByText(/AVG/)).toBeNull();
   });
 
@@ -434,6 +518,7 @@ describe('the season average in Your score', () => {
     );
     expect(circle(view, '9.1').backgroundColor).toBe(theme.semantic.score);
     expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
     expect(view.queryByLabelText('8.7 out of 10')).toBeNull();
   });
 

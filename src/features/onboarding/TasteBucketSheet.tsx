@@ -212,11 +212,6 @@ export function TasteBucketSheet({
           </Text>
         ) : null}
 
-        {/* Said once, here, because it is the thing a new user is most likely to be
-            wrong about — and being wrong about it makes them pick only recent films. */}
-        <Text variant="footnote" tone="tertiary">
-          Anything you’ve seen counts. It doesn’t have to be recent.
-        </Text>
       </ScrollView>
     </Sheet>
   );

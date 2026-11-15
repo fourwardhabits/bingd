@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
-import { formatWatchDate } from '@/features/collection/dates';
+import { formatWatchHistoryDate } from '@/features/collection/dates';
 import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { fontFamily, theme } from '@/ui/tokens';
@@ -80,7 +80,7 @@ export type WatchRowProps = {
  * One watch, as a card in this title's own historical feed (founder QA, 2026-09-21; card
  * refinement, founder spec §5, 2026-11-13; hierarchy, FU1113-A).
  *
- *     Mar 4, 2024                      (9.0)     ← the date top-left, the score top-right,
+ *     March 4, 2024                    (9.0)     ← the date top-left, the score top-right,
  *     With Alex                                    top-aligned with the date
  *     From Letterboxd                            ← the quiet metadata, straight under it
  *
@@ -124,7 +124,10 @@ export function WatchRow({
   busy = false,
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
+  // The full month and the year, this year's included, and never *Today* (UI refinement
+  // B3, 2026-11-15): `formatWatchHistoryDate`, the Watch History screen's own form. The
+  // date's `Text` has no line limit, so a long date in a large text size wraps.
+  const dateLabel = event.watchedOn ? formatWatchHistoryDate(event.watchedOn) : 'Earlier';
   // The date alone (founder QA, 2026-11-12). The row's place in the list already says which
   // watch came first; *(First watch)* on one entry read as a tag on a single row.
   const primary = dateLabel;

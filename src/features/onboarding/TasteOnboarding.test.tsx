@@ -429,7 +429,9 @@ const askOneComparison = (score = 8.7) => {
 /** The subject's card, once the pivot has loaded and the pair is answerable. */
 const answerable = async (view: Awaited<ReturnType<typeof open>>, title: string) => {
   await waitFor(() =>
-    expect(view.getByLabelText(`Choose ${title}`).props.accessibilityState.disabled).toBe(false),
+    expect(view.getByLabelText(`Choose ${title}`).props.accessibilityState.disabled).toBe(
+      false,
+    ),
   );
   return view.getByLabelText(`Choose ${title}`);
 };
@@ -600,7 +602,9 @@ describe('the picker', () => {
     const view = await open();
     await fireEvent.changeText(view.getByLabelText('Search for a movie'), 'inception');
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy(),
+    );
     expect(view.queryByLabelText(/Inception, 2010/)).toBeNull();
   });
 });
@@ -673,7 +677,9 @@ describe('one turn of the loop', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy(),
+    );
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -775,7 +781,9 @@ describe('one turn of the loop', () => {
     await releaseDismissals();
 
     // Gone, and the picker is live again at the number the placement moved it to.
-    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy(),
+    );
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -851,7 +859,9 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(dismissals().pending).toHaveLength(1));
     await releaseDismissals();
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy(),
+    );
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -867,7 +877,9 @@ describe('one turn of the loop', () => {
     expect(view.queryAllByText('How was it?', { includeHiddenElements: true })).toHaveLength(0);
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy(),
+    );
     expect(view.queryAllByText('How was it?')).toHaveLength(0);
   });
 
@@ -1066,10 +1078,10 @@ describe('the reveal after every placement', () => {
     const reveal = await revealOf(view);
     expect(reveal.props.accessibilityLabel).toMatch(/ scored 8\.7 out of 10\./);
     expect(view.getByLabelText('Rank Inception')).toBeTruthy();
-    // The onboarding reveal's one extra line, which is the explanation's only home.
+    // No explanation under the score any more (founder QA, 2026-11-16).
     expect(
-      view.getByText(/Your score comes from where this lands in your rankings/),
-    ).toBeTruthy();
+      view.queryByText(/Your score comes from where this lands in your rankings/),
+    ).toBeNull();
     expect(shows().refused).toBe(0);
   });
 
@@ -1114,7 +1126,9 @@ describe('the reveal after every placement', () => {
     await chooseBucket(view);
     await closeReveal(view);
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy(),
+    );
     // Inception is not offered again, from the same fact.
     expect(view.queryByLabelText('Inception')).toBeNull();
     releaseReadsOf('rankings');
@@ -1205,7 +1219,9 @@ describe('resuming', () => {
     alreadyRanked(3);
     const view = await renderWithProviders(<TasteScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('3 of 5 movies ranked, 2 to go')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('3 of 5 movies ranked, 2 to go')).toBeTruthy(),
+    );
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(view.queryByText('How was it?')).toBeNull();
   });
@@ -1274,11 +1290,9 @@ describe('Your First Five', () => {
   it('says what the five bought without explaining the algorithm again', async () => {
     const view = await arrive();
 
-    expect(
-      view.getByText(
-        'Your scores move as your list grows. The more you rank, the better bingd knows your taste.',
-      ),
-    ).toBeTruthy();
+    // One line (founder QA, 2026-11-16).
+    expect(view.getByText('Your scores move as your list grows.')).toBeTruthy();
+    expect(view.queryByText(/better bingd knows your taste/)).toBeNull();
     expect(view.queryByText(/comes from where this lands/)).toBeNull();
   });
 
@@ -1387,7 +1401,11 @@ describe('First Five guidance (OB-3)', () => {
     mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) => {
       if (fn === 'rank_start') {
         return Promise.resolve({
-          data: { done: false, session_id: `session-${String(args.p_media_item_id)}`, pivot: 'pivot-1' },
+          data: {
+            done: false,
+            session_id: `session-${String(args.p_media_item_id)}`,
+            pivot: 'pivot-1',
+          },
           error: null,
         });
       }
@@ -1514,16 +1532,14 @@ describe('the voice pass (OB-2)', () => {
     expect(view.queryByText('Search for a movie you have seen.')).toBeNull();
   });
 
-  it('tells the bucket question any movie counts, with contractions', async () => {
+  // Founder QA, 2026-11-16: the movie is already chosen, so the sheet asks and says no more.
+  it('asks the bucket question without the recency line', async () => {
     const view = await open();
     await search(view, 'inception');
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
 
-    await waitFor(() =>
-      expect(
-        view.getByText('Anything you’ve seen counts. It doesn’t have to be recent.'),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(view.queryByText(/Anything you’ve seen counts/)).toBeNull();
   });
 });
 
