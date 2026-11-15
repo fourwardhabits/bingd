@@ -141,6 +141,32 @@ const VERB: Record<ActivityType, string> = {
 };
 
 /**
+ * "and 4 others" on a grouped watchlist post (20261125000100), or null for one title.
+ *
+ * The count is the post's own (`payload.count`), and the member sheet lists exactly those
+ * titles, so the sentence never promises a title the sheet will not show. A legacy post
+ * carries no count and reads as the single title it always was.
+ */
+export function watchlistOthers(count: number | null | undefined): string | null {
+  const others = Math.trunc(count ?? 1) - 1;
+  if (!(others > 0)) return null;
+  return `${others} ${others === 1 ? 'other' : 'others'}`;
+}
+
+/**
+ * The tappable "and 4 others" on a grouped watchlist post, or null. One definition for the
+ * four surfaces that draw a post (Feed, own profile, someone's profile, the conversation
+ * page), so they cannot disagree about when a post is a group.
+ */
+export function watchlistTailAction(
+  event: { id: string; type: string; watchlistCount?: number | null },
+  open: (eventId: string) => void,
+): { connector: string; label: string; onPress: () => void } | null {
+  const label = event.type === 'watchlist_added' ? watchlistOthers(event.watchlistCount) : null;
+  return label ? { connector: 'and', label, onPress: () => open(event.id) } : null;
+}
+
+/**
  * The words after the title, for the activities that need them.
  *
  * "their" rather than "his or her" or a name: the row is read by people who are not

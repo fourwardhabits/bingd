@@ -52,6 +52,7 @@ const mockNav = { pushed: [] as string[], replaced: [] as string[], back: 0, can
 let mockEvent: Record<string, unknown> | null = null;
 let mockEventError = false;
 let mockComments: Record<string, unknown>[] = [];
+let mockGroupTitles: Record<string, unknown>[] = [];
 
 jest.mock('expo-router', () => ({
   Stack: { Screen: () => null },
@@ -100,7 +101,9 @@ jest.mock('@/lib/supabase', () => ({
     rpc: async (name: string) =>
       name === 'activity_comments'
         ? { data: mockComments, error: null }
-        : { data: null, error: null },
+        : name === 'watchlist_group_titles'
+          ? { data: mockGroupTitles, error: null }
+          : { data: null, error: null },
   },
   startSessionRefresh: () => () => {},
 }));
@@ -208,6 +211,7 @@ beforeEach(() => {
   mockEvent = event();
   mockEventError = false;
   mockComments = [];
+  mockGroupTitles = [];
   mockAuth.status = 'ready';
   mockReactions.summary = null;
   mockReactions.askedAbout = [];
@@ -875,5 +879,43 @@ describe('the keyboard and the composer', () => {
 
     await showKeyboard(300);
     expect(contentPadding(view, 'Reply to Anna')?.paddingBottom).toBe(300);
+  });
+});
+
+/**
+ * **A grouped watchlist post, reached from a comment notification** (20261125000100).
+ * The page draws the post the Feed draws: the same sentence and count, the same members,
+ * and the conversation below is the post's own, never a member's.
+ */
+describe('a grouped watchlist post above the conversation', () => {
+  it('reads "and 2 others", opens the members, and a member opens its title', async () => {
+    mockEvent = event({
+      type: 'watchlist_added',
+      title: 'Dune',
+      year: 2021,
+      watchlistCount: 3,
+      position: null,
+      score: null,
+      bucket: null,
+      category: null,
+    });
+    mockGroupTitles = [
+      { media_item_id: 'media-1', kind: 'movie', title: 'Dune', release_date: '2021-10-22' },
+      { media_item_id: 'arrival', kind: 'movie', title: 'Arrival', release_date: '2016-11-11' },
+      { media_item_id: 'enemy', kind: 'movie', title: 'Enemy', release_date: '2013-09-08' },
+    ];
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    fireEvent.press(await waitFor(() => view.getByText('2 others')));
+    await waitFor(() => expect(view.getByTestId('watchlist-group-rows')).toBeTruthy());
+    fireEvent.press(view.getByLabelText('Arrival, 2016'));
+    expect(mockNav.pushed).toContain('/title/arrival');
+  });
+
+  it('draws a single-title or legacy post with no count at all', async () => {
+    mockEvent = event({ type: 'watchlist_added', title: 'Dune', watchlistCount: null });
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/to their watchlist/)).toBeTruthy());
+    expect(view.queryByText(/\bothers?\b/)).toBeNull();
   });
 });

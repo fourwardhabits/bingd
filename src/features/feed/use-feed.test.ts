@@ -1381,6 +1381,59 @@ describe('follow stories', () => {
     expect(items.find((i) => i.id === 'batch-b')?.rankedCount).toBeNull();
   });
 
+  /**
+   * **A watchlist session is one post** (20261125000100). The grouping happens on the
+   * server; the client reads the count off the post and never splits or merges a post.
+   */
+  it('reads a grouped watchlist post as one item, with its count', async () => {
+    mockFeedRows = [
+      event({ id: 'watch-1', type: 'watchlist_added', payload: { count: 5 } }),
+      event({ id: 'legacy-1', type: 'watchlist_added', payload: {} }),
+      event({ id: 'batch-1', type: 'ranking_batch', payload: { sitting: 's', count: 3 } }),
+    ];
+
+    const items = await load();
+
+    expect(items).toHaveLength(3);
+    expect(items.find((i) => i.id === 'watch-1')?.watchlistCount).toBe(5);
+    // A post written before grouping carries no count, and reads as one title.
+    expect(items.find((i) => i.id === 'legacy-1')?.watchlistCount).toBeNull();
+    // Scoped to the type: a ranking sitting's count is not a watchlist count, and the
+    // reverse holds too.
+    expect(items.find((i) => i.id === 'batch-1')?.watchlistCount).toBeNull();
+    expect(items.find((i) => i.id === 'watch-1')?.rankedCount).toBeNull();
+  });
+
+  it('a refetch after the post grows shows the new count on the same post, in the same place', async () => {
+    const grown = (count: number) => [
+      event({ id: 'newer', type: 'title_ranked', created_at: '2026-11-15T10:20:00Z' }),
+      event({
+        id: 'watch-1',
+        type: 'watchlist_added',
+        payload: { count },
+        created_at: '2026-11-15T10:00:00Z',
+      }),
+    ];
+    mockFeedRows = grown(2);
+    const first = await load();
+    mockFeedRows = grown(4);
+    const second = await load();
+
+    expect(second.map((i) => i.id)).toEqual(first.map((i) => i.id));
+    expect(first.find((i) => i.id === 'watch-1')?.watchlistCount).toBe(2);
+    expect(second.find((i) => i.id === 'watch-1')?.watchlistCount).toBe(4);
+  });
+
+  it('a malformed watchlist count reads as a single title rather than failing the page', async () => {
+    mockFeedRows = [
+      event({ id: 'watch-a', type: 'watchlist_added', payload: { count: '3' } }),
+      event({ id: 'watch-b', type: 'watchlist_added', payload: null }),
+    ];
+    const items = await load();
+    expect(items.find((i) => i.id === 'watch-a')?.watchlistCount).toBeNull();
+    expect(items.find((i) => i.id === 'watch-b')?.watchlistCount).toBeNull();
+  });
+
   it('resolves who a story is about, in one call for the page', async () => {
     mockFeedRows = [followRow(), followRow({ id: 'follow-2' }), event()];
     mockFollowPeopleRows = [

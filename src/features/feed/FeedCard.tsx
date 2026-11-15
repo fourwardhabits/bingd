@@ -166,8 +166,10 @@ export function FeedCard({
                 </Text>
               </Text>
             ) : null}
-            {tail ? ` ${tail}` : null}
-            {!tail && tailAction ? (
+            {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
+                (20261125000100) "added Dune and 4 others to their watchlist": the count
+                comes before the tail, so a sentence can carry both. */}
+            {tailAction ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
                 <Text
@@ -180,6 +182,7 @@ export function FeedCard({
                 </Text>
               </Text>
             ) : null}
+            {tail ? ` ${tail}` : null}
           </Text>
           {subline ? (
             <Text variant="caption" tone="tertiary" numberOfLines={1}>

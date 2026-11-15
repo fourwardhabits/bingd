@@ -388,8 +388,10 @@ export function ActivityRow({
                 </Text>
               </Text>
             ) : null}
-            {tail ? ` ${tail}` : null}
-            {!tail && tailAction ? (
+            {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
+                (20261125000100) "added Dune and 4 others to their watchlist": the count
+                comes before the tail, so a sentence can carry both. */}
+            {tailAction ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
                 <Text
@@ -402,6 +404,7 @@ export function ActivityRow({
                 </Text>
               </Text>
             ) : null}
+            {tail ? ` ${tail}` : null}
           </Text>
 
           {/* The row's second line, and a sibling of the sentence rather than a

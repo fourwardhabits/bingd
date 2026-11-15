@@ -10,7 +10,14 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
-import { metadataFor, tailFor, verbFor, watchLabel } from '@/features/feed/activity';
+import {
+  metadataFor,
+  tailFor,
+  verbFor,
+  watchLabel,
+  watchlistTailAction,
+} from '@/features/feed/activity';
+import { WatchlistGroupSheet } from '@/features/feed/WatchlistGroupSheet';
 import { useActivityEvent } from '@/features/feed/use-feed';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
@@ -142,6 +149,7 @@ export default function ActivityScreen() {
    */
   const [pickerOpen, setPickerOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
   const reactions = useReactions(event && viewerId ? [event.id] : [], viewerId ?? '');
   const { setReaction } = useSetReaction(viewerId ?? '');
   const summary = event ? (reactions.data?.get(event.id) ?? null) : null;
@@ -273,6 +281,10 @@ export default function ActivityScreen() {
             }
             verb={verbFor(event.type, event)}
             tail={tailFor(event.type, event.title)}
+            // "added Dune and 4 others to their watchlist", as the Feed draws it
+            // (20261125000100). The conversation on this page is the post's, never a
+            // member's.
+            tailAction={watchlistTailAction(event, setWatchlistGroupFor)}
             companions={event.companions}
             title={event.title}
             year={event.year}
@@ -397,6 +409,19 @@ export default function ActivityScreen() {
 
           {/* The Feed's own sheet, with the Feed's own behaviour: tapping a name leaves
               for that profile and closes this behind it. */}
+          {/* The titles one grouped watchlist post holds (20261125000100), the Feed's
+              own sheet. A title closes the sheet and opens. */}
+          {watchlistGroupFor ? (
+            <WatchlistGroupSheet
+              eventId={watchlistGroupFor}
+              onPressTitle={(mediaItemId) => {
+                setWatchlistGroupFor(null);
+                router.push(`/title/${mediaItemId}`);
+              }}
+              onClose={() => setWatchlistGroupFor(null)}
+            />
+          ) : null}
+
           <ReactionDetail
             summary={detailOpen ? summary : null}
             onClose={() => setDetailOpen(false)}
