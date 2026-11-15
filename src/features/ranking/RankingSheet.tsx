@@ -2433,31 +2433,6 @@ function Reveal({
         </View>
       ) : null}
 
-      {/**
-       * **What the number is, said once, to the people who have never seen one**
-       * (pre-GTM audit, 2026-09-07).
-       *
-       * A stranger's first liked film reveals `10.0` and `#1 in Movies`, and the second
-       * ranking moves it. Nothing on the reveal said that the score is a statement about
-       * where the title sits among their own rankings — so it read as a star rating the
-       * app had assigned and then changed its mind about. PRD §10 has always held that
-       * "a score moves when the list moves" and "the interface never presents a score as
-       * a fixed property of the film"; this is the first time the reveal says so.
-       *
-       * **Onboarding's reveals only.** The condition is the `surface` the sheet already
-       * carries for analytics, which is exactly "the first five rankings this account
-       * will ever see" — and it is a condition the app already has, rather than a
-       * first-reveal flag that would need persisting, resetting on a second device, and
-       * getting wrong. A reader who has ranked two hundred titles is not told this on
-       * every reveal; the intro of Build your taste says it once before the first
-       * comparison, and this is its echo under the first scores. `tertiary`, under the
-       * anchors, so it never competes with the number it is explaining.
-       */}
-      {surface === 'onboarding' ? (
-        <Text variant="footnote" tone="tertiary" style={styles.centre}>
-          Your score comes from where this lands in your rankings. It can move as you rank more.
-        </Text>
-      ) : null}
 
       {/**
        * **Nothing is said here about Too tough** (founder, 2026-08-30).
