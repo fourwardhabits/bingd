@@ -45,7 +45,7 @@ import { movementSentence } from '@/features/watch-history/watch-history';
 import { hapticDecision, hapticSuccess } from '@/ui/haptics';
 import { useReducedMotion, useReducedMotionState } from '@/ui/motion';
 import { usePressScale } from '@/ui/press';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 import { useOperationIntent } from '@/lib/operation-intent';
@@ -86,7 +86,7 @@ export type RankingSubject = {
    *
    * `rebucket` is a title that had a position and is changing band. `rank_rebucket`.
    *
-   * `rerank` is *Edit ranking* re-choosing the band it already has. `rankAgain`
+   * `rerank` is *Rerank* re-choosing the band it already has. `rankAgain`
    * with `newWatch: false`, because `rank_rebucket` refuses a bucket that is not moving.
    * (The row was called *Change your rating* until 2026-09-08, and a second row —
    * *Rank it again* — reached this mode directly until the same pass consolidated the two
@@ -269,6 +269,23 @@ export type RankingSheetProps = {
   onDismissed?: () => void;
   /** iOS has finished presenting. A dismissal asked for now will complete. See Sheet. */
   onShown?: () => void;
+  /**
+   * The First Five run's facts about this placement, for `ranking_completed` alone
+   * (Onboarding 2.0, OB-1, 2026-11-14).
+   *
+   * `index` is which of the five this is, 1 to 5, counted by titles rather than by
+   * comparisons, so an empty-band placement that shows none still takes its number.
+   *
+   * `coachShown` asks for the first-comparison coach line (OB-3) on this session's first
+   * comparison. The caller sets it until one has actually been seen, and `onCoachShown`
+   * tells it when that happened — an empty-band session asks nothing and so shows nothing,
+   * and the offer passes to the next title. `ranking_completed.coach_shown` reports what
+   * was **on screen**, not what was asked for.
+   *
+   * Read only when `surface` is `onboarding`; every other surface ignores it, draws no
+   * coach, and omits both properties.
+   */
+  onboardingContext?: { index: number; coachShown: boolean; onCoachShown?: () => void };
 };
 
 /**
@@ -293,6 +310,7 @@ export function RankingSheet({
   visible = true,
   onDismissed,
   onShown,
+  onboardingContext,
 }: RankingSheetProps) {
   if (!subject) return null;
 
@@ -310,6 +328,7 @@ export function RankingSheet({
       visible={visible}
       onDismissed={onDismissed}
       onShown={onShown}
+      onboardingContext={onboardingContext}
     />
   );
 }
@@ -372,10 +391,51 @@ function Session({
   visible = true,
   onDismissed,
   onShown,
+  onboardingContext,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
+  /**
+   * The run's context, readable from `apply` without joining its dependency list —
+   * which is deliberately the subject, so a parent re-render cannot re-open the session.
+   * Kept current in an effect, as every ref here is.
+   */
+  const onboardingContextRef = useRef(onboardingContext);
+  useEffect(() => {
+    onboardingContextRef.current = onboardingContext;
+  }, [onboardingContext]);
+
   const profile = useCurrentProfile();
   const [step, setStep] = useState<SessionStep | null>(null);
+
+  /**
+   * **The first-comparison coach line** (Onboarding 2.0, OB-3, 2026-11-14).
+   *
+   * On onboarding alone, when the caller asks for it, on this session's first comparison
+   * and only until the reader answers it — a pick, Can't decide or Undo spends it, so the
+   * pair after it is the ordinary pair. `coachSeen` is what `ranking_completed` reports and
+   * what the caller is told, once, so no later title in the run is offered it again.
+   *
+   * Exposure is reported by `Comparison` itself, from the branch that draws the line beside
+   * an answerable pair (OB2-FIX2) — not from the session being in `comparing`, which is
+   * also true while that component shows its connection error instead. A reader who met
+   * "Could not load the other title" never saw the coach, so it is not spent and the next
+   * comparison that does load still offers it.
+   */
+  const [coachSpent, setCoachSpent] = useState(false);
+  const coachSeen = useRef(false);
+  const coaching =
+    surface === 'onboarding' &&
+    Boolean(onboardingContext?.coachShown) &&
+    !coachSpent &&
+    step?.state === 'comparing';
+  const reportCoachShown = useCallback(() => {
+    if (coachSeen.current) return;
+    coachSeen.current = true;
+    onboardingContextRef.current?.onCoachShown?.();
+  }, []);
+  const spendCoach = () => {
+    if (coaching) setCoachSpent(true);
+  };
   /**
    * The reader's current scores, for the whole-show score a season's `ShowDecision`
    * carries (WS-TVC, founder spec t168u §3A): never the season's. Read only for a season,
@@ -647,6 +707,15 @@ function Session({
             // How often Too tough was pressed and accepted on the way here. See
             // `skipCount`.
             skips: skipCount.current,
+            // The First Five's position and coach flag (OB-1), on onboarding alone: absent
+            // rather than null or 0 everywhere else, so no other surface's chart moves.
+            ...(surface === 'onboarding' && onboardingContextRef.current
+              ? {
+                  first_five_index: onboardingContextRef.current.index,
+                  // What was on screen, not what was asked for: see `coachSeen`.
+                  coach_shown: coachSeen.current,
+                }
+              : {}),
           },
         });
         /**
@@ -691,7 +760,7 @@ function Session({
         /**
          * A correction is not a ranking act, so it is not asked about the streak.
          *
-         * `rerank` and `rebucket` — both reached from *Edit ranking* — replace a
+         * `rerank` and `rebucket` — both reached from *Rerank* — replace a
          * position and post no activity. Before `20261001000100` they also
          * re-inserted the `rankings` row with `created_at = now()`, which is the column
          * the streak is derived from — so a correction in an otherwise empty week
@@ -760,7 +829,7 @@ function Session({
               rankStart(id, bucket, operationId);
     const attempt = () =>
       withIntent(
-        // The mode is in the intent key, so Log another watch and Edit ranking cannot
+        // The mode is in the intent key, so Log another watch and Rerank cannot
         // share an operation id: they are different acts and one of them writes an
         // activity the other must not.
         `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}${linked ? `:${linked}` : ''}`,
@@ -1013,9 +1082,11 @@ function Session({
             pivotId={step.pivotId}
             skipped={step.skipped}
             surface={surface}
-
+            coach={coaching}
+            onCoachShown={reportCoachShown}
             busy={busy}
-            onPick={(winnerId) =>
+            onPick={(winnerId) => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1024,9 +1095,10 @@ function Session({
                     outcomeUnknown,
                   ),
                 1,
-              )
-            }
-            onBack={() =>
+              );
+            }}
+            onBack={() => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1035,9 +1107,10 @@ function Session({
                     outcomeUnknown,
                   ),
                 -1,
-              )
-            }
-            onSkip={() =>
+              );
+            }}
+            onSkip={() => {
+              spendCoach();
               void act(
                 () =>
                   withIntent(
@@ -1047,8 +1120,8 @@ function Session({
                   ),
                 0,
                 true,
-              )
-            }
+              );
+            }}
             onClose={() => void close()}
           />
         ) : step?.state === 'failed' ? (
@@ -1185,6 +1258,8 @@ export function Comparison({
   onSkip,
   onClose,
   topBar = true,
+  coach = false,
+  onCoachShown,
 }: {
   /**
    * `kind` is here for the Details affordance under the card, which says a different
@@ -1213,6 +1288,17 @@ export function Comparison({
   onClose: () => void;
   /** Whether to draw the Close row. Off only when the host screen has its own. */
   topBar?: boolean;
+  /**
+   * The First Five's one-time coach line under the question (OB-3). Off everywhere except
+   * the comparison the onboarding session decides to coach; Refine never passes it.
+   */
+  coach?: boolean;
+  /**
+   * Called when the coach line is on screen beside a pair the reader can answer (OB2-FIX2):
+   * the exposure `ranking_completed.coach_shown` reports. Not called while the opponent is
+   * still loading, nor on the connection-error branch, which draws no coach at all.
+   */
+  onCoachShown?: () => void;
 }) {
   /**
    * Which title the reader asked to be reminded about, if any.
@@ -1254,6 +1340,20 @@ export function Comparison({
     },
   });
 
+  /**
+   * The coach was seen: drawn, with the opponent loaded and no error in its place. Kept
+   * above the error branch's early return so the hook order never changes; the latest
+   * callback is read through a ref so a re-render cannot report twice.
+   */
+  const coachVisible = coach && !isError && Boolean(pivot);
+  const onCoachShownRef = useRef(onCoachShown);
+  useEffect(() => {
+    onCoachShownRef.current = onCoachShown;
+  }, [onCoachShown]);
+  useEffect(() => {
+    if (coachVisible) onCoachShownRef.current?.();
+  }, [coachVisible]);
+
   if (isError) {
     // The alternative is a card reading "…" that the user can still tap, which records a
     // preference over something they were never shown.
@@ -1291,9 +1391,29 @@ export function Comparison({
   return (
     <View style={styles.comparison}>
       {topBar ? <TopBar onClose={onClose} /> : null}
-      <Text variant="headline" style={styles.centre} accessibilityRole="header">
-        Which did you like more?
-      </Text>
+      {/**
+       * The question and, on the First Five's first comparison, the coach line under it
+       * (OB-3), held as one block so the line sits with the question it explains — a line
+       * gap, `space[2]`, rather than the section gap between the question and the pair.
+       * Without the coach this is the question alone and nothing about the pair, its
+       * controls or the reveal moves.
+       */}
+      <View style={styles.question}>
+        <Text variant="headline" style={styles.centre} accessibilityRole="header">
+          Which did you like more?
+        </Text>
+        {coach ? (
+          <View style={styles.coach} testID="comparison-coach">
+            <Text variant="footnote" style={styles.centre} accessibilityRole="text">
+              New to this? Tap the one you liked more. Too close to call? Tap{' '}
+              <Text variant="footnote" style={styles.coachEmphasis}>
+                {"Can't decide"}
+              </Text>
+              .
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.cards}>
         {/* `cardWidth` is the one measurement both cards take; see `useCardWidth`. */}
@@ -2405,7 +2525,7 @@ function Reveal({
       {/**
        * **One row, one set of rules, on every reveal** (founder QA P0-3, Android, 2026-11-12).
        *
-       *   movie / show / season, Edit ranking:   [ Done ]        [ Add details ]
+       *   movie / show / season, Rerank:         [ Done ]        [ Add details ]
        *   season with Update Show Ranking:      (above)
        *   no log sheet to return to (onboarding): [            Done            ]
        *
@@ -2694,6 +2814,15 @@ const styles = StyleSheet.create({
     padding: theme.layout.gutter,
     gap: theme.space[5],
   },
+  question: { gap: theme.space[2] },
+  // The coach line's Parchment strip (OB-3): sunken surface, control radius, a compact pad.
+  coach: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.control,
+    paddingVertical: theme.space[2],
+    paddingHorizontal: theme.space[3],
+  },
+  coachEmphasis: { fontFamily: fontFamily.sansSemibold },
   // In flow, not absolute. Absolute put it over the question once the sheet stopped
   // being full height and the content moved up to meet it.
   topBar: { alignItems: 'flex-end' },

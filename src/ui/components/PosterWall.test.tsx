@@ -7,7 +7,9 @@ import {
   PosterGrid,
   PosterShelf,
   seasonPillLabel,
+  SeasonAverageBadge,
   seasonAverageBadgeText,
+  seasonAverageLabel,
   seasonPillText,
   type PosterTile,
 } from './PosterWall';
@@ -446,5 +448,22 @@ describe('the season-average pill', () => {
     const view = await render(<PosterGrid tiles={tiles} onPressTile={() => {}} />);
     expect(view.getByLabelText('Barry, average of 3 ranked seasons, scored 8.7 out of 10')).toBeTruthy();
     expect(view.getByLabelText('Severance, scored 9.5 out of 10')).toBeTruthy();
+  });
+});
+
+/**
+ * **A season average is said in one order everywhere** (design-system v3 A.2 #18):
+ * `[name, ]Season average, X out of 10`. It was that on the wall, `name, season average, X`
+ * in a Collection row, and `X out of 10, season average` in the ranked-titles sheet.
+ */
+describe('seasonAverageLabel', () => {
+  it('says what the number is, then the number, with the name first only when given', () => {
+    expect(seasonAverageLabel(9.4)).toBe('Season average, 9.4 out of 10');
+    expect(seasonAverageLabel(9.4, 'Barry')).toBe('Barry, season average, 9.4 out of 10');
+  });
+
+  it('is what a pressable badge says by default', async () => {
+    const view = await render(<SeasonAverageBadge score={8.5} onPress={() => {}} />);
+    expect(view.getByRole('button', { name: 'Season average, 8.5 out of 10' })).toBeTruthy();
   });
 });

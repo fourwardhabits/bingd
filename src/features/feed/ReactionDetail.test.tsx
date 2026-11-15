@@ -1,6 +1,8 @@
 import { fireEvent } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { ReactionDetail } from './ReactionDetail';
 import type { ReactionSummary } from './use-reactions';
@@ -105,5 +107,47 @@ describe('the people', () => {
   it('does not claim a residual when everyone is named', async () => {
     const view = await open();
     expect(view.queryByText(/more not shown/)).toBeNull();
+  });
+});
+
+/**
+ * **Each filter chip answers 44pt inside its row** (design-system v3 A.2 #13). The chip draws
+ * 32pt; slop only answers inside the filter row, which has no room above its first line and
+ * `space[3]` below its last, so the slop is all below and never wider than half the chip gap.
+ */
+describe('the filter chips’ target', () => {
+  it('reaches 44pt with slop that the filter row has room for', async () => {
+    const view = await open({
+      total: 6,
+      kinds: ['love', 'agree', 'disagree', 'funny', 'wow', 'moved'],
+      byKind: { love: 1, agree: 1, disagree: 1, funny: 1, wow: 1, moved: 1 },
+    });
+
+    const chips = view.getAllByRole('tab');
+    expect(chips).toHaveLength(7);
+
+    let parent = chips[0]!.parent;
+    while (parent && parent.type !== 'View') parent = parent.parent;
+    const row = StyleSheet.flatten(parent!.props.style);
+
+    for (const chip of chips) {
+      const drawn = StyleSheet.flatten(chip.props.style);
+      const slop = chip.props.hitSlop as {
+        top: number;
+        bottom: number;
+        left: number;
+        right: number;
+      };
+
+      expect(drawn.minHeight).toBe(theme.layout.control.chipHeight);
+      expect(drawn.minHeight + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+        theme.layout.minTapTarget,
+      );
+      // Inside the row: nothing above its first line, its bottom padding below its last.
+      expect(slop.top).toBeLessThanOrEqual(row.paddingTop ?? 0);
+      expect(slop.bottom).toBeLessThanOrEqual(row.paddingBottom);
+      // Two neighbours' slops meet in the gap without crossing.
+      expect(slop.left + slop.right).toBeLessThanOrEqual(row.gap);
+    }
   });
 });

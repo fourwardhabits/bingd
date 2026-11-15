@@ -375,7 +375,7 @@ describe('a whole show on the TV list', () => {
     expect(view.queryByText(/The Bear, S1/)).toBeNull();
     expect(view.getAllByText(/The Bear/)).toHaveLength(1);
     // 10.0 and 7.0 → 8.5, in the outlined badge, said as an average.
-    expect(view.getByLabelText(/^8\.5 out of 10/)).toBeTruthy();
+    expect(view.getByLabelText('Season average, 8.5 out of 10')).toBeTruthy();
     expect(view.getByText('Average of 2 ranked seasons')).toBeTruthy();
   });
 

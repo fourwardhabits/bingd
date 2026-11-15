@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { clearProviderCooldown } from '@/features/search/provider-budget';
+import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -2489,5 +2490,30 @@ describe('re-tapping the Search tab', () => {
 
     expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
     expect(view.getByLabelText('Search').props.value).toBe('inception');
+  });
+});
+
+/**
+ * **The clear button answers 44 × 44 here, and the field has not moved** (A11Y-44,
+ * design-system v3 A.2 #11). `SearchField`'s box is now 44pt around the 40pt field it
+ * draws; this call site gives the extra 4pt back from space already around the field, so
+ * the drawn field is the same distance from what is above and below it as before (flush under the header seam, `space[2]` above the filters).
+ * Laid out from the rendered styles (`hit-rect.ts`).
+ */
+describe('the search field', () => {
+  it('gives Clear a 44pt target and keeps the field where it was', async () => {
+    const view = await search('dune');
+    const input = view.getByLabelText('Search') as unknown as Host;
+    // input → drawn field → SearchField → searchRow → the screen's column.
+    let root = input;
+    for (let i = 0; i < 4; i += 1) root = parentView(root);
+    const site = searchFieldSite(root, input, 360);
+
+    expect(site.clear.height).toBeGreaterThanOrEqual(44);
+    expect(site.clear.width).toBeGreaterThanOrEqual(44);
+    expect(site.row.height).toBe(40);
+    expect(site.spaceAbove).toBe(0);
+    expect(site.spaceBelow).toBe(8);
+    expect(site.insideParent).toBe(true);
   });
 });

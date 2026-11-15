@@ -488,6 +488,17 @@ export const seasonPillText = (season: number, score: number) =>
  */
 export const seasonAverageBadgeText = (score: number) => `SN AVG ${formatScore(score)}`;
 
+/**
+ * **A season average, said aloud: one order everywhere** (design-system v3 A.2 #18).
+ * `[name, ]Season average, X out of 10`: what the number is, then the number. The name leads
+ * only where the badge is its own element in a row (`TitleRowActions`), so the reader knows
+ * which title it belongs to.
+ */
+export const seasonAverageLabel = (score: number, name?: string) =>
+  name
+    ? `${name}, season average, ${formatScore(score)} out of 10`
+    : `Season average, ${formatScore(score)} out of 10`;
+
 export type SeasonAverageBadgeProps = {
   score: number;
   /** Positioning from the caller (a poster's corner); never the badge's own look. */
@@ -543,7 +554,7 @@ export function SeasonAverageBadge({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? `Season average, ${formatScore(score)} out of 10`}
+      accessibilityLabel={accessibilityLabel ?? seasonAverageLabel(score)}
       onPress={onPress}
       // The badge is about 24pt tall; the slop lifts it to the 44pt target.
       hitSlop={theme.space[3]}

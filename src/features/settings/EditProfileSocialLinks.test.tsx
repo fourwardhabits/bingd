@@ -276,7 +276,9 @@ describe('a value the normaliser refuses', () => {
     await fireEvent.changeText(view.getByLabelText('Website'), 'javascript:alert(1)');
     await fireEvent.press(view.getByRole('button', { name: 'Save changes' }));
 
-    await waitFor(() => expect(view.getByText(/must start with https/)).toBeTruthy());
+    // A Field's error/hint caption is drawn but hidden from the a11y tree (the input speaks
+    // it), so queries for it include hidden elements (design-system v3 A.2 #26).
+    await waitFor(() => expect(view.getByText(/must start with https/, { includeHiddenElements: true })).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
@@ -289,7 +291,7 @@ describe('a value the normaliser refuses', () => {
     );
     await fireEvent.press(view.getByRole('button', { name: 'Save changes' }));
 
-    await waitFor(() => expect(view.getByText(/letterboxd\.com/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/letterboxd\.com/, { includeHiddenElements: true })).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
@@ -311,7 +313,7 @@ describe('a value the normaliser refuses', () => {
 
     await fireEvent.changeText(view.getByLabelText('Website'), 'ht');
 
-    expect(view.queryByText(/web address/)).toBeNull();
+    expect(view.queryByText(/web address/, { includeHiddenElements: true })).toBeNull();
   });
 
   it('says so once the box is left', async () => {
@@ -320,7 +322,7 @@ describe('a value the normaliser refuses', () => {
     await fireEvent.changeText(view.getByLabelText('Website'), 'ht');
     await fireEvent(view.getByLabelText('Website'), 'blur');
 
-    await waitFor(() => expect(view.getByText(/web address/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/web address/, { includeHiddenElements: true })).toBeTruthy());
   });
 });
 
@@ -477,7 +479,7 @@ describe('Save in the header', () => {
     expect(save(view).props.accessibilityState?.disabled).toBeFalsy();
 
     await fireEvent.press(save(view));
-    await waitFor(() => expect(view.getByText(/must start with https/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/must start with https/, { includeHiddenElements: true })).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalled();
   });
 });

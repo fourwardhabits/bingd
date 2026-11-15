@@ -42,3 +42,36 @@ it('hides it again', async () => {
   await fireEvent.press(view.getByLabelText('Hide password'));
   expect(view.getByLabelText('Password').props.secureTextEntry).toBe(true);
 });
+
+/**
+ * **An error is spoken once** (design-system v3 A.2 #26). It was in the input's label, again
+ * as its hint, and a third time from the caption under it. It stays in the label; the hint is
+ * the hint only when there is no error; the caption is drawn and hidden from the a11y tree.
+ */
+describe('the error and hint, to a screen reader', () => {
+  it('says the error in the label only, and hides the caption that draws it', async () => {
+    const view = await renderWithProviders(
+      <Field label="Username" hint="Letters and numbers" error="That username is taken" />,
+    );
+
+    const input = view.getByLabelText('Username');
+    expect(input.props.accessibilityLabel).toBe('Username. That username is taken');
+    expect(input.props.accessibilityHint).toBeUndefined();
+
+    // Drawn for sighted readers, but not an element a screen reader stops on.
+    expect(view.queryByText('That username is taken')).toBeNull();
+    const caption = view.getByText('That username is taken', { includeHiddenElements: true });
+    expect(caption.props.accessibilityElementsHidden).toBe(true);
+    expect(caption.props.importantForAccessibility).toBe('no');
+  });
+
+  it('gives the hint as the input’s hint when there is no error, and hides its caption', async () => {
+    const view = await renderWithProviders(
+      <Field label="Username" hint="Letters and numbers" />,
+    );
+
+    expect(view.getByLabelText('Username').props.accessibilityHint).toBe('Letters and numbers');
+    const caption = view.getByText('Letters and numbers', { includeHiddenElements: true });
+    expect(caption.props.accessibilityElementsHidden).toBe(true);
+  });
+});

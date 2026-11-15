@@ -19,9 +19,11 @@ export type LoadingScreenProps = {
  * list that *is* about to arrive gets `SkeletonRow` instead, because a skeleton
  * keeps the page still and this does not.
  *
- * This is the only place in the app that shows an indeterminate spinner, and it
- * earns it by being the only wait whose length is genuinely unknown. Everywhere
- * else the app knows the shape of what is coming and should draw that instead.
+ * This is the only *full-screen* indeterminate spinner, and it earns it by being the
+ * wait whose length is genuinely unknown. Small inline `ActivityIndicator`s also appear
+ * where only a footer or a step is pending — the Feed's and Activity's next-page footers
+ * (`app/(tabs)/feed.tsx`, `ActivityPageFooter`), `RankedSummary` and `ImportScreen`.
+ * Where the app knows the shape of what is coming it should draw that instead.
  *
  * It doubles as the visual handover from the native splash: same mark, same
  * background, so hiding one and showing the other is not a cut to a blank page.

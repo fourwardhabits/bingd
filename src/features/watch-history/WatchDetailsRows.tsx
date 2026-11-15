@@ -7,7 +7,7 @@ import { NoteClaims, NoteInput } from '@/features/collection/NoteComposer';
 import type { TitleNote } from '@/features/collection/use-title-note';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
-import { SheetRow, Text } from '@/ui/components';
+import { EDIT_ICON_NAME, SheetRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { clampWatchNote, watchNoteLength } from './watch-history';
@@ -146,7 +146,7 @@ export function WatchDetailsRows({
       ) : null}
 
       <SheetRow
-        icon="create-outline"
+        icon={EDIT_ICON_NAME}
         label="Note"
         value={noteValue}
         expanded={open === 'note'}

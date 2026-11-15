@@ -30,6 +30,12 @@ const mockPrefs = new Map<string, unknown>();
 const mockCounts: Record<string, number> = {};
 /** A follow count that never settles, for the bounded-read case. */
 let mockCountHangs = false;
+/**
+ * Answers for successive `follows` reads, in order: a count, a rejection, or a read that
+ * never settles. Once it is empty, reads fall back to `mockCounts` / `mockCountHangs`. This
+ * is how the mount read and the press read are told apart (OB-1 fix).
+ */
+const mockFollowReads: (number | 'reject' | 'hang')[] = [];
 
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
@@ -43,18 +49,28 @@ jest.mock('@/lib/analytics', () => ({
   track: (event: unknown) => mockTrack(event),
 }));
 
+const mockFrom = jest.fn();
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
+      mockFrom(table);
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
         select: () => chain,
         eq: () => chain,
-        then: (resolve: (value: unknown) => unknown) =>
-          mockCountHangs
-            ? new Promise(() => {})
-            : resolve({ data: [], error: null, count: mockCounts[table] ?? 0 }),
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => {
+          const scripted = table === 'follows' ? mockFollowReads.shift() : undefined;
+          if (scripted === 'reject') return reject(new Error('network down'));
+          if (scripted === 'hang' || (scripted === undefined && mockCountHangs)) {
+            return new Promise(() => {});
+          }
+          return resolve({
+            data: [],
+            error: null,
+            count: typeof scripted === 'number' ? scripted : (mockCounts[table] ?? 0),
+          });
+        },
       });
       return chain;
     },
@@ -96,19 +112,22 @@ jest.mock('@/features/auth', () => ({
  * its two exits.
  */
 jest.mock('./NotificationStep', () => ({
-  NotificationStep: ({ onDone }: { onDone: () => void }) => {
+  // `hadFollow` is drawn so the route's follow answer can be seen arriving (OB-1).
+  NotificationStep: ({ onDone, hadFollow }: { onDone: () => void; hadFollow?: boolean }) => {
     const React = jest.requireActual('react');
     const { Text, Pressable } = jest.requireActual('react-native');
     return React.createElement(
       Pressable,
       { accessibilityRole: 'button', accessibilityLabel: 'finish the step', onPress: onDone },
       React.createElement(Text, null, 'Stay in the loop'),
+      React.createElement(Text, null, `had follow: ${String(hadFollow)}`),
     );
   },
 }));
 
 beforeEach(() => {
   mockReplace.mockReset();
+  mockFrom.mockReset();
   mockPush.mockReset();
   mockNavigation.length = 0;
   clearCelebrations();
@@ -116,6 +135,7 @@ beforeEach(() => {
   mockPrefs.clear();
   for (const key of Object.keys(mockCounts)) delete mockCounts[key];
   mockCountHangs = false;
+  mockFollowReads.length = 0;
   resetOnboardingStages();
   resetTasteIntent();
   resetRankingOutcome();
@@ -135,6 +155,42 @@ const finish = async () => {
   await fireEvent.press(view.getByLabelText('finish the step'));
   return view;
 };
+
+/**
+ * **The analytics answer is the mount read; the landing answer is the press read** (OB-1,
+ * 2026-11-14; corrected 2026-11-15). The follow query is asked when the step mounts and
+ * handed to the step for `notification_permission_result.had_follow` — the step reports
+ * the prop it is given (`NotificationStep.test.tsx`), so the prop drawn here is that event's
+ * value — and asked again at the press to pick the destination.
+ */
+describe('the follow answer the step is given', () => {
+  const followReads = () => mockFrom.mock.calls.filter(([table]) => table === 'follows');
+
+  it('passes an approved follow down as true, and asks once at mount and once at the press', async () => {
+    mockCounts.follows = 1;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: true')).toBeTruthy());
+    expect(followReads()).toHaveLength(1);
+    await fireEvent.press(view.getByLabelText('finish the step'));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+    expect(followReads()).toHaveLength(2);
+  });
+
+  it('passes none as false', async () => {
+    mockCounts.follows = 0;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+  });
+
+  it('leaves it unknown while the read has not answered', async () => {
+    mockCountHangs = true;
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: undefined')).toBeTruthy());
+  });
+});
 
 describe('where the app opens', () => {
   /**
@@ -176,6 +232,65 @@ describe('where the app opens', () => {
   });
 
   /**
+   * **Race 1: People -> Follow -> Continue, faster than the follow is written** (Codex P2 on
+   * #305). People's Continue does not await the Follow mutation, so the mount read can
+   * count zero. The press read sees the follow, and the reader lands on the Feed; the
+   * analytics keep the mount answer. Reverting the exit to the cached mount answer fails
+   * this test.
+   */
+  it('opens the Feed when the follow lands after the step mounted', async () => {
+    mockFollowReads.push(0, 1);
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+    expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.forYou);
+    // `had_follow` stays the mount answer: nothing re-renders the step with the press read.
+    expect(view.getByText('had follow: false')).toBeTruthy();
+  });
+
+  /**
+   * **Race 2: the mount read failed, and the connection came back before Continue.** The
+   * failure is not cached into the landing decision.
+   */
+  it('opens the Feed when the mount read failed and the press read finds a follow', async () => {
+    mockFollowReads.push('reject', 1);
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+  });
+
+  /**
+   * A press read that fails is not a reason to downgrade a follow the mount read already
+   * saw. Nothing on this screen can unfollow, so a landed `true` is still true.
+   */
+  it('keeps a landed mount answer of true when the press read fails', async () => {
+    mockFollowReads.push(1, 'reject');
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: true')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+  });
+
+  /** And a failed press read on top of a mount answer of none is For You, as before. */
+  it('opens For You when the press read fails and the mount read found none', async () => {
+    mockFollowReads.push(0, 'reject');
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+  });
+
+  /**
    * The read sits between a button press and the navigation it promised, which is the path
    * the build-4 stranding taught this codebase to bound. An unreadable answer resolves to
    * For You, because the failure modes are not symmetric: For You has something for
@@ -193,6 +308,27 @@ describe('where the app opens', () => {
     async () => {
       mockCountHangs = true;
       await finish();
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou), {
+        timeout: 15000,
+      });
+    },
+    30000,
+  );
+
+  /**
+   * The same bound on the press read alone: the mount read answered none, and the read the
+   * exit issues never settles. It is given `CONNECTION_GRACE_MS` and no more. Timing budget
+   * as above.
+   */
+  it(
+    'still leaves when only the press-time read never settles',
+    async () => {
+      mockFollowReads.push(0, 'hang');
+      const view = await renderWithProviders(<NotificationsScreen />);
+
+      await waitFor(() => expect(view.getByText('had follow: false')).toBeTruthy());
+      await fireEvent.press(view.getByLabelText('finish the step'));
 
       await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou), {
         timeout: 15000,

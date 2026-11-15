@@ -134,18 +134,20 @@ export function FollowListSheet({
       footer={<DismissFooter onPress={close} />}
     >
       <SheetHeader title={TITLE[kind]}>
-        <SearchField
-          accessibilityLabel={
-            kind === 'followers' ? 'Search followers' : 'Search people they follow'
-          }
-          placeholder="Name or @handle"
-          value={query}
-          onChangeText={setQuery}
-          onClear={() => setQuery('')}
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="search"
-        />
+        <View style={styles.search}>
+          <SearchField
+            accessibilityLabel={
+              kind === 'followers' ? 'Search followers' : 'Search people they follow'
+            }
+            placeholder="Name or @handle"
+            value={query}
+            onChangeText={setQuery}
+            onClear={() => setQuery('')}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+        </View>
       </SheetHeader>
 
       {list.isPending ? (
@@ -310,6 +312,13 @@ function PersonRow({
 
 const styles = StyleSheet.create({
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[4] },
+  /**
+   * The field sits where it did in the header. `SearchField`'s 44pt box is 2pt taller than
+   * the drawn field above and below, for its clear button's target (A11Y-44, A.2 #11); this
+   * hands those 4pt back, and they lie in the header's own gap above (`space[2]`) and its
+   * bottom padding (`space[3]`), inside its bounds. Local, so no other header changes.
+   */
+  search: { marginVertical: -2 },
   // Shrinks to the room left above the footer: a long list scrolls to its last row.
   list: { flexShrink: 1 },
   listContent: { paddingBottom: theme.space[4] },
