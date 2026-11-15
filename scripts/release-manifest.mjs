@@ -241,7 +241,9 @@ export function liveUpdates(run, branch) {
     );
     const group = list?.currentPage?.[0]?.group;
     if (!group) continue;
-    const updates = JSON.parse(run(['update:view', group, '--json', '--non-interactive']));
+    // `update:view` takes `--json` and its insights flags only, and rejects anything else
+    // (Codex P1 on #307); it is non-interactive already.
+    const updates = JSON.parse(run(['update:view', group, '--json']));
     const entry = fromEasUpdates(updates.filter?.((update) => update.platform === platform) ?? [])[
       platform
     ];

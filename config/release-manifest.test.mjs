@@ -165,10 +165,22 @@ describe('reading what EAS serves', () => {
     gitCommitHash: commit,
   });
 
+  /**
+   * The flags each command declares in eas-cli (`update/list.ts`, `update/view.ts`). oclif
+   * refuses any other, so the fake does too (Codex P1 on #307: `update:view` has no
+   * `--non-interactive`).
+   */
+  const DECLARED = {
+    'update:list': ['--branch', '--all', '--platform', '-p', '--runtime-version', '--offset', '--limit', '--json', '--non-interactive'],
+    'update:view': ['--insights', '--days', '--start', '--end', '--json'],
+  };
+
   /** A fake `eas`: the newest group per platform, then that group's updates. */
   const easServing = ({ newest, groups }) => {
     const calls = [];
     const run = (args) => {
+      const unknown = args.filter((a) => a.startsWith('-') && !DECLARED[args[0]]?.includes(a));
+      if (unknown.length) throw new Error(`eas ${args[0]}: Nonexistent flag: ${unknown.join(' ')}`);
       calls.push(args.join(' '));
       if (args[0] === 'update:list') {
         const platform = args[args.indexOf('--platform') + 1];
@@ -200,7 +212,7 @@ describe('reading what EAS serves', () => {
     assert.equal(platforms.ios.updateId, uuid(2));
     assert.deepEqual(fatal(published({ platforms })), []);
     assert.ok(calls.includes(`update:list --branch preview --platform android --limit 1 --json --non-interactive`));
-    assert.ok(calls.includes(`update:view ${g} --json --non-interactive`));
+    assert.ok(calls.includes(`update:view ${g} --json`));
   });
 
   it('catches an iOS-only publish of another commit on top of a shared one', () => {
