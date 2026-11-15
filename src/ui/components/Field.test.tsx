@@ -61,8 +61,11 @@ describe('the error and hint, to a screen reader', () => {
     // Drawn for sighted readers, but not an element a screen reader stops on.
     expect(view.queryByText('That username is taken')).toBeNull();
     const caption = view.getByText('That username is taken', { includeHiddenElements: true });
+    // Hidden from VoiceOver, whose label says it; readable and announced on TalkBack, which
+    // reads a populated field's text instead of its label (Codex P2 on #302).
     expect(caption.props.accessibilityElementsHidden).toBe(true);
-    expect(caption.props.importantForAccessibility).toBe('no');
+    expect(caption.props.importantForAccessibility).toBe('yes');
+    expect(caption.props.accessibilityLiveRegion).toBe('polite');
   });
 
   it('gives the hint as the input’s hint when there is no error, and hides its caption', async () => {
@@ -73,5 +76,7 @@ describe('the error and hint, to a screen reader', () => {
     expect(view.getByLabelText('Username').props.accessibilityHint).toBe('Letters and numbers');
     const caption = view.getByText('Letters and numbers', { includeHiddenElements: true });
     expect(caption.props.accessibilityElementsHidden).toBe(true);
+    expect(caption.props.importantForAccessibility).toBe('no');
+    expect(caption.props.accessibilityLiveRegion).toBeUndefined();
   });
 });
