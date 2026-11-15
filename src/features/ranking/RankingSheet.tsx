@@ -414,6 +414,12 @@ function Session({
    * and only until the reader answers it — a pick, Can't decide or Undo spends it, so the
    * pair after it is the ordinary pair. `coachSeen` is what `ranking_completed` reports and
    * what the caller is told, once, so no later title in the run is offered it again.
+   *
+   * Exposure is reported by `Comparison` itself, from the branch that draws the line beside
+   * an answerable pair (OB2-FIX2) — not from the session being in `comparing`, which is
+   * also true while that component shows its connection error instead. A reader who met
+   * "Could not load the other title" never saw the coach, so it is not spent and the next
+   * comparison that does load still offers it.
    */
   const [coachSpent, setCoachSpent] = useState(false);
   const coachSeen = useRef(false);
@@ -422,11 +428,11 @@ function Session({
     Boolean(onboardingContext?.coachShown) &&
     !coachSpent &&
     step?.state === 'comparing';
-  useEffect(() => {
-    if (!coaching || coachSeen.current) return;
+  const reportCoachShown = useCallback(() => {
+    if (coachSeen.current) return;
     coachSeen.current = true;
     onboardingContextRef.current?.onCoachShown?.();
-  }, [coaching]);
+  }, []);
   const spendCoach = () => {
     if (coaching) setCoachSpent(true);
   };
@@ -1077,6 +1083,7 @@ function Session({
             skipped={step.skipped}
             surface={surface}
             coach={coaching}
+            onCoachShown={reportCoachShown}
             busy={busy}
             onPick={(winnerId) => {
               spendCoach();
@@ -1252,6 +1259,7 @@ export function Comparison({
   onClose,
   topBar = true,
   coach = false,
+  onCoachShown,
 }: {
   /**
    * `kind` is here for the Details affordance under the card, which says a different
@@ -1285,6 +1293,12 @@ export function Comparison({
    * the comparison the onboarding session decides to coach; Refine never passes it.
    */
   coach?: boolean;
+  /**
+   * Called when the coach line is on screen beside a pair the reader can answer (OB2-FIX2):
+   * the exposure `ranking_completed.coach_shown` reports. Not called while the opponent is
+   * still loading, nor on the connection-error branch, which draws no coach at all.
+   */
+  onCoachShown?: () => void;
 }) {
   /**
    * Which title the reader asked to be reminded about, if any.
@@ -1325,6 +1339,20 @@ export function Comparison({
       };
     },
   });
+
+  /**
+   * The coach was seen: drawn, with the opponent loaded and no error in its place. Kept
+   * above the error branch's early return so the hook order never changes; the latest
+   * callback is read through a ref so a re-render cannot report twice.
+   */
+  const coachVisible = coach && !isError && Boolean(pivot);
+  const onCoachShownRef = useRef(onCoachShown);
+  useEffect(() => {
+    onCoachShownRef.current = onCoachShown;
+  }, [onCoachShown]);
+  useEffect(() => {
+    if (coachVisible) onCoachShownRef.current?.();
+  }, [coachVisible]);
 
   if (isError) {
     // The alternative is a card reading "…" that the user can still tap, which records a

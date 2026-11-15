@@ -319,10 +319,15 @@ export default function PeopleStepScreen() {
       </ScrollView>
 
       <OnboardingFooter>
-        {/* Secondary to following, and present on every branch that has a list: inviting
-            somebody is the other way this step can succeed. Outlined rather than filled
-            (OB-6), so Continue is the footer's one Maroon fill. */}
-        {!isError && people.length > 0 ? <InviteFriendsButton kind="secondary" /> : null}
+        {/* Secondary to following: inviting somebody is the other way this step can
+            succeed. Outlined rather than filled (OB-6), so Continue is the footer's one
+            Maroon fill. Drawn whenever the inline invite under "Bring somebody with you" is
+            not on screen — a list of suggestions, or a search drawing in that block's place
+            (OB2-FIX2), where "Invite them instead" must have an invite to point at — and
+            never beside it, so the screen holds one invite button at a time. */}
+        {!isError && (people.length > 0 || searching) ? (
+          <InviteFriendsButton kind="secondary" />
+        ) : null}
         <Button label="Continue" onPress={leave} />
       </OnboardingFooter>
     </Screen>

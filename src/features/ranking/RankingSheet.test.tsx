@@ -2317,6 +2317,54 @@ describe('the first-comparison coach line', () => {
     expect(onCoachShown).not.toHaveBeenCalled();
   });
 
+  /**
+   * OB2-FIX2 (Codex, PR #305): the session being in `comparing` is not the same as the coach
+   * being on screen. When the opponent's title cannot be read, Comparison draws its
+   * connection error and no coach, so nothing is reported and nothing is spent.
+   */
+  it('is not reported or spent while the other title cannot be loaded, and is offered once it loads', async () => {
+    answering(comparison(), placement);
+    mockPivotRead.mockResolvedValue({ data: null, error: { message: 'network' } });
+    const onCoachShown = jest.fn();
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 1, coachShown: true, onCoachShown },
+    });
+
+    await waitFor(() => expect(sheet.getByText('Could not load the other title')).toBeTruthy());
+    expect(sheet.queryByTestId('comparison-coach')).toBeNull();
+    expect(onCoachShown).not.toHaveBeenCalled();
+
+    // The connection comes back: the same comparison, now drawn, is the coached one.
+    mockPivotRead.mockResolvedValue({
+      data: { id: 'film-p', title: 'Film P', poster_path: null },
+      error: null,
+    });
+    await fireEvent.press(sheet.getByRole('button', { name: 'Try again' }));
+    await sheet.ready('Film P');
+    expect(sheet.getByText(coach)).toBeTruthy();
+    expect(onCoachShown).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() => expect(completion()).toBeTruthy());
+    expect(completion()!.props).toMatchObject({ first_five_index: 1, coach_shown: true });
+    expect(onCoachShown).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports nothing for a coached comparison closed on its connection error', async () => {
+    answering(comparison());
+    mockPivotRead.mockResolvedValue({ data: null, error: { message: 'network' } });
+    const onCoachShown = jest.fn();
+    const sheet = await openSheet({
+      surface: 'onboarding',
+      onboardingContext: { index: 1, coachShown: true, onCoachShown },
+    });
+
+    await waitFor(() => expect(sheet.getByText('Could not load the other title')).toBeTruthy());
+    await fireEvent.press(sheet.getAllByRole('button', { name: 'Close' }).at(-1)!);
+    expect(onCoachShown).not.toHaveBeenCalled();
+  });
+
   it('is not spent by a session that places without asking anything', async () => {
     answering(placement);
     const onCoachShown = jest.fn();

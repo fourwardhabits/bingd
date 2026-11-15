@@ -372,6 +372,59 @@ describe('the footer', () => {
   });
 });
 
+/**
+ * **One invite button, always reachable** (OB2-FIX2, Codex on PR #305).
+ *
+ * With no suggestions, the only invite is the inline one under "Bring somebody with you",
+ * and a typed search draws in that block's place. The footer's secondary invite has to
+ * stand in for it then, or "Invite them instead" points at nothing — and must not appear
+ * beside the inline one when the block is back.
+ */
+describe('the invite button', () => {
+  const invites = (view: View) => view.queryAllByRole('button', { name: 'Invite friends' });
+  const inFooter = (view: View) =>
+    within(view.getByTestId('onboarding-footer')).queryAllByRole('button', {
+      name: 'Invite friends',
+    });
+
+  it('is the inline one alone when there are no suggestions and nothing is typed', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
+
+    expect(invites(view)).toHaveLength(1);
+    expect(inFooter(view)).toHaveLength(0);
+  });
+
+  it('moves to the footer when a search with no suggestions finds nobody', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
+
+    await type(view, 'zzz');
+    await waitFor(() =>
+      expect(view.getByText('No one by that name yet. Invite them instead.')).toBeTruthy(),
+    );
+
+    expect(view.queryByLabelText('Bring somebody with you')).toBeNull();
+    expect(invites(view)).toHaveLength(1);
+    expect(inFooter(view)).toHaveLength(1);
+
+    // Cleared, the block and its inline invite come back, and the footer's goes.
+    await type(view, '');
+    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
+    expect(invites(view)).toHaveLength(1);
+    expect(inFooter(view)).toHaveLength(0);
+  });
+
+  it('is the footer one alone when there are suggestions', async () => {
+    mockSuggestions = [suggestion('gio')];
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Suggested for you')).toBeTruthy());
+
+    expect(invites(view)).toHaveLength(1);
+    expect(inFooter(view)).toHaveLength(1);
+  });
+});
+
 describe('onboarding_people_search_used', () => {
   it('is not sent when nobody searched', async () => {
     const view = await open();
