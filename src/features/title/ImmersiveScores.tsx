@@ -34,9 +34,9 @@ export type ImmersiveScoresProps = {
     /**
      * **A series' season average** (WS-TVC, founder spec t168u §2; FU1113-B): on a series
      * page with no explicit show ranking but ranked seasons, the mean of those seasons —
-     * drawn as the outlined circle labelled "Season Average", never as the filled circle
-     * that means an explicit ranking. The season count is spoken, not printed. Ignored
-     * when `score` is present.
+     * drawn as the outlined circle labelled `SEASON_AVERAGE`, never as the filled circle
+     * that means an explicit ranking (founder QA 11-14 §4: the label was "Season Average").
+     * The season count is spoken, not printed. Ignored when `score` is present.
      */
     average?: { score: number; count: number } | null;
   } | null;
@@ -55,7 +55,7 @@ const NOT_RANKED = 'Not ranked yet';
 const SCORE_LOADING = 'Score loading';
 const COUNT_LOADING = 'Loading';
 /** The personal slot's label when its number is the mean of ranked seasons. */
-const SEASON_AVERAGE = 'Season Average';
+const SEASON_AVERAGE = 'Your score (SN avg)';
 
 /** Below this many points of width per unit of text scale, the three cells stack. */
 const STACK_BELOW = 290;
@@ -145,7 +145,7 @@ function Cell({
   /** Why there is no number — spoken, never printed. */
   reason: string | null;
   prominent?: boolean;
-  /** The personal slot's season average: outlined, labelled "Season Average". */
+  /** The personal slot's season average: outlined, labelled `SEASON_AVERAGE`. */
   average?: { score: number; count: number } | null;
   divided?: boolean;
   stacked?: boolean;
@@ -157,7 +157,7 @@ function Cell({
   /**
    * **One `ScoreCircle` for all four states** (FU1113-B): yours filled; a season average,
    * bingd and Following outlined; a missing score the dash. The season average is the
-   * same circle with "Season Average" under it — no `AVG` inside the circle and no
+   * same circle with `SEASON_AVERAGE` under it — no `AVG` inside the circle and no
    * "Average of N ranked seasons" paragraph. How many seasons it averages is still said,
    * to a screen reader, where it costs the sighted layout nothing.
    */

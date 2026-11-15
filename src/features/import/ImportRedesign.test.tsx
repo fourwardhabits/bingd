@@ -121,7 +121,7 @@ type View = Awaited<ReturnType<typeof openImdb>>;
 const toReady = async (csv: string) => {
   mockPicked = imdbSyntheticBytes(csv);
   const view = await openImdb();
-  await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
   await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
   return view;
 };
@@ -149,13 +149,18 @@ const runImport = async (csv: string, counts: Record<string, number>) => {
   return view;
 };
 
-/** A finished job restored on open. */
+/**
+ * A finished job reopened by name (`?job=`). Was: restored from the open-job lookup inside
+ * the 24-hour window, which QA 11-14 §6 removed.
+ */
 const restored = async (counts: Record<string, number>, provider = 'imdb') => {
-  mockLiveJob = {
-    data: { id: JOB, status: 'done', counts, completed_at: new Date().toISOString(), provider },
-    error: null,
+  mockRpcResults = {
+    ...mockRpcResults,
+    import_status: { status: 'done', counts, completed_at: new Date().toISOString(), provider },
   };
-  const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+  const view = await renderWithProviders(
+    <ImportScreen surface="settings" chooser jobId={JOB} />,
+  );
   await waitFor(() => expect(view.getByTestId('import-result')).toBeTruthy());
   return view;
 };
@@ -304,7 +309,7 @@ describe('H2: the intro', () => {
   it('stays exactly where it was when the picker is cancelled', async () => {
     mockPicked = null;
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
     expect(view.queryByText('Ready to import')).toBeNull();
     expect(view.queryByText(/couldn’t/)).toBeNull();
@@ -313,10 +318,15 @@ describe('H2: the intro', () => {
 
   // Row 24: no line on the redesigned pages is capped or shrunk, so large text wraps.
   it('never caps or shrinks a line of the intro, Ready or the results', async () => {
+    // The intro's Export / Upload pair is an `ActionPair` since QA 11-14 §7, so its two
+    // labels follow the pair's rule, as the results' pair below does: one line in a row,
+    // uncapped when stacked (`ActionPair.test.tsx`).
+    const PAIR = new Set(['IMDb Export', 'Upload IMDb file', 'Done', 'Rank titles']);
     const uncapped = (view: View) => {
       const texts = view.queryAllByText(/./);
       expect(texts.length).toBeGreaterThan(0);
       for (const text of texts) {
+        if (PAIR.has(text.props.children as string)) continue;
         expect(text.props.numberOfLines).toBeUndefined();
         expect(text.props.adjustsFontSizeToFit).toBeFalsy();
       }
@@ -458,7 +468,7 @@ describe('H2: Letterboxd Ready', () => {
       ),
     );
     const view = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(view.getByRole('button', { name: 'Upload Letterboxd ZIP' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload Letterboxd file' }));
     await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
     const card = within(view.getByTestId('import-preview'));
     expect(card.getByLabelText('Movies, 2')).toBeTruthy();
@@ -479,7 +489,7 @@ describe('a file for the other service', () => {
   it('on IMDb’s page, a ZIP offers Letterboxd, and switching opens its page with nothing sent', async () => {
     mockPicked = lbZip();
     const view = await openImdb();
-    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(view.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
     expect(
       view.getByText(
@@ -503,7 +513,7 @@ describe('a file for the other service', () => {
     await waitFor(() =>
       expect(view.getByText('Bring over your Letterboxd history')).toBeTruthy(),
     );
-    expect(view.getByRole('button', { name: 'Upload Letterboxd ZIP' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload Letterboxd file' })).toBeTruthy();
     expect(view.queryByText('That’s a ZIP, not the IMDb file')).toBeNull();
     expect(mockRpcNames).toEqual([]);
   });
@@ -514,7 +524,7 @@ describe('a file for the other service', () => {
     await waitFor(() => expect(view.getByTestId('choose-letterboxd')).toBeTruthy());
     await fireEvent.press(view.getByTestId('choose-letterboxd'));
     await fireEvent.press(
-      await waitFor(() => view.getByRole('button', { name: 'Upload Letterboxd ZIP' })),
+      await waitFor(() => view.getByRole('button', { name: 'Upload Letterboxd file' })),
     );
     await waitFor(() => expect(view.getByText('That’s not the Letterboxd ZIP')).toBeTruthy());
     expect(
@@ -525,13 +535,13 @@ describe('a file for the other service', () => {
     expect(view.queryByText(/go back/)).toBeNull();
     await fireEvent.press(view.getByRole('button', { name: 'Import from IMDb instead' }));
     await waitFor(() => expect(view.getByText('Bring over your IMDb history')).toBeTruthy());
-    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
   });
 
   it('without the choice of service, offers no switch and still says no "go back"', async () => {
     mockPicked = strToU8(IMDB_QA_MIRROR_CSV);
     const lb = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(lb.getByRole('button', { name: 'Upload Letterboxd ZIP' }));
+    await fireEvent.press(lb.getByRole('button', { name: 'Upload Letterboxd file' }));
     await waitFor(() => expect(lb.getByText('That’s not the Letterboxd ZIP')).toBeTruthy());
     expect(
       lb.getByText(
@@ -543,7 +553,7 @@ describe('a file for the other service', () => {
 
     mockPicked = lbZip();
     const imdb = await renderWithProviders(<ImportScreen surface="settings" provider="imdb" />);
-    await fireEvent.press(imdb.getByRole('button', { name: 'Upload IMDb CSV' }));
+    await fireEvent.press(imdb.getByRole('button', { name: 'Upload IMDb file' }));
     await waitFor(() => expect(imdb.getByText('That’s a ZIP, not the IMDb file')).toBeTruthy());
     expect(
       imdb.getByText(

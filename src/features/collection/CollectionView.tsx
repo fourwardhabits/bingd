@@ -224,13 +224,13 @@ export function CollectionView({
    * **The page's toolbar, then its cards, then the count — all at the head of the list**
    * (founder, marquee cohesion sprint, 2026-11-07).
    *
-   *     Watched ▾                               ▦ ☰   ⚙
+   *     Watched ▾                               ⚙   ▦ ☰
    *     37 titles                                My lists ›
    *
    * The marquee is the page's navigation (Watched / Watchlist / Unranked), and the tools
-   * opposite it act on what it shows: the Poster / List toggle, then the Filters & Sort icon,
-   * one sheet holding the sort and the filters — `BrowseControlsRow` since FU1113-C, so the
-   * tools never wrap and the marquee is what gives way on a narrow phone. The full-width segmented control that sat above this is
+   * opposite it act on what it shows: the Filters & Sort icon, one sheet holding the sort and
+   * the filters, then the Poster / List toggle, rightmost (QA 11-14, §5) —
+   * `BrowseControlsRow` since FU1113-C, so the tools never wrap and the marquee is what gives way on a narrow phone. The full-width segmented control that sat above this is
    * gone; the order in force is not written beside Filters any more, because the sheet
    * names it. The whole header scrolls away with the titles, so the posters get the screen
    * back; the app header and the tab bar stay where they always were.
@@ -246,14 +246,8 @@ export function CollectionView({
           trailing={
             hasTitles ? (
               <>
-                {/* The view control, not a third collection state. **Poster first, list
-                    second** (founder §11): the leftmost cell is the one a device with no
-                    stored preference opens on, so the row and the state agree. */}
-                <ViewModeToggle
-                  value={state.mode}
-                  onChange={(mode) => onChange({ ...state, mode })}
-                  testID="collection-view-mode"
-                />
+                {/* **Filters & Sort first, the view toggle rightmost** (founder QA 11-14,
+                    §5; was toggle then filter), as on For You. */}
                 <FilterIconButton
                   activeCount={activeCount}
                   // The sentence says the order and the count itself, so the button adds no
@@ -263,6 +257,14 @@ export function CollectionView({
                   accessibilityHint="Opens filters and the sort order"
                   onPress={() => setFilterOpen(true)}
                   testID="collection-filter-sort"
+                />
+                {/* The view control, not a third collection state. **Poster first, list
+                    second** (founder §11): the leftmost cell is the one a device with no
+                    stored preference opens on, so the row and the state agree. */}
+                <ViewModeToggle
+                  value={state.mode}
+                  onChange={(mode) => onChange({ ...state, mode })}
+                  testID="collection-view-mode"
                 />
               </>
             ) : undefined

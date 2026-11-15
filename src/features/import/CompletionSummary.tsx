@@ -48,12 +48,13 @@ export const failedNote = (failed: number) =>
  * nothing to rank there is only *Done*. On the onboarding step there is only *Continue*,
  * because the flow guard would send Collection straight back.
  *
- * **Import another file** (Codex review, #289). Settings restores a finished job for a day
- * (`RECENT_COMPLETION_MS`), and *Done* and *Rank titles* only navigate, so without a way to
- * clear it the reader comes back to this summary and cannot start another import, of
- * another file or from the other service, until the day is out. A quiet tertiary action
- * under the pair calls `reset`, which drops the job from the screen (on a finished job
- * `import_discard` deletes nothing). Not on the onboarding step, whose only way is on.
+ * **Import another file** (Codex review, #289). A summary on screen is a job this screen is
+ * holding: one that finished in front of the reader, or one a link named (`?job=`). Settings
+ * never reopens on a finished job by itself (QA 11-14, §6), but *Done* and *Rank titles*
+ * only navigate, so without a way to clear the one on screen the reader could not start
+ * another import, of a newer file or from the other service, from here. A quiet tertiary
+ * action under the pair calls `reset`, which drops the job from the screen (on a finished
+ * job `import_discard` deletes nothing). Not on the onboarding step, whose only way is on.
  */
 export function CompletionSummary({
   counts,

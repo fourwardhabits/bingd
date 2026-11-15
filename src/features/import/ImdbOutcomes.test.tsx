@@ -147,28 +147,33 @@ const importSynthetic = async (counts: Record<string, number> = COUNTS) => {
   await waitFor(() => expect(view.getByTestId('choose-imdb')).toBeTruthy());
   await fireEvent.press(view.getByTestId('choose-imdb'));
   await waitFor(() =>
-    expect(view.getByRole('button', { name: 'Upload IMDb CSV' })).toBeTruthy(),
+    expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy(),
   );
-  await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb CSV' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Upload IMDb file' }));
   await waitFor(() => expect(view.getByText('Ready to import')).toBeTruthy());
   await fireEvent.press(view.getByRole('button', { name: 'Import' }));
   await waitFor(() => expect(view.getByText(/^Your IMDb history is/)).toBeTruthy());
   return view;
 };
 
-/** A finished job restored on open, as after a restart: nothing of the file in memory. */
+/**
+ * A finished job reopened by name, as after a restart: nothing of the file in memory. Was:
+ * restored from the open-job lookup inside the 24-hour window, which QA 11-14 §6 removed;
+ * a notification's `?job=` is how a finished summary comes back after a restart now.
+ */
 const restored = async (counts: Record<string, number> = COUNTS) => {
-  mockLiveJob = {
-    data: {
-      id: JOB,
+  mockRpcResults = {
+    ...mockRpcResults,
+    import_status: {
       status: 'done',
       counts,
       completed_at: new Date().toISOString(),
       provider: 'imdb',
     },
-    error: null,
   };
-  const view = await renderWithProviders(<ImportScreen surface="settings" chooser />);
+  const view = await renderWithProviders(
+    <ImportScreen surface="settings" chooser jobId={JOB} />,
+  );
   await waitFor(() =>
     expect(view.getByText(/Your IMDb history|Nothing new came in/)).toBeTruthy(),
   );
@@ -202,7 +207,9 @@ describe('the import just sent: Unmatched by title', () => {
     unresolved(UNRESOLVED);
     const view = await importSynthetic();
     const list = await openUnmatched(view);
-    expect(list.getByText(/couldn’t find a confident match/)).toBeTruthy();
+    // QA 11-14 §8: the reason sentence is gone; the list itself is the explanation. Was:
+    // asserted present.
+    expect(list.queryByText(/couldn’t find a confident match/)).toBeNull();
     // Both types are known from this session's parse, and both media are present, so the
     // list is split (IMP1113-UI §D). Movies first.
     expect(view.getByTestId('unmatched-medium')).toBeTruthy();

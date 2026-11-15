@@ -371,10 +371,10 @@ describe('the season average in Your score', () => {
     const view = await render(<ImmersiveScores you={{ score: 9.2 }} bingd={null} following={null} />);
     expect(circle(view, '9.2').backgroundColor).toBe(theme.semantic.score);
     expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
-    expect(view.queryByText('Season Average')).toBeNull();
+    expect(view.queryByText('Your score (SN avg)')).toBeNull();
   });
 
-  it('seasons only: the outlined circle, labelled Season Average, with no paragraph and no AVG', async () => {
+  it('seasons only: the outlined circle, labelled Your score (SN avg), with no paragraph and no AVG', async () => {
     const view = await render(
       <ImmersiveScores
         you={{ score: null, average: { score: 8.7, count: 3 } }}
@@ -389,14 +389,20 @@ describe('the season average in Your score', () => {
     // The number alone inside the circle.
     expect(view.getByText('8.7')).toBeTruthy();
     expect(view.queryByText(/AVG/)).toBeNull();
-    // "Season Average" replaces "Your score"; no caption paragraph.
-    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Season Average');
+    // "Your score (SN avg)" replaces "Your score" (founder QA 11-14 §4; was "Season
+    // Average"); no caption paragraph.
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe(
+      'Your score (SN avg)',
+    );
+    expect(view.queryByText('Season Average')).toBeNull();
     expect(view.queryByText('Your score')).toBeNull();
     expect(view.queryByText(/ranked seasons?$/)).toBeNull();
     expect(view.queryByTestId('immersive-score-you-caption')).toBeNull();
     // The count survives for a screen reader.
     expect(
-      view.getByLabelText(/^Season Average\. Average of 3 ranked seasons\. 8\.7 out of 10/),
+      view.getByLabelText(
+        /^Your score \(SN avg\)\. Average of 3 ranked seasons\. 8\.7 out of 10/,
+      ),
     ).toBeTruthy();
   });
 
@@ -413,7 +419,7 @@ describe('the season average in Your score', () => {
     );
     expect(circle(view, '9.5').backgroundColor).toBe(theme.semantic.score);
     expect(view.queryByLabelText('8.1 out of 10')).toBeNull();
-    expect(view.queryByText('Season Average')).toBeNull();
+    expect(view.queryByText('Your score (SN avg)')).toBeNull();
     expect(view.queryByText(/AVG/)).toBeNull();
   });
 

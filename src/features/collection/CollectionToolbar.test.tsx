@@ -128,11 +128,12 @@ describe('the toolbar', () => {
     });
     const tools = view.getByTestId('collection-toolbar-trailing');
     expect(StyleSheet.flatten(tools.props.style)).toMatchObject({ flexWrap: 'nowrap', flexShrink: 0 });
-    // Poster / List first, then the Filters & Sort icon on the right gutter; no third button.
+    // The Filters & Sort icon first, then Poster / List on the right gutter (founder QA
+    // 11-14 §5; was the toggle first); no third button.
     expect(within(tools).getByTestId('collection-view-mode')).toBeTruthy();
     expect(within(tools).getByTestId('collection-filter-sort')).toBeTruthy();
     const json = JSON.stringify(view.toJSON());
-    expect(json.indexOf('collection-view-mode')).toBeLessThan(json.indexOf('collection-filter-sort'));
+    expect(json.indexOf('collection-filter-sort')).toBeLessThan(json.indexOf('collection-view-mode'));
   });
 
   it('heads the list: marquee, then the cards, then the count', async () => {
@@ -320,14 +321,28 @@ describe('the sort in force', () => {
   });
 });
 
+describe('the trailing order with a filter on', () => {
+  it('keeps the view toggle rightmost when Filters shows a count', async () => {
+    const view = await draw({ initial: { filters: { ...initialViewState().filters, genres: ['Drama'] } } });
+    const tools = view.getByTestId('collection-toolbar-trailing');
+    expect(within(tools).getByTestId('collection-filter-sort-count', BEHIND)).toBeTruthy();
+    const json = JSON.stringify(view.toJSON());
+    expect(json.indexOf('collection-filter-sort')).toBeLessThan(json.indexOf('collection-view-mode'));
+    // No Clear all on Collection: that is For You's alone.
+    expect(within(tools).getAllByRole('button')).toHaveLength(1);
+  });
+});
+
 describe('at 320pt and the largest text size (C9)', () => {
-  it('keeps the marquee, the view toggle and Filters on one line, each a 44pt target', async () => {
+  // QA 11-14 §5: the same three targets, Filters first and the toggle rightmost (was the
+  // toggle first). Swapping them changes no width, so the room is what it was.
+  it('keeps the marquee, Filters and the view toggle on one line, each a 44pt target', async () => {
     const view = await draw();
     const { room, targets } = expectRowFitsNarrow(view.getByTestId, 'collection-toolbar');
     expect(targets.map((target) => target.label)).toEqual([
+      'Filters and sort. Sorted by Rating, highest first. No filters',
       'Poster view',
       'List view',
-      'Filters and sort. Sorted by Rating, highest first. No filters',
     ]);
     // Room for the marquee's word beside them, before it has to truncate.
     expect(room).toBeGreaterThan(naturalWidth(view.getByTestId('collection-filter-sort'), 2) * 3);

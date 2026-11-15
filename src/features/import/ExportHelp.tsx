@@ -118,24 +118,35 @@ const HELP = {
 >;
 
 /**
+ * Opens the provider's own export page, counted as `import_instructions_opened` exactly as
+ * the sheet's button was, so the funnel keeps its meaning whichever control opened it: the
+ * intro's *IMDb Export* / *Letterboxd Export* (QA 11-14, §7) or the link inside this help.
+ * Never starts a bingd import.
+ */
+export function openProviderExport(provider: ImportProvider, surface: ImportSurface) {
+  track({ name: 'import_instructions_opened', props: { surface, provider } });
+  void Linking.openURL(HELP[provider].url).catch(() => {});
+}
+
+/**
  * *Need help getting the file?*, collapsed until asked (IMP1113-UI). The numbered steps and a
  * link to the provider's own page, which is the authority (the header above says why).
  *
- * The link counts `import_instructions_opened` exactly as the sheet's button did, so the
- * funnel keeps its meaning.
+ * **`withLink={false}` on a service's page** (QA 11-14, §7): the page's own *Export* action
+ * sits just above, so a second button to the same page inside the help was a duplicate. The
+ * failure screens and the onboarding question have no such action above them, so they keep
+ * the link.
  */
 export function ExportHelp({
   provider,
   surface,
+  withLink = true,
 }: {
   provider: ImportProvider;
   surface: ImportSurface;
+  withLink?: boolean;
 }) {
   const help = HELP[provider];
-  const open = () => {
-    track({ name: 'import_instructions_opened', props: { surface, provider } });
-    void Linking.openURL(help.url).catch(() => {});
-  };
 
   return (
     <Disclosure label="Need help getting the file?" variant="callout" testID="export-help">
@@ -150,7 +161,13 @@ export function ExportHelp({
             </Text>
           </View>
         ))}
-        <Button label={help.open} kind="secondary" onPress={open} />
+        {withLink ? (
+          <Button
+            label={help.open}
+            kind="secondary"
+            onPress={() => openProviderExport(provider, surface)}
+          />
+        ) : null}
       </View>
     </Disclosure>
   );

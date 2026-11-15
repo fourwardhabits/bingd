@@ -835,7 +835,9 @@ function ChooseProvider({
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.block}>
-        <Text variant="display">Bring your watch history</Text>
+        {/* `title1`, the page title the onboarding sibling and each service's page use
+            (QA 11-14, §7); `display` stays with the summaries. */}
+        <Text variant="title1">Bring your watch history</Text>
         <Text variant="body" tone="secondary">
           Already track movies somewhere else? Bring your history into bingd.
         </Text>
