@@ -352,7 +352,9 @@ export const SENT_LIMIT = 200;
  *
  * It narrows what is drawn and nothing else. A row on the other side is not seen
  * (`useMarkSentSeen` is handed only drawn rows), so it stays unread until the reader
- * switches to it, and the shortcut's count still covers both sides.
+ * switches to it. The shortcut counts this side only, and the other side's unread is a dot
+ * on its half of the switch (`sentShortcutBadge`, `unreadInMedium`; founder QA B6,
+ * 2026-11-15).
  */
 export const sentInMedium = (
   row: Pick<SentRecommendation, 'kind'>,
@@ -365,6 +367,19 @@ export const isUnread = (row: Pick<SentRecommendation, 'openedAt' | 'seenAt'>) =
 /** How many are unread, which is what the tab's dot carries. */
 export const unreadCount = (rows: SentRecommendation[] | undefined) =>
   (rows ?? []).filter(isUnread).length;
+
+/**
+ * How many of one side of the Movies / TV switch are unread (founder QA B6, 2026-11-15).
+ *
+ * Over the whole fetched page narrowed by medium **only**: never by the genre, language,
+ * decade or bucket filters. A filter hides rows from the list without reading them, so a
+ * count that followed it would fall to zero over recommendations that are still new, and the
+ * reader would have nothing telling them to clear the filter to find them.
+ */
+export const unreadInMedium = (
+  rows: SentRecommendation[] | undefined,
+  medium: 'movies' | 'tv',
+) => (rows ?? []).filter((row) => sentInMedium(row, medium) && isUnread(row)).length;
 
 /**
  * Whether that number is the whole truth or a floor.
@@ -410,11 +425,35 @@ export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) => {
  * unread rows to the top of the page. Against the legacy `recommendations_to_me`, which
  * orders by *opened* only, seen rows stay in the unopened prefix and only opening a title
  * moves one out of it to let a further row in.
+ *
+ * **The side on screen only** (founder QA B6, 2026-11-15). Movies counts unread films, TV
+ * unread series and seasons, so the number on the shortcut is the number the list under it
+ * can clear. The other side's unread is not lost: it is a dot on that half of the switch.
+ *
+ * **One side's floor is the whole page's floor**, and is asked of the whole page. Neither
+ * server order sorts by medium, so:
+ *
+ * - When the page is exact (`unreadIsAtLeast` false), every unread row of either medium is
+ *   in hand, so each side's count is exact too.
+ * - When the page is a floor, the rows past the cap are unread (unread first) or unopened
+ *   (legacy) **of either medium**, and nothing in hand says which. Each side's count is then
+ *   a floor, including a side with none in hand: its `New` is as true as the page's.
+ *
+ * What it must never do is test the side's own rows for the floor. Fewer than `SENT_LIMIT`
+ * of them is the normal case on a mixed page, so that test would call a capped count exact
+ * and draw `3` where the truth is "at least 3".
+ *
+ * The dot on the other half is drawn only for unread rows actually in hand
+ * (`unreadInMedium`), never for the "may be" of a floor: a dot says that side has something
+ * new, which only a row can prove. A floor with nothing in hand on either side still says
+ * `New` on the shortcut, whichever side is selected.
  */
 export const sentShortcutBadge = (
   rows: SentRecommendation[] | undefined,
+  medium: 'movies' | 'tv',
 ): { badge: string | null; spoken: string } => {
-  const unread = unreadCount(rows);
+  const unread = unreadInMedium(rows, medium);
+  // The whole page, not this side of it: see "One side's floor" above.
   const atLeast = unreadIsAtLeast(rows);
   if (unread > 0) {
     return {
