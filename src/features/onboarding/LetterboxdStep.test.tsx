@@ -12,6 +12,7 @@ import { theme } from '@/ui/tokens';
 
 import { flowProgress, FLOW_STEPS } from './OnboardingHeader';
 import { resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
+import { resetStepViewedForTests } from './step-viewed';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
 // require.context. See app-directory.test.ts.
@@ -200,6 +201,7 @@ beforeEach(() => {
   mockLiveJobHangs = false;
   mockLookupsAnswered = 0;
   resetOnboardingStages();
+  resetStepViewedForTests();
 });
 
 /** The question, drawn and settled (the open-job lookup has answered with nothing). */
@@ -757,5 +759,19 @@ describe('an import that is already running', () => {
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
     expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'continued' });
     expect(called()).not.toContain('import_discard');
+  });
+});
+
+/** `onboarding_step_viewed` (OB-1): once per run, a remount included. */
+describe('the step in the onboarding funnel', () => {
+  it('reports the step as viewed once, across a remount', async () => {
+    const first = await open();
+    await first.unmount();
+    await open();
+
+    const views = mockTrack.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.name === 'onboarding_step_viewed');
+    expect(views).toEqual([{ name: 'onboarding_step_viewed', props: { step: 'letterboxd' } }]);
   });
 });

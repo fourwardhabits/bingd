@@ -5,6 +5,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { ImportScreen } from '@/features/import/ImportScreen';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { useStepViewed } from '@/features/onboarding/step-viewed';
 import { track } from '@/lib/analytics';
 
 /**
@@ -94,6 +95,9 @@ export default function LetterboxdStepScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
   const advance = useAdvanceStage(profile.id);
+  // `onboarding_step_viewed` (OB-1). The chooser draws on its first frame, so mounting is
+  // the view; the guard keeps a remount from counting twice.
+  useStepViewed(profile.id, 'letterboxd');
 
   /**
    * One exit per visit. `Button` has no press guard, and two taps in a frame would count

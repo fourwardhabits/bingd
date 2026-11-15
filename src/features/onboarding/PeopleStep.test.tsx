@@ -6,6 +6,7 @@ import { theme } from '@/ui/tokens';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { resetOnboardingStages } from './use-onboarding-stage';
+import { resetStepViewedForTests } from './step-viewed';
 import { starterLine } from './use-starter-people';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -112,6 +113,7 @@ beforeEach(() => {
   mockAttributionFails = false;
   mockTableRows.invite_attributions = [];
   resetOnboardingStages();
+  resetStepViewedForTests();
 
   mockRpc.mockImplementation((fn: string) => {
     if (fn === 'people_mutuals') return Promise.resolve({ data: [], error: null });
@@ -277,6 +279,22 @@ describe('an invited account', () => {
   });
 });
 
+describe('an invited account, with the search (OB-6)', () => {
+  it('keeps the acknowledgment, the inviter and the walk, with only the field added', async () => {
+    invitedBy('abi', { following: true, followed_by: true });
+    mockTableRows.__mutuals = [mutual('priya', 1, ['abi'])];
+    const view = await renderWithProviders(<PeopleStepScreen />);
+
+    await waitFor(() => expect(view.getByText("You're already connected")).toBeTruthy());
+    expect(view.getByText('abi invited you to bingd.')).toBeTruthy();
+    expect(view.getByLabelText('People you may know')).toBeTruthy();
+    expect(view.getByText('Follow control for priya')).toBeTruthy();
+    expect(view.getByLabelText('Search people by username')).toBeTruthy();
+    expect(view.queryByText('Find your friends')).toBeNull();
+    expect(view.queryByLabelText('Suggested for you')).toBeNull();
+  });
+});
+
 describe('an organic account', () => {
   const organic = (rows: unknown[]) => {
     mockRpc.mockImplementation((fn: string) =>
@@ -290,12 +308,25 @@ describe('an organic account', () => {
    * Not `Find your people`. These are strangers, and a heading calling them the reader's
    * people is the screen lying in its first three words.
    */
-  it('names the outcome of following rather than claiming a relationship', async () => {
+  it('asks for friends, and labels the strangers as suggestions', async () => {
+    // OB-6 (2026-11-14): the heading was `Start your Feed`. The search under it is for
+    // people the reader knows, so `Find your friends` is true; the strangers are labelled.
     organic([suggestion('gio', 3, 88)]);
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByText('Start your Feed')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
     expect(view.queryByText('Find your people')).toBeNull();
+    expect(view.queryByText('Start your Feed')).toBeNull();
+    expect(view.getByLabelText('Suggested for you')).toBeTruthy();
+  });
+
+  it('offers no Suggested for you header over an empty list', async () => {
+    organic([]);
+    const view = await renderWithProviders(<PeopleStepScreen />);
+
+    await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
+    expect(view.queryByLabelText('Suggested for you')).toBeNull();
+    expect(view.getByLabelText('Bring somebody with you')).toBeTruthy();
   });
 
   it('describes each row with a fact', async () => {
@@ -316,7 +347,7 @@ describe('an organic account', () => {
     organic([suggestion('gio', 3, 88)]);
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByText('Start your Feed')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
     expect(view.queryByText(/%/)).toBeNull();
     expect(view.queryByText(/Match/)).toBeNull();
     expect(view.queryByText(/taste match/i)).toBeNull();
@@ -357,8 +388,8 @@ describe('when the read fails', () => {
     const view = await renderWithProviders(<PeopleStepScreen />);
 
     await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
-    expect(view.getByText(/could not load suggestions/)).toBeTruthy();
-    expect(view.queryByText('Start your Feed')).toBeNull();
+    expect(view.getByText(/couldn't load suggestions/)).toBeTruthy();
+    expect(view.queryByText('Find your friends')).toBeNull();
     expect(view.queryByText("You're already connected")).toBeNull();
   });
 
@@ -382,7 +413,7 @@ describe('when the read fails', () => {
 describe('leaving the step', () => {
   it('continues into the notification question', async () => {
     const view = await renderWithProviders(<PeopleStepScreen />);
-    await waitFor(() => expect(view.getByText('Start your Feed')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
 
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/notifications');
@@ -444,9 +475,42 @@ describe('the Continue button at the foot of the step', () => {
     expect(ancestors.some((type) => /ScrollView/.test(type))).toBe(false);
     // The control that makes that negative mean something: the heading IS in the list.
     const headingAncestors: string[] = [];
-    for (let node = view.getByText('Start your Feed').parent; node; node = node.parent) {
+    for (let node = view.getByText('Find your friends').parent; node; node = node.parent) {
       headingAncestors.push(String(node.type));
     }
     expect(headingAncestors.some((type) => /ScrollView/.test(type))).toBe(true);
+  });
+});
+
+/** `onboarding_step_viewed` (OB-1): once the branch is decided, and once per run. */
+describe('the step in the onboarding funnel', () => {
+  const views = () =>
+    mockTrack.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.name === 'onboarding_step_viewed');
+
+  it('reports the step as viewed once its branch is decided, and once across a remount', async () => {
+    const first = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(first.getByText('Find your friends')).toBeTruthy());
+    await first.unmount();
+    const second = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(second.getByText('Find your friends')).toBeTruthy());
+
+    expect(views()).toEqual([{ name: 'onboarding_step_viewed', props: { step: 'people' } }]);
+  });
+
+  it('does not report the skeleton in front of the branch as a view', async () => {
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    await renderWithProviders(<PeopleStepScreen />);
+
+    expect(views()).toHaveLength(0);
+  });
+
+  it('reports a failed read as viewed, because the failure is what the step showed', async () => {
+    mockAttributionFails = true;
+    const view = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
+
+    expect(views()).toHaveLength(1);
   });
 });

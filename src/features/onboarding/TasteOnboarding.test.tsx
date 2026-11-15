@@ -1,13 +1,16 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { clearCelebrations, hasCelebrations } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
 
 import { resetRankingOutcome } from './pick-five';
 import { resetOnboardingStages } from './use-onboarding-stage';
+import { resetStepViewedForTests } from './step-viewed';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -89,6 +92,15 @@ const releaseShows = async () => {
 
 const mockRpc = jest.fn();
 const mockReplace = jest.fn();
+/**
+ * What the screen reports (OB-1). The real `track` with no PostHog key is a no-op, so
+ * recording it here changes nothing any other case in this file observes.
+ */
+const mockTrack = jest.fn();
+jest.mock('@/lib/analytics', () => ({
+  ...jest.requireActual('@/lib/analytics'),
+  track: (event: unknown) => mockTrack(event),
+}));
 const mockPrefs = new Map<string, unknown>();
 let mockWriteFails = false;
 /** A preference write that never settles — the Keychain lane of review 47's hang. */
@@ -305,6 +317,8 @@ let mockLedgerReads = 0;
 beforeEach(() => {
   mockAwardOnPlacement = false;
   mockLedgerReads = 0;
+  mockTrack.mockReset();
+  resetStepViewedForTests();
   mockPush.mockReset();
   clearCelebrations();
   // Dismissals acknowledge themselves unless a test says otherwise, which is what a
@@ -481,7 +495,7 @@ describe('the picker', () => {
   it('asks for one movie at a time, in the founder’s words', async () => {
     const view = await open();
 
-    expect(view.getByText('Pick a movie you have seen')).toBeTruthy();
+    expect(view.getByText("Pick a movie you've seen")).toBeTruthy();
     // `film` was the app's own word and `movie` is the founder's.
     expect(view.queryByText(/five films/i)).toBeNull();
     // The old flow's instruction, which asked for all five up front.
@@ -586,7 +600,7 @@ describe('the picker', () => {
     const view = await open();
     await fireEvent.changeText(view.getByLabelText('Search for a movie'), 'inception');
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.queryByLabelText(/Inception, 2010/)).toBeNull();
   });
 });
@@ -659,7 +673,7 @@ describe('one turn of the loop', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -761,7 +775,7 @@ describe('one turn of the loop', () => {
     await releaseDismissals();
 
     // Gone, and the picker is live again at the number the placement moved it to.
-    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy());
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -831,13 +845,13 @@ describe('one turn of the loop', () => {
     // Closed, and still arriving. Nothing has asked UIKit to take it away yet.
     expect(shows().refused).toBe(0);
     expect(dismissals().pending).toHaveLength(0);
-    expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
+    expect(view.queryByLabelText('1 of 5 movies ranked, 4 to go')).toBeNull();
 
     await releaseShows();
     await waitFor(() => expect(dismissals().pending).toHaveLength(1));
     await releaseDismissals();
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
     expect(shows().refused).toBe(0);
   });
@@ -853,7 +867,7 @@ describe('one turn of the loop', () => {
     expect(view.queryAllByText('How was it?', { includeHiddenElements: true })).toHaveLength(0);
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     expect(view.queryAllByText('How was it?')).toHaveLength(0);
   });
 
@@ -869,7 +883,9 @@ describe('one turn of the loop', () => {
     await closeReveal(view);
 
     await waitFor(() =>
-      expect(view.getByLabelText(`${already + 1} of 5 movies ranked`)).toBeTruthy(),
+      expect(
+        view.getByLabelText(`${already + 1} of 5 movies ranked, ${4 - already} to go`),
+      ).toBeTruthy(),
     );
     expect(view.queryByText('Your First Five')).toBeNull();
   });
@@ -1065,7 +1081,7 @@ describe('the reveal after every placement', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
+    expect(view.queryByLabelText('1 of 5 movies ranked, 4 to go')).toBeNull();
   });
 
   it('ends a comparison on the reveal, not on the last pair', async () => {
@@ -1098,7 +1114,7 @@ describe('the reveal after every placement', () => {
     await chooseBucket(view);
     await closeReveal(view);
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked, 4 to go')).toBeTruthy());
     // Inception is not offered again, from the same fact.
     expect(view.queryByLabelText('Inception')).toBeNull();
     releaseReadsOf('rankings');
@@ -1189,7 +1205,7 @@ describe('resuming', () => {
     alreadyRanked(3);
     const view = await renderWithProviders(<TasteScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('3 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('3 of 5 movies ranked, 2 to go')).toBeTruthy());
     expect(view.getByText('Pick another one')).toBeTruthy();
     expect(view.queryByText('How was it?')).toBeNull();
   });
@@ -1258,7 +1274,11 @@ describe('Your First Five', () => {
   it('says what the five bought without explaining the algorithm again', async () => {
     const view = await arrive();
 
-    expect(view.getByText(/This is just the start/)).toBeTruthy();
+    expect(
+      view.getByText(
+        'Your scores move as your list grows. The more you rank, the better bingd knows your taste.',
+      ),
+    ).toBeTruthy();
     expect(view.queryByText(/comes from where this lands/)).toBeNull();
   });
 
@@ -1287,6 +1307,61 @@ describe('Your First Five', () => {
     );
   });
 
+  /** OB-4 (2026-11-14): what Continue leads to, after the five and inside the scroll. */
+  it('says what is up next, after the five rows and inside the scroll', async () => {
+    const view = await arrive();
+    await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
+
+    const block = view.getByTestId('first-five-up-next');
+    expect(within(block).getByRole('header', { name: 'Up next' })).toBeTruthy();
+    expect(
+      within(block).getByText(
+        'Bring your history, find your friends, then see picks made for your taste.',
+      ),
+    ).toBeTruthy();
+    // A statement, not a fork: nothing in it to press.
+    expect(within(block).queryAllByRole('button')).toHaveLength(0);
+    expect(StyleSheet.flatten(block.props.style)).toMatchObject({
+      backgroundColor: theme.surface.sunken,
+      borderRadius: theme.radius.card,
+      padding: theme.layout.cardPadding,
+      marginHorizontal: theme.layout.gutter,
+      marginTop: theme.space[3],
+      gap: theme.space[1],
+    });
+
+    // Scrolls with the rows; the footer is outside the scroll and holds the two actions.
+    const ancestors: string[] = [];
+    for (let node = block.parent; node; node = node.parent) ancestors.push(String(node.type));
+    expect(ancestors.some((type) => /ScrollView/.test(type))).toBe(true);
+    const footer = view.getByTestId('onboarding-footer');
+    expect(within(footer).queryByTestId('first-five-up-next')).toBeNull();
+    expect(within(footer).getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(within(footer).getByRole('button', { name: 'Share your First Five' })).toBeTruthy();
+  });
+
+  it('keeps Share unavailable until all five rows have loaded', async () => {
+    // Four already placed; the fifth lands while the refetch that would draw it is parked,
+    // so the payoff opens on the run's count of five with four rows in hand.
+    alreadyRanked(4);
+    starterGrid(['film-1']);
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    holdReadsOf('rankings');
+    await chooseBucket(view);
+    await closeReveal(view);
+
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    const share = () => view.getByRole('button', { name: 'Share your First Five' });
+    expect(share().props.accessibilityState.disabled).toBe(true);
+    expect(view.getByTestId('first-five-up-next')).toBeTruthy();
+
+    await act(async () => releaseReadsOf('rankings'));
+    await waitFor(() => expect(share().props.accessibilityState.disabled).toBe(false));
+  });
+
   it('continues into the optional Letterboxd step rather than into the app', async () => {
     const view = await arrive();
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
@@ -1294,6 +1369,209 @@ describe('Your First Five', () => {
     // The step after the payoff, and the stage that says so on a relaunch.
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
     await waitFor(() => expect(mockPrefs.get('user-1.onboarding.stage')).toBe('letterboxd'));
+  });
+});
+
+describe('First Five guidance (OB-3)', () => {
+  const coach = /New to this\? Tap the one you liked more/;
+  const events = (name: string) =>
+    mockTrack.mock.calls.map(([event]) => event).filter((event) => event.name === name);
+
+  /** Every title asks one comparison against the same opponent, then places. */
+  const everyTitleCompares = () => {
+    mockTableRows.media_items = [
+      { id: 'pivot-1', title: 'The Pivot', release_date: '2001-01-01', poster_path: null },
+      ...(mockTableRows.media_items ?? []),
+    ];
+    const server = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) => {
+      if (fn === 'rank_start') {
+        return Promise.resolve({
+          data: { done: false, session_id: `session-${String(args.p_media_item_id)}`, pivot: 'pivot-1' },
+          error: null,
+        });
+      }
+      if (fn === 'rank_answer') {
+        const id = String(args.p_session_id).replace('session-', '');
+        const position = (mockTableRows.rankings ?? []).length + 1;
+        mockTableRows.rankings = [
+          ...(mockTableRows.rankings ?? []),
+          rankedRow(id, `Placed ${position}`, position),
+        ];
+        return Promise.resolve({
+          data: { done: true, position, category: 'movies', bucket: 'loved', score: 8 },
+          error: null,
+        });
+      }
+      return server(fn, args);
+    });
+  };
+
+  const pick = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
+    await waitFor(() => expect(view.getByLabelText(label)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(label));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await chooseBucket(view);
+  };
+
+  it('explains the loop before the first pick', async () => {
+    const view = await open();
+
+    expect(view.getByText("Pick a movie you've seen")).toBeTruthy();
+    expect(
+      view.getByText(
+        'Say how it was, then pick which you liked more. Five picks and your list is started.',
+      ),
+    ).toBeTruthy();
+    expect(view.getByText('0 of 5')).toBeTruthy();
+    expect(view.getByLabelText('0 of 5 movies ranked')).toBeTruthy();
+  });
+
+  it('says how many are left once one is placed', async () => {
+    alreadyRanked(2);
+    const view = await open();
+
+    expect(view.getByText('Pick another one')).toBeTruthy();
+    expect(view.getByText('Each one is compared with the ones before it.')).toBeTruthy();
+    expect(view.getByText('2 of 5 · 3 to go')).toBeTruthy();
+    expect(view.getByLabelText('2 of 5 movies ranked, 3 to go')).toBeTruthy();
+  });
+
+  it('counts down to one to go', async () => {
+    alreadyRanked(4);
+    const view = await open();
+
+    expect(view.getByText('4 of 5 · 1 to go')).toBeTruthy();
+    expect(view.getByLabelText('4 of 5 movies ranked, 1 to go')).toBeTruthy();
+  });
+
+  it('labels the search field for what it searches, and keeps its spoken name', async () => {
+    const view = await open();
+    const field = view.getByLabelText('Search for a movie');
+
+    expect(field.props.placeholder).toBe('Search movies');
+  });
+
+  it('coaches the first comparison of the run, and no comparison after it', async () => {
+    starterGrid(['film-1', 'film-2', 'film-3']);
+    everyTitleCompares();
+    const view = await open();
+
+    await pick(view, 'Inception');
+    await answerable(view, 'Inception');
+    expect(view.getByText(coach)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Choose Inception'));
+    await closeReveal(view);
+    await waitFor(() => expect(view.getByLabelText(/^1 of 5 movies ranked/)).toBeTruthy());
+
+    await pick(view, 'Starter 2');
+    await answerable(view, 'Starter 2');
+    expect(view.queryByText(coach)).toBeNull();
+    await fireEvent.press(view.getByLabelText('Choose Starter 2'));
+    await closeReveal(view);
+
+    await waitFor(() => expect(events('ranking_completed')).toHaveLength(2));
+    expect(events('ranking_completed').map((event) => event.props.coach_shown)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('saves the coach for the first comparison actually asked, past an outright placement', async () => {
+    starterGrid(['film-1', 'film-2']);
+    const view = await open();
+
+    // The first title on a new account has an empty band: no comparison, so no coach.
+    await pick(view, 'Inception');
+    await closeReveal(view);
+    await waitFor(() => expect(view.getByLabelText(/^1 of 5 movies ranked/)).toBeTruthy());
+
+    everyTitleCompares();
+    await pick(view, 'Starter 2');
+    await answerable(view, 'Starter 2');
+    expect(view.getByText(coach)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Choose Starter 2'));
+    await closeReveal(view);
+
+    await waitFor(() => expect(events('ranking_completed')).toHaveLength(2));
+    expect(
+      events('ranking_completed').map((event) => [
+        event.props.first_five_index,
+        event.props.coach_shown,
+      ]),
+    ).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+  });
+});
+
+describe('the voice pass (OB-2)', () => {
+  it('asks for a movie with a contraction when the grid has nothing to offer', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText("Search for a movie you've seen.")).toBeTruthy());
+    expect(view.queryByText('Search for a movie you have seen.')).toBeNull();
+  });
+
+  it('tells the bucket question any movie counts, with contractions', async () => {
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+
+    await waitFor(() =>
+      expect(
+        view.getByText('Anything you’ve seen counts. It doesn’t have to be recent.'),
+      ).toBeTruthy(),
+    );
+  });
+});
+
+describe('the run in the onboarding funnel (OB-1)', () => {
+  const events = (name: string) =>
+    mockTrack.mock.calls.map(([event]) => event).filter((event) => event.name === name);
+
+  /** Five turns of the loop from the grid, on the default server, which places outright. */
+  const runFive = async () => {
+    const ids = ['film-1', 'film-2', 'film-3', 'film-4', 'film-5'];
+    starterGrid(ids);
+    const view = await open();
+    const labels = ['Inception', 'Starter 2', 'Starter 3', 'Starter 4', 'Starter 5'];
+    for (const [turn, label] of labels.entries()) {
+      await waitFor(() => expect(view.getByLabelText(label)).toBeTruthy());
+      await fireEvent.press(view.getByLabelText(label));
+      await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+      await chooseBucket(view);
+      await closeReveal(view);
+      if (turn < 4) {
+        await waitFor(() =>
+          expect(
+            view.getByLabelText(new RegExp(`^${turn + 1} of 5 movies ranked`)),
+          ).toBeTruthy(),
+        );
+      }
+    }
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    return view;
+  };
+
+  it('numbers each placement of the run 1 to 5, counting the empty-band ones', async () => {
+    await runFive();
+
+    const completions = events('ranking_completed');
+    expect(completions.map((event) => event.props.first_five_index)).toEqual([1, 2, 3, 4, 5]);
+    expect(completions.every((event) => event.props.surface === 'onboarding')).toBe(true);
+    // Outright placements show no comparison, so nothing was coached.
+    expect(completions.every((event) => event.props.coach_shown === false)).toBe(true);
+  });
+
+  it('reports the picker and the payoff as viewed once each', async () => {
+    await runFive();
+
+    expect(events('onboarding_step_viewed').map((event) => event.props.step)).toEqual([
+      'pick',
+      'payoff',
+    ]);
   });
 });
 
