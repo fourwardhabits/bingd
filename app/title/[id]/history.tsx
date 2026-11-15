@@ -22,7 +22,7 @@ import {
   SkeletonRow,
   Text,
 } from '@/ui/components';
-import { formatWatchDate } from '@/features/collection/dates';
+import { formatWatchHistoryDate } from '@/features/collection/dates';
 
 import {
   WatchRow,
@@ -353,14 +353,15 @@ export default function WatchHistoryScreen() {
 
   const count = events.length;
   /**
-   * `First Mar 4, 2024 · Latest Oct 12, 2026`, only when it says something: two or more
-   * dated watches on two different days. One dated watch, or two on the same day, would
-   * print the same date twice (founder QA, 2026-11-12). `historySpan` owns the rule.
+   * **`First watch:` and `Latest watch:`, one line each, only when they say something**
+   * (UI refinement B3, 2026-11-15; founder QA, 2026-11-12): two or more dated watches on
+   * two different days. One dated watch, several on one day, or none dated would print
+   * the same date twice or nothing at all, so there is no summary — the card already
+   * carries the date. Undated viewings are counted in the heading's `(N)` and never here.
+   * `historySpan` owns the rule; every date on this screen is `formatWatchHistoryDate`'s
+   * full month and year.
    */
   const spanDates = historySpan(ordered.map((event) => event.watchedOn));
-  const span = spanDates
-    ? `First ${formatWatchDate(spanDates.first)} · Latest ${formatWatchDate(spanDates.latest)}`
-    : null;
 
   if (count === 0) {
     return (
@@ -392,16 +393,24 @@ export default function WatchHistoryScreen() {
           <View>
             {/* The page's name, now that the stack's title is gone: the section label My
                 lists opens with, in the same 15pt Maroon token. Said once — nothing else
-                on the page repeats it. */}
-            <SectionHeader title="Watch history" size="large" />
+                on the page repeats it.
+
+                **With the number of watches in it** (UI refinement B3, 2026-11-15):
+                `WATCH HISTORY (3)`, every watch event counted, dated or not. It replaces
+                the "Watched once" / "Watched 3 times" heading that sat under it, which
+                said the same number a second time. The title page's own `Watched N times`
+                line, the way here, is unchanged. */}
+            <SectionHeader title={`Watch history (${count})`} size="large" />
             <View style={styles.header} testID="watch-history-summary-block">
-              <Text variant="title2" testID="watch-history-summary">
-                {count === 1 ? 'Watched once' : `Watched ${count} times`}
-              </Text>
-              {span ? (
-                <Text variant="footnote" tone="secondary" testID="watch-history-span">
-                  {span}
-                </Text>
+              {spanDates ? (
+                <View style={styles.span} testID="watch-history-span">
+                  <Text variant="footnote" tone="secondary" testID="watch-history-first">
+                    {`First watch: ${formatWatchHistoryDate(spanDates.first)}`}
+                  </Text>
+                  <Text variant="footnote" tone="secondary" testID="watch-history-latest">
+                    {`Latest watch: ${formatWatchHistoryDate(spanDates.latest)}`}
+                  </Text>
+                </View>
               ) : null}
               {error ? (
                 <Text variant="caption" tone="action" testID="watch-history-error">
@@ -512,6 +521,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
     gap: theme.space[1],
   },
+  /** First and Latest: two lines read as one fact, set at the footnote's own leading. */
+  span: { gap: 2 },
   loading: { paddingTop: theme.space[3] },
   // Above its first card; `space[2]` under it so the label does not sit on the card's edge.
   year: {

@@ -458,7 +458,7 @@ describe('the page', () => {
       },
     });
 
-  it('has the bingd. header with Back, WATCH HISTORY once, and a span for two dated watches', async () => {
+  it('has the bingd. header with Back, WATCH HISTORY (N) once, and a span for two dated watches', async () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     // The stack's own header is off, so its status-bar inset is not applied a second time
@@ -467,9 +467,11 @@ describe('the page', () => {
     expect(mockHeader.title).toBe('Watch history');
     expect(view.getAllByTestId('app-header')).toHaveLength(1);
     expect(view.getByRole('button', { name: 'Back' })).toBeTruthy();
-    expect(view.getAllByText('WATCH HISTORY')).toHaveLength(1);
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
-    expect(view.getByTestId('watch-history-span').props.children).toMatch(/^First .* · Latest /);
+    // The count rides in the heading; the "Watched 2 times" heading under it is gone (B3).
+    expect(view.getAllByText('WATCH HISTORY (2)')).toHaveLength(1);
+    expect(view.queryByText(/^Watched /)).toBeNull();
+    expect(view.getByTestId('watch-history-first').props.children).toMatch(/^First watch: /);
+    expect(view.getByTestId('watch-history-latest').props.children).toMatch(/^Latest watch: /);
   });
 
   /**
@@ -497,7 +499,7 @@ describe('the page', () => {
       event('w2', '2026-10-12', '2026-10-12T22:00:00Z'),
     ]);
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
     expect(view.queryByTestId('watch-history-span')).toBeNull();
   });
 
@@ -507,7 +509,7 @@ describe('the page', () => {
       event('w1', '2026-10-12', '2026-10-12T10:00:00Z'),
     ]);
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
     expect(view.queryByTestId('watch-history-span')).toBeNull();
   });
 
@@ -519,8 +521,11 @@ describe('the page', () => {
       undated('w0', '2023-01-01T10:00:00Z'),
     ]);
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    expect(view.getByTestId('watch-history-span').props.children).toBe(
-      'First Mar 4, 2024 · Latest Jun 1, 2025',
+    expect(view.getByTestId('watch-history-first').props.children).toBe(
+      'First watch: March 4, 2024',
+    );
+    expect(view.getByTestId('watch-history-latest').props.children).toBe(
+      'Latest watch: June 1, 2025',
     );
   });
 
@@ -537,8 +542,11 @@ describe('the page', () => {
       .map((node) => String(node.props.testID).replace('watch-row-', ''));
     expect(rows).toEqual(['w2', 'w1', 'w0']);
     expect(view.getByTestId('watch-date-w0').props.children).toBe('Earlier');
-    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
-    expect(view.queryByText(/First watch/)).toBeNull();
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('March 4, 2024');
+    // No "First watch" label on a row; the summary's own "First watch:" line is the only one.
+    expect(view.queryAllByText(/First watch/).map((node) => node.props.testID)).toEqual([
+      'watch-history-first',
+    ]);
   });
 
   it('adds no padding of its own above the summary, under the label’s 44pt row', async () => {
@@ -657,7 +665,7 @@ describe('a collapsed row', () => {
     expect(order[0]).toBe('watch-date-w1');
     expect(order).not.toContain('watch-edit-w1');
     // No *(First watch)* suffix on the earliest dated watch (founder QA, 2026-11-12).
-    expect(view.getByTestId('watch-date-w1').props.children).toBe('Mar 4, 2024');
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('March 4, 2024');
   });
 
   it('keeps the score where it was when the editor opens', async () => {
@@ -918,7 +926,7 @@ describe('Rerank', () => {
     expect(mockRankingSheet.props?.subject).toBeNull();
     expect(mockLogSheet.props?.title).toBeNull();
     noWatchWrites();
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 2 times');
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
     expect(view.getAllByTestId(/^watch-row-/)).toHaveLength(2);
     expect(mockBack).not.toHaveBeenCalled();
   });

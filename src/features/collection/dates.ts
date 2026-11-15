@@ -47,6 +47,21 @@ export const formatWatchDate = (iso: string, now = today()) => {
   });
 };
 
+/**
+ * **How a date reads on the Watch History screen** (UI refinement B3, 2026-11-15): always
+ * the full month and the four-digit year — `November 13, 2026` — even this year's, and
+ * never *Today* or *Yesterday*.
+ *
+ * The screen is a record, read back across years, and a card is often seen far from the
+ * year heading above it (or with none, when every watch is in one year), so each date
+ * carries its own year. Its own export rather than a change to `formatWatchDate`, which
+ * the log sheet, the date picker and the goals sheet still use for the short, relative
+ * form; nothing outside the Watch History screen calls this one. The device's locale
+ * orders the parts, as `formatWatchDate` and `monthLabel` already let it.
+ */
+export const formatWatchHistoryDate = (iso: string) =>
+  fromIso(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+
 export const monthLabel = (iso: string) =>
   fromIso(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
