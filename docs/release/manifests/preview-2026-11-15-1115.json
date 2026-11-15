@@ -1,0 +1,58 @@
+{
+  "$comment": "Preview after the founder-approved paired publish of the release SHA, read back with \"node scripts/release-manifest.mjs live preview\" (ok) and from u.expo.dev for each platform: channel preview serves these two updates; each bundle names variant preview, lane preview and only Supabase fjxhcbowoxuzulwirzyr. One \"eas update --platform all\" invocation (scripts/release.mjs update preview); EAS made one group per runtime, so two groups. Staging only.",
+  "lane": "preview",
+  "channel": "preview",
+  "gitSha": "cd79227dd990850fb84a71cd249b3410faee0356",
+  "status": "published",
+  "backend": {
+    "ref": "fjxhcbowoxuzulwirzyr",
+    "name": "bingd-staging",
+    "migrationHead": "20261122000200",
+    "migrationsApplied": 198,
+    "flags": {
+      "recommendations.v2_engine": "v1",
+      "recommendations.v2_rollout_percent": 0,
+      "recommendations.v2_allowlist": [],
+      "push.delivery_enabled": false
+    }
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1dfc1-b178-72a8-a7a4-4a7fc491de7d",
+      "groupId": "4ed7ca2a-5870-453f-b77b-dc34bb8e4390",
+      "runtimeVersion": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
+      "gitCommitHash": "cd79227dd990850fb84a71cd249b3410faee0356",
+      "createdAt": "2026-11-15T15:09:35.480Z",
+      "message": "staging 1115: #307 cd79227d, Android+iOS (founder-approved, staging only)"
+    },
+    "ios": {
+      "updateId": "01a1dfc1-b178-7ae9-86fb-b371429081fc",
+      "groupId": "48781724-279f-427c-8654-379baecaef64",
+      "runtimeVersion": "ef07f4b898dc935a022f24c388a75358aa4fcc23",
+      "gitCommitHash": "cd79227dd990850fb84a71cd249b3410faee0356",
+      "createdAt": "2026-11-15T15:09:35.480Z",
+      "message": "staging 1115: #307 cd79227d, Android+iOS (founder-approved, staging only)"
+    }
+  },
+  "publishedBy": "npm run update:preview -- --platform all --non-interactive --json, from a clean detached checkout of the release SHA",
+  "verification": {
+    "ci": "passed",
+    "releaseGate": "passed (run 43723085663)",
+    "codexReviewedCommit": "cd79227dd990850fb84a71cd249b3410faee0356",
+    "stagingSuites": "remote 137/137, acceptance 114/114, award-privacy 29/29, social 30/30",
+    "androidDevice": "pending founder QA",
+    "iosDevice": "pending founder QA"
+  },
+  "rollback": {
+    "samePair": {
+      "android": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
+      "ios": "60fc013e-fa30-4b33-8e59-14b702a85781",
+      "gitSha": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4"
+    },
+    "exactPrevious": {
+      "android": "0fc7e363-6e2c-4ede-b87a-2fb38024691b",
+      "ios": "4721ebbe-b6cc-418b-bfad-e876b2fcb344"
+    }
+  },
+  "knownProblems": []
+}
