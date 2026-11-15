@@ -337,9 +337,17 @@ begin
     perform pg_advisory_xact_lock(hashtextextended('watchlist_story:' || v_group.actor_id::text, 0));
     perform 1 from feed_events where id = v_group.event_id for update;
 
+    -- Only members whose title still exists (Codex, PR 310). Foreign-key cascades run at the
+    -- end of the statement, so in a DELETE that removes several titles the membership rows
+    -- of titles deleted earlier in the same statement are still here; the catalogue rows are
+    -- not, because a row-level BEFORE trigger sees the effects of the rows its statement has
+    -- already processed. Each later row's trigger recomputes, so after the last one the
+    -- representative and the count are right, and a group with no surviving title is left to
+    -- the cascade, as before.
     select wt.media_item_id
       into v_next
       from feed_watchlist_titles wt
+      join media_items mi on mi.id = wt.media_item_id
      where wt.event_id = v_group.event_id and wt.media_item_id <> old.id
      order by wt.id
      limit 1;
@@ -353,9 +361,11 @@ begin
                                 else fe.media_item_id end,
            payload = case when fe.payload ? 'count'
                           then fe.payload || jsonb_build_object('count', (
-                                 select count(*) from feed_watchlist_titles
-                                  where event_id = v_group.event_id
-                                    and media_item_id <> old.id))
+                                 select count(*)
+                                   from feed_watchlist_titles wt
+                                   join media_items mi on mi.id = wt.media_item_id
+                                  where wt.event_id = v_group.event_id
+                                    and wt.media_item_id <> old.id))
                           else fe.payload end
      where fe.id = v_group.event_id;
   end loop;

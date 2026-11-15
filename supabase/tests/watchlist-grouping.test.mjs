@@ -384,6 +384,46 @@ describe('a watchlist session is one post', () => {
     });
   });
 
+  describe('a post outlives catalogue deletions made in one statement (Codex, PR 310)', () => {
+    const removeTogether = async (ids) => {
+      await t.sql(`delete from watchlist where media_item_id = any($1::uuid[])`, [ids]);
+      await t.sql(`delete from media_items where id = any($1::uuid[])`, [ids]);
+    };
+
+    it('two non-representative titles deleted together leave the right count', async () => {
+      const me = await actor();
+      const [a, b, c] = [await film('Keep A'), await film('Drop B'), await film('Drop C')];
+      for (const id of [a, b, c]) await add(id);
+      const [post] = await posts(me);
+      await removeTogether([b, c]);
+      const [kept] = await posts(me);
+      assert.equal(kept.id, post.id);
+      assert.equal(kept.media_item_id, a);
+      assert.equal(kept.payload.count, 1);
+      assert.deepEqual(await members(post.id), [a]);
+    });
+
+    it('the representative and the next title deleted together hand the post to a survivor', async () => {
+      const me = await actor();
+      const [a, b, c] = [await film('Rep A'), await film('Next B'), await film('Survivor C')];
+      for (const id of [a, b, c]) await add(id);
+      const [post] = await posts(me);
+      await removeTogether([a, b]);
+      const [kept] = await posts(me);
+      assert.equal(kept.id, post.id);
+      assert.equal(kept.media_item_id, c);
+      assert.equal(kept.payload.count, 1);
+    });
+
+    it('a group whose every title is deleted goes, as a one-title post always did', async () => {
+      const me = await actor();
+      const [a, b] = [await film('Gone A'), await film('Gone B')];
+      for (const id of [a, b]) await add(id);
+      await removeTogether([a, b]);
+      assert.equal((await posts(me)).length, 0);
+    });
+  });
+
   describe('a post outlives its first title', () => {
     it('removing the representative from the catalogue keeps the post and its conversation', async () => {
       const me = await actor();
