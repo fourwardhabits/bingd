@@ -1,0 +1,40 @@
+{
+  "$comment": "Reconstructed 2026-11-15 from PR text only (fourwardhabits/bingd#296 comment 6877856995); no EAS read was possible from the audit session. Group IDs and the iOS runtime were recorded as 8-character prefixes, so this manifest cannot pass and lists why in knownProblems. Replace with `node scripts/release-manifest.mjs live preview` output once someone logged in to EAS runs it.",
+  "lane": "preview",
+  "channel": "preview",
+  "gitSha": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
+  "status": "published",
+  "publishedAt": "2026-11-14T13:10:00Z",
+  "publishedBy": "not recorded (ota-preview.yml publishes Android only, so iOS used another path)",
+  "backend": {
+    "ref": "fjxhcbowoxuzulwirzyr",
+    "name": "bingd-staging"
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1da2e-79fe-7b25-9612-76c62d8f5c1b",
+      "groupId": "0fc7e363",
+      "runtimeVersion": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
+      "gitCommitHash": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
+      "binary": "Preview Android build 11, EAS build c25cbaf6 (prefix)"
+    },
+    "ios": {
+      "updateId": "01a1da2e-79fe-760d-ad0f-de885e30f4c7",
+      "groupId": "60fc013e",
+      "runtimeVersion": "ef07f4b8",
+      "gitCommitHash": "5ac0363386755c5fcc4bd8aaa6d30ab1db3b9fe4",
+      "binary": "Preview iOS build 9, EAS build 4295384b (prefix)"
+    }
+  },
+  "verification": {
+    "ci": "passed",
+    "releaseGate": "not recorded",
+    "androidDevice": "founder staging pass 4",
+    "iosDevice": "superseded: the iPhone later showed #286 (d702d098) behaviour; how it got there is not recorded"
+  },
+  "knownProblems": [
+    "android: groupId must be a full UUID",
+    "ios: runtimeVersion must be a full fingerprint hash",
+    "ios: groupId must be a full UUID"
+  ]
+}
