@@ -1085,9 +1085,9 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
           >
             Your First Five
           </Text>
+          {/* One line (founder QA, 2026-11-16): the five are the point. */}
           <Text variant="body" tone="secondary">
-            Your scores move as your list grows. The more you rank, the better bingd knows
-            your taste.
+            Your scores move as your list grows.
           </Text>
         </View>
 

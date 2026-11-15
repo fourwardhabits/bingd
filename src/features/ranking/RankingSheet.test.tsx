@@ -2595,14 +2595,16 @@ describe('how many Too tough presses a completion carries', () => {
 describe('what the first reveals say about the number', () => {
   const LINE = /Your score comes from where this lands in your rankings/;
 
-  it('explains the score during onboarding', async () => {
+  // Founder QA, 2026-11-16: the First Five payoff says it ("Your scores move as your
+  // list grows"), so onboarding's reveals no longer carry their own line.
+  it('adds no explanation under onboarding’s first scores either', async () => {
     answering(placement);
     const sheet = await openSheet({ surface: 'onboarding' });
 
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
 
-    expect(sheet.getByText(LINE)).toBeTruthy();
-    expect(sheet.getByText(/It can move as you rank more/)).toBeTruthy();
+    expect(sheet.queryByText(LINE)).toBeNull();
+    expect(sheet.queryByText(/It can move as you rank more/)).toBeNull();
   });
 
   it('says nothing of the kind on an ordinary reveal', async () => {
