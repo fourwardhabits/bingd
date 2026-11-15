@@ -1,0 +1,47 @@
+{
+  "$comment": "Preview after the founder-approved staging publish of PR 308 (follow-up line, draft, not merged) at f5fc77a7, read back with `release-manifest live preview` (ok) and from u.expo.dev for each platform: each served update names only Supabase fjxhcbowoxuzulwirzyr. Published from a clean detached checkout whose fingerprints matched the installed Preview binaries. Staging only; #307 cd79227d is unchanged.",
+  "lane": "preview",
+  "channel": "preview",
+  "gitSha": "f5fc77a7659463d4f3b040744f58a89a01811ca5",
+  "status": "published",
+  "backend": {
+    "ref": "fjxhcbowoxuzulwirzyr",
+    "name": "bingd-staging",
+    "migrationHead": "20261122000200",
+    "migrationsApplied": 198
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1e076-9a93-7b14-bf6a-4c8a3e9c4e49",
+      "groupId": "0d2e1af6-5809-4d76-8ee3-7f5f538f6907",
+      "runtimeVersion": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
+      "gitCommitHash": "f5fc77a7659463d4f3b040744f58a89a01811ca5",
+      "createdAt": "2026-11-15T18:27:11.635Z",
+      "message": "PR 308 f5fc77a7: post-QA refinements B1-B7, P1-P4 (staging Preview)"
+    },
+    "ios": {
+      "updateId": "01a1e076-9a93-715e-ace0-00e7cd2176e7",
+      "groupId": "c2e48148-90c0-480a-80f4-7d32c0d7a555",
+      "runtimeVersion": "ef07f4b898dc935a022f24c388a75358aa4fcc23",
+      "gitCommitHash": "f5fc77a7659463d4f3b040744f58a89a01811ca5",
+      "createdAt": "2026-11-15T18:27:11.635Z",
+      "message": "PR 308 f5fc77a7: post-QA refinements B1-B7, P1-P4 (staging Preview)"
+    }
+  },
+  "publishedBy": "npm run update:preview -- --platform all --non-interactive --json, from a clean detached checkout of f5fc77a7",
+  "verification": {
+    "ci": "passed on f5fc77a7",
+    "codexReviewedCommit": "f5fc77a7659463d4f3b040744f58a89a01811ca5",
+    "jest": "6961 passed, 0 failed",
+    "androidDevice": "pending founder QA of changed surfaces",
+    "iosDevice": "pending founder QA of changed surfaces"
+  },
+  "rollback": {
+    "samePair": {
+      "android": "4ed7ca2a-5870-453f-b77b-dc34bb8e4390",
+      "ios": "48781724-279f-427c-8654-379baecaef64",
+      "gitSha": "cd79227dd990850fb84a71cd249b3410faee0356"
+    }
+  },
+  "knownProblems": []
+}
