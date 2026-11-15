@@ -1,0 +1,4 @@
+# Mutation logs (README.md): per-run evidence for the coordinator, not source; they name
+# fixture handles but never a key. Ignored here rather than in the root .gitignore,
+# which is an @expo/fingerprint input ("bareGitIgnore") and would move every runtime.
+logs/

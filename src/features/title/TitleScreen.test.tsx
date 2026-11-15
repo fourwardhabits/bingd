@@ -3689,6 +3689,99 @@ describe('pull to refresh and the season list', () => {
 });
 
 /**
+ * **A pull reloads the reviews** (QA1114-REVIEWS F1, 2026-11-14).
+ *
+ * The founder's second QA account published a review and the first account's pull did
+ * not show it: the pull refetched the title, the reader's row, seasons and Similar, and
+ * never the reviews list or its count, both of which sit behind the 60s global
+ * `staleTime`. Every sort and the Most Helpful preview share the `['title-reviews', id]`
+ * prefix, so one invalidation reloads them all; a series has no reviews and asks nothing.
+ */
+describe('pull to refresh and the reviews', () => {
+  const refreshControl = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    view
+      .root!.queryAll(() => true)
+      .map((node) => node as never as { props?: Record<string, any> })
+      .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
+  const pull = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await act(async () => {
+      refreshControl(view).props.onRefresh();
+    });
+    await waitFor(() => expect(refreshControl(view).props.refreshing).toBe(false));
+  };
+
+  const callsOf = (name: string) => mockRpc.mock.calls.filter(([fn]) => fn === name).length;
+
+  const otherReview = {
+    id: 'um-other',
+    user_id: 'user-77',
+    username: 'second_account',
+    display_name: 'Second Account',
+    avatar_path: null,
+    note: 'Published from the other phone.',
+    has_spoilers: false,
+    updated_at: '2026-11-14T09:00:00.000Z',
+    score: '7.6',
+    reaction_count: 0,
+    helpful_count: 0,
+    viewer_helpful: false,
+  };
+
+  describe.each(['original', 'immersive'] as const)('on the %s page', (layout) => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout(layout);
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+    });
+
+    it('on a movie page, refetches the reviews and the count, and shows a new review', async () => {
+      let published = false;
+      mockRpcResults.title_reviews_v2 = () => (published ? [otherReview] : []);
+      mockRpcResults.title_review_count = () => (published ? 1 : 0);
+      const view = await renderWithProviders(<TitleScreen />);
+      await waitFor(() => expect(callsOf('title_reviews_v2')).toBeGreaterThan(0));
+      await waitFor(() => expect(callsOf('title_review_count')).toBeGreaterThan(0));
+      if (layout === 'original') {
+        await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: /^Reviews/ })));
+      }
+      expect(view.queryByText('Published from the other phone.')).toBeNull();
+      const reviewsBefore = callsOf('title_reviews_v2');
+      const countBefore = callsOf('title_review_count');
+
+      // The other account publishes; this reader pulls.
+      published = true;
+      await pull(view);
+
+      expect(callsOf('title_reviews_v2')).toBeGreaterThan(reviewsBefore);
+      expect(callsOf('title_review_count')).toBeGreaterThan(countBefore);
+      await waitFor(() => expect(view.getByText('Published from the other phone.')).toBeTruthy());
+      expect(view.getAllByText('Second Account').length).toBeGreaterThan(0);
+      expect(view.getAllByLabelText('7.6 out of 10').length).toBeGreaterThan(0);
+      if (layout === 'original') {
+        expect(view.getByRole('tab', { name: 'Reviews (1)' })).toBeTruthy();
+      }
+    });
+  });
+
+  it('on a whole-show page, asks for neither reviews nor their count', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+
+    await pull(view);
+
+    expect(callsOf('title_reviews_v2')).toBe(0);
+    expect(callsOf('title_review_count')).toBe(0);
+  });
+});
+
+/**
  * **Anything in the collection can leave it without being ranked first** (Android beta
  * report, 2026-09-18).
  *
@@ -5125,11 +5218,62 @@ describe('the immersive title page (experiment)', () => {
         expect(order.indexOf('My own words on it.')).toBeLessThan(
           order.indexOf('Review number 1.'),
         );
-        // No score circle on your own review.
-        expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
+        // Your own score now shows on your review (QA1114-REVIEWS §2), and it is the
+        // server's: the `score` on your own `title_reviews_v2` row (8.4 here), with Edit
+        // directly beneath it.
+        const stack = within(within(mine).getByTestId('review-card-stack'));
+        expect(stack.getByLabelText('8.4 out of 10')).toBeTruthy();
+        expect(stack.getByTestId('edit-review')).toBeTruthy();
 
         await fireEvent.press(within(mine).getByTestId('edit-review'));
         await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      });
+
+      /**
+       * QA1114-REVIEWS §2: the own card's score is the RPC row's — the number every other
+       * reader sees — and not the page's own band arithmetic, even where they differ.
+       */
+      it('scores your own review with your title_reviews_v2 row, not a local number', async () => {
+        withNote('public');
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', score: '6.2' },
+        ];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        const mine = await waitFor(() =>
+          within(view.getByTestId('reviews-preview')).getByTestId('your-review'),
+        );
+        await waitFor(() =>
+          expect(
+            within(within(mine).getByTestId('review-card-stack')).getByLabelText('6.2 out of 10'),
+          ).toBeTruthy(),
+        );
+      });
+
+      it('shows your public review on a title you have not ranked, with no circle', async () => {
+        tableRows.user_media = [
+          {
+            user_id: 'user-1',
+            media_item_id: 'film-1',
+            bucket: null,
+            watched_on: '2026-08-12',
+            note: 'Public, never ranked.',
+            note_visibility: 'public',
+            note_has_spoilers: false,
+            note_updated_at: '2026-10-02T10:00:00.000Z',
+          },
+        ];
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(9), user_id: 'user-1', note: 'Public, never ranked.', score: null },
+        ];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        const mine = await waitFor(() =>
+          within(view.getByTestId('reviews-preview')).getByTestId('your-review'),
+        );
+        expect(within(mine).getByText('Public, never ranked.')).toBeTruthy();
+        expect(within(mine).queryByTestId('review-card-score')).toBeNull();
+        expect(within(mine).getByTestId('edit-review')).toBeTruthy();
       });
 
       it('never shows a private note as a review, anywhere', async () => {
