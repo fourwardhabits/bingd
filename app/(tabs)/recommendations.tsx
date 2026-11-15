@@ -46,6 +46,7 @@ import {
 } from '@/features/recommendations/use-top-rated';
 import {
   asCollectionItem as recommendationAsItem,
+  sentInMedium,
   sentShortcutBadge,
   useMarkRecommendationOpened,
   useSentToYou,
@@ -705,8 +706,11 @@ export default function RecommendationsScreen() {
 
   // Filtered here rather than in the query, so turning the chip on cannot refetch and
   // cannot reorder: the server's ordering survives, narrowed.
-  const sentShown = applyFilters(sentRows.map(recommendationAsItem), filters);
-  const sentVisible = sentRows.filter((row) =>
+  // The header's Movies / TV first (founder QA, 2026-11-15): Movies lists films, TV lists
+  // series and seasons. What the other side holds is not drawn, so it is not marked seen.
+  const sentForMedium = sentRows.filter((row) => sentInMedium(row, medium));
+  const sentShown = applyFilters(sentForMedium.map(recommendationAsItem), filters);
+  const sentVisible = sentForMedium.filter((row) =>
     sentShown.some((item) => item.mediaItemId === row.mediaItemId),
   );
   // FU1113-E: what Sent to You is drawing, once it has loaded, is marked seen.
@@ -1022,6 +1026,8 @@ export default function RecommendationsScreen() {
               query={sent}
               rows={sentVisible}
               total={sentRows.length}
+              inMedium={sentForMedium.length}
+              medium={medium}
               saved={savedIds}
               busyId={busy}
               onOpen={openRecommendation}
@@ -1244,7 +1250,7 @@ export default function RecommendationsScreen() {
               // list of four films does not offer twenty genres none of them are.
               items={
                 sentOnly
-                  ? sentRows.map(recommendationAsItem)
+                  ? sentForMedium.map(recommendationAsItem)
                   : onTopRated
                     ? // The *unfiltered* pool, so the sheet's options describe what could
                       // be chosen rather than what already survived a choice — otherwise
@@ -1386,6 +1392,8 @@ function SentList({
   query,
   rows,
   total,
+  inMedium,
+  medium,
   saved,
   busyId,
   onOpen,
@@ -1397,6 +1405,9 @@ function SentList({
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
   total: number;
+  /** How many of `total` are on the header's side of Movies / TV, before the filters. */
+  inMedium: number;
+  medium: Medium;
   saved: ReadonlySet<string>;
   busyId: string | null;
   onOpen: (row: SentRecommendation) => void;
@@ -1437,6 +1448,18 @@ function SentList({
           kind="nothingYet"
           title="Nothing sent your way yet"
           body="When someone you follow back recommends a film or a season, it lands here."
+        />
+      ) : inMedium === 0 ? (
+        // Something was sent, all of it on the other side of the switch. Not the filter
+        // state: there may be no filter to clear, and the switch is in the header.
+        <EmptyState
+          kind="nothingYet"
+          title={medium === 'tv' ? 'No TV sent your way yet' : 'No movies sent your way yet'}
+          body={
+            medium === 'tv'
+              ? 'Switch to Movies to see what people have sent you.'
+              : 'Switch to TV to see what people have sent you.'
+          }
         />
       ) : rows.length === 0 ? (
         // No button. Clear all is already on screen, in the chip row a few points above

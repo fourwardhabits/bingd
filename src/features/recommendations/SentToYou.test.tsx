@@ -636,6 +636,8 @@ describe('a recommendation the reader has already ranked', () => {
 
     const view = await renderWithProviders(<RecommendationsScreen />);
     await openSent(view);
+    // Seasons are on the TV side of the switch (founder QA, 2026-11-15).
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
 
     // Having watched Season 1 says nothing about Season 2, which is the same identity
     // rule the spoiler mask and the watchlist already use.
@@ -987,5 +989,87 @@ describe('Sent to You on the unread-first backend', () => {
     expect(marks()[1][1]).toMatchObject({ p_ids: ['n0', 'n1', 'n2', 'n3', 'n4'] });
     // The page now ends in seen rows, so every unread one is in hand: the count is exact.
     await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
+  });
+});
+
+/**
+ * **Sent to You follows the Movies / TV switch** (founder QA, 2026-11-15). Movies lists
+ * films; TV lists whole series and single seasons. What the other side holds is not drawn,
+ * so it is not marked seen: it stays unread until the reader switches to it.
+ */
+describe('Sent to You and the Movies / TV switch', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+  const mixed = () => [
+    recommendation(),
+    recommendation({
+      id: 'r2',
+      media_item_id: 'tlou-s1',
+      media_kind: 'season',
+      media_title: 'Season 1',
+      series_title: 'The Last of Us',
+    }),
+    recommendation({
+      id: 'r3',
+      media_item_id: 'severance',
+      media_kind: 'series',
+      media_title: 'Severance',
+    }),
+  ];
+
+  it('lists films on Movies, and series and seasons on TV', async () => {
+    mockRpcResults.recommendations_to_me = mixed();
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    expect(view.queryByText('The Last of Us, S1 (2010)')).toBeNull();
+    expect(view.queryByText(/Severance/)).toBeNull();
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+
+    await waitFor(() => expect(view.getByText('The Last of Us, S1 (2010)')).toBeTruthy());
+    expect(view.getByText(/Severance/)).toBeTruthy();
+    expect(view.queryByText('Inception (2010)')).toBeNull();
+  });
+
+  it('marks only the side on screen, and the other side when the reader switches to it', async () => {
+    mockRpcResults.recommendations_to_me = mixed();
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 3 new' })).toBeTruthy(),
+    );
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toEqual({ p_operation_id: expect.any(String), p_ids: ['r1'] });
+    // The TV rows were not on screen, so they are still new.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+
+    await waitFor(() => expect(marks()).toHaveLength(2));
+    expect([...(marks()[1][1] as { p_ids: string[] }).p_ids].sort()).toEqual(['r2', 'r3']);
+    // Seeing is not opening.
+    expect(mockRpc.mock.calls.some(([name]) => name === 'mark_recommendation_opened')).toBe(
+      false,
+    );
+  });
+
+  it('says the other side has them, rather than blaming a filter', async () => {
+    mockRpcResults.recommendations_to_me = [mixed()[1]];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('No movies sent your way yet')).toBeTruthy());
+    expect(view.getByText('Switch to TV to see what people have sent you.')).toBeTruthy();
+    expect(view.queryByText('Nothing matches your filters')).toBeNull();
+    expect(view.queryByText('Nothing sent your way yet')).toBeNull();
+    // Nothing was drawn, so nothing was marked.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
   });
 });

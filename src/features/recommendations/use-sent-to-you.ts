@@ -344,6 +344,21 @@ export const SENT_LIMIT = 200;
  * the row listed in Sent to you writes `seenAt` (`useMarkSentSeen`). Either one means the
  * reader has had it in front of them, so either one clears the tab's dot and the row's tint.
  */
+/**
+ * **Which side of the Movies / TV switch a recommendation belongs to** (founder QA,
+ * 2026-11-15). Sent to You follows the medium the header shows: Movies lists films, TV
+ * lists whole series and single seasons. The same rule `rankable_category` applies to a
+ * media kind, so a season is never a movie and a series is never missing from TV.
+ *
+ * It narrows what is drawn and nothing else. A row on the other side is not seen
+ * (`useMarkSentSeen` is handed only drawn rows), so it stays unread until the reader
+ * switches to it, and the shortcut's count still covers both sides.
+ */
+export const sentInMedium = (
+  row: Pick<SentRecommendation, 'kind'>,
+  medium: 'movies' | 'tv',
+): boolean => (medium === 'movies' ? row.kind === 'movie' : row.kind !== 'movie');
+
 export const isUnread = (row: Pick<SentRecommendation, 'openedAt' | 'seenAt'>) =>
   !row.openedAt && !row.seenAt;
 
