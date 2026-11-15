@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { checkManifest, fromEasUpdates } from '../scripts/release-manifest.mjs';
+import { checkManifest, fromEasUpdates, liveUpdates } from '../scripts/release-manifest.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -139,20 +139,101 @@ describe('one release, both platforms, one commit', () => {
 });
 
 describe('reading what EAS serves', () => {
-  it('keeps the newest update per platform, with the commit EAS recorded', () => {
-    const platforms = fromEasUpdates({
-      currentPage: [
-        { id: uuid(1), group: uuid(3), platform: 'android', runtimeVersion: RT.android, gitCommitHash: OTHER, createdAt: '2026-11-14T13:00:00Z' },
-        { id: uuid(5), group: uuid(6), platform: 'android', runtimeVersion: RT.android, gitCommitHash: SHA, createdAt: '2026-11-15T13:00:00Z' },
-        { id: uuid(2), group: uuid(7), platform: 'ios', runtimeVersion: RT.ios, gitCommitHash: OTHER, createdAt: '2026-11-15T14:00:00Z' },
-        { id: uuid(8), group: uuid(9), platform: 'web' },
-      ],
+  /**
+   * Recorded shapes, from eas-cli's own formatters (Codex P1 on #307): `update:list --json`
+   * prints group summaries (`getUpdateGroupDescriptionsWithBranch`) under `currentPage`;
+   * `update:view --json` prints individual updates (`getUpdateJsonInfosForUpdates`).
+   */
+  const groupSummary = (group, platforms) => ({
+    branch: 'preview',
+    message: '"staging" (1 hour ago by founder)',
+    runtimeVersion: RT.android,
+    isRollBackToEmbedded: false,
+    group,
+    platforms,
+  });
+  const update = (id, group, platform, commit, createdAt) => ({
+    id,
+    createdAt,
+    group,
+    branch: 'preview',
+    message: 'staging',
+    runtimeVersion: RT[platform],
+    platform,
+    manifestPermalink: `https://u.expo.dev/update/${id}`,
+    isRollBackToEmbedded: false,
+    gitCommitHash: commit,
+  });
+
+  /** A fake `eas`: the newest group per platform, then that group's updates. */
+  const easServing = ({ newest, groups }) => {
+    const calls = [];
+    const run = (args) => {
+      calls.push(args.join(' '));
+      if (args[0] === 'update:list') {
+        const platform = args[args.indexOf('--platform') + 1];
+        const group = newest[platform];
+        return JSON.stringify({
+          name: 'preview',
+          currentPage: group ? [groupSummary(group, groups[group].map((u) => u.platform).join(', '))] : [],
+        });
+      }
+      if (args[0] === 'update:view') return JSON.stringify(groups[args[1]]);
+      throw new Error(`unexpected eas ${args.join(' ')}`);
+    };
+    return { run, calls };
+  };
+
+  it('finds both platforms in one group from one commit, and passes', () => {
+    const g = uuid(3);
+    const { run, calls } = easServing({
+      newest: { android: g, ios: g },
+      groups: {
+        [g]: [
+          update(uuid(1), g, 'android', SHA, '2026-11-15T13:00:00Z'),
+          update(uuid(2), g, 'ios', SHA, '2026-11-15T13:00:00Z'),
+        ],
+      },
     });
+    const platforms = liveUpdates(run, 'preview');
     assert.deepEqual(Object.keys(platforms).sort(), ['android', 'ios']);
-    assert.equal(platforms.android.gitCommitHash, SHA);
-    // So the live check is the same mixed-commit refusal.
+    assert.equal(platforms.ios.updateId, uuid(2));
+    assert.deepEqual(fatal(published({ platforms })), []);
+    assert.ok(calls.includes(`update:list --branch preview --platform android --limit 1 --json --non-interactive`));
+    assert.ok(calls.includes(`update:view ${g} --json --non-interactive`));
+  });
+
+  it('catches an iOS-only publish of another commit on top of a shared one', () => {
+    const shared = uuid(3);
+    const iosOnly = uuid(4);
+    const { run } = easServing({
+      newest: { android: shared, ios: iosOnly },
+      groups: {
+        [shared]: [
+          update(uuid(1), shared, 'android', SHA, '2026-11-14T13:10:00Z'),
+          update(uuid(2), shared, 'ios', SHA, '2026-11-14T13:10:00Z'),
+        ],
+        [iosOnly]: [update(uuid(5), iosOnly, 'ios', OTHER, '2026-11-15T07:00:00Z')],
+      },
+    });
+    const platforms = liveUpdates(run, 'preview');
+    assert.equal(platforms.ios.gitCommitHash, OTHER);
     const problems = fatal(published({ platforms }));
-    assert.ok(problems.some((p) => /^mixed-commit: ios/.test(p)), problems);
+    assert.ok(problems.some((p) => /^mixed-commit: ios was published from bbbbbbbb/.test(p)), problems);
+  });
+
+  it('reports a platform with nothing on the branch as one-platform', () => {
+    const g = uuid(3);
+    const { run } = easServing({
+      newest: { android: g },
+      groups: { [g]: [update(uuid(1), g, 'android', SHA, '2026-11-15T13:00:00Z')] },
+    });
+    const problems = fatal(published({ platforms: liveUpdates(run, 'preview') }));
+    assert.ok(problems.some((p) => /^one-platform: no ios update/.test(p)), problems);
+  });
+
+  it('takes nothing from a group summary, which carries no update, platform or commit', () => {
+    assert.deepEqual(fromEasUpdates({ currentPage: [groupSummary(uuid(3), 'android, ios')] }), {});
   });
 });
 

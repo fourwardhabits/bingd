@@ -23,7 +23,8 @@
  * for EACH platform the update, its group, its runtime and the commit EAS says it was built
  * from. `check` refuses a manifest that is mixed-commit, one-platform without a written
  * exception, on a runtime that is not the recorded binary's, or on a backend its lane may
- * not use. `live` reads what EAS is actually serving on a branch and runs the same checks.
+ * not use. `live` reads what EAS is actually serving on a branch (`update:list` for the
+ * newest group per platform, then `update:view` for its updates) and runs the same checks.
  *
  * **Unknown is not parity.** As in `ota-gate.mjs`, anything this cannot prove is a
  * problem, not a note.
@@ -179,12 +180,17 @@ export function checkManifest(manifest, { live, backends, lanes }) {
 }
 
 /**
- * What EAS returns for an update, reduced to the manifest's fields. Tolerant of the two
- * shapes `eas update:list --json` and `eas update:view --json` use, because neither is
- * a documented contract; a field it cannot find stays undefined and `checkManifest` says so.
+ * Individual updates, as `eas update:view <group> --json` prints them (eas-cli
+ * `getUpdateJsonInfosForUpdates`: id, group, platform, runtimeVersion, gitCommitHash, ...),
+ * reduced to the manifest's fields: the newest per platform. A field it cannot find stays
+ * undefined and `checkManifest` says so.
+ *
+ * **Not `eas update:list --json`** (Codex P1 on #307). That prints update-*group* summaries
+ * under `currentPage`, with `platforms: "android, ios"` and no update id, platform or commit,
+ * so it can only say which group to view. `liveUpdates` below does the two steps.
  */
 export function fromEasUpdates(updates) {
-  const list = Array.isArray(updates) ? updates : (updates?.currentPage ?? updates?.updates ?? []);
+  const list = Array.isArray(updates) ? updates : [];
   const latest = {};
   for (const update of list) {
     const platform = update.platform;
@@ -205,6 +211,43 @@ export function fromEasUpdates(updates) {
     }
   }
   return Object.fromEntries(Object.entries(latest).map(([platform, { entry }]) => [platform, entry]));
+}
+
+/**
+ * What a branch is serving, per platform, read from EAS in two steps:
+ *
+ *   1. `update:list --branch <b> --platform <p> --limit 1 --json`: the newest group that
+ *      holds an update for that platform (eas-cli filters by platform server-side);
+ *   2. `update:view <group> --json`: that group's individual updates, with the commit.
+ *
+ * `run(args)` returns the CLI's stdout, so the tests hand it recorded output. A platform with
+ * no group is absent, which `checkManifest` reports as one-platform.
+ */
+export function liveUpdates(run, branch) {
+  const platforms = {};
+  for (const platform of PLATFORMS) {
+    const list = JSON.parse(
+      run([
+        'update:list',
+        '--branch',
+        branch,
+        '--platform',
+        platform,
+        '--limit',
+        '1',
+        '--json',
+        '--non-interactive',
+      ]),
+    );
+    const group = list?.currentPage?.[0]?.group;
+    if (!group) continue;
+    const updates = JSON.parse(run(['update:view', group, '--json', '--non-interactive']));
+    const entry = fromEasUpdates(updates.filter?.((update) => update.platform === platform) ?? [])[
+      platform
+    ];
+    if (entry) platforms[platform] = entry;
+  }
+  return platforms;
 }
 
 function context() {
@@ -236,12 +279,9 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 
   if (command === 'live' && ctx.lanes[arg]) {
     // Read-only. Needs `eas login`; publishes and changes nothing.
-    const raw = execFileSync(
-      'eas',
-      ['update:list', '--branch', ctx.lanes[arg].channel, '--json', '--non-interactive', '--limit', '25'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
-    );
-    const platforms = fromEasUpdates(JSON.parse(raw));
+    const run = (args) =>
+      execFileSync('eas', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+    const platforms = liveUpdates(run, ctx.lanes[arg].channel);
     const expectAt = rest.indexOf('--expect');
     const expected = expectAt >= 0 ? JSON.parse(readFileSync(rest[expectAt + 1], 'utf8')) : null;
     const shas = [...new Set(Object.values(platforms).map((entry) => entry.gitCommitHash))];
