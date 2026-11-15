@@ -95,6 +95,7 @@ import {
   orderByRating,
   reviewsComplete,
   serverSortOf,
+  useRefreshTitleReviews,
   useSetReviewHelpful,
   useTitleReviewCount,
   useTitleReviews,
@@ -762,6 +763,8 @@ export default function TitleScreen() {
    */
   // Also gates the series-only reads below (`rankedSeasons`, `myScores`, ...).
   const isSeriesTitle = data?.title?.kind === 'series';
+  // The title whose reviews a pull reloads: none on a series, which has no reviews.
+  const refreshReviews = useRefreshTitleReviews(isSeriesTitle ? null : titleId);
   const pull = usePullRefresh(
     // Memoised, because the hook's callback depends on it: a new array-builder every
     // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
@@ -769,14 +772,20 @@ export default function TitleScreen() {
     // Seasons only on a whole-show page. Anywhere else `useSeasons` was handed no series
     // and its queryFn is `skipToken`, and refetching that would only put it in an error
     // state (React Query v5's `refetch()` ignores `enabled`).
+    //
+    // Reviews and their count (QA1114-REVIEWS F1, 2026-11-14): a review another account
+    // published did not appear on pull, because nothing here asked. Invalidated rather
+    // than refetched, for the same `enabled` reason as seasons, by prefix so every sort
+    // and the Most Helpful preview come back together; `useRefreshTitleReviews` says how.
     useCallback(
       () => [
         refetch(),
         ...(isSeriesTitle ? [seasons.refetch()] : []),
         personal.refetch(),
         similar.refetch(),
+        ...refreshReviews(),
       ],
-      [refetch, seasons, personal, similar, isSeriesTitle],
+      [refetch, seasons, personal, similar, isSeriesTitle, refreshReviews],
     ),
   );
   // The score is derived from the band, so this needs the whole category's
@@ -2227,19 +2236,25 @@ export default function TitleScreen() {
       watched: watched.data,
     });
 
-  /** The reader's own published review, from their own row — a public note, never a private one. */
+  /**
+   * The reader's own published review, from their own row — a public note, never a private one.
+   *
+   * **Its score is the one everybody else sees** (QA1114-REVIEWS §2, 2026-11-14): the
+   * `score` on the reader's own `title_reviews_v2` row, which is the server's live
+   * `score_for()` band score. Only while that row has not loaded yet does it fall back to
+   * `useTitleScore`'s client-side copy of the same band arithmetic, and only for a ranked
+   * title; otherwise null, which draws no circle (D-R2). Never an invented number.
+   */
+  const ownReviewRow = (helpfulReviews.data ?? reviews.data ?? []).find(
+    (review) => review.userId === profile.id,
+  );
   const ownPublishedReview = hasReview
     ? {
         text: noteText,
         hasSpoilers: Boolean(data.logged?.note_has_spoilers),
-        updatedAt:
-          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
-            ?.updatedAt ??
-          data.logged?.note_updated_at ??
-          null,
-        helpfulCount:
-          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
-            ?.helpfulCount ?? 0,
+        updatedAt: ownReviewRow?.updatedAt ?? data.logged?.note_updated_at ?? null,
+        helpfulCount: ownReviewRow?.helpfulCount ?? 0,
+        score: ownReviewRow ? ownReviewRow.score : data.ranked ? (titleScore.score ?? null) : null,
       }
     : null;
 
@@ -2459,7 +2474,8 @@ export default function TitleScreen() {
               noun={title.kind === 'season' ? 'season' : 'movie'}
               // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
               // own name and picture on your review, and the same thumbs-up the sheet offers
-              // under everybody else's. Your score is the module's, so it is not repeated.
+              // under everybody else's. Your review carries your score too, as everybody
+              // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
               onToggleHelpful={toggleHelpful}
               helpfulPendingId={helpfulPendingId}
               viewer={reviewViewer}

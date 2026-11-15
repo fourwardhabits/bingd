@@ -2512,6 +2512,83 @@ describe('the one Note row', () => {
     expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
   });
 
+  /**
+   * **QA1114-REVIEWS: every own review write refreshes the title's Reviews.**
+   *
+   * The list (by prefix, so every sort and the Most Helpful preview's `top_desc` entry)
+   * and the tab's count live under two roots, and both must be invalidated after a
+   * create, an edit and a private → public publish — the three ways a reader's own
+   * review comes to exist or change from this sheet. `invalidate.test.ts` pins the
+   * helper; this pins that the sheet's writers actually reach it.
+   */
+  const reviewKeysInvalidated = (spy: jest.SpyInstance) => {
+    const keys = spy.mock.calls.map(([filters]) => (filters as { queryKey?: unknown })?.queryKey);
+    return {
+      list: keys.some((key) => JSON.stringify(key) === JSON.stringify(['title-reviews', filmA.id])),
+      count: keys.some(
+        (key) => JSON.stringify(key) === JSON.stringify(['title-review-count', filmA.id]),
+      ),
+    };
+  };
+
+  it('invalidates the review list and count after a private → public publish', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    await fireEvent.press(shareChip(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
+  it('invalidates the review list and count after editing a published review', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'shared already',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('shared already'));
+    await fireEvent.changeText(sheet.note(), 'shared already, and edited');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({ p_note_visibility: 'public' });
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
+  it('invalidates the review list and count after creating a first public review', async () => {
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'a first review');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note_visibility).toBe('public');
+    await waitFor(() => expect(reviewKeysInvalidated(spy)).toEqual({ list: true, count: true }));
+  });
+
   it('takes it back on a second tap, keeping the text', async () => {
     // The stand-in behaves like the server: the first save really stores `public`, so
     // the refetch behind it returns the published state and the second tap is judged
