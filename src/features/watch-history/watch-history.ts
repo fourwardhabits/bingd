@@ -125,8 +125,9 @@ export function watchCountLabel(count: number): string | null {
 }
 
 /**
- * The first and latest dated watch, for the screen's `First … · Latest …` line, or null when
- * that line would say nothing.
+ * The first and latest dated watch, for the screen's `First watch:` and `Latest watch:`
+ * lines (two lines since UI refinement B3, 2026-11-15; one `First … · Latest …` line
+ * before), or null when they would say nothing.
  *
  * **Null for one dated watch, or for dated watches that all fall on one day** (founder QA,
  * 2026-11-12). Either way the line would print the same date twice. Undated viewings never

@@ -1,4 +1,12 @@
-import { addDays, addMonths, formatWatchDate, monthGrid, toIso } from './dates';
+import {
+  addDays,
+  addMonths,
+  formatWatchDate,
+  formatWatchHistoryDate,
+  monthGrid,
+  toIso,
+  today,
+} from './dates';
 
 /**
  * Watch dates are local calendar dates, and every bug in this file is the same bug:
@@ -59,6 +67,27 @@ describe('formatWatchDate', () => {
   it('includes the year only when it differs', () => {
     expect(formatWatchDate('2026-01-04', now)).not.toMatch(/2026/);
     expect(formatWatchDate('2020-01-04', now)).toMatch(/2020/);
+  });
+});
+
+/** The Watch History screen's own form (UI refinement B3, 2026-11-15). */
+describe('formatWatchHistoryDate', () => {
+  it('is the full month, the day and the four-digit year', () => {
+    expect(formatWatchHistoryDate('2026-05-28')).toBe('May 28, 2026');
+    expect(formatWatchHistoryDate('2026-11-13')).toBe('November 13, 2026');
+    expect(formatWatchHistoryDate('2019-01-05')).toBe('January 5, 2019');
+  });
+
+  it('keeps the year on a date this year, and never says Today or Yesterday', () => {
+    const now = today();
+    expect(formatWatchHistoryDate(now)).toMatch(new RegExp(`${now.slice(0, 4)}$`));
+    expect(formatWatchHistoryDate(now)).not.toBe('Today');
+    expect(formatWatchHistoryDate(addDays(now, -1))).not.toBe('Yesterday');
+  });
+
+  it('leaves the shared short form alone', () => {
+    expect(formatWatchDate('2026-08-15', '2026-08-15')).toBe('Today');
+    expect(formatWatchDate('2026-01-04', '2026-08-15')).not.toMatch(/2026/);
   });
 });
 

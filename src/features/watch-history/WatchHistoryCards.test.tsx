@@ -1,6 +1,7 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
+import { addDays, today } from '@/features/collection/dates';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
@@ -222,11 +223,13 @@ describe('a watch is a card', () => {
     expect(card.marginHorizontal).toBe(theme.layout.gutter);
   });
 
-  it('one watch: one card, no span, Watched once', async () => {
+  it('one watch: one card, WATCH HISTORY (1), and no span', async () => {
     history([watch('w1', '2026-09-01')]);
     const view = await renderWithProviders(<WatchHistoryScreen />);
     expect(cardIds(view)).toEqual(['w1']);
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched once');
+    // The count rides in the heading (B3, 2026-11-15); the "Watched once" heading is gone.
+    expect(view.getAllByText('WATCH HISTORY (1)')).toHaveLength(1);
+    expect(view.queryByText(/^Watched /)).toBeNull();
     expect(view.queryByTestId('watch-history-span')).toBeNull();
     expect(hasRule(view)).toBe(false);
   });
@@ -239,7 +242,8 @@ describe('a watch is a card', () => {
       watch('w4', '2026-10-12'),
     ]);
     const view = await renderWithProviders(<WatchHistoryScreen />);
-    expect(view.getByTestId('watch-history-summary').props.children).toBe('Watched 4 times');
+    expect(view.getAllByText('WATCH HISTORY (4)')).toHaveLength(1);
+    expect(view.queryByText(/^Watched /)).toBeNull();
     expect(cardIds(view)).toEqual(['w4', 'w3', 'w2', 'w1']);
     // One header per year, above its first card.
     for (const year of ['2026', '2024', '2023'])
@@ -249,7 +253,14 @@ describe('a watch is a card', () => {
     for (const id of ['w1', 'w2', 'w3', 'w4']) {
       expect(cardStyle(view, id).backgroundColor).toBe(theme.surface.raised);
     }
-    expect(view.getByTestId('watch-date-w3').props.children).toMatch(/^Nov 30, 2024/);
+    expect(view.getByTestId('watch-date-w3').props.children).toBe('November 30, 2024');
+    // The year headers are unchanged, and the span carries its own years beside them.
+    expect(view.getByTestId('watch-history-first').props.children).toBe(
+      'First watch: February 10, 2023',
+    );
+    expect(view.getByTestId('watch-history-latest').props.children).toBe(
+      'Latest watch: October 12, 2026',
+    );
   });
 
   it('keeps an undated import last, labelled Earlier, with where it came from on one line', async () => {
@@ -465,3 +476,103 @@ describe('the refined card', () => {
   });
 });
 
+/**
+ * **The heading's count, the First / Latest lines and every date with its year** (UI
+ * refinement B3, 2026-11-15): `WATCH HISTORY (N)` counts every watch, dated or not; the
+ * summary is two lines, `First watch:` and `Latest watch:`, only for dated watches on two
+ * or more days; and each date on the screen is the full month with the four-digit year.
+ */
+describe('the summary and its dates', () => {
+  const lines = (view: View) => ({
+    first: view.queryByTestId('watch-history-first')?.props.children ?? null,
+    latest: view.queryByTestId('watch-history-latest')?.props.children ?? null,
+  });
+
+  it('one watch: no summary repeating the card’s date', async () => {
+    history([watch('w1', '2026-05-28')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (1)')).toBeTruthy();
+    expect(lines(view)).toEqual({ first: null, latest: null });
+    expect(view.queryByTestId('watch-history-span')).toBeNull();
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('May 28, 2026');
+  });
+
+  it('several watches: First watch and Latest watch, one line each', async () => {
+    history([watch('w1', '2026-05-28'), watch('w2', '2026-08-02'), watch('w3', '2026-11-13')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (3)')).toBeTruthy();
+    expect(lines(view)).toEqual({
+      first: 'First watch: May 28, 2026',
+      latest: 'Latest watch: November 13, 2026',
+    });
+    // Neither line is clamped: a long date at a large text size wraps.
+    expect(view.getByTestId('watch-history-first').props.numberOfLines).toBeUndefined();
+    expect(view.getByTestId('watch-history-latest').props.numberOfLines).toBeUndefined();
+    expect(view.getByTestId('watch-date-w3').props.numberOfLines).toBeUndefined();
+  });
+
+  it('several watches on one day: counted, and no summary', async () => {
+    history([
+      watch('w1', '2026-11-13', { recordedAt: '2026-11-13T10:00:00Z' }),
+      watch('w2', '2026-11-13', { recordedAt: '2026-11-13T22:00:00Z' }),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
+    expect(lines(view)).toEqual({ first: null, latest: null });
+  });
+
+  it('across years: the year in each line and on each card', async () => {
+    history([watch('w1', '2019-01-05'), watch('w2', '2026-11-13')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(lines(view)).toEqual({
+      first: 'First watch: January 5, 2019',
+      latest: 'Latest watch: November 13, 2026',
+    });
+    expect(view.getByTestId('watch-date-w1').props.children).toBe('January 5, 2019');
+    expect(view.getByTestId('watch-date-w2').props.children).toBe('November 13, 2026');
+  });
+
+  it('undated only: counted in the heading, with no summary', async () => {
+    history([watch('w0', null, { recordedAt: '2024-01-01T10:00:00Z' }), watch('w1', null)]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
+    expect(lines(view)).toEqual({ first: null, latest: null });
+    expect(view.getByTestId('watch-date-w0').props.children).toBe('Earlier');
+  });
+
+  it('dated and undated: all counted, only the dated ones in First and Latest', async () => {
+    history([
+      watch('w0', null, { recordedAt: '2027-01-01T10:00:00Z' }),
+      watch('w1', '2024-03-04'),
+      watch('w2', '2025-06-01'),
+    ]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (3)')).toBeTruthy();
+    expect(lines(view)).toEqual({
+      first: 'First watch: March 4, 2024',
+      latest: 'Latest watch: June 1, 2025',
+    });
+  });
+
+  it('one dated watch beside an undated one: no summary', async () => {
+    history([watch('w0', null), watch('w1', '2026-05-28')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByText('WATCH HISTORY (2)')).toBeTruthy();
+    expect(lines(view)).toEqual({ first: null, latest: null });
+  });
+
+  it('a date this year, even today’s, carries its year and is never Today or Yesterday', async () => {
+    const now = today();
+    const yesterday = addDays(now, -1);
+    const year = now.slice(0, 4);
+    history([watch('w1', yesterday), watch('w2', now)]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    for (const id of ['w1', 'w2']) {
+      const date = String(view.getByTestId(`watch-date-${id}`).props.children);
+      expect(date).toMatch(new RegExp(`\\b${year}$`));
+      expect(date).not.toMatch(/Today|Yesterday/);
+    }
+    expect(String(lines(view).latest)).toMatch(new RegExp(`^Latest watch: .*\\b${year}$`));
+    expect(view.queryByText(/Today|Yesterday/)).toBeNull();
+  });
+});
