@@ -610,6 +610,9 @@ describe('the guard is wired in, not merely present', () => {
     // delivered inbox. Suspension is about what an account may do to other people; it
     // does not make somebody unable to read what was sent to them.
     'recommendations_to_me',
+    // 20261121000400. The same read, unread first and paged: security invoker, read state
+    // only through the recipient-only helpers below.
+    'recommendations_to_me_page',
     // 20260929000100. The same read for one title, for the title page: security invoker,
     // filtered on recipient_id = auth.uid(), and admitting only what
     // title_recommendations_recipient admits. Reading what was sent to you is not

@@ -5,6 +5,7 @@ import { renderHookWithProviders } from '@/test-utils/render';
 import {
   SENT_LIMIT,
   isUnread,
+  resetSentToYouSource,
   sentShortcutBadge,
   unreadCount,
   unreadIsAtLeast,
@@ -31,9 +32,18 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+/** A backend without 20261121000400: the page function is unknown, as PostgREST says it. */
+const legacyBackend = (name: string) =>
+  Promise.resolve(
+    name === 'recommendations_to_me_page'
+      ? { data: null, error: { code: 'PGRST202', message: 'not found' } }
+      : { data: [], error: null },
+  );
+
 beforeEach(() => {
   mockRpc.mockReset();
-  mockRpc.mockResolvedValue({ data: [], error: null });
+  mockRpc.mockImplementation(legacyBackend);
+  resetSentToYouSource();
 });
 
 /**
@@ -243,5 +253,132 @@ describe('what the query actually asks the server for', () => {
     expect(
       mockRpc.mock.calls.filter(([name]) => name === 'recommendations_to_me'),
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * **The unread-first page** (20261121000400, #290 Codex P2 #5). The client asks for it
+ * first and falls back to `recommendations_to_me` where the backend does not have it yet,
+ * remembering that for the app session.
+ */
+describe('recommendations_to_me_page, and falling back from it', () => {
+  const calls = (name: string) => mockRpc.mock.calls.filter(([called]) => called === name);
+  const ranked = (id: string, rank: 0 | 1 | 2) => ({ ...serverRow(id), read_rank: rank });
+
+  it('asks the page function first, with the same p_limit, and maps read_rank', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'recommendations_to_me_page'
+          ? { data: [ranked('a', 0), ranked('b', 1), ranked('c', 2)], error: null }
+          : { data: [], error: null },
+      ),
+    );
+    const { result } = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    expect(mockRpc).toHaveBeenCalledWith('recommendations_to_me_page', { p_limit: SENT_LIMIT });
+    expect(calls('recommendations_to_me')).toHaveLength(0);
+    expect(result.current.data?.map((r) => r.readRank)).toEqual([0, 1, 2]);
+  });
+
+  it('falls back to recommendations_to_me on PGRST202, and remembers it', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'recommendations_to_me_page'
+          ? { data: null, error: { code: 'PGRST202', message: 'not found' } }
+          : { data: [serverRow('r1')], error: null },
+      ),
+    );
+    const first = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+    await waitFor(() => expect(first.result.current.data).toHaveLength(1));
+    expect(first.result.current.data?.[0]?.readRank).toBeNull();
+    expect(mockRpc).toHaveBeenCalledWith('recommendations_to_me', { p_limit: SENT_LIMIT });
+
+    // A second load in the same app session goes straight to the legacy function.
+    const second = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+    await waitFor(() => expect(second.result.current.data).toHaveLength(1));
+    expect(calls('recommendations_to_me_page')).toHaveLength(1);
+    expect(calls('recommendations_to_me')).toHaveLength(2);
+  });
+
+  it('falls back on 42883 too', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'recommendations_to_me_page'
+          ? { data: null, error: { code: '42883', message: 'function does not exist' } }
+          : { data: [serverRow('r1')], error: null },
+      ),
+    );
+    const { result } = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(calls('recommendations_to_me')).toHaveLength(1);
+  });
+
+  it('does not fall back on any other error: that is a failed load', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'recommendations_to_me_page'
+          ? { data: null, error: { code: '08006', message: 'unreachable' } }
+          : { data: [serverRow('r1')], error: null },
+      ),
+    );
+    const { result } = await renderHookWithProviders(() => useSentToYou('viewer-1'));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(calls('recommendations_to_me')).toHaveLength(0);
+  });
+});
+
+describe('whether the count is a floor, under each server order', () => {
+  const seen = '2026-01-03T00:00:00Z';
+  const opened = '2026-01-04T00:00:00Z';
+  /** The page order: `unread` rank-0 rows, then `seenRows` rank 1, then `openedRows` rank 2. */
+  const page = (unread: number, seenRows = 0, openedRows = 0) => [
+    ...Array.from({ length: unread }, (_, i) => row({ id: `u${i}`, readRank: 0 })),
+    ...Array.from({ length: seenRows }, (_, i) => row({ id: `s${i}`, seenAt: seen, readRank: 1 })),
+    ...Array.from({ length: openedRows }, (_, i) =>
+      row({ id: `o${i}`, openedAt: opened, readRank: 2 }),
+    ),
+  ];
+
+  it('unread first: a floor only for a full page that was all unread when fetched', () => {
+    expect(unreadIsAtLeast(page(SENT_LIMIT))).toBe(true);
+    expect(unreadIsAtLeast(page(SENT_LIMIT - 1))).toBe(false);
+    // A seen row on the page ends the unread prefix, so every unread one is in hand — the
+    // same page under the legacy rule (all unopened) would have been a floor.
+    const endsSeen = page(SENT_LIMIT - 1, 1);
+    expect(unreadIsAtLeast(endsSeen)).toBe(false);
+    expect(unreadIsAtLeast(endsSeen.map((r) => ({ ...r, readRank: null })))).toBe(true);
+    expect(unreadIsAtLeast(page(0, SENT_LIMIT))).toBe(false);
+    expect(unreadIsAtLeast(page(100, 50, 50))).toBe(false);
+  });
+
+  it('opened only (no readRank): the legacy rule, unchanged', () => {
+    expect(unreadIsAtLeast(list(SENT_LIMIT))).toBe(true);
+    expect(unreadIsAtLeast(list(SENT_LIMIT - 1, 1))).toBe(false);
+    expect(unreadIsAtLeast(list(SENT_LIMIT).map((r) => ({ ...r, seenAt: seen })))).toBe(true);
+    expect(unreadIsAtLeast(list(SENT_LIMIT).map((r) => ({ ...r, readRank: null })))).toBe(true);
+  });
+
+  it('keeps 200+ and then New through optimistic seen marks, until the next fetch', () => {
+    const fetched = page(SENT_LIMIT);
+    expect(sentShortcutBadge(fetched)).toEqual({
+      badge: `${SENT_LIMIT}+`,
+      spoken: `Sent to You, at least ${SENT_LIMIT} new`,
+    });
+
+    // Half marked seen in the cache: still a floor, because the rank is the fetch's.
+    const half = fetched.map((r, i) => (i < 100 ? { ...r, seenAt: seen } : r));
+    expect(sentShortcutBadge(half)).toEqual({
+      badge: '100+',
+      spoken: 'Sent to You, at least 100 new',
+    });
+
+    // All of it marked seen: nothing in hand is unread, and more may be.
+    const all = fetched.map((r) => ({ ...r, seenAt: seen }));
+    expect(sentShortcutBadge(all)).toEqual({ badge: 'New', spoken: 'Sent to You, more may be new' });
+
+    // The next fetch ranks those as seen and brings the rest: an exact count again.
+    const next = page(5, SENT_LIMIT - 5);
+    expect(sentShortcutBadge(next)).toEqual({ badge: '5', spoken: 'Sent to You, 5 new' });
   });
 });

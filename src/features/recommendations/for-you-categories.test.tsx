@@ -43,6 +43,10 @@ jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
+      // A backend without 20261121000400, so Sent to you reads `recommendations_to_me`.
+      if (name === 'recommendations_to_me_page') {
+        return Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'not found' } });
+      }
       return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
     },
     from: () => {

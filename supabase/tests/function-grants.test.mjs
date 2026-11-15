@@ -631,6 +631,8 @@ const ALLOWED = {
   // 20260813001900 exists to prevent.
   'recommend_title(uuid,uuid,uuid)': ['authenticated'],
   'recommendations_to_me(integer)': ['authenticated'],
+  // 20261121000400. The same caller-only read, unread first and paged; no recipient parameter.
+  'recommendations_to_me_page(integer,smallint,timestamp with time zone,uuid)': ['authenticated'],
   'mark_recommendation_opened(uuid)': ['authenticated'],
   'create_invite_link(uuid,uuid)': ['authenticated'],
 
