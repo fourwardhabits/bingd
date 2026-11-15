@@ -1010,7 +1010,9 @@ describe('the reveal names what it landed between', () => {
     expect(sheet.queryByText('Season 1', { includeHiddenElements: true })).toBeNull();
   });
 
-  it('keeps a long neighbour name on one line', async () => {
+  it('wraps a long neighbour name rather than cutting it', async () => {
+    // Was "keeps a long neighbour name on one line": UI refinement B2 (2026-11-15) lets the
+    // name wrap, because the one-line clamp hid the end of it.
     const long = 'The Assassination of Jesse James by the Coward Robert Ford';
     ranked([
       { mediaItemId: 'm2', position: 2, kind: 'movie', title: long, genres: [] },
@@ -1020,9 +1022,46 @@ describe('the reveal names what it landed between', () => {
     const sheet = await openSheet();
 
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
-    // The row wrapping the name, not the name itself, carries the clamp.
-    const row = sheet.getByText(long, { includeHiddenElements: true }).parent;
-    expect(row?.props.numberOfLines).toBe(1);
+    const name = sheet.getByText(long, { includeHiddenElements: true });
+    const row = sheet.getByTestId('reveal-anchor-below', { includeHiddenElements: true });
+    // Neither the line nor the name inside it is clamped, and the line may shrink to wrap.
+    expect(row.props.numberOfLines).toBeUndefined();
+    expect(name.props.numberOfLines).toBeUndefined();
+    expect(StyleSheet.flatten(row.props.style)).toEqual(
+      expect.objectContaining({ textAlign: 'center', flexShrink: 1 }),
+    );
+    expect(StyleSheet.flatten(row.props.style).height).toBeUndefined();
+  });
+
+  it('leads each neighbour with Below: / Above: in Ink, the names staying secondary', async () => {
+    ranked(movies);
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText(
+      'Film A scored 8.7 out of 10. #3 in Movies. Below Sicario. Above Collateral.',
+    );
+
+    const hidden = { includeHiddenElements: true };
+    const below = sheet.getByText('Below:', hidden);
+    const above = sheet.getByText('Above:', hidden);
+    for (const label of [below, above]) {
+      const style = StyleSheet.flatten(label.props.style);
+      expect(style.color).toBe(theme.text.primary);
+      expect(style.fontFamily).toBe('Inter_500Medium');
+      expect(style.fontSize).toBe(typography.footnote.fontSize);
+    }
+    for (const title of ['Sicario', 'Collateral']) {
+      expect(StyleSheet.flatten(sheet.getByText(title, hidden).props.style).color).toBe(
+        theme.text.secondary,
+      );
+    }
+    // The old uncoloned words are gone, and each label sits in its own line before its name.
+    expect(sheet.queryByText(/^Below /, hidden)).toBeNull();
+    expect(sheet.queryByText(/^Above /, hidden)).toBeNull();
+    expect(sheet.getByTestId('reveal-anchor-below', hidden)).toHaveTextContent('Below: Sicario');
+    expect(sheet.getByTestId('reveal-anchor-above', hidden)).toHaveTextContent(
+      'Above: Collateral',
+    );
   });
 
   it('draws nothing extra before the list it reads has arrived', async () => {

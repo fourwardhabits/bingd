@@ -2335,19 +2335,33 @@ function Reveal({
        *
        * Nothing is invented to sit above a #1 or below a last place. The line that
        * would name it is simply absent.
+       *
+       * **`Below:` and `Above:` lead in Ink; the names stay secondary** (UI refinement
+       * B2, 2026-11-15). The words were tertiary and the names secondary, so the line's
+       * structure was the quietest thing on it. Now the label is the primary ink at
+       * Inter Medium with a colon, the same footnote size, and the name after it keeps
+       * the secondary tone — the reader sees what the line is, then whose name it is.
+       *
+       * **A long name wraps; it is never cut.** Each line was clamped to one, which hid
+       * the end of a name like "The Assassination of Jesse James by the Coward Robert
+       * Ford". The label and the name are one centred paragraph, so the name wraps under
+       * the label with the paragraph's own width (the anchors block stretches to the
+       * reveal), and the reveal body above Done already scrolls when it runs long.
        */}
       {higher || lower ? (
         <View style={styles.anchors}>
           {higher ? (
             <Text
+              testID="reveal-anchor-below"
               variant="footnote"
-              tone="tertiary"
-              style={styles.centre}
-              numberOfLines={1}
+              tone="secondary"
+              style={styles.anchor}
               accessibilityElementsHidden
             >
-              Below{' '}
-              <Text variant="footnote" tone="secondary">
+              <Text variant="footnote" tone="primary" style={styles.anchorLabel}>
+                Below:
+              </Text>{' '}
+              <Text variant="footnote" tone="secondary" testID="reveal-anchor-name">
                 {higher.name}
               </Text>
             </Text>
@@ -2355,14 +2369,16 @@ function Reveal({
 
           {lower ? (
             <Text
+              testID="reveal-anchor-above"
               variant="footnote"
-              tone="tertiary"
-              style={styles.centre}
-              numberOfLines={1}
+              tone="secondary"
+              style={styles.anchor}
               accessibilityElementsHidden
             >
-              Above{' '}
-              <Text variant="footnote" tone="secondary">
+              <Text variant="footnote" tone="primary" style={styles.anchorLabel}>
+                Above:
+              </Text>{' '}
+              <Text variant="footnote" tone="secondary" testID="reveal-anchor-name">
                 {lower.name}
               </Text>
             </Text>
@@ -2920,6 +2936,10 @@ const styles = StyleSheet.create({
   // reveal's own space[6]. Tight inside, so they read as a pair rather than as two
   // more facts.
   anchors: { alignSelf: 'stretch', gap: 2 },
+  /** One anchor line: centred, and free to wrap within the reveal's width. */
+  anchor: { textAlign: 'center', flexShrink: 1 },
+  /** `Below:` / `Above:` — the footnote in Inter Medium, so the label leads its name. */
+  anchorLabel: { fontFamily: fontFamily.sansMedium },
   /** The placement or genre ranks: one centred, wrapping row a line under the title. */
   accomplishment: {
     flexDirection: 'row',
