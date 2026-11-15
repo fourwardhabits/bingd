@@ -39,7 +39,7 @@ import { supabase } from '@/lib/supabase';
  *
  * **A pending request is not a connection.** It is not an edge, it may never be approved,
  * and treating a maybe as a yes puts somebody on an empty screen — which is precisely the
- * loop the rule exists to avoid. The count below asks for `approved` and nothing else.
+ * loop the rule exists to avoid. `approvedFollow` asks for `approved` and nothing else.
  *
  * An unreadable answer resolves to **For You**, deliberately. The failure modes are not
  * symmetric: For You has content for everybody, and the Feed is empty for anybody this
@@ -55,6 +55,30 @@ import { supabase } from '@/lib/supabase';
  * witness to that.
  */
 const CONNECTION_GRACE_MS = 3000;
+
+/**
+ * One approved outgoing follow is enough, so the query asks for one.
+ *
+ * `head: true` with an exact count: this is a yes-or-no question and counting somebody's
+ * entire follow list to answer it would be a page of rows thrown away. `null` when it could
+ * not be answered — an error or a throw — so each caller decides what not knowing means.
+ *
+ * An async function rather than `.then` on the builder: PostgREST's builder is a
+ * `PromiseLike` and not a `Promise`, so it does not satisfy `withGrace`'s parameter. The
+ * same shape `taste.tsx` uses for its own bounded pre-exit read.
+ */
+async function approvedFollow(profileId: string): Promise<boolean | null> {
+  try {
+    const { count, error } = await supabase
+      .from('follows')
+      .select('followee_id', { count: 'exact', head: true })
+      .eq('follower_id', profileId)
+      .eq('state', 'approved');
+    return error ? null : (count ?? 0) > 0;
+  } catch {
+    return null;
+  }
+}
 
 export default function NotificationsStepScreen() {
   const router = useRouter();
@@ -86,43 +110,32 @@ export default function NotificationsStepScreen() {
   }, [stage, router]);
 
   /**
-   * One approved outgoing follow is enough, so the query asks for one.
+   * **Asked twice, and each answer has one reader** (OB-1, 2026-11-14; corrected after
+   * review, 2026-11-15).
    *
-   * `head: true` with an exact count and a limit of one: this is a yes-or-no question and
-   * counting somebody's entire follow list to answer it would be a page of rows thrown
-   * away. Bounded, because it sits between a button press and the navigation it promised,
-   * and the build-4 stranding is what happens when something on that path does not settle.
-   */
-  /**
-   * **Asked once, from the moment the step mounts** (OB-1, 2026-11-14).
+   * *At mount, for the analytics.* `notification_permission_result` reports `had_follow`,
+   * and the question settles *before* `finish` runs, so a query first asked from `finish`
+   * could never have answered it. The mount read is cached for the life of the screen and
+   * handed to the step; that is all it is for.
    *
-   * The same query, issued once and shared: `notification_permission_result` reports this
-   * answer as `had_follow`, and the question settles *before* `finish` runs, so a query
-   * first asked from `finish` could never have answered it. Starting it on mount lets the
-   * analytics read the step's own answer rather than ask a second time. The People step is
-   * behind this screen, so the follows it is counting are already made.
+   * *At the press, for the landing.* The mount answer cannot pick the destination, because
+   * it can be stale in the one direction that matters. People's Continue does not wait for
+   * a Follow it has just sent (`FollowControl`'s mutation is still in flight when `leave`
+   * navigates), so this screen can mount and count before that follow is written — a
+   * connected reader would be sent to For You. And a mount read that failed would stay
+   * `false` for good, even once the connection came back. So `opensOnFeed` asks again, at
+   * the press, the way `finish` asked before OB-1, bounded by `CONNECTION_GRACE_MS`.
    *
-   * The bound is unchanged and still taken at the press: `finish` gives the shared answer
-   * `CONNECTION_GRACE_MS` from then, exactly as it gave a fresh request before, so a slow
-   * read is if anything more likely to have landed. A throw is a `false`, as a refusal is.
+   * If the press-time read fails or outlasts the grace, the mount answer is used **only if
+   * it was a landed `true`**: a known follow is not downgraded to For You because the
+   * second read was slow (nothing on this screen can unfollow). Anything else is For You,
+   * for the asymmetry above. A press-time read that *answers* is believed either way.
    */
   const followAnswer = useRef<Promise<boolean> | null>(null);
+  /** The mount answer once it has landed, for `opensOnFeed`'s fallback. */
+  const mountAnswer = useRef<boolean | undefined>(undefined);
   const askFollow = useCallback(() => {
-    // An async wrapper rather than `.then` on the builder: PostgREST's builder is a
-    // `PromiseLike` and not a `Promise`, so it does not satisfy `withGrace`'s parameter.
-    // The same shape `taste.tsx` uses for its own bounded pre-exit read.
-    followAnswer.current ??= (async () => {
-      try {
-        const { count, error } = await supabase
-          .from('follows')
-          .select('followee_id', { count: 'exact', head: true })
-          .eq('follower_id', profile.id)
-          .eq('state', 'approved');
-        return !error && (count ?? 0) > 0;
-      } catch {
-        return false;
-      }
-    })();
+    followAnswer.current ??= approvedFollow(profile.id).then((answer) => answer ?? false);
     return followAnswer.current;
   }, [profile.id]);
 
@@ -134,6 +147,7 @@ export default function NotificationsStepScreen() {
   useEffect(() => {
     let live = true;
     void askFollow().then((answer) => {
+      mountAnswer.current = answer;
       if (live) setHadFollow(answer);
     });
     return () => {
@@ -141,7 +155,10 @@ export default function NotificationsStepScreen() {
     };
   }, [askFollow]);
 
-  const opensOnFeed = () => withGrace(askFollow(), CONNECTION_GRACE_MS, false);
+  const opensOnFeed = async () => {
+    const fresh = await withGrace(approvedFollow(profile.id), CONNECTION_GRACE_MS, null);
+    return fresh ?? mountAnswer.current === true;
+  };
 
   const finish = async () => {
     if (departing.current) return;

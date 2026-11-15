@@ -556,10 +556,11 @@ was stored), `pending` (permission given, registration still running at the dead
 `undelivered` (permission given, the binary cannot deliver), or `declined`. **Not now and an
 OS refusal share `declined`** — both leave the person without a push, and the OS does not say
 which on every platform. `had_follow` is the route's own "at least one approved outgoing
-follow" answer, the one that picks Feed or For You: the query is now asked once, when the
-step mounts, and both the event and the exit read that one answer. **If it has not landed by
-the moment the question settles, `had_follow` is `false`** — an under-report in a known
-direction, never a guess.
+follow" answer, asked **when the step mounts** — the exit asks again at the press to pick
+Feed or For You, so the two can differ. **If it has not landed by the moment the question
+settles, `had_follow` is `false`**, and a follow sent in the last moments of People (whose
+Continue does not wait for it) can be missed by the mount read too — an under-report in a
+known direction, never a guess.
 
 **`onboarding_people_search_used`** (OB-1/OB-6) says the People step's inline `@username`
 search was used: `searches` is the number of distinct trimmed queries that settled, and
