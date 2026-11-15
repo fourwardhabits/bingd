@@ -26,6 +26,7 @@ import {
 } from '@/features/recommendations/use-recommendation-requests';
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
+import { useMarkSentSeen } from '@/features/recommendations/use-mark-sent-seen';
 import {
   refreshRecommendations,
   useRecommendationArrangement,
@@ -656,6 +657,8 @@ export default function RecommendationsScreen() {
   const sentVisible = sentRows.filter((row) =>
     sentShown.some((item) => item.mediaItemId === row.mediaItemId),
   );
+  // FU1113-E: what Sent to You is drawing, once it has loaded, is marked seen.
+  useMarkSentSeen(profile.id, sentVisible, sentOnly && sent.isSuccess);
 
   const savedIds = new Set((watchlist.data ?? []).map((row) => row.mediaItemId));
 

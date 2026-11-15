@@ -37,6 +37,11 @@ export type SentRecommendation = {
    * recipient policy admits no pending one, so a request's note cannot arrive here.
    */
   message: string | null;
+  /**
+   * When the reader saw it listed in Sent to you (20261121000100), or null. Independent of
+   * `openedAt`: seeing a row clears its "new" state, only opening the title opens it.
+   */
+  seenAt: string | null;
 };
 
 type Row = {
@@ -58,6 +63,8 @@ type Row = {
   opened_at: string | null;
   /** Absent against a backend older than 20260929000100, which reads as no note. */
   message?: string | null;
+  /** Absent against a backend older than 20261121000100, which reads as not seen. */
+  seen_at?: string | null;
 };
 
 const yearOf = (date: string | null): number | null => {
@@ -137,6 +144,7 @@ export function useSentToYou(viewerId: string) {
         recommendedAt: row.recommended_at,
         openedAt: row.opened_at,
         message: row.message ?? null,
+        seenAt: row.seen_at ?? null,
       }));
     },
   });
@@ -275,9 +283,19 @@ async function inheritedMetadata(
  */
 export const SENT_LIMIT = 200;
 
-/** How many have not been opened, which is what the tab's dot carries. */
-export const unopenedCount = (rows: SentRecommendation[] | undefined) =>
-  (rows ?? []).filter((row) => !row.openedAt).length;
+/**
+ * **Unread** is neither opened nor seen (FU1113-E, 20261121000100).
+ *
+ * Opening the title still writes `openedAt` and still emits `recommendation_opened`; seeing
+ * the row listed in Sent to you writes `seenAt` (`useMarkSentSeen`). Either one means the
+ * reader has had it in front of them, so either one clears the tab's dot and the row's tint.
+ */
+export const isUnread = (row: Pick<SentRecommendation, 'openedAt' | 'seenAt'>) =>
+  !row.openedAt && !row.seenAt;
+
+/** How many are unread, which is what the tab's dot carries. */
+export const unreadCount = (rows: SentRecommendation[] | undefined) =>
+  (rows ?? []).filter(isUnread).length;
 
 /**
  * Whether that number is the whole truth or a floor.
@@ -294,8 +312,24 @@ export const unopenedCount = (rows: SentRecommendation[] | undefined) =>
  * Independent review 21c found this one, after the first sweep looked only at PostgREST's
  * cap and not at a limit the app asks for itself.
  */
-export const unopenedIsAtLeast = (rows: SentRecommendation[] | undefined) =>
-  (rows ?? []).length >= SENT_LIMIT && unopenedCount(rows) >= SENT_LIMIT;
+export const unreadIsAtLeast = (rows: SentRecommendation[] | undefined) =>
+  (rows ?? []).length >= SENT_LIMIT && (rows ?? []).every((row) => !row.openedAt);
+
+/*
+ * **Why the test above is still about `openedAt`** (FU1113-E). The server's order is
+ * unchanged — unopened first — so it is still the unopened rows that form a prefix, and
+ * unread rows are a subset of them. If any row on the page is opened, every unopened row
+ * (and so every unread one) is in hand and the count is exact; only a page that is all
+ * unopened can hide more beyond the cap, so only then is the unread count a floor.
+ */
+
+/**
+ * The names the tab screen imports, kept so `app/(tabs)/recommendations.tsx` needs no edit
+ * for FU1113-E (another workstream edits that file in parallel). They now mean **unread**:
+ * neither opened nor seen. Rename at the next edit of that screen.
+ */
+export const unopenedCount = unreadCount;
+export const unopenedIsAtLeast = unreadIsAtLeast;
 
 /**
  * A recommendation as the shared filter sheet sees it.

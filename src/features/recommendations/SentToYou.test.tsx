@@ -8,6 +8,7 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
+import { resetMarkSentSeen } from './use-mark-sent-seen';
 import { relativeTime } from './use-sent-to-you';
 
 const mockPush = jest.fn();
@@ -115,6 +116,10 @@ jest.mock('expo-router', () => ({
   Stack: { Screen: () => null },
 }));
 
+// A real string, as on a device: `mark_recommendations_seen` sends one per attempt (FU1113-E).
+let mockOperation = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `operation-${++mockOperation}` }));
+
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
     id: 'user-1',
@@ -217,6 +222,9 @@ beforeEach(() => {
   mockRanked = [];
   mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
+  resetMarkSentSeen();
+  // Re-tapping's tests leave the tab unfocused, and an unfocused tab marks nothing.
+  mockNavigation.focused = true;
 });
 
 describe('the wall and the list', () => {
@@ -299,9 +307,34 @@ describe('the wall and the list', () => {
     await openSent(view);
 
     await waitFor(() => expect(view.getByText('Heat (2010)')).toBeTruthy());
-    // The unopened one carries the mark; the opened one does not.
-    expect(view.getByTestId('sent-unopened-film-2')).toBeTruthy();
+    const titles = view
+      .getAllByText(/\(2010\)$/)
+      .map((node) => [node.props.children].flat().join(''));
+    expect(titles).toEqual(['Heat (2010)', 'Inception (2010)']);
+  });
+
+  it('tints only what is unread, and a failed mark leaves it tinted (FU1113-E)', async () => {
+    // The mark fails, so the server's own word stands: the unopened, unseen row keeps the
+    // tint and the dot; the opened one and the already-seen one never had them.
+    mockRpcErrors.mark_recommendations_seen = { code: '08006', message: 'unreachable' };
+    mockRpcResults.recommendations_to_me = [
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Heat' }),
+      recommendation({ id: 'r3', media_item_id: 'film-3', seen_at: '2026-08-16T09:00:00.000Z' }),
+      recommendation({ id: 'r1', media_item_id: 'film-1', opened_at: '2026-08-16T10:00:00.000Z' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendations_seen', {
+        p_operation_id: expect.any(String),
+        p_ids: ['r2'],
+      }),
+    );
+    await waitFor(() => expect(view.getByTestId('sent-unopened-film-2')).toBeTruthy());
+    expect(view.queryByTestId('sent-unopened-film-3')).toBeNull();
     expect(view.queryByTestId('sent-unopened-film-1')).toBeNull();
+    expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy();
   });
 
   it('records the open on the way to the title, once', async () => {
@@ -714,6 +747,105 @@ describe('a note in the row', () => {
     await openSent(view);
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await fireEvent.press(view.getByText('Inception (2010)'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
+        p_recommendation_id: 'r1',
+      }),
+    );
+  });
+});
+
+/**
+ * Sent to You read state (FU1113-E, 20261121000100). Unread is neither opened nor seen;
+ * the list being on screen, loaded, marks what it draws as seen — and nothing else.
+ */
+describe('reading Sent to You', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+
+  it('does not mark anything while For You is on screen', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
+  });
+
+  it('clears the dot and the tint for what it loaded, once', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Heat' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 unopened' })).toBeTruthy(),
+    );
+
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toEqual({ p_operation_id: expect.any(String), p_ids: ['r1', 'r2'] });
+    await waitFor(() => expect(view.queryByTestId('sent-unopened-film-1')).toBeNull());
+    expect(view.queryByTestId('sent-unopened-film-2')).toBeNull();
+    expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy();
+    // Both rows are still listed: reading removes nothing.
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.getByText('Heat (2010)')).toBeTruthy();
+    expect(marks()).toHaveLength(1);
+  });
+
+  it('never opens, adds, dismisses or saves anything by reading', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    const others = mockRpc.mock.calls
+      .map(([name]) => name as string)
+      .filter((name) =>
+        /mark_recommendation_opened|add_recommendation|dismiss|watchlist|rank/.test(name),
+      );
+    expect(others).toEqual([]);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('marks nothing while another tab is the focused one', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    // The tab is mounted while another one is selected. (Focus changes after mount arrive
+    // as focus/blur events, which `use-mark-sent-seen.test.tsx` drives; this stand-in
+    // navigator only reports `isFocused`.)
+    mockNavigation.focused = false;
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
+    expect(view.getByTestId('sent-unopened-film-1')).toBeTruthy();
+  });
+
+  it('marks nothing when the list failed to load', async () => {
+    mockRpcErrors.recommendations_to_me = { code: '08006', message: 'unreachable' };
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Could not load these')).toBeTruthy());
+    expect(marks()).toHaveLength(0);
+  });
+
+  it('still records the open of a row it has marked seen', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+
     await fireEvent.press(view.getByText('Inception (2010)'));
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {

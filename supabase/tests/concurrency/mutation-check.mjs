@@ -74,6 +74,13 @@
  *      invitees redeeming one inviter's link hold two different pair keys — so both insert
  *      a story about the same actor and the founder's §A13 frequency cap becomes one row
  *      per caller.
+ *  16. `_release_recommendations` without its mutual-pair guard (20261121000300) — exactly
+ *      the 20260826000400 body. A Request held from a sender who has since unfollowed must
+ *      land in Sent to You again when the recipient follows back: FU1113-E's D1. The honest
+ *      function is run first as a control and must leave it pending.
+ *  17. `mark_recommendations_seen` without its `seen_at is null` guards (20261121000100). A
+ *      second mark must move `seen_at` and count the rows again — the "first time wins"
+ *      that `races/recommendation-seen.mjs` S1 asserts.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1506,6 +1513,109 @@ end; $$;
   await t1.end();
   await t2.end();
   await ctl.end();
+  await db.close();
+}
+
+// --- Mutant 16: _release_recommendations without the mutual-pair guard (20261121000300).
+//     The sender unfollows a pair with a held Request; the recipient follows back. Honest:
+//     still pending. Mutant: delivered into Sent to You with no sender -> recipient edge.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const scenario = async (label) => {
+    const sender = await fx.createUser();
+    const recipient = await fx.createUser();
+    await fx.follow(sender, recipient);
+    const film = await fx.createMovie(`Mutant 16 ${label}`);
+    const s = await db.session('sender');
+    await s.actAs(sender);
+    await s.q(`select recommend_title($1, $2, $3)`, [crypto.randomUUID(), recipient, film]);
+    await s.q(`select unfollow($1, $2)`, [crypto.randomUUID(), recipient]);
+    await s.end();
+    const r = await db.session('recipient');
+    await r.actAs(recipient);
+    await r.q(`select follow($1, $2)`, [crypto.randomUUID(), sender]);
+    const { rows: list } = await r.q(`select id from recommendations_to_me(100)`);
+    await r.end();
+    return list.length;
+  };
+
+  controls.push([
+    'release mutual guard present -> a Request from a sender who unfollowed stays held',
+    (await scenario('honest')) === 0,
+  ]);
+
+  await db.sql(`
+    create or replace function _release_recommendations(p_sender uuid, p_recipient uuid)
+    returns integer language plpgsql security definer set search_path = public as $fn$
+    declare v_released integer;
+    begin
+      if p_sender is null or p_recipient is null or p_sender = p_recipient then return 0; end if;
+      if blocked_between(p_sender, p_recipient) then return 0; end if;
+      update title_recommendations set state = 'delivered'
+       where sender_id = p_sender and recipient_id = p_recipient and state = 'pending';
+      get diagnostics v_released = row_count;
+      return v_released;
+    end; $fn$;`);
+
+  results.push([
+    'release mutual guard dropped -> a Request from a sender who unfollowed lands in Sent to You',
+    (await scenario('mutant')) === 1,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 17: mark_recommendations_seen without its `seen_at is null` guards
+//     (20261121000100). A second mark of the same rows must re-count them and move seen_at.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const sender = await fx.createUser();
+  const recipient = await fx.createUser();
+  await fx.mutualFollow(sender, recipient);
+  const film = await fx.createMovie('Mutant 17');
+
+  const s = await db.session('sender');
+  await s.actAs(sender);
+  const sent = (
+    await s.q(`select recommend_title($1, $2, $3) as r`, [crypto.randomUUID(), recipient, film])
+  ).rows[0].r;
+  await s.end();
+
+  await db.sql(`
+    create or replace function mark_recommendations_seen(p_operation_id uuid, p_ids uuid[])
+    returns jsonb language plpgsql security definer set search_path = public as $fn$
+    declare v_marked integer;
+    begin
+      perform assert_can_write();
+      if not _claim_operation(p_operation_id, 'mark_recommendations_seen') then
+        return jsonb_build_object('status', 'already_applied');
+      end if;
+      update title_recommendations set seen_at = clock_timestamp()
+       where id = any(coalesce(p_ids, '{}'::uuid[])) and recipient_id = auth.uid() and state = 'delivered';
+      get diagnostics v_marked = row_count;
+      return jsonb_build_object('status', 'ok', 'marked', v_marked);
+    end; $fn$;`);
+
+  const r = await db.session('recipient');
+  await r.actAs(recipient);
+  await r.q(`select mark_recommendations_seen($1, $2::uuid[])`, [crypto.randomUUID(), [sent.id]]);
+  const first = (await db.rows(`select seen_at from title_recommendations where id = $1`, [sent.id]))[0]
+    .seen_at;
+  const second = (
+    await r.q(`select mark_recommendations_seen($1, $2::uuid[]) as r`, [crypto.randomUUID(), [sent.id]])
+  ).rows[0].r;
+  const after = (await db.rows(`select seen_at from title_recommendations where id = $1`, [sent.id]))[0]
+    .seen_at;
+  await r.end();
+
+  results.push([
+    'seen guard dropped -> a second mark counts the row again and moves seen_at',
+    second.marked === 1 && +after !== +first,
+  ]);
+
   await db.close();
 }
 
