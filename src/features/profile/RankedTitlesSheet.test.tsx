@@ -1,10 +1,10 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Dimensions, StyleSheet } from 'react-native';
 
-import { expectRowFitsNarrow } from '@/test-utils/narrow-row';
+import { expectRowFitsNarrow, LARGEST_FONT_SCALE, NARROW_WIDTH } from '@/test-utils/narrow-row';
 import { renderWithProviders } from '@/test-utils/render';
 
-import { RankedTitlesSheet } from './RankedTitlesSheet';
+import { RankedTitlesSheet, rankedCategoryOptions } from './RankedTitlesSheet';
 
 /**
  * Somebody's whole ranked collection, behind See all and behind the profile stat.
@@ -79,10 +79,9 @@ beforeEach(() => {
   mockError = false;
 });
 
-/** Movies / TV Shows is a `MediumSelector` in the heading row since FU1113-C: open, choose. */
+/** Movies / TV Shows is the compact switch since founder QA 2026-11-16: one tap. */
 const pickCategory = async (view: Awaited<ReturnType<typeof open>>, name: 'Movies' | 'TV Shows') => {
-  await fireEvent.press(view.getByTestId('ranked-category'));
-  await fireEvent.press(await view.findByRole('menuitem', { name }));
+  await fireEvent.press(within(view.getByTestId('ranked-category')).getByRole('radio', { name }));
 };
 
 const open = (over: Partial<Parameters<typeof RankedTitlesSheet>[0]> = {}) =>
@@ -682,9 +681,13 @@ describe('the sheet around the list', () => {
     const leading = view.getByTestId('ranked-heading-row-leading');
     expect(within(leading).getByRole('header').props.children).toBe("Anna's collection");
     const trailing = view.getByTestId('ranked-heading-row-trailing');
-    expect(within(trailing).getByTestId('ranked-category').props.accessibilityLabel).toBe(
-      'Showing Movies',
-    );
+    const category = within(within(trailing).getByTestId('ranked-category'));
+    expect(category.getByRole('radio', { name: 'Movies' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    expect(category.getByRole('radio', { name: 'TV Shows' }).props.accessibilityState).toMatchObject({
+      selected: false,
+    });
     const filter = within(trailing).getByTestId('ranked-filter-sort');
     expect(filter.props.accessibilityLabel).toMatch(/^Filters and sort\. Sorted by Rank, highest first/);
     // The selector first, the icon on the right gutter.
@@ -855,13 +858,62 @@ describe('at 320pt and the largest text size (C9)', () => {
     'keeps the heading, %s and the filter icon on one line',
     async (category) => {
       mockMovies = [entry()];
+      // The window the budget is for: 320pt at the largest text size (founder QA, 2026-11-16:
+      // the switch's label now depends on it).
+      const rn = jest.requireActual('react-native') as typeof import('react-native');
+      const dims = jest
+        .spyOn(rn, 'useWindowDimensions')
+        .mockReturnValue({ width: NARROW_WIDTH, height: 800, scale: 2, fontScale: LARGEST_FONT_SCALE });
       const view = await open({ category });
       await waitFor(() => expect(view.getByTestId('ranked-heading-row')).toBeTruthy());
+      dims.mockRestore();
       const { targets } = expectRowFitsNarrow(view.getByTestId, 'ranked-heading-row');
-      expect(targets[0]?.label).toBe(category === 'movies' ? 'Showing Movies' : 'Showing TV Shows');
+      // At 2× on 320pt "TV Shows" would crowd the name, so the switch reads Movies | TV, as
+      // Collection's does (founder QA, 2026-11-16).
+      expect(targets.slice(0, 2).map((t) => t.label)).toEqual(['Movies', 'TV']);
       // The heading truncates to one line rather than wrapping the row.
       const heading = view.getByRole('header');
       expect(heading.props.numberOfLines).toBe(1);
     },
   );
+});
+
+/**
+ * **Profile TV: the switch, and the circle a season average is drawn in** (founder QA,
+ * 2026-11-16). Silo and The Last of Us are season-derived; The Crown and Ted Lasso explicit.
+ */
+describe('the TV list, as the title page draws scores', () => {
+  it('keeps "TV Shows" wherever it fits, and says TV only when it would crowd the name', () => {
+    const label = (width: number, scale: number) =>
+      rankedCategoryOptions(width, scale).find((o) => o.id === 'tv_seasons')?.label;
+    expect(label(320, 1)).toBe('TV Shows');
+    expect(label(320, 1.25)).toBe('TV Shows');
+    expect(label(320, 1.3)).toBe('TV');
+    expect(label(320, 1.6)).toBe('TV');
+    expect(label(375, 1.6)).toBe('TV Shows');
+    expect(label(430, 2)).toBe('TV Shows');
+  });
+
+  it('draws a season average as the outlined circle with the number alone, and an explicit score filled', async () => {
+    const silo = (n: number, position: number) =>
+      entry({
+        mediaItemId: `silo-${n}`,
+        title: `Season ${n}`,
+        seriesTitle: 'Silo',
+        seasonNumber: n,
+        kind: 'season',
+        category: 'tv_seasons',
+        seriesId: 'silo',
+        position,
+      });
+    mockSeasons = [silo(1, 1), silo(2, 2)];
+    const view = await open({ category: 'tv_seasons' });
+    await waitFor(() => expect(view.getByText(/Silo/)).toBeTruthy());
+    const average = view.getByTestId('ranked-row-average-badge');
+    // 10.0 and 7.0 → 8.5: the number alone in the outlined circle, the source said below.
+    expect(average.props.accessibilityLabel).toBe('Season average, 8.5 out of 10');
+    expect(within(average).queryByText(/SN AVG/, { includeHiddenElements: true })).toBeNull();
+    expect(within(average).getByText('8.5', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByText('Average of 2 ranked seasons')).toBeTruthy();
+  });
 });

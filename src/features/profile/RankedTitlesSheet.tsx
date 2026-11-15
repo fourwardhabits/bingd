@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
 import {
@@ -28,26 +28,51 @@ import {
   DismissFooter,
   EmptyState,
   FilterIconButton,
-  MediumSelector,
   ScoreBadge,
-  SeasonAverageBadge,
   seasonAverageLabel,
   Sheet,
   SkeletonRow,
   Text,
   TitleRow,
-  type MediumSelectorOption,
 } from '@/ui/components';
+import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 import { coerceSortState, filterSortSpoken, type SortAxisSpec, type SortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 export type RankedCategory = 'movies' | 'tv_seasons';
 
-/** Same words as the wall above the sheet: Movies, TV Shows. */
-const RANKED_CATEGORIES: readonly MediumSelectorOption<RankedCategory>[] = [
+/**
+ * Same words as the wall above the sheet: Movies, TV Shows — in the compact two-option
+ * switch Collection and For You use (founder QA, 2026-11-16), so one tap changes the medium
+ * instead of opening a dropdown to choose between two things.
+ */
+const RANKED_CATEGORIES: readonly CompactSwitchOption<RankedCategory>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv_seasons', label: 'TV Shows' },
 ];
+/** Collection's own label for the same switch, for when "TV Shows" would crowd the row. */
+const RANKED_CATEGORIES_SHORT: readonly CompactSwitchOption<RankedCategory>[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv_seasons', label: 'TV' },
+];
+
+/**
+ * **"TV Shows" whenever it fits, "TV" when it would not** (founder QA, 2026-11-16).
+ *
+ * The heading row is the owner's name, the switch and the filter icon, and the name must
+ * keep at least a 44pt run before it truncates. The two-word switch is about 142pt at 1×
+ * (Inter Medium, the repo's narrow-row budget, which over-estimates on purpose); everything
+ * else on the row is the two gutters, the filter's 44pt target, the name's 44pt floor and
+ * two gaps. So "TV Shows" stays up to about 1.29× on a 320pt phone, 1.68× at 375pt and
+ * 2.07× at 430pt, and past that the label is the one Collection already uses for the choice —
+ * rather than the switch pushing over the name or the row wrapping.
+ */
+const LONG_SWITCH_AT_1X = 142;
+export const rankedCategoryOptions = (width: number, fontScale: number) =>
+  LONG_SWITCH_AT_1X * fontScale <=
+  width - 2 * theme.layout.gutter - 2 * theme.layout.minTapTarget - 2 * theme.space[2]
+    ? RANKED_CATEGORIES
+    : RANKED_CATEGORIES_SHORT;
 
 /**
  * How many rows this sheet will mount.
@@ -431,6 +456,8 @@ export function RankedTitlesSheet({
   /** How many the category actually holds, for the count and the cap's disclosure. */
   const total = pooled.length;
 
+  // Above the early return: a hook may not be skipped when the sheet has no list open.
+  const window = useWindowDimensions();
   if (!category) return null;
 
   const whose = isSelf ? 'Your collection' : `${name}'s collection`;
@@ -478,14 +505,14 @@ export function RankedTitlesSheet({
           }
           trailing={
             <>
-              <MediumSelector
-                size="filter"
-                value={category}
-                options={RANKED_CATEGORIES}
-                accessibilityHint="Choose Movies or TV Shows"
-                onChange={onChangeCategory}
-                testID="ranked-category"
-              />
+              <View testID="ranked-category">
+                <CompactSwitch
+                  accessibilityLabel="Medium"
+                  options={rankedCategoryOptions(window.width, window.fontScale)}
+                  value={category}
+                  onChange={onChangeCategory}
+                />
+              </View>
               <FilterIconButton
                 activeCount={activeCount}
                 accessibilityLabel={filterSortSpoken(axes, order, activeCount)}
@@ -574,17 +601,20 @@ export function RankedTitlesSheet({
                 // A season-derived score says so in words, under the title, as the show
                 // page does (founder spec t168u §2).
                 secondary={row.average != null ? averageCaption(row.average) : undefined}
-                // The owner's score, in the badge every other list in the app uses —
-                // filled for an explicit ranking, the outlined `SN AVG` badge for a season
-                // average.
+                // The owner's score as the title page draws it (founder QA, 2026-11-16):
+                // filled for an explicit ranking, the outlined circle with the number alone
+                // for a season average. The line under the title already says "Average of
+                // N ranked seasons", so the badge does not repeat SN AVG; the compact
+                // `SN AVG` badge stays on Collection's posters, where there is no such line.
                 trailing={
                   row.average != null && row.score != null ? (
-                    // The season average's outlined `SN AVG` badge, as on the wall (FU1113-B).
-                    <SeasonAverageBadge
-                      score={row.score}
+                    <View
+                      accessible
                       accessibilityLabel={seasonAverageLabel(row.score)}
                       testID="ranked-row-average-badge"
-                    />
+                    >
+                      <ScoreBadge score={row.score} variant="outlined" />
+                    </View>
                   ) : (
                     <ScoreBadge score={row.score} bucket={row.bucket} variant="filled" />
                   )
