@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
@@ -27,16 +27,86 @@ export type StatRowProps = {
   stats: StatItem[];
   /** Each figure centred in its quarter, inside the owner's profile card (2026-11-07). */
   centered?: boolean;
+  /**
+   * **Inside a card that already sets it off the screen edge** (founder, 286-SMOKE-UI,
+   * 2026-11-15). The frame drops its own `layout.gutter` side margin, so each quarter gets
+   * the 8pt back that lets `TV Shows` hold one line at 320pt (see {@link statLabelFit}).
+   */
+  inCard?: boolean;
 };
 
-export function StatRow({ stats, centered = false }: StatRowProps) {
+/**
+ * **From this text size the labels wrap rather than fit one line** (founder, 286-SMOKE-UI,
+ * t223u, 2026-11-15): one line at normal sizes, readability first at the accessibility
+ * sizes. 1.5 sits above Android's 1.3 and iOS's largest standard size (xxxLarge, 1.353)
+ * and below iOS's first accessibility size (AX1, 1.647), so every standard setting on
+ * either platform gets one line and every accessibility size gets the pre-existing
+ * wrapping label, at its full, uncapped size.
+ */
+export const STAT_LABEL_WRAP_SCALE = 1.5;
+
+/** The `Button` `fit` floor: below 85% the label reads as a different size of type. */
+export const STAT_LABEL_MIN_SCALE = 0.85;
+
+/**
+ * **How far a label may grow with the reader's text size before it fits itself to the
+ * quarter** (founder, 286-SMOKE-UI, t222s1181), by window width.
+ *
+ * The cap is what lets the 0.85 floor hold: `adjustsFontSizeToFit` shrinks from the capped
+ * size, so the capped size times 0.85 must fit the narrowest quarter at that width. The
+ * widest label is `TV Shows`, 4.795em of Inter Regular (`StatRow.test.tsx` reads it from
+ * the font), 64.83pt at 13pt with the 4% allowance `RankingSheet` uses. A quarter's text
+ * width inside the profile card (card border, frame border and three rules each at most
+ * 1pt; frame `space[2]` and item `space[1]` padding either side; no frame margin) is
+ *
+ *     (W - 2 * gutter - 7 * 1 - 2 * space[2]) / 4 - 2 * space[1]  =  (W - 55) / 4 - 8
+ *
+ *     W      quarter   largest cap at 0.85   cap   shrink at the cap
+ *     320    58.25     1.057                 1.05  0.856
+ *     360    68.25     1.238                 1.1   0.957
+ *     390    75.75     1.375                 1.2   0.974
+ *
+ * Steps rather than the ratio itself, so the type does not change size between phones a
+ * point apart; each step is checked at the narrowest width it applies to.
+ */
+export function statLabelMaxScale(windowWidth: number): number {
+  if (windowWidth >= 390) return 1.2;
+  if (windowWidth >= 360) return 1.1;
+  return 1.05;
+}
+
+/**
+ * The label's line rule at this window: one line, fit to the quarter (`Button`'s `fit`
+ * trio plus the width cap), below {@link STAT_LABEL_WRAP_SCALE}; nothing at all at or
+ * above it, so the label wraps and grows the row exactly as it did before.
+ *
+ * Android: `adjustsFontSizeToFit` with `numberOfLines` shrinks there too, but its text
+ * layout ignores `minimumFontScale` (see `RankingSheet`'s reveal exits). That costs nothing
+ * here: the cap is chosen so the shrink a label needs is never below 0.85 in the first
+ * place, and Android only shrinks as far as the label needs.
+ */
+export function statLabelFit(windowWidth: number, fontScale: number) {
+  if (fontScale >= STAT_LABEL_WRAP_SCALE) return {};
+  return {
+    numberOfLines: 1,
+    adjustsFontSizeToFit: true,
+    minimumFontScale: STAT_LABEL_MIN_SCALE,
+    maxFontSizeMultiplier: statLabelMaxScale(windowWidth),
+  } as const;
+}
+
+export function StatRow({ stats, centered = false, inCard = false }: StatRowProps) {
+  const { width, fontScale } = useWindowDimensions();
+  // The same rule for all four labels: one that fits `TV Shows` is the one that fits all.
+  const labelFit = statLabelFit(width, fontScale);
+
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, inCard && styles.inCard]}>
       {stats.map((stat, index) => {
         const content = (
           <>
             <Text variant="headline">{stat.value}</Text>
-            <Text variant="footnote" tone="secondary">
+            <Text variant="footnote" tone="secondary" {...labelFit}>
               {stat.label}
             </Text>
           </>
@@ -127,6 +197,8 @@ const styles = StyleSheet.create({
     borderColor: theme.border.hairline,
     borderRadius: theme.radius.card,
   },
+  // The card's own margin already sets the frame off the screen edge.
+  inCard: { marginHorizontal: 0 },
   item: {
     flex: 1,
     alignItems: 'flex-start',

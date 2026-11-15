@@ -260,6 +260,7 @@ export function ProfileIdentity({
       ) : stats ? (
         <StatRow
           centered={card}
+          inCard={card}
           stats={[
             {
               label: 'Followers',
