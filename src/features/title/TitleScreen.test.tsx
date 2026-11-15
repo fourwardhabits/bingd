@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import { Alert, Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -5155,8 +5155,27 @@ describe('the immersive title page (experiment)', () => {
         );
         return within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
       };
-      const sortTab = (sheet: ReturnType<typeof within>, name: string | RegExp) =>
-        sheet.getByRole('tab', { name });
+      /**
+       * The sheet's order is chosen from its heading row (founder QA, 2026-11-16): the
+       * compact control names the current order and opens grouped choices in place.
+       */
+      // The heading row sits above the sheet's list, so these read the open sheet itself.
+      const header = () => within(screen.getByTestId('reviews-sheet-header'));
+      const currentOrder = (_sheet: ReturnType<typeof within>) =>
+        String(header().getByTestId('reviews-sort-control').props.accessibilityLabel).replace(
+          /^Sort reviews, /,
+          '',
+        );
+      const chooseOrder = async (_sheet: ReturnType<typeof within>, label: string) => {
+        await fireEvent.press(header().getByTestId('reviews-sort-control'));
+        await fireEvent.press(header().getByRole('radio', { name: label }));
+      };
+      const ratingOffered = async (_sheet: ReturnType<typeof within>) => {
+        await fireEvent.press(header().getByTestId('reviews-sort-control'));
+        const offered = header().queryByRole('radio', { name: 'Highest rated' }) !== null;
+        await fireEvent.press(header().getByTestId('reviews-sort-control'));
+        return offered;
+      };
       const reviewsCalledWith = (sort: string) =>
         mockRpc.mock.calls.some(
           ([name, args]) =>
@@ -5345,7 +5364,7 @@ describe('the immersive title page (experiment)', () => {
         for (const n of [1, 2, 3]) {
           expect(sheet.getAllByText(`Review number ${n}.`)).toHaveLength(1);
         }
-        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        expect(currentOrder(sheet)).toBe('Most helpful');
         // Helpful is the review's one reaction: a thumbs-up, and no heart beside it.
         expect(sheet.getByHintText('Tells Reader 1 their review helped')).toBeTruthy();
         // Every row is the shared card (FU1113-F).
@@ -5419,15 +5438,15 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        await fireEvent.press(sortTab(sheet, 'Newest'));
+        await chooseOrder(sheet, 'Newest');
         await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), {
           timeout: 4000,
         });
-        await fireEvent.press(sortTab(sheet, 'Newest first'));
+        await chooseOrder(sheet, 'Oldest');
         await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), {
           timeout: 4000,
         });
-        expect(sortTab(sheet, 'Oldest first')).toBeSelected();
+        expect(currentOrder(sheet)).toBe('Oldest');
       });
 
       it('orders by Rating over the complete list, highest first, then lowest', async () => {
@@ -5442,7 +5461,7 @@ describe('the immersive title page (experiment)', () => {
         const sheet = await sheetOf(view);
         const calls = mockRpc.mock.calls.length;
 
-        await fireEvent.press(sortTab(sheet, 'Rating'));
+        await chooseOrder(sheet, 'Highest rated');
         // An instance tree names each string at its composite and its host; once each.
         const shown = () => [
           ...new Set(
@@ -5467,7 +5486,7 @@ describe('the immersive title page (experiment)', () => {
             .every(([, args]) => (args as { p_sort: string }).p_sort === 'top_desc'),
         ).toBe(true);
 
-        await fireEvent.press(sortTab(sheet, 'Highest rated first'));
+        await chooseOrder(sheet, 'Lowest rated');
         // Lowest first; a review with no score stays last either way.
         await waitFor(() =>
           expect(shown()).toEqual([
@@ -5487,7 +5506,7 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        expect(sheet.queryByRole('tab', { name: 'Rating' })).toBeNull();
+        expect(await ratingOffered(sheet)).toBe(false);
         expect(sheet.getByTestId('reviews-truncated')).toHaveTextContent(
           'Showing the first 100 reviews in this order.',
         );
@@ -5509,18 +5528,18 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        await fireEvent.press(sortTab(sheet, 'Rating'));
-        await waitFor(() => expect(sortTab(sheet, 'Highest rated first')).toBeSelected());
+        await chooseOrder(sheet, 'Highest rated');
+        await waitFor(() => expect(currentOrder(sheet)).toBe('Highest rated'));
 
         full = true;
         await fireEvent.press(sheet.getByHintText('Tells Reader 1 their review helped'));
         await waitFor(
-          () => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(),
+          () => expect(currentOrder(sheet)).toBe('Most helpful'),
           {
             timeout: 4000,
           },
         );
-        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        expect(currentOrder(sheet)).toBe('Most helpful');
         expect(sheet.getByTestId('reviews-truncated')).toBeTruthy();
       });
 
@@ -5531,7 +5550,7 @@ describe('the immersive title page (experiment)', () => {
         const view = await open();
         const sheet = await sheetOf(view);
 
-        await fireEvent.press(sortTab(sheet, 'Only people you follow'));
+        await chooseOrder(sheet, 'People I follow');
         await waitFor(() => expect(sheet.getByText('Review number 7.')).toBeTruthy());
         expect(sheet.queryByText('Review number 1.')).toBeNull();
       });

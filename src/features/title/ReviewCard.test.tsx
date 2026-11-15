@@ -105,8 +105,12 @@ describe('somebody else’s review (F3)', () => {
     const control = head.getByRole('button', { name: 'Mark review helpful' });
     expect(control.props.accessibilityState).toMatchObject({ selected: false, busy: false });
     expect(head.queryByTestId('edit-review')).toBeNull();
-    expect(view.getByTestId('review-helpful-outline', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.queryByTestId('review-helpful-filled', { includeHiddenElements: true })).toBeNull();
+    expect(
+      view.getByTestId('review-helpful-outline', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    expect(
+      view.queryByTestId('review-helpful-filled', { includeHiddenElements: true }),
+    ).toBeNull();
   });
 
   it('is a full 44pt target', async () => {
@@ -124,8 +128,28 @@ describe('somebody else’s review (F3)', () => {
 
     const control = view.getByRole('button', { name: 'Remove helpful' });
     expect(control.props.accessibilityState).toMatchObject({ selected: true });
-    expect(view.getByTestId('review-helpful-filled', { includeHiddenElements: true })).toBeTruthy();
+    // Founder QA, 2026-11-16: selected is the 👍 emoji itself, as reactions are elsewhere.
+    const mark = view.getByTestId('review-helpful-filled', { includeHiddenElements: true });
+    expect(mark.props.children).toBe('👍');
+    expect(
+      view.queryByTestId('review-helpful-outline', { includeHiddenElements: true }),
+    ).toBeNull();
     expect(view.getByText('1 person found this helpful')).toBeTruthy();
+  });
+
+  it('draws the outline until the viewer marks it, and no Edit on somebody else’s', async () => {
+    const view = await draw({
+      review: theirs({ helpfulCount: 2 }),
+      onToggleHelpful: jest.fn(),
+    });
+    expect(
+      view.getByTestId('review-helpful-outline', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    expect(
+      view.queryByTestId('review-helpful-filled', { includeHiddenElements: true }),
+    ).toBeNull();
+    expect(view.queryByTestId('edit-review')).toBeNull();
+    expect(view.getByText('2 people found this helpful')).toBeTruthy();
   });
 
   it('asks to toggle on a tap', async () => {
@@ -206,13 +230,19 @@ describe('the count copy (F3)', () => {
     expect(helpfulCountCopy(1)).toBe('1 person found this helpful');
     expect(helpfulCountCopy(3)).toBe('3 people found this helpful');
 
-    const zero = await draw({ review: theirs({ helpfulCount: 0 }), onToggleHelpful: jest.fn() });
+    const zero = await draw({
+      review: theirs({ helpfulCount: 0 }),
+      onToggleHelpful: jest.fn(),
+    });
     expect(zero.queryByText(/found this helpful/)).toBeNull();
     const one = await draw({ review: theirs({ helpfulCount: 1 }), onToggleHelpful: jest.fn() });
     expect(one.getByTestId('review-helpful-count').props.children).toBe(
       '1 person found this helpful',
     );
-    const many = await draw({ review: theirs({ helpfulCount: 3 }), onToggleHelpful: jest.fn() });
+    const many = await draw({
+      review: theirs({ helpfulCount: 3 }),
+      onToggleHelpful: jest.fn(),
+    });
     expect(many.getByTestId('review-helpful-count').props.children).toBe(
       '3 people found this helpful',
     );
