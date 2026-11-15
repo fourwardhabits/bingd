@@ -1,11 +1,14 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context. See app-directory.test.ts.
 import FeedScreen from '../../../app/(tabs)/feed';
+import { WatchlistGroupSheet } from './WatchlistGroupSheet';
 
 /**
  * The Feed screen with the Supabase boundary mocked and everything above it real — the
@@ -300,5 +303,47 @@ describe('a grouped watchlist post on the Feed', () => {
     const view = await renderWithProviders(<FeedScreen />);
     fireEvent.press(await waitFor(() => view.getByText('2 others')));
     await waitFor(() => expect(view.getByText('Nothing to show here.')).toBeTruthy());
+  });
+});
+
+/**
+ * **Reopening a grown group reads it again** (Codex, PR 310). Under the app's own default
+ * staleTime (60 s, `src/lib/query.ts`) — the test providers use 0, which would hide the bug —
+ * the second open of the same event must fetch, because the post kept its id while it grew.
+ */
+describe('the member sheet under the app’s cache settings', () => {
+  it('fetches the members again on every open, so a grown group shows its new titles', async () => {
+    // The app's staleTime, and a gcTime that outlives the unmount: with gcTime 0 the second
+    // open would refetch regardless and the test could not tell the fix from its absence.
+    const client = new QueryClient({
+      defaultOptions: { queries: { staleTime: 60_000, gcTime: 60_000, retry: false } },
+    });
+    const metrics = {
+      frame: { x: 0, y: 0, width: 390, height: 844 },
+      insets: { top: 47, left: 0, right: 0, bottom: 34 },
+    };
+    const sheet = () => (
+      <QueryClientProvider client={client}>
+        <SafeAreaProvider initialMetrics={metrics}>
+          <WatchlistGroupSheet eventId="w1" onPressTitle={() => {}} onClose={() => {}} />
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    );
+    try {
+      mockRpc.watchlist_group_titles = members.slice(0, 2);
+      const first = await render(sheet());
+      await waitFor(() => expect(first.getByLabelText('Barbie, 2023')).toBeTruthy());
+      await first.unmount();
+
+      mockRpc.watchlist_group_titles = members;
+      const second = await render(sheet());
+      await waitFor(() => expect(second.getByLabelText('Shōgun, 2024, Season 1')).toBeTruthy());
+      expect(
+        mockRpcCalls.filter((call) => call.name === 'watchlist_group_titles'),
+      ).toHaveLength(2);
+      await second.unmount();
+    } finally {
+      client.clear();
+    }
   });
 });

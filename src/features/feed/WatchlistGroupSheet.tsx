@@ -69,6 +69,11 @@ export function WatchlistGroupSheet({
     queryKey: ['watchlist-group', eventId],
     enabled: Boolean(eventId),
     queryFn: () => watchlistGroupTitles(eventId as string),
+    // Read afresh every time the sheet opens (Codex, PR 310). A group keeps its id while it
+    // grows, so the app-wide 60-second staleTime would reopen it on the members it had
+    // before the post's count went up. The sheet is mounted only while open, so this is one
+    // read per open and nothing in the background.
+    staleTime: 0,
   });
 
   const titles = data ?? [];
