@@ -112,6 +112,9 @@ jest.mock('@/features/auth', () => ({
  * its two exits.
  */
 jest.mock('./NotificationStep', () => ({
+  // These tests are about the exits of a step that is asked; whether it is asked at all is
+  // `NotificationsHandoff.test.tsx`'s subject (founder QA, 2026-11-16).
+  shouldShowNotificationStep: () => Promise.resolve(true),
   // `hadFollow` is drawn so the route's follow answer can be seen arriving (OB-1).
   NotificationStep: ({ onDone, hadFollow }: { onDone: () => void; hadFollow?: boolean }) => {
     const React = jest.requireActual('react');
