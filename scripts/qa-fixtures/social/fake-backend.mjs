@@ -42,6 +42,7 @@ export function createFakeBackend({
   const profiles = new Map(); // id -> profile
   const reserved = new Set();
   const userMedia = new Map(); // `${user}:${media}` -> row
+  const watchEvents = new Map(); // id -> { id, user_id, media_item_id, note }
   const rankings = new Map(); // user -> [{ media, bucket }] in position order
   const sessions = new Map(); // session id -> { user, media, bucket, lo, hi }
   const follows = new Map(); // `${a}>${b}` -> state
@@ -60,6 +61,8 @@ export function createFakeBackend({
       { tmdb_id: 150540, title: 'Inside Out', release_date: '2015-06-19' },
       { tmdb_id: 361743, title: 'Top Gun: Maverick', release_date: '2022-05-27' },
       { tmdb_id: 2062, title: 'Ratatouille', release_date: '2007-06-29' },
+      { kind: 'season', tmdb_id: 3572, title: 'Season 1', release_date: '2008-01-20' },
+      { kind: 'season', tmdb_id: 144593, title: 'Season 1', release_date: '2023-01-15' },
     ]
   ).map((m) => ({ id: nextId('media'), kind: 'movie', ...m }));
 
@@ -121,6 +124,13 @@ export function createFakeBackend({
         note_updated_at: null,
         watched_on: null,
         watch_events: 1, // the seen-implies-a-watch backstop
+      });
+      const watchId = nextId('watch');
+      watchEvents.set(watchId, {
+        id: watchId,
+        user_id: user,
+        media_item_id: mediaId,
+        note: null,
       });
     }
     return Object.assign(userMedia.get(key), fields);
@@ -226,6 +236,16 @@ export function createFakeBackend({
       if (!row) throw new RpcRefusal(404, 'P0002', 'title is not in your collection');
       if (row.watch_events > 1) throw new RpcRefusal(400, 'P0001', 'multiple_watches');
       row.watched_on = p_watched_on;
+      return record(uid, p_operation_id, { status: 'ok' });
+    },
+
+    set_watch_details(uid, { p_operation_id, p_watch_event_id, p_note }) {
+      const c = claim(uid, p_operation_id, 'set_watch_details');
+      if (!c.claimed) return c.prior ?? { status: 'already_applied' };
+      const watch = watchEvents.get(p_watch_event_id);
+      if (!watch || watch.user_id !== uid) return { status: 'not_found' };
+      const note = String(p_note ?? '').trim();
+      watch.note = note === '' ? null : note;
       return record(uid, p_operation_id, { status: 'ok' });
     },
 
@@ -509,6 +529,7 @@ export function createFakeBackend({
   const TABLES = {
     profiles: (uid) => [...profiles.values()].filter((p) => canView(uid, p.id)),
     user_media: (uid) => [...userMedia.values()].filter((r) => r.user_id === uid),
+    watch_events: (uid) => [...watchEvents.values()].filter((r) => r.user_id === uid),
     rankings: (uid) =>
       [...rankings.entries()].flatMap(([user, list]) =>
         canView(uid, user)
@@ -545,7 +566,18 @@ export function createFakeBackend({
     calls,
     notifications,
     deviceTokens,
-    state: { users, profiles, follows, recs, votes, userMedia, rankings, reserved, mediaItems },
+    state: {
+      users,
+      profiles,
+      follows,
+      recs,
+      votes,
+      userMedia,
+      watchEvents,
+      rankings,
+      reserved,
+      mediaItems,
+    },
 
     async environmentName() {
       calls.push({ name: 'environment_name' });

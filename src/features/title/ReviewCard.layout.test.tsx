@@ -38,7 +38,8 @@ const LONG_BODY = Array.from(
   { length: 40 },
   (_, n) => `Sentence ${n + 1} goes on about the film for rather longer than it needs to.`,
 ).join(' ');
-const MULTI_LINE = 'First line.\nSecond line.\n\nA paragraph after a blank line.\nAnd one more.';
+const MULTI_LINE =
+  'First line.\nSecond line.\n\nA paragraph after a blank line.\nAnd one more.';
 
 const review = (over: Partial<TitleReview> & { id: string }): TitleReview => ({
   userId: `author-${over.id}`,
@@ -59,7 +60,12 @@ const reviewers: TitleReview[] = [
   review({ id: 'a', name: LONG_NAME, text: LONG_BODY, score: 9.1, helpfulCount: 3 }),
   review({ id: 'b', name: `${LONG_NAME} (second)`, text: MULTI_LINE, score: 6.4 }),
   // Wrote without ranking it: a real state the server allows.
-  review({ id: 'c', name: `${LONG_NAME} (unranked)`, text: 'No score, still an opinion.', score: null }),
+  review({
+    id: 'c',
+    name: `${LONG_NAME} (unranked)`,
+    text: 'No score, still an opinion.',
+    score: null,
+  }),
   // The reader's own row, which the editorial sheet draws pinned above and not again.
   review({ id: 'mine', userId: VIEWER, name: 'Sai', text: 'My own words.', score: 7.3 }),
 ];
@@ -109,7 +115,7 @@ const drawSheet = (width: number) =>
   );
 
 describe.each([320, 360])('the See all sheet at %ipt', (width) => {
-  it('draws every card with the circle over the action inside the header', async () => {
+  it('draws every card with the score and the action side by side inside the header', async () => {
     const view = await drawSheet(width);
     const others = view.getAllByTestId('review-card');
     // Yours is pinned above, so it is not listed again.
@@ -122,14 +128,27 @@ describe.each([320, 360])('the See all sheet at %ipt', (width) => {
       const action = order.find((id) => id === 'edit-review' || id === 'review-helpful');
       expect(action).toBeDefined();
       if (order.includes('review-card-score')) {
-        // Score first, the action beneath it.
+        // Score first, the action immediately to its right (founder QA, 2026-11-16).
         expect(order.indexOf('review-card-score')).toBeLessThan(order.indexOf(action!));
       }
-      // The column does not shrink for a long name, and its width fits the 44pt target.
-      const style = StyleSheet.flatten(stack.props.style) as Record<string, number>;
+      // One row that does not shrink for a long name, centred, with no fixed width or
+      // height reserving a column beside the text.
+      const style = StyleSheet.flatten(stack.props.style) as Record<string, unknown>;
       expect(style.flexShrink).toBe(0);
-      expect(style.width).toBeGreaterThanOrEqual(44);
+      expect(style.flexDirection).toBe('row');
       expect(style.alignItems).toBe('center');
+      expect(style.width).toBeUndefined();
+      expect(style.height).toBeUndefined();
+      // The action keeps its 44pt target.
+      const target = within(stack).getByTestId(action!);
+      const targetStyle = StyleSheet.flatten(
+        typeof target.props.style === 'function'
+          ? target.props.style({ pressed: false })
+          : target.props.style,
+      ) as Record<string, number>;
+      expect(
+        Math.max(targetStyle.minWidth ?? 0, targetStyle.width ?? 0),
+      ).toBeGreaterThanOrEqual(44);
     }
   });
 
@@ -188,9 +207,9 @@ describe.each([320, 360])('the See all sheet at %ipt', (width) => {
     const mine = view.getByTestId('your-review');
     const stack = within(mine).getByTestId('review-card-stack');
     expect(within(stack).getByLabelText('7.3 out of 10')).toBeTruthy();
-    expect(idsIn(stack).filter((id) => id === 'review-card-score' || id === 'edit-review')).toEqual(
-      ['review-card-score', 'edit-review'],
-    );
+    expect(
+      idsIn(stack).filter((id) => id === 'review-card-score' || id === 'edit-review'),
+    ).toEqual(['review-card-score', 'edit-review']);
     expect(within(mine).queryByTestId('review-helpful')).toBeNull();
   });
 
@@ -217,7 +236,9 @@ describe.each([320, 360])('the See all sheet at %ipt', (width) => {
     const count = within(first!).getByTestId('review-helpful-count');
     expect(count.props.children).toBe('3 people found this helpful');
     expect(
-      within(within(first!).getByTestId('review-card-head')).queryByTestId('review-helpful-count'),
+      within(within(first!).getByTestId('review-card-head')).queryByTestId(
+        'review-helpful-count',
+      ),
     ).toBeNull();
   });
 });
@@ -292,7 +313,9 @@ describe('the unranked-score switch (D-R2)', () => {
     const view = await renderWithProviders(
       <ReviewCard review={card()} score={0} onToggleHelpful={() => {}} />,
     );
-    expect(within(view.getByTestId('review-card-stack')).getByTestId('review-card-score')).toBeTruthy();
+    expect(
+      within(view.getByTestId('review-card-stack')).getByTestId('review-card-score'),
+    ).toBeTruthy();
   });
 
   it('draws no column at all when there is neither a score nor an action', async () => {

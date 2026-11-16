@@ -3,7 +3,16 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
-export type CompactSwitchOption<T extends string> = { id: T; label: string };
+export type CompactSwitchOption<T extends string> = {
+  id: T;
+  label: string;
+  /**
+   * A small Maroon dot beside the word, and what it means said after the label, e.g.
+   * `new recommendations` makes "TV, new recommendations". Absent: no dot, and the option
+   * reads and draws exactly as it always has (founder QA B6, 2026-11-15).
+   */
+  indicator?: string;
+};
 
 export type CompactSwitchProps<T extends string> = {
   /** What a screen reader calls the group, e.g. "Medium". */
@@ -32,6 +41,12 @@ export type CompactSwitchProps<T extends string> = {
  * 32pt (independent review, 2026-11-03). Now the halves are the full height and the
  * outline is a decoration inset inside them, so nothing depends on slop. Each half is
  * wider than 44pt by its word alone.
+ *
+ * **An option may carry a dot** (founder QA B6, 2026-11-15): For You puts one on the side
+ * of Movies | TV that holds unread Sent to You rows while the other side is selected. It is
+ * drawn in the fill's top-right padding, out of the flow, so a dot arriving or leaving never
+ * moves the word or widens the half; it is the bell's Maroon at 6pt, quieter than a count.
+ * The option's spoken label carries what it means, since a dot alone says nothing heard.
  */
 export function CompactSwitch<T extends string>({
   accessibilityLabel,
@@ -49,7 +64,9 @@ export function CompactSwitch<T extends string>({
             key={option.id}
             accessibilityRole="radio"
             accessibilityState={{ selected }}
-            accessibilityLabel={option.label}
+            accessibilityLabel={
+              option.indicator ? `${option.label}, ${option.indicator}` : option.label
+            }
             onPress={() => {
               if (!selected) onChange(option.id);
             }}
@@ -65,6 +82,15 @@ export function CompactSwitch<T extends string>({
                 >
                   {option.label}
                 </Text>
+                {option.indicator ? (
+                  <View
+                    testID={`compact-switch-indicator-${option.id}`}
+                    style={styles.indicator}
+                    pointerEvents="none"
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  />
+                ) : null}
               </View>
             )}
           </Pressable>
@@ -80,6 +106,8 @@ const INNER = 2;
 /** The fill's floor, and the press around it: 8 + 28 + 8 = 44. */
 const FILL = 28;
 const PAD = (theme.layout.minTapTarget - FILL) / 2;
+/** The unread dot, 6pt: it and its 2pt inset are the fill's 8pt side padding. */
+const INDICATOR = 6;
 
 const styles = StyleSheet.create({
   group: {
@@ -128,4 +156,15 @@ const styles = StyleSheet.create({
   },
   selected: { backgroundColor: theme.surface.sunken },
   pressed: { opacity: 0.6 },
+  // In the fill's 8pt side padding and above the word's cap height (about 9pt down a 28pt
+  // fill), so it overlaps neither the word nor the outline: 2pt in from the fill's corner.
+  indicator: {
+    position: 'absolute',
+    top: INNER,
+    right: INNER,
+    width: INDICATOR,
+    height: INDICATOR,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.semantic.action,
+  },
 });

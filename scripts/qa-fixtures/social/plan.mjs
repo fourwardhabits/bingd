@@ -72,6 +72,10 @@ export const TITLES = Object.freeze([
   { key: 'tmdb150540', kind: 'movie', tmdbId: 150540, label: 'Inside Out (2015)' },
   { key: 'tmdb361743', kind: 'movie', tmdbId: 361743, label: 'Top Gun: Maverick (2022)' },
   { key: 'tmdb2062', kind: 'movie', tmdbId: 2062, label: 'Ratatouille (2007)' },
+  // Seasons, for the Movies/TV split of Sent to You: a recommendation names a movie or a
+  // season (`rankable_category`), never a whole series. Keyed by the season's own TMDB id.
+  { key: 'tv3572', kind: 'season', tmdbId: 3572, label: 'Breaking Bad, Season 1' },
+  { key: 'tv144593', kind: 'season', tmdbId: 144593, label: 'The Last of Us, Season 1' },
 ]);
 
 const ACCOUNT_SHAPES = [
@@ -187,6 +191,18 @@ const RECOMMENDATIONS = [
   ['fx2', 'fx1', 'tmdb150540', 'delivered', 'unread'],
   ['fx4', 'fx1', 'tmdb361743', 'pending', 'unread'],
   ['fx3', 'fx5', 'tmdb2062', 'pending', 'unread'],
+  // TV, so each recipient's unread badge has a movie and a TV count to show.
+  ['fx2', 'fx1', 'tv3572', 'delivered', 'unread'],
+  ['fx3', 'fx2', 'tv144593', 'delivered', 'unread'],
+];
+
+/**
+ * A watch's own private note (`watch_events.note`, `set_watch_details`), on a watch the
+ * ranking above created. It is never the title's review: fx1's Inside Out review is a
+ * different text, so QA can copy this into the review and see the two stay separate.
+ */
+const WATCH_NOTES = [
+  ['fx1', 'tmdb150540', 'QA fixture watch note: rewatched on a plane, still cried.'],
 ];
 
 const HELPFUL = [
@@ -290,6 +306,18 @@ export function buildPlan({ generation = 1, linkQaAccounts = false } = {}) {
       spoilers,
       text,
       operationId: op(id, 'save_note'),
+    });
+  }
+
+  for (const [actor, title, text] of WATCH_NOTES) {
+    const id = `watch-note:${actor}:${title}`;
+    entries.push({
+      id,
+      type: 'watchNote',
+      actor,
+      title,
+      text,
+      operationId: op(id, 'set_watch_details'),
     });
   }
 
@@ -490,6 +518,13 @@ export function validatePlan(plan) {
 
     if (entry.type === 'note' && entry.visibility === 'public')
       reviewAuthors.set(entry.id, entry.actor);
+    if (
+      entry.type === 'watchNote' &&
+      !plan.entries.some(
+        (e) => e.type === 'ranking' && e.actor === entry.actor && e.title === entry.title,
+      )
+    )
+      throw new PlanError(`${entry.id}: a watch note needs a ranked watch of that title`);
     if (entry.type === 'helpful') {
       const author = reviewAuthors.get(entry.review);
       if (author === undefined)

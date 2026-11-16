@@ -37,10 +37,24 @@ export type WatchEdit = {
    * `companionIds` is present only when the companions changed, and absent leaves them.
    */
   details?: { note: string | null; companionIds?: string[] };
+  /**
+   * Present only when the reader chose **Share as a review** in this editor (founder QA,
+   * 2026-11-16): publish `note` as the title's review (`user_media.note`, `save_note`)
+   * with this spoiler flag, after this watch's own note is written. The watch's note stays
+   * private either way; nothing here ties the two together afterwards.
+   */
+  review?: { note: string; spoilers: boolean };
 };
 
-/** What a save came to: the editor closes only on `ok`, and says `message` otherwise. */
-export type WatchSaveResult = { ok: true } | { ok: false; message: string };
+/**
+ * What a save came to: the editor closes only on `ok`, and says `message` otherwise.
+ * `cancelled` is the reader declining to replace their review: nothing was written, the
+ * editor stays open with the draft, and there is nothing to say.
+ */
+export type WatchSaveResult =
+  | { ok: true }
+  | { ok: false; message: string }
+  | { ok: false; cancelled: true };
 
 export type WatchRowProps = {
   event: WatchEvent;
@@ -73,6 +87,14 @@ export type WatchRowProps = {
    * to correct, or while another card's editor is open, and then it is not drawn.
    */
   onEditRanking?: () => void;
+  /**
+   * **Share as a review** (B5): offers THIS watch's saved note to the title's review
+   * composer, as a draft. The caller asks before it replaces an existing review and opens
+   * the composer; nothing is written by this tap, and the watch note is never touched.
+   * Drawn only on a card with a saved note, beside Edit watch and Rerank; absent while any
+   * card's editor is open.
+   */
+  onShareNote?: () => void;
   busy?: boolean;
 };
 
@@ -105,6 +127,10 @@ export type WatchRowProps = {
  *   Rerank              the *current* ranking, through comparisons. No watch is created,
  *                       none is removed, and the scores frozen on earlier watches stay
  *                       frozen (`scoresByWatch`).
+ *
+ * And, on a card with a note, *Share as a review* (B5): not a fourth way to change this
+ * watch but a door to the title's own review composer, opened on this note as a draft.
+ * It writes nothing itself; the watch's note stays private on the watch.
  */
 export function WatchRow({
   event,
@@ -121,6 +147,7 @@ export function WatchRow({
   onSave,
   onRemove,
   onEditRanking,
+  onShareNote,
   busy = false,
 }: WatchRowProps) {
   const [expanded, setExpanded] = useState(false);
@@ -142,6 +169,77 @@ export function WatchRow({
     .filter(Boolean)
     .join(' · ');
 
+  /**
+   * **Where the action line sits: beside the score when nothing comes between** (UI
+   * refinement B4, 2026-11-15).
+   *
+   * The card's top row is the date block and the score circle, top-aligned, so the row is
+   * as tall as the taller of the two. The circle is 40pt (`scoreBadge.sm`, more at large
+   * text) and a date alone is one 22pt `headline` line, so on a watch with no companion
+   * and no provenance the row was the circle's height and the action line, below the row,
+   * started 18pt under the date's last line: empty space that only a companion line
+   * (22 + 4 + 18 = 44pt, taller than the circle) ever filled. Nothing reserved it by
+   * name — it was the circle's height standing in for the date block's.
+   *
+   * So when the next thing after the date block is the action line — the card has no note
+   * and is not being edited — the action line joins the date block's column, beside the
+   * circle: it follows the date or the last metadata line directly, and the card is as
+   * tall as its content or the circle, whichever is taller. The order is unchanged (date,
+   * companions, provenance, acts) and Edit watch and Rerank keep their 44pt targets and
+   * wrap inside the column, never under the circle.
+   *
+   * **With a note the line stays where it was**, under the note at the card's full width
+   * (FU1113-A): the note is prose and keeps the card's whole measure, so it starts below
+   * the circle, and the acts follow it. The editor, too, keeps the card's full width.
+   */
+  const actionsBesideScore = !note && !editing;
+  const actions = (
+    <View
+      style={[styles.actionLine, !actionsBesideScore && styles.actionLineInset]}
+      testID={`watch-actions-${event.id}`}
+    >
+      <CardAction
+        testID={`watch-edit-${event.id}`}
+        icon={EDIT_WATCH_ICON}
+        label="Edit watch"
+        accessibilityLabel={`Edit this watch, ${dateLabel}`}
+        onPress={onEdit}
+      />
+      {onEditRanking ? (
+        <CardAction
+          testID={`watch-rerank-${event.id}`}
+          icon={RERANK_ICON}
+          label={RERANK_LABEL}
+          accessibilityHint="Compares this title again. Records no new watch."
+          onPress={onEditRanking}
+          // A write this screen started (a removal, a save) may still be in flight:
+          // the ranking does not open over it (independent review).
+          disabledReason={busy ? 'Saving' : undefined}
+        />
+      ) : null}
+      {/**
+       * **Share as a review, on the action line** (B5). The third of the card's acts, in
+       * the same quiet form, because it is an act on this watch like the other two — and
+       * here rather than inside the editor, because what it shares is the note the card
+       * shows, which is the *saved* one: an editor's unsaved draft is never offered, and the
+       * editor's own header (Rerank · Cancel · Save) stays as it is. Only on a card that has
+       * a note — so it is always on the full-width line under the note (B4), never beside
+       * the score.
+       */}
+      {note && onShareNote ? (
+        <CardAction
+          testID={`watch-share-${event.id}`}
+          icon="people-outline"
+          label="Share as a review"
+          accessibilityLabel={`Share this watch’s note as a review, ${dateLabel}`}
+          accessibilityHint="Opens your review with this note. Nothing is shared until you choose to."
+          onPress={onShareNote}
+          disabledReason={busy ? 'Saving' : undefined}
+        />
+      ) : null}
+    </View>
+  );
+
   return (
     /**
      * **Each watch is a card** (UI wave, 2026-11-12): `surface.raised` on Paper,
@@ -153,22 +251,29 @@ export function WatchRow({
        * `headline`; who it was watched with sits directly under it, then where the date
        * came from, both quieter. The score circle is top-aligned with the date row, and
        * nothing in this row changes when the editor opens, so it never moves.
+       *
+       * The date block is sized by its own lines — no height, no minimum, and no line
+       * drawn for a companion who is not there — inside a column that takes what the
+       * score leaves (B4).
        */}
       <View style={styles.main} testID={`watch-main-${event.id}`}>
-        <View style={styles.lead} testID={`watch-lead-${event.id}`}>
-          <Text variant="headline" style={styles.date} testID={`watch-date-${event.id}`}>
-            {primary}
-          </Text>
-          {withLine ? (
-            <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
-              {withLine}
+        <View style={styles.leadColumn} testID={`watch-lead-column-${event.id}`}>
+          <View style={styles.lead} testID={`watch-lead-${event.id}`}>
+            <Text variant="headline" style={styles.date} testID={`watch-date-${event.id}`}>
+              {primary}
             </Text>
-          ) : null}
-          {provenance ? (
-            <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
-              {provenance}
-            </Text>
-          ) : null}
+            {withLine ? (
+              <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
+                {withLine}
+              </Text>
+            ) : null}
+            {provenance ? (
+              <Text variant="footnote" tone="tertiary" testID={`watch-provenance-${event.id}`}>
+                {provenance}
+              </Text>
+            ) : null}
+          </View>
+          {actionsBesideScore ? actions : null}
         </View>
 
         {score ? (
@@ -219,34 +324,15 @@ export function WatchRow({
           onRemove={onRemove}
           onEditRanking={onEditRanking}
         />
-      ) : (
-        /**
-         * **Edit watch and Rerank, with the watch they belong to** (founder spec §5). Both
-         * are quiet Maroon text actions with their glyphs, each a full 44pt target, on one
-         * line that wraps at large text rather than running past the card.
-         */
-        <View style={styles.actionLine} testID={`watch-actions-${event.id}`}>
-          <CardAction
-            testID={`watch-edit-${event.id}`}
-            icon={EDIT_WATCH_ICON}
-            label="Edit watch"
-            accessibilityLabel={`Edit this watch, ${dateLabel}`}
-            onPress={onEdit}
-          />
-          {onEditRanking ? (
-            <CardAction
-              testID={`watch-rerank-${event.id}`}
-              icon={RERANK_ICON}
-              label={RERANK_LABEL}
-              accessibilityHint="Compares this title again. Records no new watch."
-              onPress={onEditRanking}
-              // A write this screen started (a removal, a save) may still be in flight:
-              // the ranking does not open over it (independent review).
-              disabledReason={busy ? 'Saving' : undefined}
-            />
-          ) : null}
-        </View>
-      )}
+      ) : null}
+
+      {/**
+       * **Edit watch and Rerank, with the watch they belong to** (founder spec §5). Both
+       * are quiet Maroon text actions with their glyphs, each a full 44pt target, on one
+       * line that wraps at large text rather than running past the card. Here, under the
+       * note, only when the card has one; otherwise beside the score, above (B4).
+       */}
+      {editing || actionsBesideScore ? null : actions}
     </View>
   );
 }
@@ -331,6 +417,13 @@ function WatchEditor({
    */
   const [noteDraft, setNoteDraft] = useState(() => note ?? '');
   const [selected, setSelected] = useState(() => companions.map((person) => person.id));
+  /**
+   * **Share as a review, chosen in the editor** (founder QA, 2026-11-16). Private until the
+   * reader turns it on, every time the editor opens: editing a watch's note never publishes
+   * or republishes anything by itself.
+   */
+  const [shareAsReview, setShareAsReview] = useState(false);
+  const [spoilers, setSpoilers] = useState(false);
   /** Why the last save failed, said inside the editor that still holds the draft. */
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -351,8 +444,13 @@ function WatchEditor({
         ...(companionsChanged ? { companionIds: selected } : {}),
       };
     }
+    // Shared only when chosen, and only text there is: an empty note is not a review.
+    if (shareAsReview && nextNote) edit.review = { note: nextNote, spoilers };
     return edit;
   };
+
+  const nothingToWrite = (edit: WatchEdit) =>
+    edit.watchedOn === undefined && !edit.details && !edit.review;
 
   /**
    * Whether this editor is still the one open. A save that lands after the reader has
@@ -392,14 +490,18 @@ function WatchEditor({
    * before the server says so.
    */
   const commit = async (edit: WatchEdit): Promise<boolean> => {
-    if (edit.watchedOn === undefined && !edit.details) return true;
+    if (nothingToWrite(edit)) return true;
     setFailure(null);
     const result = await onSave(edit);
-    if (!result.ok && mounted.current) setFailure(result.message);
+    if (!result.ok && 'message' in result && mounted.current) setFailure(result.message);
     return result.ok;
   };
 
   const save = async () => {
+    if (shareAsReview && !normalWatchNote(noteDraft)) {
+      setFailure('Write a note to share it as a review.');
+      return;
+    }
     if (!begin()) return;
     let saved = false;
     try {
@@ -428,7 +530,7 @@ function WatchEditor({
   const editRanking = (open: () => void) => {
     if (inFlight.current) return;
     const edit = pendingEdit();
-    if (edit.watchedOn === undefined && !edit.details) {
+    if (nothingToWrite(edit)) {
       open();
       return;
     }
@@ -517,6 +619,15 @@ function WatchEditor({
           value: noteDraft,
           onChangeText: setNoteDraft,
           maxLength: WATCH_NOTE_MAX_LENGTH,
+          share: {
+            visibility: shareAsReview ? 'public' : 'private',
+            spoilers,
+            onVisibility: (next) => {
+              setShareAsReview(next === 'public');
+              setFailure(null);
+            },
+            onSpoilers: setSpoilers,
+          },
         }}
       />
 
@@ -586,10 +697,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
   },
   /**
-   * Takes what the score leaves, so a long date wraps here rather than under the circle.
-   * The metadata lines sit `space[1]` apart at most, so they read as one block with the date.
+   * Takes what the score leaves, so a long date wraps here rather than under the circle —
+   * and so does the action line when it sits here (B4). Grows across, never down: in the
+   * row only its width is flexible, and its height is its content's.
    */
-  lead: { flex: 1, gap: theme.space[1] },
+  leadColumn: { flex: 1, minWidth: 0 },
+  /**
+   * The date block: the date and the metadata under it, sized by its own lines. The lines
+   * sit `space[1]` apart at most, so they read as one block with the date.
+   */
+  lead: { gap: theme.space[1] },
   // The anchor: the card's one line in display weight.
   date: { fontFamily: fontFamily.sansSemibold },
   // The note, below the metadata with modest air above it.
@@ -604,10 +721,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     columnGap: theme.space[4],
-    paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[1],
     paddingBottom: theme.space[1],
   },
+  // Under a note the line is the card's full width, so it takes the card's own gutter; in
+  // the date block's column the top row's gutter already applies.
+  actionLineInset: { paddingHorizontal: theme.layout.gutter },
   // Glyph and word, the word centred in a full 44pt target.
   cardAction: {
     flexDirection: 'row',

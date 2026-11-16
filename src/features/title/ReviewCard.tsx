@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar, EditAction, ScoreBadge, SpoilerNote, Text } from '@/ui/components';
-import { scoreBadgeMetrics } from '@/ui/components/ScoreBadge';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -102,7 +101,11 @@ export function formatReviewDate(value: string | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 /**
@@ -113,21 +116,21 @@ export function formatReviewDate(value: string | null | undefined): string {
  * is a person's opinion like any other, and yours differs by its control, not its colour.
  *
  *   ┌──────────────────────────────────────────┐
- *   │ (o) Name, truncated…              (8.4)  │   the author's score, yours included
- *   │     14 Nov 2026                  [action] │   action: Edit (yours) or 👍 (theirs)
+ *   │ (o) Name, truncated…      (8.4) [action] │   the score, then Edit (yours) or 👍
+ *   │     14 Nov 2026                          │
  *   │ The review text, at the card's full      │
  *   │ inner width, clamped, … more              │
  *   │ 3 people found this helpful           ⋯   │   count omitted at 0; ⋯ = Report
  *   └──────────────────────────────────────────┘
  *
- * **The header** (QA1114-REVIEWS §2, 2026-11-14): who and when on the left, and on the
- * right one fixed-width column — the score circle with the action directly beneath it,
- * both centred on the column's axis. The header simply grows to that column's height;
- * the text is a sibling *below* the header, never beside the column, so a long review
- * always reads at the full width and the column can never overlap it. A long name
- * truncates on one line rather than pushing the column. An author who has not ranked the
- * title has no circle (`UNRANKED_REVIEW_SCORE`), and the action sits alone at the top of
- * the same column.
+ * **The header** (founder QA, 2026-11-16; it was QA1114-REVIEWS §2's column): who and when
+ * on the left, then the score circle and the action **side by side** on the right, both
+ * centred on the row. The column put the action under the circle, which made the header
+ * 84pt tall for a two-line name and opened a gap above the text; side by side the header is
+ * as tall as its tallest item, the 44pt action. The text is still a sibling *below* the
+ * header at the card's full width, so nothing reserves a right-hand column beside it. A
+ * long name truncates on one line rather than pushing the pair. An author who has not
+ * ranked the title has no circle (`UNRANKED_REVIEW_SCORE`), and the action stands alone.
  *
  * The Helpful *count* stays in the footer, in words, where it has always been; only the
  * icon is in the column.
@@ -159,7 +162,6 @@ export function ReviewCard({
   const slot = reviewScoreSlot(score);
   // Wide enough for the 44pt action and for the circle at the largest text size it
   // scales to, so neither is ever squeezed by a long name beside it.
-  const stackWidth = Math.max(theme.layout.minTapTarget, scoreBadgeMetrics('sm').diameter);
 
   const action = review.isOwn ? (
     onEdit ? (
@@ -219,7 +221,7 @@ export function ReviewCard({
         )}
 
         {slot === 'badge' || action ? (
-          <View style={[styles.stack, { width: stackWidth }]} testID="review-card-stack">
+          <View style={styles.stack} testID="review-card-stack">
             {/* The circle, or under option (b) the placeholder `reviewScoreSlot` names. */}
             {slot === 'badge' && score !== null ? (
               <View testID="review-card-score">
@@ -304,7 +306,9 @@ function HelpfulToggle({
       accessibilityRole="button"
       accessibilityLabel={selected ? 'Remove helpful' : 'Mark review helpful'}
       accessibilityHint={
-        selected ? `Takes back your mark on ${author}'s review` : `Tells ${author} their review helped`
+        selected
+          ? `Takes back your mark on ${author}'s review`
+          : `Tells ${author} their review helped`
       }
       accessibilityState={{ selected, busy: pending }}
       // A second tap while the first is in flight would snapshot an optimistic state and
@@ -313,12 +317,28 @@ function HelpfulToggle({
       style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
       testID="review-helpful"
     >
-      <Ionicons
-        name={selected ? 'thumbs-up' : 'thumbs-up-outline'}
-        size={theme.layout.icon.sm}
-        color={selected ? theme.semantic.action : theme.text.secondary}
-        testID={selected ? 'review-helpful-filled' : 'review-helpful-outline'}
-      />
+      {/**
+       * **Selected is the emoji itself** (founder QA, 2026-11-16), as a reaction is
+       * everywhere else in bingd: the outline invites, the 👍 says it is yours. Drawn at the
+       * outline's size, so the toggle never changes width.
+       */}
+      {selected ? (
+        <Text
+          style={styles.helpfulEmoji}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+          testID="review-helpful-filled"
+        >
+          👍
+        </Text>
+      ) : (
+        <Ionicons
+          name="thumbs-up-outline"
+          size={theme.layout.icon.sm}
+          color={theme.text.secondary}
+          testID="review-helpful-outline"
+        />
+      )}
     </Pressable>
   );
 }
@@ -338,16 +358,22 @@ const styles = StyleSheet.create({
   // the column on the right, so the text below starts under both.
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[2] },
   // `minWidth: 0` lets a long name truncate inside the row instead of widening it.
-  who: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  who: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+  },
   // 1pt: the name and its date read as one two-line label, as on every person row.
   whoCopy: { flex: 1, minWidth: 0, gap: 1 },
   /**
-   * The circle over the action, centred on one axis. The column sits inside the card's
-   * padding (the overhang the lone action used to take into it is gone: a circle above
-   * it would have been pushed into the padding too), so the 44pt targets stay wholly
-   * inside the card and nothing clips them.
+   * The circle and the action in one row, centred on each other (founder QA, 2026-11-16).
+   * Inside the card's padding, so the 44pt target stays wholly inside the card.
    */
-  stack: { flexShrink: 0, alignItems: 'center' },
+  stack: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
+  // The 👍 at the outline icon's size: one line, no extra leading, so the toggle keeps its box.
+  helpfulEmoji: { fontSize: theme.layout.icon.sm, lineHeight: theme.layout.icon.sm + 4 },
   helpful: {
     minWidth: theme.layout.minTapTarget,
     minHeight: theme.layout.minTapTarget,

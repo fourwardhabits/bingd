@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -9,7 +9,7 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
 import { useLogState } from '@/features/collection/use-log-state';
-import { removeFromCollection, type WriteResult } from '@/features/collection/writes';
+import { removeFromCollection, saveNote, type WriteResult } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
@@ -124,6 +124,22 @@ export default function WatchHistoryScreen() {
   const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const canEditRanking = Boolean(logState.data?.ranked && loggable.data);
+  /**
+   * **Share as a review: a watch's note, offered to the title's one composer** (B5).
+   *
+   * The composer is the log sheet's Note — the very one the title page's *Write a review*
+   * opens, already mounted here for Rerank — so nothing about writing a review is built on
+   * this screen. What this holds is the draft it opens on: the card's saved note, set only
+   * by the card's *Share as a review* and cleared the moment the sheet closes or hands off
+   * to a ranking, so a later Rerank never reopens on it.
+   *
+   * The sheet holds the draft unwritten until its own *Share as a review* (`seedNote`), and
+   * then saves it through `save_note`. `set_watch_details` is not called: the watch's note
+   * stays on the watch, private, exactly as the card shows it.
+   */
+  const [reviewSeed, setReviewSeed] = useState<string | null>(null);
+  // The stored note must be known before it can be asked about, so the act waits for it.
+  const canShareNote = Boolean(loggable.data && logState.data);
 
   /**
    * Memoised rather than defaulted inline: `?? []` builds a NEW array every render, so
@@ -132,7 +148,10 @@ export default function WatchHistoryScreen() {
    * screen that scrolls and one that stutters, and it is the lint rule's whole point.
    */
   const events = useMemo(() => history.data?.events ?? EMPTY_EVENTS, [history.data]);
-  const placements = useMemo(() => history.data?.placements ?? EMPTY_PLACEMENTS, [history.data]);
+  const placements = useMemo(
+    () => history.data?.placements ?? EMPTY_PLACEMENTS,
+    [history.data],
+  );
 
   /**
    * The opinion held at each watch (founder delta QA, 2026-09-21): the same frozen number
@@ -178,8 +197,7 @@ export default function WatchHistoryScreen() {
       events.findIndex((candidate) => candidate.id === event.id),
     );
 
-  const reconcile = () =>
-    invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
+  const reconcile = () => invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
 
   /** Back to the title page behind this one, or to it when this page was opened cold. */
   const leave = () =>
@@ -196,8 +214,49 @@ export default function WatchHistoryScreen() {
     setRating(loggable.data);
   };
 
+  /**
+   * Opens the composer on a watch's note — after asking, when it would replace something.
+   *
+   * **A title note that already exists is never overwritten without being asked**, in the
+   * app's own confirm (a native alert, as Rerank's unsaved-edit question and signing out
+   * ask). *Replace* opens the composer with the watch's note in place of the stored one —
+   * still unwritten, so the stored note changes only when the reader then shares. *Cancel*
+   * opens nothing: the reader asked to share this note, and a composer showing the other
+   * one would be a different request; their review is untouched either way, and *Write a
+   * review* on the title page is where it is edited. A stored note that already reads the
+   * same is not a replacement, so it is not asked about. The question names what is stored
+   * — a review when it is shared, a note when it is private — so it says what would go.
+   */
+  const shareNote = (text: string) => {
+    const title = loggable.data;
+    const stored = logState.data;
+    if (!title || !stored) return;
+    const open = () => {
+      setEditingId(null);
+      setError(null);
+      setPlacement(null);
+      setReviewSeed(text);
+      setRating(title);
+    };
+    const existing = stored.note.trim();
+    if (!existing || existing === text.trim()) {
+      open();
+      return;
+    }
+    const noun = stored.noteVisibility === 'public' ? 'review' : 'note';
+    Alert.alert(
+      `Replace your ${noun}?`,
+      `This title already has your ${noun}. Sharing this watch’s note will replace it. Nothing changes until you share.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Replace', style: 'destructive', onPress: open },
+      ],
+    );
+  };
+
   const endRating = () => {
     setRating(null);
+    setReviewSeed(null);
     setPlacement(null);
     reconcile();
     celebrate();
@@ -217,10 +276,54 @@ export default function WatchHistoryScreen() {
    * leaves the card exactly as it was.
    */
   const saveEdit = async (eventId: string, edit: WatchEdit): Promise<WatchSaveResult> => {
-    if (edit.watchedOn === undefined && !edit.details) return { ok: true };
+    if (edit.watchedOn === undefined && !edit.details && !edit.review) return { ok: true };
+    /**
+     * **Share as a review from the editor** (founder QA, 2026-11-16). Asked before anything
+     * is written: a title note that exists and reads differently is replaced only on
+     * *Replace*. *Cancel* writes nothing at all — not the review, and not this watch's note
+     * either — and the editor keeps the draft. The same question `shareNote` asks.
+     */
+    if (edit.review) {
+      /**
+       * Not before the title's own note is known (Codex, PR 308). Without it, a different
+       * stored review would be replaced without asking, and `save_note` would get no base
+       * version and so no conflict check. The collapsed card's Share waits on the same
+       * thing (`canShareNote`). Refused before anything is written; the draft is kept.
+       */
+      if (!canShareNote) {
+        return {
+          ok: false,
+          message:
+            'We couldn’t load your review of this title yet, so nothing was saved. Try again in a moment.',
+        };
+      }
+      const stored = logState.data;
+      const existing = stored?.note.trim() ?? '';
+      if (existing && existing !== edit.review.note.trim()) {
+        const noun = stored?.noteVisibility === 'public' ? 'review' : 'note';
+        const replace = await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            `Replace your ${noun}?`,
+            `This title already has your ${noun}. Sharing this watch’s note will replace it.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          ),
+        );
+        if (!replace) return { ok: false, cancelled: true };
+      }
+    }
     setBusy(true);
     setError(null);
     const results: WriteResult[] = [];
+    /** Set when this watch's own writes landed and only the review did not. */
+    let reviewFailure: string | null = null;
+    /** The review's write failed in a way that may still have committed (a dropped reply). */
+    let reviewUnknown = false;
+    /** The review changed elsewhere since this screen read it: re-read it before a retry. */
+    let reviewStale = false;
     try {
       if (edit.watchedOn !== undefined) {
         results.push(
@@ -245,17 +348,63 @@ export default function WatchHistoryScreen() {
           }),
         );
       }
+      /**
+       * Then, and only when everything above landed, the review: a copy of the text as the
+       * title's note, public, with the editor's spoiler flag, through the one writer the
+       * title page's composer uses. Two records, written in order and never claimed to be
+       * one: a failure here leaves this watch's note saved and says exactly that. It is
+       * checked against the version this screen read, so a review changed elsewhere is
+       * never overwritten (save_note's 55000). A retry rewrites the same row, so a second
+       * attempt cannot publish twice.
+       */
+      if (edit.review && !results.some((result) => result.outcome === 'failed')) {
+        const published = await saveNote({
+          operationId: newOperationId(),
+          mediaItemId,
+          note: edit.review.note,
+          baseVersion: logState.data?.noteVersion ?? null,
+          noteVisibility: 'public',
+          noteSpoilers: edit.review.spoilers,
+        });
+        if (published.outcome === 'failed') {
+          reviewFailure = published.message;
+          reviewUnknown = published.changed === true;
+          // Codex (PR 308): without a re-read, every retry would send the same stale version
+          // and be refused again. Refreshed, the next Save asks before replacing the newer
+          // review, as a first Share would.
+          reviewStale = published.conflict === true;
+        } else {
+          results.push(published);
+        }
+      }
     } catch {
       results.push({ outcome: 'failed', message: 'Could not save this watch.' });
     } finally {
       setBusy(false);
     }
     // `mustReconcile`'s rule, inline: a write that landed, or may have, refreshes the caches.
-    if (results.some((result) => result.outcome !== 'failed' || result.changed === true)) {
+    if (
+      reviewUnknown ||
+      reviewStale ||
+      results.some((result) => result.outcome !== 'failed' || result.changed === true)
+    ) {
       reconcile();
     }
     const failed = results.find((result) => result.outcome === 'failed');
-    return failed?.outcome === 'failed' ? { ok: false, message: failed.message } : { ok: true };
+    if (failed?.outcome === 'failed') return { ok: false, message: failed.message };
+    if (reviewFailure !== null) {
+      // This watch is saved; the draft stays in the editor so Save can share it again. A
+      // reply that never came is said as what it is: it may or may not have been shared.
+      return {
+        ok: false,
+        message: reviewUnknown
+          ? 'Your note is saved on this watch. We couldn’t confirm it was shared as a review; save again to make sure.'
+          : reviewStale
+            ? 'Your note is saved on this watch, but it wasn’t shared: your review of this title changed somewhere else. Save again to choose whether to replace it.'
+            : `Your note is saved on this watch, but it wasn’t shared as a review. ${reviewFailure}`,
+      };
+    }
+    return { ok: true };
   };
 
   /**
@@ -302,12 +451,19 @@ export default function WatchHistoryScreen() {
     }
     setBusy(true);
     setError(null);
-    const result = await deleteWatchEvent({ operationId: newOperationId(), watchEventId: eventId });
+    const result = await deleteWatchEvent({
+      operationId: newOperationId(),
+      watchEventId: eventId,
+    });
     setBusy(false);
     setEditingId(null);
     reconcile();
     if (result.outcome === 'failed') {
-      setError(result.lastWatch ? 'A title in your collection has at least one watch.' : result.message);
+      setError(
+        result.lastWatch
+          ? 'A title in your collection has at least one watch.'
+          : result.message,
+      );
     }
   };
 
@@ -327,9 +483,7 @@ export default function WatchHistoryScreen() {
   const header = (
     <>
       <Stack.Screen options={{ headerShown: false, title: 'Watch history' }} />
-      <AppHeader
-        back={{ onPress: leave }}
-      />
+      <AppHeader back={{ onPress: leave }} />
       <HeaderBoundary />
     </>
   );
@@ -426,7 +580,8 @@ export default function WatchHistoryScreen() {
           // virtualisation tuning this screen is sized for.
           const group = groups.find((candidate) => candidate.events.includes(item));
           const first = group?.events[0]?.id === item.id;
-          const showYear = first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
+          const showYear =
+            first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
           const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 
@@ -462,6 +617,13 @@ export default function WatchHistoryScreen() {
                     ? editRanking
                     : undefined
                 }
+                // Like Rerank, not while another card's editor is open: opening the sheet
+                // over it would close that editor and drop its draft without asking.
+                onShareNote={
+                  canShareNote && editingId === null && details?.note
+                    ? () => shareNote(details.note as string)
+                    : undefined
+                }
                 busy={busy}
               />
             </View>
@@ -474,6 +636,7 @@ export default function WatchHistoryScreen() {
         surface="title"
         postRank={placement}
         inWatchHistory
+        seedNote={reviewSeed}
         onClose={endRating}
         onDone={endRating}
         onRank={(bucket, mode) => {
@@ -487,6 +650,7 @@ export default function WatchHistoryScreen() {
             mode,
           });
           setRankedTitle(rating);
+          setReviewSeed(null);
           setPlacement(null);
           setRating(null);
         }}

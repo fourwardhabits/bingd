@@ -250,9 +250,9 @@ describe('H1: the synthetic mirror of the founder’s QA file', () => {
   it('first import: in, with the card and notes adding up to the seven rows', async () => {
     unresolved(QA_MIRROR_UNRESOLVED);
     const view = await runImport(IMDB_QA_MIRROR_CSV, QA_MIRROR_FIRST);
-    expect(view.getByText('Your IMDb history is in')).toBeTruthy();
+    expect(view.getByText('Import complete')).toBeTruthy();
     expect(view.getByLabelText('Already in bingd, 1')).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 3')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 3')).toBeTruthy();
     expect(view.queryByText(/from an earlier import/)).toBeNull();
     expect(view.getByRole('button', { name: 'Unmatched, 1 title' })).toBeTruthy();
     expect(
@@ -279,10 +279,10 @@ describe('H1: the synthetic mirror of the founder’s QA file', () => {
   it('re-import: already here, the three as an earlier import’s, still adding up to seven', async () => {
     unresolved(QA_MIRROR_UNRESOLVED);
     const view = await runImport(IMDB_QA_MIRROR_CSV, QA_MIRROR_REIMPORT);
-    expect(view.getByText('Your IMDb history is already here')).toBeTruthy();
-    expect(view.queryByText('Your IMDb history is in')).toBeNull();
-    expect(view.getByLabelText('Already in bingd, 1')).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 3. 3 from an earlier import')).toBeTruthy();
+    expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy();
+    expect(view.queryByText(/added to bingd\./)).toBeNull();
+    expect(view.getByLabelText('Already in bingd, 4')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 0')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Unmatched, 1 title' })).toBeTruthy();
     const n = drawnNumbers(view);
     expect(n.present + n.imported + n.unmatched + n.notes).toBe(7);
@@ -392,8 +392,8 @@ describe('H2: results', () => {
   // Row 11.
   it('all previously imported: already here, and ranking still offered', async () => {
     const view = await restored({ watched: 0, already: 5 });
-    expect(view.getByText('Your IMDb history is already here')).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 5. 5 from an earlier import')).toBeTruthy();
+    expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 0')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Rank titles' })).toBeTruthy();
   });
 
@@ -404,7 +404,7 @@ describe('H2: results', () => {
       { name: 'B', year: 2002 },
     ]);
     const view = await restored({ watched: 0, kept: 0, already: 0, unmatched: 2 });
-    expect(view.getByText('Nothing new came in')).toBeTruthy();
+    expect(view.getByText('No new movies were added.')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Unmatched, 2 titles' })).toBeTruthy();
     expect(view.queryByRole('button', { name: 'Rank titles' })).toBeNull();
     expect(view.getAllByRole('button', { name: 'Done' })).toHaveLength(1);
@@ -418,7 +418,7 @@ describe('H2: results', () => {
       unsupported_tv: 2,
       unsupported_episode: 1,
     });
-    expect(view.getByText('Nothing new came in')).toBeTruthy();
+    expect(view.getByText('No new movies were added.')).toBeTruthy();
     expect(view.getByText(/We found 2 TV shows/)).toBeTruthy();
     expect(view.getByText(/1 TV episode didn’t come in/)).toBeTruthy();
     expect(view.getByText(/1 title didn’t come in/)).toBeTruthy();
@@ -429,7 +429,7 @@ describe('H2: results', () => {
 
   it('a failed write is a warning of its own, never folded into a row', async () => {
     const view = await restored({ watched: 2, failed: 1 });
-    expect(view.getByLabelText('Imported movies, 2')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 2')).toBeTruthy();
     expect(view.getByText(/1 title couldn’t be saved/)).toBeTruthy();
   });
 
@@ -439,8 +439,8 @@ describe('H2: results', () => {
       { watched: 2, kept: 1, watchlist: 3, viewings: 4 },
       'letterboxd',
     );
-    expect(view.getByText('Your Letterboxd history is in')).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 2')).toBeTruthy();
+    expect(view.getByText('Import complete')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 2')).toBeTruthy();
     expect(view.getByLabelText('Already in bingd, 1')).toBeTruthy();
     expect(view.getByLabelText('Added to watchlist, 3')).toBeTruthy();
     expect(view.getByLabelText('Diary entries, 4')).toBeTruthy();

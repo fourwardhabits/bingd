@@ -1,9 +1,11 @@
 import {
   alreadyHere,
+  alreadyInBingd,
   bucketTotal,
   importedTitles,
   resultHeadline,
   resultModel,
+  resultSummary,
   somethingArrived,
 } from './result-model';
 
@@ -45,7 +47,7 @@ describe('resultModel', () => {
       failed: 0,
     });
     expect(bucketTotal(model)).toBe(7);
-    expect(resultHeadline(model, 'imdb')).toBe('Your IMDb history is in');
+    expect(resultHeadline(model, 'imdb')).toBe('Import complete');
   });
 
   it('maps a re-import: nothing new, the earlier import’s titles as previouslyImported', () => {
@@ -66,7 +68,12 @@ describe('resultModel', () => {
     expect(importedTitles(model)).toBe(3);
     expect(somethingArrived(model)).toBe(false);
     expect(alreadyHere(model)).toBe(true);
-    expect(resultHeadline(model, 'imdb')).toBe('Your IMDb history is already here');
+    expect(resultHeadline(model, 'imdb')).toBe('Import complete');
+    // Founder QA, 2026-11-16: the earlier import's three are already in bingd, not imported.
+    expect(alreadyInBingd(model)).toBe((model.alreadyPresent ?? 0) + 3);
+    expect(resultSummary(model)).toBe(
+      'No new movies were added. Your existing titles are already in bingd.',
+    );
     expect(bucketTotal(model)).toBe(7);
   });
 
@@ -96,10 +103,10 @@ describe('resultModel', () => {
 
   it('an all-unmatched import headlines nothing new', () => {
     const model = resultModel({ watched: 0, kept: 0, already: 0, unmatched: 4 }, 'imdb');
-    expect(resultHeadline(model, 'imdb')).toBe('Nothing new came in');
-    expect(
-      resultHeadline(resultModel({ watched: 0, unmatched: 4 }, 'letterboxd'), 'letterboxd'),
-    ).toBe('Nothing new came in');
+    expect(resultSummary(model)).toBe('No new movies were added.');
+    expect(resultSummary(resultModel({ watched: 0, unmatched: 4 }, 'letterboxd'))).toBe(
+      'No new movies were added.',
+    );
   });
 
   it('never folds failed into another bucket', () => {
@@ -140,7 +147,7 @@ describe('resultModel', () => {
     });
     // A watchlist addition alone is something arriving.
     const watchlistOnly = resultModel({ watched: 0, watchlist: 2 }, 'letterboxd');
-    expect(resultHeadline(watchlistOnly, 'letterboxd')).toBe('Your Letterboxd history is in');
+    expect(resultSummary(watchlistOnly)).toBe('2 movies added to your watchlist.');
   });
 
   it('never counts a matched TV show as imported or unmatched', () => {
@@ -149,28 +156,68 @@ describe('resultModel', () => {
     expect(importedTitles(model)).toBe(0);
     expect(model.unmatched).toBeUndefined();
     expect(model.unsupportedOther).toBe(0);
-    expect(resultHeadline(model, 'imdb')).toBe('Nothing new came in');
+    expect(resultSummary(model)).toBe('No new movies were added.');
   });
 
-  it('headlines the three cases for both providers, never two claims at once', () => {
+  it('says what happened in one line, one heading for every finish (founder QA, 2026-11-16)', () => {
     const cases = [
-      [{ watched: 1, kept: 5, already: 5 }, 'in'],
-      [{ watched: 0, kept: 5 }, 'already'],
-      [{ watched: 0, already: 5 }, 'already'],
-      [{ watched: 0 }, 'none'],
+      [{ watched: 1, kept: 5, already: 5 }, '1 movie added to bingd.'],
+      [{ watched: 3 }, '3 movies added to bingd.'],
+      [
+        { watched: 0, kept: 5 },
+        'No new movies were added. Your existing titles are already in bingd.',
+      ],
+      [
+        { watched: 0, already: 5 },
+        'No new movies were added. Your existing titles are already in bingd.',
+      ],
+      [{ watched: 0 }, 'No new movies were added.'],
     ] as const;
     for (const provider of ['imdb', 'letterboxd'] as const) {
-      const name = provider === 'imdb' ? 'IMDb' : 'Letterboxd';
       for (const [counts, expected] of cases) {
-        const headline = resultHeadline(resultModel(counts, provider), provider);
-        expect(headline).toBe(
-          expected === 'in'
-            ? `Your ${name} history is in`
-            : expected === 'already'
-              ? `Your ${name} history is already here`
-              : 'Nothing new came in',
-        );
+        const model = resultModel(counts, provider);
+        expect(resultHeadline(model, provider)).toBe('Import complete');
+        expect(resultSummary(model)).toBe(expected);
       }
     }
+  });
+
+  /**
+   * **The founder's repeat IMDb import** (Android, 2026-11-15): one title already ranked
+   * here (`kept`), three an earlier import added (`already`), one unmatched. It read
+   * "Already in bingd 1 · Imported movies 3"; nothing was imported.
+   */
+  it('counts a repeat import as nothing new and everything already in bingd', () => {
+    const model = resultModel(
+      {
+        watched: 0,
+        kept: 1,
+        already: 3,
+        unmatched: 1,
+        unsupported: 2,
+        unsupported_tv: 1,
+        unsupported_episode: 1,
+      },
+      'imdb',
+    );
+    expect(model.newlyAdded).toBe(0);
+    expect(alreadyInBingd(model)).toBe(4);
+    expect(model.unmatched).toBe(1);
+    // Still rankable: the earlier import's three are unranked titles in the collection.
+    expect(importedTitles(model)).toBe(3);
+    // Every row in exactly one bucket: 0 + 4 + 1 + 2 recognised kinds = the file's 7 rows.
+    expect(bucketTotal(model)).toBe(7);
+  });
+
+  it('counts a mixed file once: new titles new, the rest already in bingd', () => {
+    const model = resultModel(
+      { watched: 2, kept: 1, already: 1, duplicate: 1, unmatched: 1 },
+      'imdb',
+    );
+    expect(model.newlyAdded).toBe(2);
+    expect(alreadyInBingd(model)).toBe(2);
+    expect(model.duplicate).toBe(1);
+    expect(resultSummary(model)).toBe('2 movies added to bingd.');
+    expect(bucketTotal(model)).toBe(2 + 2 + 1 + 1);
   });
 });

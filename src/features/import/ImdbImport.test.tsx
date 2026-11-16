@@ -361,7 +361,7 @@ describe('the IMDb preview', () => {
       props: { outcome: 'ok', provider: 'imdb' },
     });
     await fireEvent.press(view.getByRole('button', { name: 'Import' }));
-    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
       props: { applied: 7, unresolved: 0, provider: 'imdb' },
@@ -440,9 +440,9 @@ describe('the IMDb summary', () => {
     const view = await renderWithProviders(
       <ImportScreen surface="settings" chooser jobId={JOB} />,
     );
-    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
-    expect(view.getByLabelText('Already in bingd, 12')).toBeTruthy();
-    expect(view.getByLabelText('Imported movies, 643. 3 from an earlier import')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
+    expect(view.getByLabelText('Already in bingd, 15')).toBeTruthy();
+    expect(view.getByLabelText('Newly imported, 640')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Unmatched, 8 titles' })).toBeTruthy();
     expect(
       view.queryByText(/Imported TV|Not supported|Couldn’t match|Couldn’t import/),
@@ -481,12 +481,12 @@ describe('the IMDb summary', () => {
     const view = await renderWithProviders(
       <ImportScreen surface="settings" chooser jobId={JOB} />,
     );
-    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
 
     await fireEvent.press(view.getByRole('button', { name: 'Import another file' }));
 
     await waitFor(() => expect(view.getByText('Bring your watch history')).toBeTruthy());
-    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    expect(view.queryByText(/added to bingd\./)).toBeNull();
     // The existing reset, which on a finished job is answered `running` and deletes nothing.
     expect(calls('import_discard')).toEqual([{ p_job_id: JOB }]);
     // And the other service is one tap away.
@@ -500,10 +500,10 @@ describe('the IMDb summary', () => {
       <ImportScreen surface="settings" chooser jobId={JOB} />,
     );
     await waitFor(() =>
-      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+      expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy(),
     );
     expect(
-      view.getByLabelText('Imported movies, 640. 640 from an earlier import'),
+      view.getByLabelText('Newly imported, 0'),
     ).toBeTruthy();
     expect(view.queryByText('Unmatched')).toBeNull();
     // The 640 are the import's and still unranked, so ranking them is still the way on
@@ -522,9 +522,9 @@ describe('the IMDb summary', () => {
     const view = await renderWithProviders(
       <ImportScreen surface="settings" chooser jobId={JOB} />,
     );
-    await waitFor(() => expect(view.getByText('Nothing new came in')).toBeTruthy());
-    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
-    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    await waitFor(() => expect(view.getByText('No new movies were added.')).toBeTruthy());
+    expect(view.queryByText('No new movies were added. Your existing titles are already in bingd.')).toBeNull();
+    expect(view.queryByText(/added to bingd\./)).toBeNull();
     expect(view.getByRole('button', { name: 'Unmatched, 4 titles' })).toBeTruthy();
     expect(view.getByText(/We found 2 TV shows from your file in bingd/)).toBeTruthy();
     expect(view.getByText(/1 TV episode didn’t come in/)).toBeTruthy();
@@ -538,7 +538,7 @@ describe('the IMDb summary', () => {
       <ImportScreen surface="settings" chooser jobId={JOB} />,
     );
     await waitFor(() =>
-      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+      expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy(),
     );
     expect(view.getByLabelText('Already in bingd, 5')).toBeTruthy();
     expect(view.queryByRole('button', { name: 'Rank titles' })).toBeNull();
@@ -590,8 +590,8 @@ describe('Settings ▸ Import ▸ IMDb after an earlier import', () => {
     const view = await openImdb();
     expect(view.getByRole('button', { name: 'IMDb Export' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Upload IMDb file' })).toBeTruthy();
-    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
-    expect(view.queryByText('Your IMDb history is in')).toBeNull();
+    expect(view.queryByText('No new movies were added. Your existing titles are already in bingd.')).toBeNull();
+    expect(view.queryByText(/added to bingd\./)).toBeNull();
     // The earlier job is history: nothing discards or re-reads it.
     expect(calls('import_discard')).toEqual([]);
     expect(calls('import_status')).toEqual([]);
@@ -602,7 +602,7 @@ describe('Settings ▸ Import ▸ IMDb after an earlier import', () => {
     finishes({ watched: 0, already: 7 });
     const view = await importAgain();
     await waitFor(() =>
-      expect(view.getByText('Your IMDb history is already here')).toBeTruthy(),
+      expect(view.getByText('No new movies were added. Your existing titles are already in bingd.')).toBeTruthy(),
     );
     expect(calls('import_create')).toEqual([{ p_provider: 'imdb' }]);
   });
@@ -611,9 +611,9 @@ describe('Settings ▸ Import ▸ IMDb after an earlier import', () => {
     earlier();
     finishes({ watched: 3, already: 7 });
     const view = await importAgain();
-    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
-    expect(view.queryByText('Your IMDb history is already here')).toBeNull();
-    expect(view.getByLabelText('Imported movies, 10. 7 from an earlier import')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
+    expect(view.queryByText('No new movies were added. Your existing titles are already in bingd.')).toBeNull();
+    expect(view.getByLabelText('Newly imported, 3')).toBeTruthy();
   });
 
   /** Score preservation, as words only: nothing here writes a ranking. */
@@ -621,7 +621,7 @@ describe('Settings ▸ Import ▸ IMDb after an earlier import', () => {
     earlier();
     finishes({ watched: 3, kept: 4 });
     const view = await importAgain();
-    await waitFor(() => expect(view.getByText('Your IMDb history is in')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
     expect(view.getByLabelText('Already in bingd, 4')).toBeTruthy();
     const intro = await openImdb();
     expect(intro.getByText(/Anything already ranked keeps its score\./)).toBeTruthy();

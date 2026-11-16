@@ -356,7 +356,7 @@ describe('a card at large text sizes', () => {
     expect(date.props.numberOfLines).toBeUndefined();
     expect(date.props.adjustsFontSizeToFit).toBeUndefined();
     // The column the date sits in takes what the score leaves, so it wraps there.
-    expect(StyleSheet.flatten(date.parent!.props.style).flex).toBe(1);
+    expect(StyleSheet.flatten(view.getByTestId('watch-lead-column-w1').props.style).flex).toBe(1);
   });
 
   it('wraps Cancel and Save onto a second line rather than past the card’s edge', async () => {
@@ -383,6 +383,169 @@ describe('a card at large text sizes', () => {
         : edit.props.style,
     );
     expect(style.minHeight).toBe(theme.layout.minTapTarget);
+  });
+});
+
+/**
+ * **No space held for a companion who is not there** (UI refinement B4, 2026-11-15).
+ *
+ * The top row is the date block beside the 40pt score circle, so a card with a date and
+ * nothing under it was the circle's height, and the acts below it started 18pt under the
+ * date. Now, when no note comes between, the acts sit in the date block's own column,
+ * beside the circle. A unit renderer has no layout, so these pin the structure: the date
+ * block has no height or minimum of its own, no empty companion line is drawn, the acts
+ * follow the date in its column (or the note, at the card's width), and keep 44pt targets.
+ */
+describe('the card holds no space for absent metadata', () => {
+  const sizing = (style: Record<string, unknown>) => ({
+    height: style.height,
+    minHeight: style.minHeight,
+    maxHeight: style.maxHeight,
+    flexGrow: style.flex === undefined ? style.flexGrow : 'flex',
+  });
+  /** The ids of a node's direct children. */
+  const kids = (view: View, testID: string) =>
+    (view.getByTestId(testID).children as unknown as { props: { testID?: string } }[]).map(
+      (child) => child.props.testID,
+    );
+  const ranked = (events: Row[], details: Record<string, Details> = {}) =>
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: events.length,
+        events,
+        details: new Map(Object.entries(details)),
+        placements: [],
+        posts: events.map((event) => ({
+          watchEventId: event.id,
+          score: 8.4,
+          bucket: 'loved',
+          createdAt: event.recordedAt,
+        })),
+      },
+    });
+
+  it('sizes the date block by its own lines: no height, no minimum, no vertical flex', async () => {
+    ranked([watch('w1', '2026-09-01')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(view.getByTestId('watch-score-w1')).toBeTruthy();
+    for (const id of ['watch-lead-w1', 'watch-main-w1']) {
+      expect(sizing(StyleSheet.flatten(view.getByTestId(id).props.style))).toEqual({
+        height: undefined,
+        minHeight: undefined,
+        maxHeight: undefined,
+        flexGrow: undefined,
+      });
+    }
+    // The column grows across, beside the score; its height is its content's.
+    const column = StyleSheet.flatten(view.getByTestId('watch-lead-column-w1').props.style);
+    expect(column.height).toBeUndefined();
+    expect(column.minHeight).toBeUndefined();
+    // Top-aligned, so neither side stretches to the other's height.
+    expect(StyleSheet.flatten(view.getByTestId('watch-main-w1').props.style).alignItems).toBe(
+      'flex-start',
+    );
+  });
+
+  it('draws no companion or provenance line when there is none', async () => {
+    ranked([watch('w1', '2026-09-01')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(kids(view, 'watch-lead-w1')).toEqual(['watch-date-w1']);
+    expect(view.queryByTestId('watch-with-w1')).toBeNull();
+    expect(view.queryByTestId('watch-provenance-w1')).toBeNull();
+  });
+
+  it('with no note, puts the acts straight under the date, in its column beside the score', async () => {
+    ranked([watch('w1', '2026-09-01')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(kids(view, 'watch-main-w1')).toEqual(['watch-lead-column-w1', 'watch-score-w1']);
+    expect(kids(view, 'watch-lead-column-w1')).toEqual(['watch-lead-w1', 'watch-actions-w1']);
+    // Exactly one action line on the card, and nothing after the top row.
+    expect(view.getAllByTestId('watch-actions-w1')).toHaveLength(1);
+    expect(kids(view, 'watch-row-w1')).toEqual(['watch-main-w1']);
+    // The top row's gutter already applies, so the line adds none of its own here.
+    const line = StyleSheet.flatten(view.getByTestId('watch-actions-w1').props.style);
+    expect(line.paddingHorizontal).toBeUndefined();
+    expect(line.flexWrap).toBe('wrap');
+  });
+
+  it('with companions, keeps them in the date block, the acts after them', async () => {
+    ranked([watch('w1', '2026-09-01')], {
+      w1: {
+        companions: [
+          { id: 'a', username: 'alex', name: 'Alex', avatarUri: null },
+          { id: 'b', username: 'sam', name: 'Sam Rivera-Montgomery', avatarUri: null },
+          { id: 'c', username: 'jo', name: 'Jo', avatarUri: null },
+        ],
+      },
+    });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(kids(view, 'watch-lead-w1')).toEqual(['watch-date-w1', 'watch-with-w1']);
+    expect(view.getByTestId('watch-with-w1').props.numberOfLines).toBeUndefined();
+    expect(kids(view, 'watch-lead-column-w1')).toEqual(['watch-lead-w1', 'watch-actions-w1']);
+  });
+
+  it('with a note, keeps the note and then the acts at the card’s full width', async () => {
+    ranked([watch('w1', '2026-09-01')], { w1: { note: 'Better the second time.' } });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    expect(kids(view, 'watch-lead-column-w1')).toEqual(['watch-lead-w1']);
+    expect(kids(view, 'watch-row-w1')).toEqual([
+      'watch-main-w1',
+      'watch-note-block-w1',
+      'watch-actions-w1',
+    ]);
+    expect(
+      StyleSheet.flatten(view.getByTestId('watch-actions-w1').props.style).paddingHorizontal,
+    ).toBe(theme.layout.gutter);
+  });
+
+  it('keeps Edit watch and Rerank at 44pt in both places', async () => {
+    mockLogState.mockReturnValue({
+      data: {
+        note: 'Still holds up.',
+        noteVisibility: 'private' as const,
+        noteSpoilers: false,
+        noteVersion: '2026-09-24T00:00:00Z',
+        ranked: true,
+      },
+    });
+    try {
+      ranked([watch('w1', '2024-03-04'), watch('w2', '2026-09-01')], {
+        w2: { note: 'Better the second time.' },
+      });
+      const view = await renderWithProviders(<WatchHistoryScreen />);
+      for (const id of ['watch-edit-w1', 'watch-rerank-w1', 'watch-edit-w2', 'watch-rerank-w2']) {
+        const node = view.getByTestId(id);
+        const style = StyleSheet.flatten(
+          typeof node.props.style === 'function'
+            ? node.props.style({ pressed: false })
+            : node.props.style,
+        );
+        expect(style.minHeight).toBe(theme.layout.minTapTarget);
+        expect(style.minWidth).toBe(theme.layout.minTapTarget);
+        expect(style.height).toBeUndefined();
+      }
+    } finally {
+      mockLogState.mockReset();
+      mockLogState.mockReturnValue({
+        data: {
+          note: 'Still holds up.',
+          noteVisibility: 'private' as const,
+          noteSpoilers: false,
+          noteVersion: '2026-09-24T00:00:00Z',
+          ranked: false,
+        },
+      });
+    }
+  });
+
+  it('opens the editor at the card’s full width, with no action line left beside the score', async () => {
+    ranked([watch('w1', '2026-09-01')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    expect(kids(view, 'watch-lead-column-w1')).toEqual(['watch-lead-w1']);
+    expect(view.queryByTestId('watch-actions-w1')).toBeNull();
+    expect(kids(view, 'watch-row-w1')).toEqual(['watch-main-w1', 'watch-editor-w1']);
   });
 });
 
