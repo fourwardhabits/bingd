@@ -257,6 +257,7 @@ const ALLOWED = {
   // else — it is keyed on auth.uid() and the caller's own sitting uuid.
   'rank_batch_finalize(uuid,uuid)': ['authenticated'],
   'ranking_batch_titles(uuid)': ['authenticated'],
+  'watchlist_group_titles(uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

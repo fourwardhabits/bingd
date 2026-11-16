@@ -33,6 +33,14 @@ describe('a watchlist add is activity', () => {
     owner = await t.createUser({ username: 'owner' });
     follower = await t.createUser({ username: 'follower' });
     stranger = await t.createUser({ username: 'stranger' });
+    // Single-title mode: every case here saves several titles inside one session and holds
+    // each to its own post, which is exactly what `feed.watchlist_grouping_enabled` false
+    // restores (20261125000100). So this file is now the rollback path's suite; grouping
+    // itself is `watchlist-grouping.test.mjs`.
+    await t.sql(
+      `insert into app_config (key, value) values ('feed.watchlist_grouping_enabled', 'false'::jsonb)
+       on conflict (key) do update set value = excluded.value`,
+    );
     await t.actAs(owner);
   });
 

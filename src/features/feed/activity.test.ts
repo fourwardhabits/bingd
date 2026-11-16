@@ -5,6 +5,8 @@ import {
   tailFor,
   verbFor,
   watchLabel,
+  watchlistOthers,
+  watchlistTailAction,
   type ActivityType,
 } from './activity';
 
@@ -297,5 +299,45 @@ describe('a TV ranking update', () => {
       if (type === 'title_ranked') continue;
       expect(verbFor(type, { update: true })).toBe(verbFor(type));
     }
+  });
+});
+
+/** A grouped watchlist post (20261125000100): "added Dune and 4 others to their watchlist". */
+describe('the grouped watchlist sentence', () => {
+  it('counts the others, singular and plural', () => {
+    expect(watchlistOthers(2)).toBe('1 other');
+    expect(watchlistOthers(5)).toBe('4 others');
+  });
+
+  it('says nothing for one title, for a legacy post with no count, or for nonsense', () => {
+    expect(watchlistOthers(1)).toBeNull();
+    expect(watchlistOthers(null)).toBeNull();
+    expect(watchlistOthers(undefined)).toBeNull();
+    expect(watchlistOthers(0)).toBeNull();
+    expect(watchlistOthers(Number.NaN)).toBeNull();
+  });
+
+  it('is a tappable action on a grouped watchlist post, and on nothing else', () => {
+    const open = jest.fn();
+    const action = watchlistTailAction(
+      { id: 'w1', type: 'watchlist_added', watchlistCount: 3 },
+      open,
+    );
+    expect(action).toMatchObject({ connector: 'and', label: '2 others' });
+    action?.onPress();
+    expect(open).toHaveBeenCalledWith('w1');
+
+    expect(
+      watchlistTailAction({ id: 'w2', type: 'watchlist_added', watchlistCount: 1 }, open),
+    ).toBeNull();
+    expect(watchlistTailAction({ id: 'w3', type: 'watchlist_added' }, open)).toBeNull();
+    // A ranking sitting has its own "and 2 more"; this never claims one.
+    expect(
+      watchlistTailAction({ id: 'r1', type: 'ranking_batch', watchlistCount: 3 }, open),
+    ).toBeNull();
+  });
+
+  it('keeps the tail after the count, so the sentence reads in order', () => {
+    expect(tailFor('watchlist_added', 'Dune')).toBe('to their watchlist');
   });
 });

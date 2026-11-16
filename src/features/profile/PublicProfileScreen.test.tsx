@@ -1570,3 +1570,50 @@ describe('the profile card, on somebody else’s profile', () => {
     expect(view.queryByText('Set a goal')).toBeNull();
   });
 });
+
+/**
+ * **A grouped watchlist post in someone's Recent activity** (20261125000100): the same
+ * sentence, count and member sheet the Feed draws, from the same helper.
+ */
+describe('a grouped watchlist post on their profile', () => {
+  it('reads "and 2 others" and opens the members, each of which opens its title', async () => {
+    tableRows.feed_events = [
+      {
+        id: 'w1',
+        type: 'watchlist_added',
+        actor_id: 'anna-id',
+        media_item_id: 'dune',
+        created_at: '2026-11-15T10:00:00Z',
+        causal_at: '2026-11-15T10:00:00Z',
+        causal_step: 0,
+        payload: { count: 3 },
+        media_items: {
+          kind: 'movie',
+          title: 'Dune',
+          release_date: '2021-10-22',
+          poster_path: null,
+          genres: ['Science Fiction'],
+          runtime_minutes: 155,
+          parent: null,
+        },
+        profiles: { username: 'anna', display_name: 'Anna', avatar_path: null },
+      },
+    ];
+    tableRows.follows = [];
+    mockRpcResults.watchlist_group_titles = [
+      { media_item_id: 'dune', kind: 'movie', title: 'Dune', release_date: '2021-10-22' },
+      { media_item_id: 'arrival', kind: 'movie', title: 'Arrival', release_date: '2016-11-11' },
+      { media_item_id: 'enemy', kind: 'movie', title: 'Enemy', release_date: '2013-09-08' },
+    ];
+    const view = await open();
+
+    fireEvent.press(await waitFor(() => view.getByText('2 others')));
+    await waitFor(() => expect(view.getByTestId('watchlist-group-rows')).toBeTruthy());
+    expect(mockRpcCalls).toContainEqual({
+      name: 'watchlist_group_titles',
+      args: { p_event_id: 'w1' },
+    });
+    fireEvent.press(view.getByLabelText('Enemy, 2013'));
+    expect(mockPush).toHaveBeenCalledWith('/title/enemy');
+  });
+});
