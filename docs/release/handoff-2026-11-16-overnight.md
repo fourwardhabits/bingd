@@ -47,3 +47,39 @@ The founder authorized this order on 2026-11-16.
   - Record: `docs/release/manifests/production-2026-11-16-feed-grouping.json`.
 - **Health after enabling:** anon smoke 137/137. Integrity reads are clean: 232/232 watchlist groups with members, 0 stale drafts.
 - **Rollback:** flags off first, then republish #308's groups if needed. Never revert the migrations.
+
+## 08:41Z health check (15 minutes after the flags went on)
+
+- **Flags:** both on.
+- **Integrity:** 0 orphaned groups, 0 count mismatches, 0 stale drafts.
+- **Smoke:** anon 137/137.
+- **Live manifest:** production ok.
+- **Real activity since the flags went on:** none yet (0 new watchlist or ranking posts), so grouping is not yet exercised by real users in production.
+
+## Morning handoff
+
+### Shipped
+- **#308 in production:** OTA `fb44d469` (Android `30bf8eef`, iOS `cacbef1e`), app-only. Manifest: `production-2026-11-16-pr308.json`.
+- **Feed grouping, #310 + #311, in production:**
+  - OTA `9d11a797` (Android `b82a0376`, iOS `0c141d10`).
+  - Migrations `20261125000100` and `20261126000100` (201 total).
+  - Flags on at 08:26:36Z.
+  - Manifest: `production-2026-11-16-feed-grouping.json`.
+- **Staging social fixture `social-v1`:** verify 330/330, with a lookup table in `docs/release/qa/2026-11-16-pr308-closure.md`.
+
+### Ready
+- **Preview (staging):** serves `80f72210`, the same tree as production main, for any on-device check (Android `767a4229`, iOS `db9a6fb3`).
+
+### Blocked
+- Nothing.
+
+### Next
+- Watch the first real grouped posts. Read-only checks:
+  - `feed_events` where `payload->>count > 1` matches the membership count;
+  - no stale `ranking_batch_draft` rows.
+- H-1 is still tracked separately and is NOT resolved.
+
+### Founder action required
+- **Optional on-device checks:** none were performed for either release. In particular, check B5's in-editor share, the 85% sheets, and the watchlist and ranking group sheets.
+- **Welcome email:** production `welcome.delivery_enabled` is true. That predates this work and is a separate workstream; it was not touched.
+- **Fixture password:** if you want to sign in to fixture accounts by hand, derive the password as described in the QA record. It is never stored.
