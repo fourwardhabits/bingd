@@ -211,6 +211,68 @@ describe('title-page backfill rankings', () => {
   });
 });
 
+describe('a hidden member that gains a conversation or a review (Codex, PR 313)', () => {
+  const groupOfThree = async () => {
+    for (const name of ['M1', 'M2', 'M3']) await groupNote(await ranked('movie', name));
+    const posts = await allPosts();
+    return {
+      g: posts.find((p) => p.type === 'ranking_batch'),
+      members: posts.filter((p) => p.type === 'title_ranked'),
+    };
+  };
+
+  it('a reaction from a device still showing the old card puts that card back', async () => {
+    const { g, members } = await groupOfThree();
+    await t.sql(
+      `insert into reactions (feed_event_id, user_id, kind) values ($1, $2, 'love')`,
+      [members[1].id, friend],
+    );
+    const after = await allPosts();
+    assert.equal(after.find((p) => p.id === members[1].id).presented_in, null, 'shown again');
+    assert.equal(
+      after.find((p) => p.id === g.id).payload.count,
+      2,
+      'the group drops its title',
+    );
+    const seen = await visibleTo(friend);
+    assert.ok(
+      seen.some((p) => p.id === members[1].id),
+      'its reaction is reachable',
+    );
+  });
+
+  it('a comment does the same', async () => {
+    const { members } = await groupOfThree();
+    await t.sql(
+      `insert into comments (feed_event_id, author_id, body) values ($1, $2, 'late')`,
+      [members[0].id, friend],
+    );
+    assert.equal((await allPosts()).find((p) => p.id === members[0].id).presented_in, null);
+  });
+
+  it('publishing a review of a grouped title gives its ranking its own card again', async () => {
+    const { g, members } = await groupOfThree();
+    await t.sql(
+      `update user_media set note = 'Written later.', note_visibility = 'public'
+        where user_id = $1 and media_item_id = $2`,
+      [user, members[2].media_item_id],
+    );
+    const after = await allPosts();
+    assert.equal(after.find((p) => p.id === members[2].id).presented_in, null);
+    assert.equal(after.find((p) => p.id === g.id).payload.count, 2);
+  });
+
+  it('a private note changes nothing', async () => {
+    const { members } = await groupOfThree();
+    await t.sql(
+      `update user_media set note = 'Just for me.', note_visibility = 'private'
+        where user_id = $1 and media_item_id = $2`,
+      [user, members[2].media_item_id],
+    );
+    assert.ok((await allPosts()).find((p) => p.id === members[2].id).presented_in !== null);
+  });
+});
+
 describe('an Unranked sitting and a title-page group', () => {
   it('a sitting that begins inside the window joins the title-page group', async () => {
     await groupNote(await ranked('movie', 'Page 1'));
@@ -374,6 +436,39 @@ describe('historical consolidation', () => {
       after.find((p) => p.id === w[0]).payload.count,
       1,
       'the promoted watchlist post has its own payload back',
+    );
+  });
+
+  it('a history group is closed to new rankings, and a revert keeps one that gained a conversation', async () => {
+    const films = [];
+    for (let i = 0; i < 2; i += 1) films.push(await ranked('movie', `Closed ${i}`));
+    await t.sql(
+      `update feed_events set created_at = now() - interval '2 minutes', causal_at = now() - interval '2 minutes'
+        where actor_id = $1 and type = 'title_ranked'`,
+      [user],
+    );
+    await t.sql(
+      `update watch_events set recorded_at = now() - interval '1 hour' where user_id = $1`,
+      [user],
+    );
+    await consolidate(`closed-${seq}`, true);
+    const g = (await allPosts()).find((p) => p.type === 'ranking_batch');
+    assert.ok(g, 'the recent burst was consolidated');
+    assert.equal(g.payload.started_at, undefined, 'no open window');
+    // A ranking made right now does not join it, though it is minutes old.
+    assert.equal((await groupNote(await ranked('movie', 'After'))).status, 'solo');
+
+    await t.sql(
+      `insert into comments (feed_event_id, author_id, body) values ($1, $2, 'nice set')`,
+      [g.id, friend],
+    );
+    const reverted = await call(`revert_feed_consolidation($1)`, [`closed-${seq}`]);
+    assert.deepEqual(reverted.kept_with_conversation, [g.id]);
+    assert.equal(
+      (await t.sql(`select count(*)::int n from comments where feed_event_id = $1`, [g.id]))
+        .rows[0].n,
+      1,
+      'the conversation is not cascaded away',
     );
   });
 

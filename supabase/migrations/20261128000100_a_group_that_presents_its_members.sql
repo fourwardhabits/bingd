@@ -948,12 +948,16 @@ begin
         perform pg_advisory_xact_lock(hashtextextended('ranking_story:' || (v_group ->> 'actor'), 0));
         perform pg_advisory_xact_lock(hashtextextended('watchlist_story:' || (v_group ->> 'actor'), 0));
 
-        -- Re-checked under lock: a conversation that began since the plan keeps its card.
+        -- Locked first, then re-read in a fresh statement (Codex, PR 313): a comment or
+        -- reaction in flight holds a key-share lock, so this waits for it, and the check
+        -- below then sees what committed. Under these locks nothing new can reference them
+        -- without the `_unpresent_on_reference` triggers putting the card back.
+        perform 1 from feed_events where id = any (v_ids) order by id for update;
         select array_agg(fe.id order by fe.created_at, fe.id) into v_live
           from feed_events fe
          where fe.id = any (v_ids) and fe.presented_in is null
-           and not _feed_event_referenced(fe.id);
-        perform 1 from feed_events where id = any (v_live) for update;
+           and not _feed_event_referenced(fe.id)
+           and (fe.type <> 'title_ranked' or not _feed_title_reviewed(fe.actor_id, fe.media_item_id));
         if coalesce(array_length(v_live, 1), 0) < 2 then
           continue;
         end if;
@@ -964,7 +968,9 @@ begin
           insert into feed_events (actor_id, type, media_item_id, payload, created_at, causal_at, causal_step)
           values (
             v_first.actor_id, 'ranking_batch', v_first.media_item_id,
-            jsonb_build_object('count', array_length(v_live, 1), 'started_at', v_first.created_at,
+            -- No `started_at` (Codex, PR 313): a history group has no open window, so no
+            -- sitting or title-page ranking ever joins it and a revert loses nothing.
+            jsonb_build_object('count', array_length(v_live, 1),
                                'origin', 'history', 'consolidation_batch', p_batch),
             v_first.created_at, v_first.causal_at, 0
           )
@@ -1034,6 +1040,9 @@ begin
       from feed_consolidation_log
      where batch = p_batch and member_event_id is null
   loop
+    -- Locked, then checked in a fresh statement (Codex, PR 313): a comment or reaction being
+    -- written on the group is waited for and seen, and never cascaded away by the delete.
+    perform 1 from feed_events where id = v_g.group_event_id for update;
     if v_g.created_group and _feed_event_referenced(v_g.group_event_id) then
       v_kept := v_kept || v_g.group_event_id;
       continue;
@@ -1126,6 +1135,8 @@ begin
      where e.actor_id = p_actor
        and e.type = 'watchlist_added'
        and e.presented_in is null
+       -- A consolidated history post never grows (Codex, PR 313): a revert restores it.
+       and not (e.payload ? 'consolidation_batch')
        and e.payload ? 'count'
        and now() < e.causal_at + v_window
      order by e.causal_at desc, e.id
@@ -1158,3 +1169,91 @@ begin
   return v_event;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 10. A hidden member that gains a conversation or a review gets its card back
+-- ---------------------------------------------------------------------------
+--
+-- Codex, PR 313. Grouping checks for references under lock, but a device still showing the
+-- single card can write after grouping commits: every comment, reaction, notification or
+-- proactive item, and every published review, is caught here instead, whoever writes it
+-- (old binaries included). The member is shown again on its own, exactly as it was, and
+-- its group's count drops by its title. Nothing is deleted and nothing moves.
+
+create or replace function _unpresent(p_event_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group uuid;
+begin
+  select presented_in into v_group from feed_events where id = p_event_id for update;
+  if v_group is null then
+    return;
+  end if;
+  update feed_events set presented_in = null where id = p_event_id;
+  update feed_events
+     set payload = payload || jsonb_build_object('count', _group_title_count(v_group))
+   where id = v_group;
+end;
+$$;
+
+create or replace function _unpresent_on_reference()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_table_name in ('comments', 'reactions', 'proactive_cluster_actors') then
+    perform _unpresent(new.feed_event_id);
+  elsif tg_table_name = 'notifications' and new.subject_type = 'feed_event' then
+    perform _unpresent(new.subject_id);
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function _unpresent_on_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event uuid;
+begin
+  if new.note_visibility = 'public' and nullif(btrim(coalesce(new.note, '')), '') is not null then
+    for v_event in
+      select fe.id from feed_events fe
+       where fe.actor_id = new.user_id and fe.media_item_id = new.media_item_id
+         and fe.type = 'title_ranked' and fe.presented_in is not null
+    loop
+      perform _unpresent(v_event);
+    end loop;
+  end if;
+  return null;
+end;
+$$;
+
+revoke execute on function _unpresent(uuid) from public, anon, authenticated;
+revoke execute on function _unpresent_on_reference() from public, anon, authenticated;
+revoke execute on function _unpresent_on_review() from public, anon, authenticated;
+
+drop trigger if exists comments_unpresent on comments;
+create trigger comments_unpresent after insert on comments
+  for each row execute function _unpresent_on_reference();
+drop trigger if exists reactions_unpresent on reactions;
+create trigger reactions_unpresent after insert on reactions
+  for each row execute function _unpresent_on_reference();
+drop trigger if exists notifications_unpresent on notifications;
+create trigger notifications_unpresent after insert on notifications
+  for each row execute function _unpresent_on_reference();
+drop trigger if exists proactive_cluster_actors_unpresent on proactive_cluster_actors;
+create trigger proactive_cluster_actors_unpresent after insert on proactive_cluster_actors
+  for each row execute function _unpresent_on_reference();
+drop trigger if exists user_media_unpresent_on_review on user_media;
+create trigger user_media_unpresent_on_review after insert or update of note, note_visibility on user_media
+  for each row execute function _unpresent_on_review();
