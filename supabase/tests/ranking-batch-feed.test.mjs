@@ -594,6 +594,15 @@ describe('a sitting is published when it ends', () => {
     const first = await sitting();
     await note(first, await ranked('Heat'));
     await finalize(first);
+    // A later sitting outside the first's 30-minute window (20261126000100): one that begins
+    // inside it joins instead, which is `ranking-grouping.test.mjs`.
+    await t.sql(
+      `update feed_events
+          set payload = jsonb_set(payload, '{started_at}',
+                to_jsonb((payload ->> 'started_at')::timestamptz - interval '31 minutes'))
+        where actor_id = $1 and type = 'ranking_batch'`,
+      [user],
+    );
 
     const second = await sitting();
     await note(second, await ranked('Ronin'));
