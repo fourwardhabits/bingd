@@ -444,12 +444,20 @@ describe('Edit watch → Note edits this watch’s own note', () => {
     expect(second.getByTestId('watch-note-w1').props.children).toBe('First time, opening weekend.');
   });
 
-  it('is private: no Share or Spoilers on a watch note, only the line that says so', async () => {
+  // Founder QA, 2026-11-16: the composer's two claims are here, private by default; they
+  // ask Save to publish a copy as the review, and never make this watch's note public.
+  it('is private by default, with Share and Spoilers off and a line that says so', async () => {
     const view = await loaded();
     const editor = await open(view, 'w3');
-    expect(editor.getByTestId('watch-note-private-hint').props.children).toBe('Only you see this note');
-    expect(editor.queryByLabelText('Share this note as a public review')).toBeNull();
-    expect(editor.queryByLabelText('This note contains spoilers')).toBeNull();
+    expect(editor.getByTestId('note-claims-caption').props.children).toBe(
+      'Only you see this note.',
+    );
+    expect(
+      editor.getByLabelText('Share this note as a public review').props.accessibilityState,
+    ).toMatchObject({ checked: false });
+    expect(
+      editor.getByLabelText('This note contains spoilers').props.accessibilityState,
+    ).toMatchObject({ checked: false });
     // The Note row counts this watch's words, never "Shared", which is the review's state.
     expect(editor.queryByText(/^Shared/)).toBeNull();
   });
@@ -529,8 +537,14 @@ describe('A11: the card reads date, companions, score, note, then its acts', () 
   it('puts the date top-left with the companions directly under it, and the score top-right', async () => {
     const view = await loaded();
     const main = view.getByTestId('watch-main-w3');
-    const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
-    expect(lead?.props.testID).toBe('watch-lead-w3');
+    const [left, right] = main.children as unknown as {
+      props: { testID?: string };
+      children: { props: { testID?: string } }[];
+    }[];
+    // The left column holds the date block first (B4: and the acts after it, when no note
+    // comes between); the score is alone in the right one.
+    expect(left?.props.testID).toBe('watch-lead-column-w3');
+    expect(left?.children[0]?.props.testID).toBe('watch-lead-w3');
     expect(right?.props.testID).toBe('watch-score-w3');
     // Top-aligned, not centred on the block.
     expect(StyleSheet.flatten(main.props.style).alignItems).toBe('flex-start');

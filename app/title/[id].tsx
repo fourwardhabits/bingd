@@ -87,7 +87,7 @@ import { trailerPreviewsByDefault } from '@/features/title/trailer-previews';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonCountLabel } from '@/features/title/season-count';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
-import { ReviewsPreview, TitleReviews } from '@/features/title/TitleReviews';
+import { ReviewsPreview, ReviewsSheetHeader, TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
 import {
   DEFAULT_REVIEW_SORT,
@@ -1776,8 +1776,7 @@ export default function TitleScreen() {
      * sheet can honestly show, so it reads as Most Helpful, which is what it draws, rather
      * than a Rating label over a Helpful list.
      */
-    const order: ReviewOrder =
-      isRatingOrder(reviewSort) && !(inSheet && ratingAvailable) ? 'top_desc' : reviewSort;
+    const order: ReviewOrder = inSheet ? sheetReviewOrder : reviewOrderOutsideSheet;
     const rating = isRatingOrder(order);
     const serverRows = rating ? helpfulReviews.data : reviews.data;
     const rows = rating
@@ -1830,6 +1829,7 @@ export default function TitleScreen() {
           // published review first, from your own row — a public note and nothing else.
           variant={immersive ? 'editorial' : undefined}
           ownReview={immersive ? ownPublishedReview : null}
+          sortInHeader={inSheet}
         />
     );
   };
@@ -1844,6 +1844,17 @@ export default function TitleScreen() {
 
   /** Rating needs every review in hand; a list at the server's ceiling may not be all. */
   const ratingAvailable = immersive && reviewsComplete(helpfulReviews.data);
+  /**
+   * The order the sheet is actually in, for its heading's control and its list alike
+   * (independent review, post-QA sprint 2): Rating over a list that has since reached the
+   * ceiling is no order this sheet can honestly show, so it reads as Most Helpful.
+   */
+  const sheetReviewOrder: ReviewOrder =
+    isRatingOrder(reviewSort) && !ratingAvailable ? 'top_desc' : reviewSort;
+  /** The title page's own section never offers Rating. */
+  const reviewOrderOutsideSheet: ReviewOrder = isRatingOrder(reviewSort)
+    ? 'top_desc'
+    : reviewSort;
 
   /** Edit or Write from inside the sheet: close it, then open the one composer. */
   const writeFromSheet = () => {
@@ -2615,9 +2626,17 @@ export default function TitleScreen() {
         }}
       >
         <View style={styles.castSheet} testID="reviews-sheet">
-          <Text variant="title2">
-            {reviewTotal ? `Reviews (${reviewTotal})` : 'Reviews'}
-          </Text>
+          {/* "N reviews" and the order it is in, on one row (founder QA, 2026-11-16). The
+              order is the sheet's own (`sheetReviewOrder`), the one its list draws. */}
+          <ReviewsSheetHeader
+            total={reviewTotal ?? 0}
+            order={sheetReviewOrder}
+            ratingAvailable={ratingAvailable}
+            onChange={(next) => {
+              setReviewSort(next);
+              track({ name: 'reviews_sort_changed', props: { sort: next } });
+            }}
+          />
         </View>
         <ScrollView
           testID="reviews-sheet-list"

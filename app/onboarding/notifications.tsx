@@ -1,9 +1,12 @@
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { NotificationStep } from '@/features/onboarding/NotificationStep';
+import { canReceivePush, pushPermission } from '@/features/notifications/push';
+import { pushAlreadyOffered, shouldOfferPush } from '@/features/notifications/push-permission';
 import {
   useAdvanceStage,
   useOnboardingStage,
@@ -14,6 +17,8 @@ import { track } from '@/lib/analytics';
 import { withGrace } from '@/lib/grace';
 import { TAB_ROUTES } from '@/lib/routes';
 import { supabase } from '@/lib/supabase';
+import { Screen } from '@/ui/components';
+import { theme } from '@/ui/tokens';
 
 /**
  * Step 10, and the end of the flow.
@@ -55,6 +60,49 @@ import { supabase } from '@/lib/supabase';
  * witness to that.
  */
 const CONNECTION_GRACE_MS = 3000;
+
+/**
+ * How long the step waits to learn whether it should ask at all before it asks anyway.
+ * Both reads are local (a preference and the OS permission), so this only bounds a device
+ * that is somehow stuck; asking is the fallback because it is the one that strands nobody.
+ */
+const ELIGIBILITY_GRACE_MS = 1500;
+
+/**
+ * **Whether this account should meet "Stay in the loop" at all** (founder QA, 2026-11-16).
+ *
+ * The question is the shared one (`shouldOfferPush`, as `shouldShowNotificationStep` asks it): only
+ * while the OS permission is undetermined and bingd has never put it. A follow on the
+ * People step offers the same permission in context and records `push.offered` whatever
+ * the answer, so somebody who just turned notifications on — or said Not now — is not
+ * asked the same thing again one screen later. Granted, blocked and unavailable are the OS
+ * having decided, and a question it cannot act on is not put.
+ *
+ * Granted here is not taken to mean a token is registered: this only decides whether to
+ * ask. Registration stays the contextual prompt's, best effort, and nothing on the skip
+ * path claims it succeeded. A read that fails or does not answer in time asks, as before.
+ *
+ * **A failed read is not "no push here".** `pushPermission` never throws: a native read
+ * that rejects is reported and comes back as `unavailable`, the same word a simulator
+ * gets. On a device that can receive push, `unavailable` can only mean the read failed,
+ * so it is treated as not knowing — and not knowing asks, unless bingd has already put
+ * the question (`push.offered`), which is the one thing this step exists not to repeat.
+ * The shared `shouldOfferPush` is left as it is: the contextual primer is right to stay
+ * quiet on a failed read, because it interrupts something else.
+ */
+async function eligibility(): Promise<boolean> {
+  const [offered, permission] = await Promise.all([pushAlreadyOffered(), pushPermission()]);
+  if (permission === 'unavailable' && canReceivePush()) return !offered;
+  return shouldOfferPush({ permission, offered });
+}
+
+async function shouldAsk(): Promise<boolean> {
+  try {
+    return await withGrace(eligibility(), ELIGIBILITY_GRACE_MS, true);
+  } catch {
+    return true;
+  }
+}
 
 /**
  * One approved outgoing follow is enough, so the query asks for one.
@@ -160,14 +208,20 @@ export default function NotificationsStepScreen() {
     return fresh ?? mountAnswer.current === true;
   };
 
-  const finish = async () => {
+  /**
+   * `shown`: the step was drawn and left. A step that was never shown is neither viewed
+   * nor completed in the funnel — `viewed − completed` stays a count of people who saw it.
+   */
+  const finish = async ({ shown }: { shown: boolean }) => {
     if (departing.current) return;
     departing.current = true;
 
-    track({
-      name: 'onboarding_step_completed',
-      props: { step: 'notifications', outcome: 'continued' },
-    });
+    if (shown) {
+      track({
+        name: 'onboarding_step_completed',
+        props: { step: 'notifications', outcome: 'continued' },
+      });
+    }
 
     /**
      * **Everything that has to be awaited is awaited first, and then the flow ends in one
@@ -242,10 +296,43 @@ export default function NotificationsStepScreen() {
     celebrate();
   };
 
+  /**
+   * Unknown until `shouldAsk` answers, so the question is never drawn and then pulled away.
+   * When it is not to be asked, the flow ends through `finish` — the same `advance('done')`,
+   * completion, landing rule and celebration as Continue — with nothing to press.
+   */
+  const [ask, setAsk] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void shouldAsk().then((answer) => {
+      if (!live) return;
+      setAsk(answer);
+      if (!answer) void finish({ shown: false });
+    });
+    return () => {
+      live = false;
+    };
+    // Once per mount: `finish` is guarded by `departing`, and the answer cannot change
+    // underneath a screen that is about to leave.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <NotificationStep onDone={() => void finish()} hadFollow={hadFollow} />
+      {ask ? (
+        <NotificationStep onDone={() => void finish({ shown: true })} hadFollow={hadFollow} />
+      ) : (
+        <Screen>
+          <View style={styles.resolving} testID="notifications-resolving">
+            <ActivityIndicator color={theme.semantic.action} />
+          </View>
+        </Screen>
+      )}
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  resolving: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+});

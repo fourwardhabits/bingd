@@ -140,9 +140,9 @@ describe('in a sheet, under a long list', () => {
     await draw('dense');
     const body = StyleSheet.flatten(screen.getByTestId('sheet-body').props.style);
     const content = StyleSheet.flatten(screen.getByTestId('sheet-content').props.style);
-    // `dense` is an alias of `size="standard"` since FU1113-B: 80% of the window below the
+    // `dense` is an alias of `size="standard"` since FU1113-B: 85% of the window below the
     // top inset (47, `renderWithProviders`' iPhone), in points rather than 90%.
-    expect(body.height).toBe(Math.round(0.8 * (Dimensions.get('window').height - 47)));
+    expect(body.height).toBe(Math.round(0.85 * (Dimensions.get('window').height - 47)));
     expect(content.flex).toBe(1);
   });
 });

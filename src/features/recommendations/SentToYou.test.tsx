@@ -636,8 +636,9 @@ describe('a recommendation the reader has already ranked', () => {
 
     const view = await renderWithProviders(<RecommendationsScreen />);
     await openSent(view);
-    // Seasons are on the TV side of the switch (founder QA, 2026-11-15).
-    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+    // Seasons are on the TV side of the switch (founder QA, 2026-11-15). Its name carries
+    // "new recommendations" once the list has landed (founder QA B6), so matched as a prefix.
+    await fireEvent.press(view.getByRole('radio', { name: /^TV/ }));
 
     // Having watched Season 1 says nothing about Season 2, which is the same identity
     // rule the spoiler mask and the watchlist already use.
@@ -1025,32 +1026,42 @@ describe('Sent to You and the Movies / TV switch', () => {
     expect(view.queryByText('The Last of Us, S1 (2010)')).toBeNull();
     expect(view.queryByText(/Severance/)).toBeNull();
 
-    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'TV, new recommendations' }));
 
     await waitFor(() => expect(view.getByText('The Last of Us, S1 (2010)')).toBeTruthy());
     expect(view.getByText(/Severance/)).toBeTruthy();
     expect(view.queryByText('Inception (2010)')).toBeNull();
   });
 
+  /**
+   * Since founder QA B6 the shortcut counts the side on screen (it said "3 new" over 1 film
+   * and 2 TV rows before), so the TV rows' newness is the dot on TV, which stays through
+   * reading Movies because reading Movies does not see them.
+   */
   it('marks only the side on screen, and the other side when the reader switches to it', async () => {
     mockRpcResults.recommendations_to_me = mixed();
     const view = await renderWithProviders(<RecommendationsScreen />);
     await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 3 new' })).toBeTruthy(),
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
     );
+    expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy();
     await openSent(view);
 
     await waitFor(() => expect(marks()).toHaveLength(1));
     expect(marks()[0][1]).toEqual({ p_operation_id: expect.any(String), p_ids: ['r1'] });
-    // The TV rows were not on screen, so they are still new.
-    await waitFor(() =>
-      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
-    );
+    // Movies is read, so its count clears. The TV rows were not on screen: still new.
+    await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
+    expect(view.getByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeTruthy();
 
-    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'TV, new recommendations' }));
 
     await waitFor(() => expect(marks()).toHaveLength(2));
     expect([...(marks()[1][1] as { p_ids: string[] }).p_ids].sort()).toEqual(['r2', 'r3']);
+    // Both sides read: no count, and no dot on either half.
+    await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
+    expect(view.getByRole('radio', { name: 'Movies' })).toBeTruthy();
+    expect(view.queryByTestId('compact-switch-indicator-movies', { includeHiddenElements: true })).toBeNull();
+    expect(view.queryByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeNull();
     // Seeing is not opening.
     expect(mockRpc.mock.calls.some(([name]) => name === 'mark_recommendation_opened')).toBe(
       false,
@@ -1071,5 +1082,162 @@ describe('Sent to You and the Movies / TV switch', () => {
       await new Promise((done) => setTimeout(done, 50));
     });
     expect(marks()).toHaveLength(0);
+  });
+});
+
+/**
+ * **The shortcut counts the side on screen; the other side is a dot** (founder QA B6,
+ * 2026-11-15). Movies counts unread films, TV unread series and seasons, over every fetched
+ * row on that side whatever the filters say. A side with unread rows while the other is
+ * selected gets a dot on its half of the switch, said as "TV, new recommendations".
+ */
+describe('the Sent to You count follows Movies / TV', () => {
+  const marks = () => mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendations_seen');
+  const show = (id: string, over: Record<string, unknown> = {}) =>
+    recommendation({ id, media_item_id: id, media_kind: 'series', media_title: id, ...over });
+  const film = (id: string, over: Record<string, unknown> = {}) =>
+    recommendation({ id, media_item_id: id, media_title: id, ...over });
+
+  beforeEach(() => {
+    mockRpcResults.mark_recommendations_seen = { status: 'ok', marked: 0 };
+  });
+
+  it('shows 1 on Movies and 2 on TV for one unread film and two unread shows', async () => {
+    mockRpcResults.recommendations_to_me = [film('f1'), show('s1'), show('s2')];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
+    );
+    expect(view.getByText('1', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy();
+    // The selected half never carries the dot: its count is the shortcut's.
+    expect(view.getByRole('radio', { name: 'Movies' })).toBeTruthy();
+    expect(view.queryByTestId('compact-switch-indicator-movies', { includeHiddenElements: true })).toBeNull();
+
+    // Switching the wall's medium, with the list closed, sees nothing.
+    await fireEvent.press(view.getByRole('radio', { name: 'TV, new recommendations' }));
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+    expect(view.getByRole('radio', { name: 'Movies, new recommendations' })).toBeTruthy();
+    expect(view.queryByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeNull();
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(0);
+  });
+
+  it('draws no count when the side on screen has none, and the dot on the side that does', async () => {
+    mockRpcResults.recommendations_to_me = [
+      film('f1', { seen_at: '2026-08-16T09:00:00.000Z' }),
+      film('f2', { opened_at: '2026-08-16T10:00:00.000Z' }),
+      show('s1'),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy(),
+    );
+    expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy();
+    expect(view.queryByText('1', { includeHiddenElements: true })).toBeNull();
+    expect(view.queryByText('New', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('counts every row on this side, not only those the filters leave', async () => {
+    // Two unread films, one a Horror. A Comedy filter hides it from the list, not from the
+    // count: hiding is not reading, and it is still new when the filter comes off.
+    mockRpcResults.recommendations_to_me = [film('f1'), film('f2', { genres: ['Horror'] })];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByRole('button', { name: 'Filters' }));
+    await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
+    await fireEvent.press(view.getByText('Comedy'));
+    await fireEvent.press(view.getByText('Apply'));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Filters, 1 on' })).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Sent to You, 2 new' })).toBeTruthy();
+
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toMatchObject({ p_ids: ['f1'] });
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
+    );
+  });
+
+  it('clears Movies by reading Movies, and keeps the TV dot until TV is read', async () => {
+    mockRpcResults.recommendations_to_me = [film('f1'), show('s1'), show('s2')];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 new' })).toBeTruthy(),
+    );
+
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect(marks()[0][1]).toMatchObject({ p_ids: ['f1'] });
+    await waitFor(() => expect(view.getByRole('button', { name: 'Sent to You' })).toBeTruthy());
+    expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy();
+    expect(view.getByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeTruthy();
+    // Nothing else was marked: the shows were never drawn.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(marks()).toHaveLength(1);
+  });
+
+  /**
+   * The cap, per side. A full unread-first page that was all unread when fetched is a floor
+   * for both sides, because the rows past it may be of either medium; the side's own rows
+   * are fewer than the cap and would wrongly read as exact if they were asked instead.
+   */
+  it('says "at least" on both sides of a capped page, and New on a read side', async () => {
+    delete mockRpcErrors.recommendations_to_me_page;
+    resetSentToYouSource();
+    mockRpcResults.recommendations_to_me_page = [
+      ...Array.from({ length: 120 }, (_, i) => film(`f${i}`, { read_rank: 0 })),
+      ...Array.from({ length: SENT_LIMIT - 120 }, (_, i) => show(`s${i}`, { read_rank: 0 })),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, at least 120 new' })).toBeTruthy(),
+    );
+    expect(view.getByText('120+', { includeHiddenElements: true })).toBeTruthy();
+    expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy();
+
+    // Reading Movies: nothing in hand on Movies is unread, but more films may be past the cap.
+    await openSent(view);
+    await waitFor(() => expect(marks()).toHaveLength(1));
+    expect((marks()[0][1] as { p_ids: string[] }).p_ids).toHaveLength(120);
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy();
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV, new recommendations' }));
+    await waitFor(() => expect(marks()).toHaveLength(2));
+    expect((marks()[1][1] as { p_ids: string[] }).p_ids).toHaveLength(SENT_LIMIT - 120);
+    // Both read and the page still a floor: New, and no dot, since no row proves either side.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, more may be new' })).toBeTruthy(),
+    );
+    expect(view.queryByTestId('compact-switch-indicator-movies', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('puts no dot on the switch over Top Rated, where Sent to You is not drawn', async () => {
+    mockRpcResults.recommendations_to_me = [film('f1'), show('s1')];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await waitFor(() =>
+      expect(view.getByRole('radio', { name: 'TV, new recommendations' })).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(await view.findByRole('menuitem', { name: /^Top Rated/ }));
+
+    await waitFor(() => expect(view.getByRole('radio', { name: 'TV' })).toBeTruthy());
+    expect(view.queryByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeNull();
   });
 });

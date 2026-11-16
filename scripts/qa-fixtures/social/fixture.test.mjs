@@ -318,6 +318,27 @@ describe('plan', () => {
     assert.ok(counts.includes(0) && counts.includes(1) && counts.some((n) => n >= 3));
     assert.ok(plan.entries.some((e) => e.type === 'recommend' && e.readState === 'unread'));
     assert.ok(plan.entries.some((e) => e.type === 'recommend' && e.readState !== 'unread'));
+    // Sent to You's Movies/TV split: some recipient has an unread movie and an unread season.
+    const kindOf = (key) => plan.titles.find((t) => t.key === key).kind;
+    const unread = plan.entries.filter(
+      (e) =>
+        e.type === 'recommend' && e.expectedState === 'delivered' && e.readState === 'unread',
+    );
+    assert.ok(
+      plan.accounts.some(
+        (a) =>
+          unread.some((e) => e.recipient === a.key && kindOf(e.title) === 'movie') &&
+          unread.some((e) => e.recipient === a.key && kindOf(e.title) === 'season'),
+      ),
+      'an unread movie and an unread TV recommendation for one recipient',
+    );
+    // A watch's own note, separate from the same title's review.
+    const watchNote = plan.entries.find((e) => e.type === 'watchNote');
+    assert.ok(watchNote);
+    const review = plan.entries.find(
+      (e) => e.type === 'note' && e.actor === watchNote.actor && e.title === watchNote.title,
+    );
+    assert.ok(review && review.text !== watchNote.text);
   });
 
   it('refuses entries that target QA or non-fixture accounts, and self-votes', () => {
@@ -530,6 +551,9 @@ describe('setup, verify, re-run', () => {
     assert.equal(recs.filter((r) => r.opened_at).length, 1);
     assert.equal(recs.filter((r) => r.seen_at && !r.opened_at).length, 1);
     assert.equal(votes.size, 6);
+    const watched = [...fake.state.watchEvents.values()].filter((w) => w.note != null);
+    assert.equal(watched.length, 1, 'one watch carries a note');
+    assert.equal(watched[0].user_id, id(1));
   });
 
   it('verify exits non-zero on drift', async () => {

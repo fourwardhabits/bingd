@@ -8,7 +8,7 @@ import { join } from 'path';
 const root = join(__dirname, '../../..');
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
-/** Full-size browsing lists: the standard 80% sheet with a pinned Close. */
+/** Full-size browsing lists: the standard 85% sheet with a pinned Close. */
 const STANDARD = [
   'src/features/profile/RankedTitlesSheet.tsx',
   'src/features/profile/FollowListSheet.tsx',

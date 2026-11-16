@@ -48,6 +48,7 @@ import {
   asCollectionItem as recommendationAsItem,
   sentInMedium,
   sentShortcutBadge,
+  unreadInMedium,
   useMarkRecommendationOpened,
   useSentToYou,
   type SentRecommendation,
@@ -857,7 +858,20 @@ export default function RecommendationsScreen() {
   // orders unopened first, so a full page of unopened rows means there may be more unread
   // ones (`use-sent-to-you.ts`). The chip says so rather than presenting a cap as a total
   // (independent review 21c), including when none in hand is unread (Codex review, #290).
-  const sentBadge = sentShortcutBadge(sentRows);
+  //
+  // **This side of Movies / TV only** (founder QA B6, 2026-11-15), over every fetched row
+  // on it and not just the filtered ones: the number is what the list under it can clear.
+  // The other side's unread is a dot on its half of the switch, below.
+  const sentBadge = sentShortcutBadge(sentRows, medium);
+  const otherMedium: Medium = medium === 'movies' ? 'tv' : 'movies';
+  // Not on Top Rated: Sent to You is not on that wall, and the switch there chooses which
+  // side of Top Rated is shown, so a dot would point at a list the reader cannot reach.
+  const otherHasUnread = !onTopRated && unreadInMedium(sentRows, otherMedium) > 0;
+  const mediumOptions = otherHasUnread
+    ? FOR_YOU_MEDIA.map((option) =>
+        option.id === otherMedium ? { ...option, indicator: SENT_INDICATOR } : option,
+      )
+    : FOR_YOU_MEDIA;
   const activeCount = activeFilterCount(filters);
   // Items, not senders, and the server's own count rather than the length of a capped
   // list — see `useRecommendationRequests`.
@@ -1010,7 +1024,7 @@ export default function RecommendationsScreen() {
         right={
           <CompactSwitch
             accessibilityLabel="Medium"
-            options={FOR_YOU_MEDIA}
+            options={mediumOptions}
             value={topMedium ?? medium}
             onChange={(next) =>
               changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
@@ -1374,6 +1388,13 @@ const FOR_YOU_MEDIA: readonly CompactSwitchOption<Medium>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV' },
 ];
+
+/**
+ * What the dot on the other half of Movies / TV says (founder QA B6, 2026-11-15): "TV, new
+ * recommendations". No count: the number is the shortcut's, for the side on screen, and a
+ * second one in the header would be a second badge to reconcile with it.
+ */
+const SENT_INDICATOR = 'new recommendations';
 
 /** Which wall, in the page's dropdown. */
 const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [

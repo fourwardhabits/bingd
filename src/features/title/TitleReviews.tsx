@@ -4,7 +4,11 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { formatScore } from '@/features/collection/score';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
-import { ReviewCard, formatReviewDate, type ReviewCardReview } from '@/features/title/ReviewCard';
+import {
+  ReviewCard,
+  formatReviewDate,
+  type ReviewCardReview,
+} from '@/features/title/ReviewCard';
 import {
   REVIEW_LIMIT,
   type ReviewOrder,
@@ -104,6 +108,11 @@ export type TitleReviewsProps = {
   viewer?: { name: string; avatarUri: string | null };
   /** The review whose Helpful vote is in flight, announced busy on its card. */
   helpfulPendingId?: string | null;
+  /**
+   * The order is chosen in the sheet's heading row (`ReviewsSheetHeader`), so the list
+   * draws no tabs of its own (founder QA, 2026-11-16). The title page's section is unchanged.
+   */
+  sortInHeader?: boolean;
 };
 
 /**
@@ -146,6 +155,7 @@ export function TitleReviews({
   truncated = false,
   viewer,
   helpfulPendingId = null,
+  sortInHeader = false,
 }: TitleReviewsProps) {
   // Which review's reason sheet is open, by `user_media.id`.
   const [reporting, setReporting] = useState<string | null>(null);
@@ -207,21 +217,17 @@ export function TitleReviews({
           it — a review of something you have not placed in your list is a review with
           no score, and the founder's route in is to rank first. */}
       {editorial ? null : (
-      <View style={styles.compose}>
-        {viewerRanked ? (
-          <Button
-            label={viewerHasReview ? 'Edit your review' : 'Write a review'}
-            kind="secondary"
-            onPress={onWrite}
-          />
-        ) : (
-          <Button
-            label={`Rank to leave a review`}
-            kind="secondary"
-            onPress={onWrite}
-          />
-        )}
-      </View>
+        <View style={styles.compose}>
+          {viewerRanked ? (
+            <Button
+              label={viewerHasReview ? 'Edit your review' : 'Write a review'}
+              kind="secondary"
+              onPress={onWrite}
+            />
+          ) : (
+            <Button label={`Rank to leave a review`} kind="secondary" onPress={onWrite} />
+          )}
+        </View>
       )}
 
       {/* Offered once there is an order to choose. Kept while Following is active even
@@ -230,7 +236,8 @@ export function TitleReviews({
           sheet it also stays while a new order loads, and while any order but the
           default is chosen: a control that vanishes mid-switch is a control the reader
           cannot take back (post-QA sprint 2). */}
-      {limit === undefined &&
+      {!sortInHeader &&
+      limit === undefined &&
       (listed.length > 1 ||
         sort === 'following' ||
         (editorial && (loading || sort !== 'top_desc'))) ? (
@@ -451,7 +458,11 @@ export function ReviewsPreview({
               hitSlop={{ top: 12, bottom: 12 }}
               style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
             >
-              <Ionicons name="refresh" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Ionicons
+                name="refresh"
+                size={theme.layout.icon.sm}
+                color={theme.semantic.action}
+              />
               <Text variant="callout" tone="action">
                 Try again
               </Text>
@@ -588,7 +599,11 @@ const EDITORIAL_SORT_OPTIONS: readonly SortOption[] = [
   {
     id: 'top',
     labelFor: (sort) =>
-      sort === 'top_desc' ? `Helpful ${DOWN}` : sort === 'top_asc' ? `Helpful ${UP}` : 'Helpful',
+      sort === 'top_desc'
+        ? `Helpful ${DOWN}`
+        : sort === 'top_asc'
+          ? `Helpful ${UP}`
+          : 'Helpful',
     spokenFor: (sort) =>
       sort === 'top_desc'
         ? 'Most helpful first'
@@ -609,7 +624,11 @@ const EDITORIAL_SORT_OPTIONS: readonly SortOption[] = [
   {
     id: 'rating',
     labelFor: (sort) =>
-      sort === 'rating_desc' ? `Rating ${DOWN}` : sort === 'rating_asc' ? `Rating ${UP}` : 'Rating',
+      sort === 'rating_desc'
+        ? `Rating ${DOWN}`
+        : sort === 'rating_asc'
+          ? `Rating ${UP}`
+          : 'Rating',
     spokenFor: (sort) =>
       sort === 'rating_desc'
         ? 'Highest rated first'
@@ -623,6 +642,168 @@ const EDITORIAL_SORT_OPTIONS: readonly SortOption[] = [
 function nextEditorialOrder(current: ReviewOrder, pressed: SortAxis): ReviewOrder {
   if (pressed === 'rating') return current === 'rating_desc' ? 'rating_asc' : 'rating_desc';
   return nextSort(current, pressed);
+}
+
+/** "1 review", "2 reviews": the sheet's heading, in words (founder QA, 2026-11-16). */
+export const reviewCountHeading = (total: number): string =>
+  total === 1 ? '1 review' : `${total} reviews`;
+
+/** What the compact control says it is showing, in the words of its own menu. */
+export const reviewOrderLabel = (order: ReviewOrder): string =>
+  ({
+    top_desc: 'Most helpful',
+    top_asc: 'Least helpful',
+    recent_desc: 'Newest',
+    recent_asc: 'Oldest',
+    rating_desc: 'Highest rated',
+    rating_asc: 'Lowest rated',
+    following: 'People I follow',
+  })[order];
+
+type MenuChoice = { order: ReviewOrder; label: string };
+
+/**
+ * **The Reviews sheet's heading row** (founder QA, 2026-11-16): "N reviews" on the left and
+ * the order it is in on the right, as a compact control that opens its choices in place.
+ *
+ *   Sort by   Most helpful · Newest · Oldest · Highest rated · Lowest rated
+ *   Show      Everyone · People I follow
+ *
+ * The choices are the orders the sheet already had, regrouped by what they answer.
+ * **People I follow is a filter, not a sort direction**, so it has its own group; inside it
+ * the order is Most helpful's, as it always was (`following`). The two rating orders are
+ * offered only when `ratingAvailable` — every review is in hand — because ranking a first
+ * page by score is not ranking the reviews. The panel opens inline rather than as a sheet:
+ * this is already a sheet, and a second modal over it is what both platforms handle worst.
+ * With one review there is nothing to choose, so the control is drawn but quiet, and the
+ * row does not change shape when a second review arrives.
+ */
+export function ReviewsSheetHeader({
+  total,
+  order,
+  ratingAvailable,
+  onChange,
+}: {
+  total: number;
+  order: ReviewOrder;
+  ratingAvailable: boolean;
+  onChange: (next: ReviewOrder) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const following = order === 'following';
+  const quiet = total <= 1 && order === 'top_desc';
+  const sortBy: MenuChoice[] = [
+    { order: 'top_desc', label: 'Most helpful' },
+    { order: 'recent_desc', label: 'Newest' },
+    { order: 'recent_asc', label: 'Oldest' },
+    ...(ratingAvailable
+      ? [
+          { order: 'rating_desc' as const, label: 'Highest rated' },
+          { order: 'rating_asc' as const, label: 'Lowest rated' },
+        ]
+      : []),
+  ];
+  const choose = (next: ReviewOrder) => {
+    setOpen(false);
+    if (next !== order) onChange(next);
+  };
+  return (
+    <View testID="reviews-sheet-header">
+      <View style={styles.headerRow}>
+        <Text variant="title2" accessibilityRole="header" style={styles.headerTitle}>
+          {total ? reviewCountHeading(total) : 'Reviews'}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Sort reviews, ${reviewOrderLabel(order)}`}
+          accessibilityState={{ expanded: open, disabled: quiet }}
+          disabled={quiet}
+          onPress={() => setOpen((was) => !was)}
+          style={({ pressed }) => [
+            styles.orderControl,
+            quiet && styles.quiet,
+            pressed && styles.pressed,
+          ]}
+          testID="reviews-sort-control"
+        >
+          <Text variant="callout" tone={quiet ? 'tertiary' : 'action'} numberOfLines={1}>
+            {reviewOrderLabel(order)}
+          </Text>
+          <Ionicons
+            name="swap-vertical-outline"
+            size={theme.layout.icon.sm}
+            color={quiet ? theme.text.tertiary : theme.semantic.action}
+          />
+        </Pressable>
+      </View>
+      {open ? (
+        <View style={styles.menu} testID="reviews-sort-menu">
+          <MenuGroup title="Sort by">
+            {sortBy.map((choice) => (
+              <MenuRow
+                key={choice.order}
+                label={choice.label}
+                // Inside People I follow the order is Most helpful's, so that one is ticked.
+                selected={following ? choice.order === 'top_desc' : order === choice.order}
+                onPress={() => choose(choice.order)}
+              />
+            ))}
+          </MenuGroup>
+          <MenuGroup title="Show">
+            <MenuRow
+              label="Everyone"
+              selected={!following}
+              onPress={() => choose(following ? 'top_desc' : order)}
+            />
+            <MenuRow
+              label="People I follow"
+              selected={following}
+              onPress={() => choose('following')}
+            />
+          </MenuGroup>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function MenuGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.menuGroup} accessibilityRole="radiogroup" accessibilityLabel={title}>
+      <Text variant="caption" tone="tertiary" style={styles.menuTitle}>
+        {title}
+      </Text>
+      {children}
+    </View>
+  );
+}
+
+function MenuRow({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ selected, checked: selected }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+      testID={`reviews-sort-${label.toLowerCase().replace(/ /g, '-')}`}
+    >
+      <Text variant="body" style={styles.menuLabel}>
+        {label}
+      </Text>
+      {selected ? (
+        <Ionicons name="checkmark" size={theme.layout.icon.sm} color={theme.semantic.action} />
+      ) : null}
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -642,5 +823,26 @@ const styles = StyleSheet.create({
   truncated: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
   preview: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  // The heading and its control on one row; a long count never pushes the control off it.
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  headerTitle: { flex: 1, minWidth: 0 },
+  orderControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    flexShrink: 0,
+  },
+  quiet: { opacity: 0.6 },
+  menu: { gap: theme.space[3], paddingTop: theme.space[2] },
+  menuGroup: { gap: theme.space[1] },
+  menuTitle: { textTransform: 'uppercase' },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: theme.layout.minTapTarget,
+    gap: theme.space[2],
+  },
+  menuLabel: { flex: 1 },
   previewEmpty: { gap: theme.space[1] },
 });

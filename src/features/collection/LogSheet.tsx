@@ -197,6 +197,35 @@ export type LogSheetProps = {
    * Nothing else about the sheet changes.
    */
   inWatchHistory?: boolean;
+  /**
+   * **Share a watch's note as a review** (B5): the composer opens on this text, which is a
+   * watch's own private note (`watch_events.note`) offered by Watch History.
+   *
+   * It is a *draft*, held rather than written, and the rule that keeps it safe is that
+   * nothing about it reaches the server until the reader takes the composer's own explicit
+   * act — *Share as a review*:
+   *
+   *   - Opening writes nothing. The text is an overlay, not a dirty edit, so closing the
+   *     sheet, collapsing the row, blurring the field and backgrounding the app all leave
+   *     the title's note exactly as it was.
+   *   - Typing and the Spoilers chip are held too. The autosave is the composer's contract
+   *     for writing the reader has already committed to; this text has not been, and
+   *     autosaving it would rewrite — and, over a published review, republish — the title's
+   *     note before anybody pressed Share.
+   *   - It opens **private**, whatever is stored and whatever the remembered choice says.
+   *     The watch note is writing that already exists, and `NoteClaims`' rule is that no
+   *     caller pre-sets *Share as a review* on for such writing: the reader turns it on.
+   *   - That tap is the commit. It writes the draft as it then reads, with the spoiler
+   *     choice beside it, through `saveDetails`' ordinary `save_note` path — the title's
+   *     review pathway, and never `set_watch_details`. From then on the composer is the
+   *     ordinary one: further typing autosaves into the review it just published.
+   *
+   * Replacing an existing note is the caller's question to ask before it seeds this
+   * (Watch History confirms *Replace your review?*). Ignored in the post-rank state, which
+   * is a ranking returning to the sheet rather than the reader opening it to write.
+   * The watch note itself is never read or written here.
+   */
+  seedNote?: string | null;
 };
 
 /**
@@ -245,6 +274,7 @@ export function LogSheet({
   inWatchHistory,
   showDecision,
   onUpdateShow,
+  seedNote,
 }: LogSheetProps) {
   if (!title) return null;
 
@@ -268,6 +298,7 @@ export function LogSheet({
       inWatchHistory={inWatchHistory}
       showDecision={showDecision}
       onUpdateShow={onUpdateShow}
+      seedNote={seedNote}
     />
   );
 }
@@ -337,6 +368,7 @@ function Body({
   inWatchHistory = false,
   showDecision = null,
   onUpdateShow,
+  seedNote = null,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -420,8 +452,20 @@ function Body({
    * a real edit and `??` passes it through, which is what makes clearing a note work.
    */
   const [bucketEdit, setBucketEdit] = useState<BucketId | null>(null);
-  const [noteEdit, setNoteEdit] = useState<string | null>(null);
-  const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
+  /**
+   * A watch's note offered as a review (`seedNote`), read once as the sheet mounts — it is
+   * keyed by the title, so the initial value is the answer. The draft is the note overlay
+   * and the visibility opens private; `holdingSeed` is what keeps either from being
+   * written until *Share as a review* (see the prop). A ref, because the autosave's
+   * timers and `saveDetails` read it outside render; `holding` is the same fact for render.
+   */
+  const [seeded] = useState(() => seedNote !== null && !postRank);
+  const holdingSeed = useRef(seeded);
+  const [holding, setHolding] = useState(seeded);
+  const [noteEdit, setNoteEdit] = useState<string | null>(seeded ? seedNote : null);
+  const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(
+    seeded ? 'private' : null,
+  );
   const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
   const [dateEdit, setDateEdit] = useState<string | null>(null);
   /**
@@ -481,7 +525,7 @@ function Body({
     // `postRank` wins over both, for the reason recorded above the `openWriting` prop:
     // a reveal that arrives with a row already open under the keyboard is not the sheet
     // the reader just finished ranking into.
-    postRank ? null : openSection ? openSection : openWriting ? 'notes' : null,
+    postRank ? null : openSection ? openSection : openWriting || seeded ? 'notes' : null,
   );
   /**
    * A bucket tap is being handled, so a second one is ignored rather than raced.
@@ -1055,7 +1099,10 @@ function Body({
     // the visibility a new note is written with. The date does not: it carries no
     // visibility, and holding it behind a note preference dropped a date picked in the
     // instant before that local read landed (Codex review of the combined candidate).
-    const noteChanged = notesReady && trimmed !== (knownNote.current ?? state.note);
+    // A held seed is not the reader's writing yet (`seedNote`): a date written meanwhile
+    // goes on its own, and the draft and its claims wait for *Share as a review*.
+    const held = holdingSeed.current;
+    const noteChanged = !held && notesReady && trimmed !== (knownNote.current ?? state.note);
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
     // The two claims travel with the note and are meaningless without one, so a
     // toggle flipped against an empty field is held locally and written by the
@@ -1069,6 +1116,7 @@ function Body({
     const storedVisibility = knownClaims.current?.visibility ?? state.noteVisibility;
     const storedSpoilers = knownClaims.current?.spoilers ?? state.noteSpoilers;
     const claimsChanged =
+      !held &&
       notesReady &&
       Boolean(trimmed) &&
       (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
@@ -1889,6 +1937,8 @@ function Body({
                 label="Note"
                 onChangeText={(next) => {
                   setNoteEdit(next);
+                  // A held seed is edited, not saved: Share is its commit (`seedNote`).
+                  if (holdingSeed.current) return;
                   // Typing is what saves — see the autosave block. The dirty flag
                   // and the timer are refs, so this costs no render beyond the
                   // overlay's own. (Disabled rule: an event handler, not render;
@@ -1904,9 +1954,24 @@ function Body({
                 spoilers={spoilers}
                 onSpoilers={(next) => {
                   setSpoilersEdit(next);
+                  // Held with the draft, and written with it by Share (`seedNote`).
+                  if (holdingSeed.current) return;
                   void saveDetails({ spoilers: next });
                 }}
                 onVisibility={(next) => {
+                  if (holdingSeed.current) {
+                    // The held draft opens private, so the one tap it can take is Share,
+                    // and that tap is its commit. An emptied draft is not shared: it would
+                    // be `save_note` clearing the title's note behind a button that says
+                    // it publishes one.
+                    if (next !== 'public') return;
+                    if (!note.trim()) {
+                      setProblem('Write something to share as a review.');
+                      return;
+                    }
+                    holdingSeed.current = false;
+                    setHolding(false);
+                  }
                   setVisibilityEdit(next);
                   // The reader's explicit act, and the only thing that moves the remembered
                   // choice. It decides how the next *new* note opens; this note's own
@@ -1915,6 +1980,13 @@ function Body({
                   void saveDetails({ visibility: next });
                 }}
               />
+              {holding ? (
+                // Said once, under the chip that commits it: the composer's usual promise
+                // is that typing saves, and for this draft it does not.
+                <Text variant="caption" tone="tertiary" testID="log-note-seed-hint">
+                  From this watch’s note. Nothing is saved until you share it.
+                </Text>
+              ) : null}
             </View>
           ) : null}
         </View>
