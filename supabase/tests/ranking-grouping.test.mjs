@@ -279,11 +279,28 @@ describe('publishing on its own', () => {
     assert.equal((await posts()).length, 2);
   });
 
-  it('never mixes ladders: a season sitting does not join a movie post', async () => {
-    await sitting([await rankedMovie('Film')]);
-    await sitting([await rankedSeason('Show')]);
+  /**
+   * Reversed by 20261128000100 (founder spec 2026-11-16, §5C): grouping is a social
+   * presentation, so a season sitting joins a movie post inside the window. Each title
+   * keeps its own ladder, standing and score; the sheet labels each by its own list.
+   */
+  it('joins across ladders, while each title keeps its own ladder and score', async () => {
+    const film = await rankedMovie('Film');
+    const season = await rankedSeason('Show');
+    await sitting([film]);
+    const second = await sitting([season]);
+    assert.equal(second.result.joined, true);
     const all = await posts();
-    assert.equal(all.length, 2);
+    assert.equal(all.length, 1);
+    assert.equal(all[0].payload.count, 2);
+    const { rows } = await t.sql(
+      `select media_item_id, category, score from ranking_batch_titles($1)`,
+      [all[0].id],
+    );
+    const byId = Object.fromEntries(rows.map((row) => [row.media_item_id, row]));
+    assert.equal(byId[film].category, 'movies');
+    assert.equal(byId[season].category, 'tv_seasons');
+    assert.equal(Number(byId[season].score), 10, 'top of its own ladder, not the movies');
   });
 
   it('never extends a post published before this migration (no recorded start)', async () => {
