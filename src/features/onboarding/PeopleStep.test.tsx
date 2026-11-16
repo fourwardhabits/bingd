@@ -270,12 +270,15 @@ describe('an invited account', () => {
    * No candidates: the acknowledgment stands on its own and the offer becomes an
    * invitation. There is no empty list and no "no suggestions yet".
    */
-  it('offers an invitation rather than an empty list when the walk finds nobody', async () => {
+  // Founder QA, 2026-11-16: no invitation in onboarding; the acknowledgment stands alone.
+  it('shows neither an empty list nor an invitation when the walk finds nobody', async () => {
     invitedBy('abi', { following: true, followed_by: true });
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
-    expect(view.getByText('Invite friends')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('abi invited you to bingd.')).toBeTruthy());
+    expect(view.queryByLabelText('Bring somebody with you')).toBeNull();
+    expect(view.queryByText('Invite friends')).toBeNull();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
   });
 });
 
@@ -326,7 +329,7 @@ describe('an organic account', () => {
 
     await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
     expect(view.queryByLabelText('Suggested for you')).toBeNull();
-    expect(view.getByLabelText('Bring somebody with you')).toBeTruthy();
+    expect(view.queryByLabelText('Bring somebody with you')).toBeNull();
   });
 
   it('describes each row with a fact', async () => {
@@ -367,12 +370,14 @@ describe('an organic account', () => {
    * A genuinely empty read is not the same as a failed one. Nobody is told they are alone;
    * the offer is simply the one that still makes sense.
    */
-  it('offers an invitation when there is genuinely nobody to suggest', async () => {
+  it('offers no invitation when there is genuinely nobody to suggest, and Continue works', async () => {
     organic([]);
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
-    expect(view.getByText('Invite friends')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('Find your friends')).toBeTruthy());
+    expect(view.queryByLabelText('Bring somebody with you')).toBeNull();
+    expect(view.queryByText('Invite friends')).toBeNull();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
   });
 });
 

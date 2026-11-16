@@ -69,11 +69,18 @@ export function NoteClaims({
   spoilers,
   onVisibility,
   onSpoilers,
+  caption,
 }: {
   visibility: NoteVisibility;
   spoilers: boolean;
   onVisibility: (next: NoteVisibility) => void;
   onSpoilers: (next: boolean) => void;
+  /**
+   * The line under the chips, when the default would say the wrong thing. Watch History's
+   * editor passes its own (2026-11-16): there, Share publishes a copy as the title's
+   * review and the watch's own note stays private, which the default does not say.
+   */
+  caption?: string;
 }) {
   return (
     <>
@@ -95,12 +102,13 @@ export function NoteClaims({
           onToggle={() => onVisibility(visibility === 'public' ? 'private' : 'public')}
         />
       </View>
-      <Text variant="caption" tone="tertiary">
-        {visibility === 'private'
-          ? 'Only you can read this.'
-          : spoilers
-            ? 'Shown with your rating, hidden until people who have not seen it tap to reveal.'
-            : 'Shown with your rating on your profile and in your friends’ feeds.'}
+      <Text variant="caption" tone="tertiary" testID="note-claims-caption">
+        {caption ??
+          (visibility === 'private'
+            ? 'Only you can read this.'
+            : spoilers
+              ? 'Shown with your rating, hidden until people who have not seen it tap to reveal.'
+              : 'Shown with your rating on your profile and in your friends’ feeds.')}
       </Text>
     </>
   );

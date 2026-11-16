@@ -270,7 +270,7 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
    * FU1113-A (2026-11-13). A watch's note is `watch_events.note`, owner-only by schema, so
    * the review's two claims have nothing to do here; the line says who can read it.
    */
-  it('offers no review claims on a watch’s own note, only that it is private', async () => {
+  it('offers the review claims on a watch’s own note, both off, and writes nothing on opening', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -286,9 +286,10 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Note/));
 
-    expect(view.getByText('Only you see this note')).toBeTruthy();
-    expect(view.queryByLabelText('This note contains spoilers')).toBeNull();
-    expect(view.queryByLabelText('Share this note as a public review')).toBeNull();
+    // Founder QA, 2026-11-16: visible before the note has ever been saved, both off.
+    expect(view.getByText('Only you see this note.')).toBeTruthy();
+    expect(view.getByLabelText('This note contains spoilers')).toBeTruthy();
+    expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
     // Opening the field is not an act: nothing is written until Save.
     expect(mockSaveNote).not.toHaveBeenCalled();
     expect(mockDetails).not.toHaveBeenCalled();
@@ -653,8 +654,14 @@ describe('a collapsed row', () => {
     two();
     const view = await renderWithProviders(<WatchHistoryScreen />);
     const main = view.getByTestId('watch-main-w1');
-    const [lead, right] = main.children as unknown as { props: { testID?: string } }[];
-    expect(lead?.props.testID).toBe('watch-lead-w1');
+    const [left, right] = main.children as unknown as {
+      props: { testID?: string };
+      children: { props: { testID?: string } }[];
+    }[];
+    // The left column holds the date block first (B4: and the acts after it, when no note
+    // comes between); the score is alone in the right one.
+    expect(left?.props.testID).toBe('watch-lead-column-w1');
+    expect(left?.children[0]?.props.testID).toBe('watch-lead-w1');
     expect(right?.props.testID).toBe('watch-score-w1');
     expect(StyleSheet.flatten(main.props.style).alignItems).toBe('flex-start');
     // The date is the block's first line, in the headline style; Edit is not in it.

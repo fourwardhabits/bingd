@@ -1,9 +1,7 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
 
 import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
-import { theme } from '@/ui/tokens';
 
 import { clearCelebrations, hasCelebrations } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
@@ -967,24 +965,15 @@ describe('one turn of the loop', () => {
    * Share is an offer beside the flow's one action, not a fork in it: Continue keeps the
    * fill, and the card opens over the payoff and comes straight back to it.
    */
-  it('offers the First Five card beside Continue, built from this reader\u2019s own five', async () => {
+  // Founder QA, 2026-11-16: the payoff no longer offers the share card; Continue goes on.
+  it('goes on with Continue, with no share card offered on the payoff', async () => {
     alreadyRanked(5);
     const view = await renderWithProviders(<TasteScreen />);
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
 
     expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
-    await fireEvent.press(view.getByRole('button', { name: 'Share your First Five' }));
-
-    await waitFor(() => expect(view.getByTestId('first-five-card')).toBeTruthy());
-    expect(view.getAllByTestId('first-five-card-row')).toHaveLength(5);
-    const card = view.getByTestId('first-five-card');
-    expect(within(card).getByText(/Ranked 1/)).toBeTruthy();
-    expect(within(card).getByText(/Ranked 5/)).toBeTruthy();
-
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
-
-    await waitFor(() => expect(view.queryByTestId('first-five-card')).toBeNull());
-    expect(view.getByText('Your First Five')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Share your First Five' })).toBeNull();
+    expect(view.queryByTestId('first-five-card')).toBeNull();
   });
 
   /**
@@ -1079,9 +1068,7 @@ describe('the reveal after every placement', () => {
     expect(reveal.props.accessibilityLabel).toMatch(/ scored 8\.7 out of 10\./);
     expect(view.getByLabelText('Rank Inception')).toBeTruthy();
     // No explanation under the score any more (founder QA, 2026-11-16).
-    expect(
-      view.queryByText(/Your score comes from where this lands in your rankings/),
-    ).toBeNull();
+    expect(view.queryByText(/Your score comes from where this lands in your rankings/)).toBeNull();
     expect(shows().refused).toBe(0);
   });
 
@@ -1322,39 +1309,25 @@ describe('Your First Five', () => {
   });
 
   /** OB-4 (2026-11-14): what Continue leads to, after the five and inside the scroll. */
-  it('says what is up next, after the five rows and inside the scroll', async () => {
+  /**
+   * **The five, then one Continue** (founder QA, 2026-11-16): no Up next card, no Share and
+   * no Use a different account on this screen, and no space held for any of them. Sharing
+   * lives on in `FirstFiveShareSheet`; switching accounts stays on the picker.
+   */
+  it('ends on the five rows and a single Continue in the footer', async () => {
     const view = await arrive();
     await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
 
-    const block = view.getByTestId('first-five-up-next');
-    expect(within(block).getByRole('header', { name: 'Up next' })).toBeTruthy();
-    expect(
-      within(block).getByText(
-        'Bring your history, find your friends, then see picks made for your taste.',
-      ),
-    ).toBeTruthy();
-    // A statement, not a fork: nothing in it to press.
-    expect(within(block).queryAllByRole('button')).toHaveLength(0);
-    expect(StyleSheet.flatten(block.props.style)).toMatchObject({
-      backgroundColor: theme.surface.sunken,
-      borderRadius: theme.radius.card,
-      padding: theme.layout.cardPadding,
-      marginHorizontal: theme.layout.gutter,
-      marginTop: theme.space[3],
-      gap: theme.space[1],
-    });
-
-    // Scrolls with the rows; the footer is outside the scroll and holds the two actions.
-    const ancestors: string[] = [];
-    for (let node = block.parent; node; node = node.parent) ancestors.push(String(node.type));
-    expect(ancestors.some((type) => /ScrollView/.test(type))).toBe(true);
+    expect(view.queryByTestId('first-five-up-next')).toBeNull();
+    expect(view.queryByText(/Bring your history, find your friends/)).toBeNull();
     const footer = view.getByTestId('onboarding-footer');
-    expect(within(footer).queryByTestId('first-five-up-next')).toBeNull();
+    expect(within(footer).getAllByRole('button')).toHaveLength(1);
     expect(within(footer).getByRole('button', { name: 'Continue' })).toBeTruthy();
-    expect(within(footer).getByRole('button', { name: 'Share your First Five' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Share your First Five' })).toBeNull();
+    expect(view.queryByRole('button', { name: /different account/i })).toBeNull();
   });
 
-  it('keeps Share unavailable until all five rows have loaded', async () => {
+  it('offers Continue alone while the five load, and after', async () => {
     // Four already placed; the fifth lands while the refetch that would draw it is parked,
     // so the payoff opens on the run's count of five with four rows in hand.
     alreadyRanked(4);
@@ -1368,12 +1341,13 @@ describe('Your First Five', () => {
     await closeReveal(view);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
-    const share = () => view.getByRole('button', { name: 'Share your First Five' });
-    expect(share().props.accessibilityState.disabled).toBe(true);
-    expect(view.getByTestId('first-five-up-next')).toBeTruthy();
+    // Founder QA, 2026-11-16: Continue is the payoff's one action, loading or loaded.
+    expect(view.queryByRole('button', { name: 'Share your First Five' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
 
     await act(async () => releaseReadsOf('rankings'));
-    await waitFor(() => expect(share().props.accessibilityState.disabled).toBe(false));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Share your First Five' })).toBeNull();
   });
 
   it('continues into the optional Letterboxd step rather than into the app', async () => {

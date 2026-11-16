@@ -320,7 +320,7 @@ describe('the search’s other states', () => {
     await type(view, 'zzz');
 
     await waitFor(() =>
-      expect(view.getByText('No one by that name yet. Invite them instead.')).toBeTruthy(),
+      expect(view.getByText('No one found.')).toBeTruthy(),
     );
   });
 
@@ -349,7 +349,7 @@ describe('the footer', () => {
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/notifications');
   });
 
-  it('holds exactly one Maroon fill: Continue, with Invite friends outlined beside it', async () => {
+  it('holds one action: Continue, filled, and no invitation (founder QA, 2026-11-16)', async () => {
     mockSuggestions = [suggestion('gio')];
     const view = await open();
     await waitFor(() => expect(view.getByLabelText('Suggested for you')).toBeTruthy());
@@ -363,65 +363,42 @@ describe('the footer', () => {
       (node.children ?? []).some((child) => typeof child !== 'string' && fills(child));
 
     const buttons = within(footer).getAllByRole('button');
-    expect(buttons).toHaveLength(2);
-    const invite = within(footer).getByRole('button', { name: 'Invite friends' });
+    expect(buttons).toHaveLength(1);
     const proceed = within(footer).getByRole('button', { name: 'Continue' });
     expect(fills(proceed as unknown as Node)).toBe(true);
-    expect(fills(invite as unknown as Node)).toBe(false);
-    expect(buttons.filter((button) => fills(button as unknown as Node))).toHaveLength(1);
+    expect(within(footer).queryByRole('button', { name: 'Invite friends' })).toBeNull();
   });
 });
 
 /**
- * **One invite button, always reachable** (OB2-FIX2, Codex on PR #305).
- *
- * With no suggestions, the only invite is the inline one under "Bring somebody with you",
- * and a typed search draws in that block's place. The footer's secondary invite has to
- * stand in for it then, or "Invite them instead" points at nothing — and must not appear
- * beside the inline one when the block is back.
+ * **No invitation in onboarding** (founder QA, 2026-11-16; it was OB2-FIX2's one invite
+ * button). Somebody who has not started using bingd is not sent to invite others: not
+ * with suggestions, not without them, and not when a search finds nobody. Invite friends
+ * stays in the app itself.
  */
-describe('the invite button', () => {
+describe('invitations', () => {
   const invites = (view: View) => view.queryAllByRole('button', { name: 'Invite friends' });
-  const inFooter = (view: View) =>
-    within(view.getByTestId('onboarding-footer')).queryAllByRole('button', {
-      name: 'Invite friends',
-    });
 
-  it('is the inline one alone when there are no suggestions and nothing is typed', async () => {
+  it('are not offered when there are no suggestions and nothing is typed', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
-
-    expect(invites(view)).toHaveLength(1);
-    expect(inFooter(view)).toHaveLength(0);
-  });
-
-  it('moves to the footer when a search with no suggestions finds nobody', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
-
-    await type(view, 'zzz');
-    await waitFor(() =>
-      expect(view.getByText('No one by that name yet. Invite them instead.')).toBeTruthy(),
-    );
-
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy());
+    expect(invites(view)).toHaveLength(0);
     expect(view.queryByLabelText('Bring somebody with you')).toBeNull();
-    expect(invites(view)).toHaveLength(1);
-    expect(inFooter(view)).toHaveLength(1);
-
-    // Cleared, the block and its inline invite come back, and the footer's goes.
-    await type(view, '');
-    await waitFor(() => expect(view.getByLabelText('Bring somebody with you')).toBeTruthy());
-    expect(invites(view)).toHaveLength(1);
-    expect(inFooter(view)).toHaveLength(0);
   });
 
-  it('is the footer one alone when there are suggestions', async () => {
+  it('are not offered when a search finds nobody: the empty state is neutral', async () => {
+    const view = await open();
+    await type(view, 'zzz');
+    await waitFor(() => expect(view.getByText('No one found.')).toBeTruthy());
+    expect(invites(view)).toHaveLength(0);
+    expect(view.queryByText(/Invite them/)).toBeNull();
+  });
+
+  it('are not offered beside suggestions', async () => {
     mockSuggestions = [suggestion('gio')];
     const view = await open();
     await waitFor(() => expect(view.getByLabelText('Suggested for you')).toBeTruthy());
-
-    expect(invites(view)).toHaveLength(1);
-    expect(inFooter(view)).toHaveLength(1);
+    expect(invites(view)).toHaveLength(0);
   });
 });
 
@@ -442,7 +419,7 @@ describe('onboarding_people_search_used', () => {
     await waitFor(() => expect(view.getByText('@jo')).toBeTruthy());
     await type(view, 'zzz');
     await waitFor(() =>
-      expect(view.getByText('No one by that name yet. Invite them instead.')).toBeTruthy(),
+      expect(view.getByText('No one found.')).toBeTruthy(),
     );
     // The same handle again, with the sigil: one search, not a third.
     await type(view, '@jo');
@@ -462,7 +439,7 @@ describe('onboarding_people_search_used', () => {
 
     await type(view, 'sai');
     await waitFor(() =>
-      expect(view.getByText('No one by that name yet. Invite them instead.')).toBeTruthy(),
+      expect(view.getByText('No one found.')).toBeTruthy(),
     );
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
 

@@ -394,12 +394,14 @@ function Body({
       return (
         <Waiting
           title={copy.importing}
+          // While the file is still on this phone, closing bingd stops it, so this is the
+          // one phase that asks the app to stay open (founder QA, 2026-11-16: one sentence).
           detail={
             state.total > 1
               ? // `Math.min`, because after the last page `sent === total` and the screen
                 // stays up for the whole `import_ready` round trip.
-                `Keep bingd open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
-              : 'Keep bingd open while we send your history.'
+                `Keep bingd open while your file uploads. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
+              : 'Keep bingd open while your file uploads.'
           }
         />
       );
@@ -423,9 +425,10 @@ function Body({
         return (
           <Waiting
             title={copy.onItsWay}
-            detail="It keeps running in the background, even if you close bingd. We’ll let you know when it’s done."
-            // The Settings row has been "Import from" since 20261113000100.
-            note="You can check on it anytime in Settings, under Import from."
+            // Founder QA, 2026-11-16: one short explanation. "In bingd" because the finish
+            // is an inbox notification (20260917001500); push may be off, so nothing here
+            // promises one. The Settings row has been "Import from" since 20261113000100.
+            detail="It keeps going even if you close bingd. We’ll let you know in bingd when it’s done."
             action={<Button label="Continue" onPress={carryOn} />}
           />
         );
@@ -433,9 +436,11 @@ function Body({
       return (
         <Waiting
           title={copy.importing}
-          detail="You can close bingd. Your import will keep running, and we’ll let you know when it’s done. Come back here anytime to check on it."
-          note="This may take a few minutes, especially for larger libraries."
-          action={<Button label="Leave it running" kind="secondary" onPress={onLeave} />}
+          // Founder QA, 2026-11-16: one sentence, and an action that says what it does.
+          // Done is navigation only (`onLeave`); the job is on the server and reopening
+          // Import from shows it again, so leaving loses nothing.
+          detail="You can leave this screen while we finish. We’ll let you know in bingd when it’s done."
+          action={<Button label="Done" kind="secondary" onPress={onLeave} />}
         />
       );
 
@@ -793,6 +798,12 @@ function explain(
   }
 }
 
+/** Both platforms' own line-breaking props; each ignores the other's (see `EmptyState`). */
+const BALANCED_LINES = {
+  textBreakStrategy: 'balanced',
+  lineBreakStrategyIOS: 'push-out',
+} as const;
+
 /**
  * The choice of service: Settings ▸ Import from, and the onboarding question (founder spec
  * 2026-11-10, §7 and §9). One list for both (`ProviderChoice`), so the two cannot drift.
@@ -850,7 +861,7 @@ function ChooseProvider({
   );
 }
 
-function Waiting({
+export function Waiting({
   title,
   detail,
   note,
@@ -861,17 +872,28 @@ function Waiting({
   note?: string;
   action?: React.ReactNode;
 }) {
+  /**
+   * **Heading, then the indicator, then one line** (founder QA, 2026-11-16). The spinner sat
+   * above everything, apart from the work it stood for; under the heading it reads as that
+   * import's progress. The copy is balanced rather than shrunk: Android balances the lines and
+   * iOS pushes a word down instead of leaving one alone — `EmptyState`'s error-state rule.
+   */
   return (
-    <View style={styles.waiting}>
-      <ActivityIndicator color={theme.semantic.action} />
-      <Text variant="headline" style={styles.centred}>
+    <View style={styles.waiting} testID="import-waiting">
+      <Text
+        variant="headline"
+        style={styles.centred}
+        accessibilityRole="header"
+        {...BALANCED_LINES}
+      >
         {title}
       </Text>
-      <Text variant="body" tone="secondary" style={styles.centred}>
+      <ActivityIndicator color={theme.semantic.action} testID="import-waiting-indicator" />
+      <Text variant="body" tone="secondary" style={styles.centred} {...BALANCED_LINES}>
         {detail}
       </Text>
       {note ? (
-        <Text variant="footnote" tone="tertiary" style={styles.centred}>
+        <Text variant="footnote" tone="tertiary" style={styles.centred} {...BALANCED_LINES}>
           {note}
         </Text>
       ) : null}

@@ -116,14 +116,43 @@ export const importedTitles = (model: ResultModel): number =>
 export const somethingArrived = (model: ResultModel): boolean =>
   (model.newlyAdded ?? 0) + (model.watchlistAdded ?? 0) > 0;
 
-/** Whether the file named titles bingd already had, from this person or an earlier import. */
-export const alreadyHere = (model: ResultModel): boolean =>
-  (model.alreadyPresent ?? 0) + (model.previouslyImported ?? 0) > 0;
+/**
+ * **Already in bingd: everything the file named that was in the collection before this run**
+ * (founder QA, 2026-11-16). That is `kept` (ranked or logged here) and `already` (put there by
+ * an earlier import) together. A repeated import used to count the second group under
+ * "Imported movies", as if this run had added them; it added nothing. The server counts every
+ * row in exactly one bucket, so the sum is already deduplicated: a title is never both.
+ */
+export const alreadyInBingd = (model: ResultModel): number =>
+  (model.alreadyPresent ?? 0) + (model.previouslyImported ?? 0);
 
-/** The results headline. Three cases, never two claims at once. */
-export function resultHeadline(model: ResultModel, provider: ImportProvider): string {
-  const name = provider === 'imdb' ? 'IMDb' : 'Letterboxd';
-  if (somethingArrived(model)) return `Your ${name} history is in`;
-  if (alreadyHere(model)) return `Your ${name} history is already here`;
-  return 'Nothing new came in';
+/** Whether the file named titles bingd already had, from this person or an earlier import. */
+export const alreadyHere = (model: ResultModel): boolean => alreadyInBingd(model) > 0;
+
+/**
+ * The results headline: one heading for every finished import (founder QA, 2026-11-16).
+ * What happened is the summary line's job, not the heading's, so the heading never has to
+ * choose between "is in" and "is already here" for a file that is partly both.
+ */
+export function resultHeadline(_model: ResultModel, _provider: ImportProvider): string {
+  return 'Import complete';
+}
+
+/**
+ * The line under the heading. Movies only: a Letterboxd or IMDb history arrives as films, and
+ * TV and episodes have their own notes below. Three cases, never two claims at once.
+ */
+export function resultSummary(model: ResultModel): string {
+  const added = model.newlyAdded ?? 0;
+  const watchlist = model.watchlistAdded ?? 0;
+  if (added > 0) return `${added === 1 ? '1 movie' : `${added} movies`} added to bingd.`;
+  // A Letterboxd watchlist is the one other thing an import adds; saying "no new movies"
+  // over a watchlist row that just grew would read as a contradiction.
+  if (watchlist > 0) {
+    return `${watchlist === 1 ? '1 movie' : `${watchlist} movies`} added to your watchlist.`;
+  }
+  if (alreadyHere(model)) {
+    return 'No new movies were added. Your existing titles are already in bingd.';
+  }
+  return 'No new movies were added.';
 }

@@ -26,7 +26,6 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
-import { FirstFiveShareSheet } from '@/features/share/FirstFiveShareSheet';
 import { firstFiveRows } from '@/features/share/first-five';
 import { useTrending } from '@/features/trending/use-trending';
 import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
@@ -1062,9 +1061,8 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
   const profile = useCurrentProfile();
   const { data } = useRankedCollection(profile.id, 'movies');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [sharing, setSharing] = useState(false);
   // `onboarding_step_viewed` for the payoff (OB-1). This component is the payoff, so its
-  // first commit is the view; the share sheet opening over it is not a second one.
+  // first commit is the view.
   useStepViewed(profile.id, 'payoff');
 
   // Position is 1-based and ascending within the category, and every row here is the same
@@ -1118,63 +1116,18 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             which Continue opens: `app/onboarding/letterboxd.tsx`. The payoff keeps its one
             action and nothing beneath the five competes with them. */}
 
-        {/**
-         * **Up next** (Onboarding 2.0, OB-4, 2026-11-14): what Continue leads to, said once,
-         * so the five are a start rather than an ending. A statement and not a card to
-         * act on — no link, no recommendations teaser — so it does not compete with the
-         * footer's one primary. Inside the scroll, after the fifth row, so the rows and
-         * this block scroll and the fixed footer never covers either (the 2026-11-02 "every
-         * title shows" rule).
-         *
-         * The section-header token in Maroon rather than `SectionHeader`, which brings its
-         * own gutter and a 44pt row and would double-pad inside the card's padding.
-         */}
-        <View style={styles.upNext} testID="first-five-up-next">
-          <Text
-            variant="sectionHeader"
-            tone="action"
-            accessibilityRole="header"
-            // The token uppercases; the label keeps a screen reader from spelling it out.
-            accessibilityLabel="Up next"
-          >
-            Up next
-          </Text>
-          <Text variant="body">
-            Bring your history, find your friends, then see picks made for your taste.
-          </Text>
-        </View>
       </ScrollView>
 
+      {/**
+       * **One action** (founder QA, 2026-11-16): Continue, full width, in the footer that
+       * already sits above the system navigation. Share and Use a different account are
+       * gone from this screen only: sharing the First Five lives on (`FirstFiveShareSheet`
+       * is untouched), and switching accounts stays on the picker, which is where somebody
+       * who signed in as the wrong person finds out.
+       */}
       <OnboardingFooter>
-        <View style={styles.payoffActions}>
-          <View style={styles.payoffAction}>
-            <Button
-              label="Share"
-              kind="secondary"
-              fit
-              accessibilityLabel="Share your First Five"
-              disabled={rows.length < FIRST_FIVE}
-              disabledReason="Your list is still loading."
-              onPress={() => {
-                track({ name: 'first_five_share_opened' });
-                setSharing(true);
-              }}
-            />
-          </View>
-          <View style={styles.payoffAction}>
-            <Button label="Continue" fit onPress={onContinue} />
-          </View>
-        </View>
-        <UseDifferentAccountButton />
+        <Button label="Continue" onPress={onContinue} testID="first-five-continue" />
       </OnboardingFooter>
-
-      {sharing ? (
-        <FirstFiveShareSheet
-          rows={rows}
-          username={profile.username}
-          onClose={() => setSharing(false)}
-        />
-      ) : null}
 
       <DiagnosticsSheet visible={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </>
@@ -1210,16 +1163,6 @@ const styles = StyleSheet.create({
   status: { padding: theme.layout.gutter, gap: theme.space[3] },
   results: { paddingBottom: theme.space[8] },
   payoff: { paddingBottom: theme.space[2] },
-  payoffActions: { flexDirection: 'row', gap: theme.space[2] },
-  upNext: {
-    backgroundColor: theme.surface.sunken,
-    borderRadius: theme.radius.card,
-    padding: theme.layout.cardPadding,
-    marginHorizontal: theme.layout.gutter,
-    marginTop: theme.space[3],
-    gap: theme.space[1],
-  },
-  payoffAction: { flex: 1 },
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',

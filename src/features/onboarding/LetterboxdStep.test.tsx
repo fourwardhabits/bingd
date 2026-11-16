@@ -503,10 +503,11 @@ describe('importing from the step', () => {
       expect(view.getByText('Your Letterboxd import is on its way')).toBeTruthy(),
     );
     expect(
-      view.getByText(/keeps running in the background, even if you close bingd\./),
+      view.getByText(/keeps going even if you close bingd\./),
     ).toBeTruthy();
-    expect(view.getByText(/let you know when it’s done/)).toBeTruthy();
-    expect(view.getByText(/anytime in Settings/)).toBeTruthy();
+    expect(view.getByText(/let you know in bingd when it’s done/)).toBeTruthy();
+    // Founder QA, 2026-11-16: one explanation under the heading.
+    expect(view.queryByText(/anytime in Settings/)).toBeNull();
     expect(called().slice(0, 4)).toEqual([
       'import_create',
       'import_status',
@@ -664,7 +665,7 @@ describe('importing from the step', () => {
     await waitFor(() => expect(view.getByText('Import')).toBeTruthy());
     await fireEvent.press(view.getByText('Import'));
 
-    await waitFor(() => expect(view.getByText('Your Letterboxd history is in')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Import complete')).toBeTruthy());
     // Collection is outside the flow, and the guard would send it straight back.
     expect(view.queryByText('Rank imported movies')).toBeNull();
     expect(view.queryByText('Import another file')).toBeNull();

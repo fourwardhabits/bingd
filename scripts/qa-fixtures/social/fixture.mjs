@@ -325,6 +325,14 @@ async function ownUserMedia(ctx, s, mediaId) {
   return rows[0] ?? null;
 }
 
+/** `watch_events` rows of one account for one title; RLS answers only the owner's own. */
+async function watchesOf(ctx, s, userId, mediaId) {
+  return selectRows(ctx, s, 'watch_events', {
+    columns: ['id', 'user_id', 'media_item_id', 'note'],
+    eq: { user_id: userId, media_item_id: mediaId },
+  });
+}
+
 async function ownRanking(ctx, s, mediaId) {
   const rows = await selectRows(ctx, s, 'rankings', {
     columns: ['media_item_id', 'bucket', 'position'],
@@ -819,6 +827,29 @@ const SETUP = {
     );
   },
 
+  async watchNote(ctx, entry) {
+    const s = session(ctx, entry.actor);
+    const mediaId = ctx.titles.get(entry.title);
+    const watches = await watchesOf(ctx, s, s.id, mediaId);
+    if (!ctx.dryRun && watches.length !== 1)
+      return problem(ctx, entry.id, `expected one watch to note, found ${watches.length}`);
+    const watch = watches[0];
+    if (watch?.note === entry.text) return;
+    if (watch && watch.note != null)
+      return problem(ctx, entry.id, 'a different watch note is already there; not overwriting');
+    await rpcWrite(
+      ctx,
+      s,
+      'set_watch_details',
+      {
+        p_operation_id: entry.operationId,
+        p_watch_event_id: watch?.id ?? '<watch>',
+        p_note: entry.text,
+      },
+      entry.id,
+    );
+  },
+
   async follow(ctx, entry) {
     const s = session(ctx, entry.actor);
     const targetId = await resolveRef(ctx, s, entry.target);
@@ -1136,6 +1167,31 @@ export async function runVerify(ctx) {
         String(row.viewer_helpful),
       );
     }
+  }
+
+  // A watch's own note: the owner reads it on the watch, nobody else reads the watch at all,
+  // and it is not the title's review.
+  for (const entry of plan.entries.filter((e) => e.type === 'watchNote' && live(e))) {
+    const mediaId = ctx.titles.get(entry.title);
+    const owner = session(ctx, entry.actor);
+    const own = await watchesOf(ctx, owner, owner.id, mediaId);
+    check(
+      ctx,
+      `${entry.id} is on the owner's watch`,
+      own.length === 1 && own[0].note === entry.text,
+      `watches=${own.length}`,
+    );
+    for (const viewer of keys.filter((k) => k !== entry.actor)) {
+      const seen = await watchesOf(ctx, session(ctx, viewer), owner.id, mediaId);
+      check(
+        ctx,
+        `${viewer} cannot read ${entry.id}`,
+        seen.length === 0,
+        seen.length ? 'VISIBLE' : '',
+      );
+    }
+    const review = (await ownUserMedia(ctx, owner, mediaId))?.note ?? null;
+    check(ctx, `${entry.id} is not the title's review`, review !== entry.text, '');
   }
 
   // Review counts on each title, from each public account's point of view.

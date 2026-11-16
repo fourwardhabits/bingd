@@ -8,6 +8,7 @@ import {
   resetSentToYouSource,
   sentShortcutBadge,
   unreadCount,
+  unreadInMedium,
   unreadIsAtLeast,
   useSentToYou,
 } from './use-sent-to-you';
@@ -160,21 +161,21 @@ describe('unread', () => {
     const allSeen = list(SENT_LIMIT).map((r) => ({ ...r, seenAt: seen }));
     expect(unreadCount(allSeen)).toBe(0);
     expect(unreadIsAtLeast(allSeen)).toBe(true);
-    expect(sentShortcutBadge(allSeen)).toEqual({
+    expect(sentShortcutBadge(allSeen, 'movies')).toEqual({
       badge: 'New',
       spoken: 'Sent to You, more may be new',
     });
 
     // Before it was seen, the floor as a number, as before.
-    expect(sentShortcutBadge(list(SENT_LIMIT))).toEqual({
+    expect(sentShortcutBadge(list(SENT_LIMIT), 'movies')).toEqual({
       badge: `${SENT_LIMIT}+`,
       spoken: `Sent to You, at least ${SENT_LIMIT} new`,
     });
     // An exact count, and an exact nothing, are unchanged.
-    expect(sentShortcutBadge(list(3, 5))).toEqual({ badge: '3', spoken: 'Sent to You, 3 new' });
+    expect(sentShortcutBadge(list(3, 5), 'movies')).toEqual({ badge: '3', spoken: 'Sent to You, 3 new' });
     const seenAndOpened = list(SENT_LIMIT - 1, 1).map((r) => ({ ...r, seenAt: seen }));
-    expect(sentShortcutBadge(seenAndOpened)).toEqual({ badge: null, spoken: 'Sent to You' });
-    expect(sentShortcutBadge(undefined)).toEqual({ badge: null, spoken: 'Sent to You' });
+    expect(sentShortcutBadge(seenAndOpened, 'movies')).toEqual({ badge: null, spoken: 'Sent to You' });
+    expect(sentShortcutBadge(undefined, 'movies')).toEqual({ badge: null, spoken: 'Sent to You' });
   });
 
   it('reads seen_at from the server, and treats an older backend without it as unseen', async () => {
@@ -361,24 +362,116 @@ describe('whether the count is a floor, under each server order', () => {
 
   it('keeps 200+ and then New through optimistic seen marks, until the next fetch', () => {
     const fetched = page(SENT_LIMIT);
-    expect(sentShortcutBadge(fetched)).toEqual({
+    expect(sentShortcutBadge(fetched, 'movies')).toEqual({
       badge: `${SENT_LIMIT}+`,
       spoken: `Sent to You, at least ${SENT_LIMIT} new`,
     });
 
     // Half marked seen in the cache: still a floor, because the rank is the fetch's.
     const half = fetched.map((r, i) => (i < 100 ? { ...r, seenAt: seen } : r));
-    expect(sentShortcutBadge(half)).toEqual({
+    expect(sentShortcutBadge(half, 'movies')).toEqual({
       badge: '100+',
       spoken: 'Sent to You, at least 100 new',
     });
 
     // All of it marked seen: nothing in hand is unread, and more may be.
     const all = fetched.map((r) => ({ ...r, seenAt: seen }));
-    expect(sentShortcutBadge(all)).toEqual({ badge: 'New', spoken: 'Sent to You, more may be new' });
+    expect(sentShortcutBadge(all, 'movies')).toEqual({ badge: 'New', spoken: 'Sent to You, more may be new' });
 
     // The next fetch ranks those as seen and brings the rest: an exact count again.
     const next = page(5, SENT_LIMIT - 5);
-    expect(sentShortcutBadge(next)).toEqual({ badge: '5', spoken: 'Sent to You, 5 new' });
+    expect(sentShortcutBadge(next, 'movies')).toEqual({ badge: '5', spoken: 'Sent to You, 5 new' });
+  });
+});
+
+/**
+ * **The side of Movies / TV on screen** (founder QA B6, 2026-11-15). The shortcut counts the
+ * unread rows of the selected medium only; whether that count is a floor is still asked of
+ * the whole page, because neither server order sorts by medium.
+ */
+describe('one side of the Movies / TV switch', () => {
+  const seen = '2026-01-03T00:00:00Z';
+  const film = (id: string, over: Partial<SentRecommendation> = {}) =>
+    row({ id, mediaItemId: id, kind: 'movie', ...over });
+  const show = (id: string, over: Partial<SentRecommendation> = {}) =>
+    row({ id, mediaItemId: id, kind: id.startsWith('season') ? 'season' : 'series', ...over });
+
+  it('counts films on Movies and series and seasons on TV', () => {
+    const rows = [film('f1'), show('series-1'), show('season-1'), film('f2', { seenAt: seen })];
+    expect(unreadInMedium(rows, 'movies')).toBe(1);
+    expect(unreadInMedium(rows, 'tv')).toBe(2);
+    expect(sentShortcutBadge(rows, 'movies')).toEqual({ badge: '1', spoken: 'Sent to You, 1 new' });
+    expect(sentShortcutBadge(rows, 'tv')).toEqual({ badge: '2', spoken: 'Sent to You, 2 new' });
+  });
+
+  it('draws no count for a side with nothing unread, while the other still has some', () => {
+    const rows = [film('f1', { seenAt: seen }), show('series-1')];
+    expect(sentShortcutBadge(rows, 'movies')).toEqual({ badge: null, spoken: 'Sent to You' });
+    expect(unreadInMedium(rows, 'tv')).toBe(1);
+    expect(unreadInMedium(undefined, 'tv')).toBe(0);
+  });
+
+  /**
+   * The mutant this guards: asking `unreadIsAtLeast` of the side's own rows. A full page
+   * split 120 / 80 has fewer than `SENT_LIMIT` rows on either side, so that test would
+   * call both counts exact while rows past the cap, of either medium, may still be unread.
+   */
+  it('is a floor on both sides whenever the whole page is, however the page splits', () => {
+    const fetched = [
+      ...Array.from({ length: 120 }, (_, i) => film(`f${i}`, { readRank: 0 })),
+      ...Array.from({ length: SENT_LIMIT - 120 }, (_, i) => show(`series-${i}`, { readRank: 0 })),
+    ];
+    expect(unreadIsAtLeast(fetched)).toBe(true);
+    expect(unreadIsAtLeast(fetched.filter((r) => r.kind === 'movie'))).toBe(false);
+
+    expect(sentShortcutBadge(fetched, 'movies')).toEqual({
+      badge: '120+',
+      spoken: 'Sent to You, at least 120 new',
+    });
+    expect(sentShortcutBadge(fetched, 'tv')).toEqual({
+      badge: '80+',
+      spoken: 'Sent to You, at least 80 new',
+    });
+
+    // Every film seen: none in hand on Movies, but the rows past the cap may be films.
+    const filmsSeen = fetched.map((r) => (r.kind === 'movie' ? { ...r, seenAt: seen } : r));
+    expect(sentShortcutBadge(filmsSeen, 'movies')).toEqual({
+      badge: 'New',
+      spoken: 'Sent to You, more may be new',
+    });
+    expect(sentShortcutBadge(filmsSeen, 'tv').badge).toBe('80+');
+    // A whole page of one medium is still a floor on the other side, which holds none.
+    const allFilms = Array.from({ length: SENT_LIMIT }, (_, i) => film(`f${i}`, { readRank: 0 }));
+    expect(sentShortcutBadge(allFilms, 'tv')).toEqual({
+      badge: 'New',
+      spoken: 'Sent to You, more may be new',
+    });
+    // ...but nothing in hand proves TV has anything, so no dot would be drawn for it.
+    expect(unreadInMedium(allFilms, 'tv')).toBe(0);
+  });
+
+  it('is exact on both sides when the page is, even a full one', () => {
+    // A seen row ends the unread prefix: every unread row of either medium is in hand.
+    const fetched = [
+      ...Array.from({ length: 100 }, (_, i) => film(`f${i}`, { readRank: 0 })),
+      ...Array.from({ length: 99 }, (_, i) => show(`series-${i}`, { readRank: 0 })),
+      film('seen-1', { seenAt: seen, readRank: 1 }),
+    ];
+    expect(fetched).toHaveLength(SENT_LIMIT);
+    expect(sentShortcutBadge(fetched, 'movies')).toEqual({
+      badge: '100',
+      spoken: 'Sent to You, 100 new',
+    });
+    expect(sentShortcutBadge(fetched, 'tv').badge).toBe('99');
+
+    // The legacy order: an opened row ends the unopened prefix the same way.
+    const legacy = [
+      ...Array.from({ length: SENT_LIMIT - 1 }, (_, i) =>
+        i % 2 ? film(`f${i}`) : show(`series-${i}`),
+      ),
+      film('opened-1', { openedAt: seen }),
+    ];
+    expect(sentShortcutBadge(legacy, 'tv').badge).toBe(String(Math.ceil((SENT_LIMIT - 1) / 2)));
+    expect(sentShortcutBadge(legacy, 'tv').badge).not.toMatch(/\+/);
   });
 });

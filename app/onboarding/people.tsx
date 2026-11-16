@@ -15,7 +15,6 @@ import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import { useStepViewed } from '@/features/onboarding/step-viewed';
 import { mutualsLine } from '@/features/people/use-people';
 import { FollowControl } from '@/features/profile/FollowControl';
-import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { useRelationships } from '@/features/profile/use-social';
 import { useDebounced } from '@/features/search/use-title-search';
 import {
@@ -258,19 +257,11 @@ export default function PeopleStepScreen() {
                   />
                 ))}
               </>
-            ) : (
-              /* No candidates: the acknowledgment stands on its own and the offer becomes
-                 an invitation. There is no empty list and no "no suggestions yet". */
-              <View style={styles.alone}>
-                <SectionHeader title="Bring somebody with you" />
-                <View style={styles.aloneBody}>
-                  <Text variant="body" tone="secondary">
-                    Your Feed fills up faster with the people you actually watch things with.
-                  </Text>
-                  <InviteFriendsButton />
-                </View>
-              </View>
-            )}
+            ) : /* No candidates: the acknowledgment stands on its own (founder QA,
+                   2026-11-16: no invitation in onboarding — somebody who has not started
+                   using bingd yet is not sent to invite others; Invite friends stays in
+                   the app). There is no empty list and no "no suggestions yet". */
+            null}
           </>
         ) : (
           <>
@@ -291,16 +282,9 @@ export default function PeopleStepScreen() {
               results
             ) : people.length === 0 ? (
               /* A genuinely empty read, which is not the same as a failed one. Nobody is
-                 told they are alone; the offer is simply the one that still makes sense. */
-              <View style={styles.alone}>
-                <SectionHeader title="Bring somebody with you" />
-                <View style={styles.aloneBody}>
-                  <Text variant="body" tone="secondary">
-                    Your Feed fills up faster with the people you actually watch things with.
-                  </Text>
-                  <InviteFriendsButton />
-                </View>
-              </View>
+                 told they are alone, and nobody is sent to invite (founder QA, 2026-11-16):
+                 the search above and Continue below are the step. */
+              null
             ) : (
               <>
                 <SectionHeader title="Suggested for you" />
@@ -318,16 +302,10 @@ export default function PeopleStepScreen() {
         )}
       </ScrollView>
 
+      {/* Continue is the step's one action, and it always works (founder QA, 2026-11-16:
+          invitations are out of onboarding; following, requests and the inviter's own
+          row are unchanged). */}
       <OnboardingFooter>
-        {/* Secondary to following: inviting somebody is the other way this step can
-            succeed. Outlined rather than filled (OB-6), so Continue is the footer's one
-            Maroon fill. Drawn whenever the inline invite under "Bring somebody with you" is
-            not on screen — a list of suggestions, or a search drawing in that block's place
-            (OB2-FIX2), where "Invite them instead" must have an invite to point at — and
-            never beside it, so the screen holds one invite button at a time. */}
-        {!isError && (people.length > 0 || searching) ? (
-          <InviteFriendsButton kind="secondary" />
-        ) : null}
         <Button label="Continue" onPress={leave} />
       </OnboardingFooter>
     </Screen>
@@ -420,7 +398,7 @@ function SearchResults({
     return (
       <View style={styles.searchStatus}>
         <Text variant="body" tone="secondary">
-          No one by that name yet. Invite them instead.
+          No one found.
         </Text>
       </View>
     );
@@ -584,6 +562,4 @@ const styles = StyleSheet.create({
   identity: { flex: 1, gap: 2 },
   nameLine: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   name: { flexShrink: 1, fontFamily: fontFamily.sansSemibold },
-  alone: { paddingBottom: theme.space[4] },
-  aloneBody: { paddingHorizontal: theme.layout.gutter, gap: theme.space[3] },
 });

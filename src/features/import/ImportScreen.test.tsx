@@ -6,7 +6,7 @@ import { StyleSheet } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
-import { ImportScreen } from './ImportScreen';
+import { ImportScreen, Waiting } from './ImportScreen';
 
 /**
  * The importer's screen, exercised through the states a person actually passes.
@@ -360,7 +360,9 @@ describe('uploading', () => {
     await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText(/You can close bingd\./)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/You can leave this screen while we finish\./)).toBeTruthy(),
+    );
 
     const called = mockRpc.mock.calls.map(([name]) => name);
     // The `import_status` between `create` and `stage` is the guard against staging onto a
@@ -469,7 +471,7 @@ describe('when it is over', () => {
     await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Import complete')).toBeTruthy());
     // The unresolved count: a partial import must not read as a complete one. A row since
     // IMP1113-UI (*Unmatched*, expandable), where it was a sentence.
     expect(screen.getByRole('button', { name: 'Unmatched, 1 title' })).toBeTruthy();
@@ -518,12 +520,12 @@ describe('when it is over', () => {
     await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import'));
 
-    // IMP1113-UI (`resultModel`): *Already in bingd* is `kept` alone, and an earlier
-    // import's films are *Imported movies* with their own sublabel, because they are the
-    // import's and still unranked, where `kept` is somebody's own.
-    await waitFor(() => expect(screen.getByText('Imported movies')).toBeTruthy());
-    expect(screen.getByLabelText('Imported movies, 2. 1 from an earlier import')).toBeTruthy();
-    expect(screen.getByLabelText('Already in bingd, 1')).toBeTruthy();
+    // Founder QA, 2026-11-16 (`resultModel`): *Newly imported* is this run's additions
+    // alone, and *Already in bingd* is everything that was there before it — `kept` and an
+    // earlier import's films together, which the server never counts twice.
+    await waitFor(() => expect(screen.getByText('Newly imported')).toBeTruthy());
+    expect(screen.getByLabelText('Newly imported, 1')).toBeTruthy();
+    expect(screen.getByLabelText('Already in bingd, 2')).toBeTruthy();
     // Named as diary entries, because it is the one number that is not a count of films.
     expect(screen.getByLabelText('Diary entries, 3')).toBeTruthy();
     // A zero is left out rather than drawn.
@@ -555,9 +557,13 @@ describe('when it is over', () => {
     await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() =>
-      expect(screen.getByText('Your Letterboxd history is already here')).toBeTruthy(),
+      expect(
+        screen.getByText(
+          'No new movies were added. Your existing titles are already in bingd.',
+        ),
+      ).toBeTruthy(),
     );
-    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    expect(screen.queryByText(/added to bingd\./)).toBeNull();
     // Nothing the import owns is unranked, so Done is the only way on.
     expect(screen.queryByText('Rank titles')).toBeNull();
     expect(screen.getByText('Done')).toBeTruthy();
@@ -587,9 +593,13 @@ describe('when it is over', () => {
     await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText('Nothing new came in')).toBeTruthy());
-    expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
-    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    await waitFor(() => expect(screen.getByText('No new movies were added.')).toBeTruthy());
+    expect(
+      screen.queryByText(
+        'No new movies were added. Your existing titles are already in bingd.',
+      ),
+    ).toBeNull();
+    expect(screen.queryByText(/added to bingd\./)).toBeNull();
     // The unmatched count is still there to say why.
     expect(screen.getByRole('button', { name: 'Unmatched, 2 titles' })).toBeTruthy();
     expect(screen.queryByText('Rank titles')).toBeNull();
@@ -669,7 +679,7 @@ describe('an import that is already happening', () => {
 
     await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
     expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
-    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    expect(screen.queryByText(/added to bingd\./)).toBeNull();
   });
 
   /**
@@ -710,7 +720,11 @@ describe('an import that is already happening', () => {
     await fireEvent.press(screen.getByText('Import'));
 
     await waitFor(() =>
-      expect(screen.getByText('Your Letterboxd history is already here')).toBeTruthy(),
+      expect(
+        screen.getByText(
+          'No new movies were added. Your existing titles are already in bingd.',
+        ),
+      ).toBeTruthy(),
     );
     expect(mockRpc.mock.calls.map(([name]) => name)).toContain('import_create');
   });
@@ -737,9 +751,13 @@ describe('an import that is already happening', () => {
     await waitFor(() => expect(screen.getByText('Import')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import'));
 
-    await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    expect(screen.queryByText('Your Letterboxd history is already here')).toBeNull();
-    expect(screen.getByLabelText('Imported movies, 2. 1 from an earlier import')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Import complete')).toBeTruthy());
+    expect(
+      screen.queryByText(
+        'No new movies were added. Your existing titles are already in bingd.',
+      ),
+    ).toBeNull();
+    expect(screen.getByLabelText('Newly imported, 1')).toBeTruthy();
   });
 
   /**
@@ -895,8 +913,8 @@ describe('opened for a named import', () => {
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
-    expect(screen.getByLabelText('Imported movies, 19')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Import complete')).toBeTruthy());
+    expect(screen.getByLabelText('Newly imported, 19')).toBeTruthy();
     expect(screen.getByLabelText('Added to watchlist, 2')).toBeTruthy();
   });
 
@@ -908,7 +926,7 @@ describe('opened for a named import', () => {
       expect(screen.getByText('We couldn’t finish your Letterboxd import')).toBeTruthy(),
     );
     expect(screen.getByText('Upload Letterboxd file')).toBeTruthy();
-    expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
+    expect(screen.queryByText(/added to bingd\./)).toBeNull();
   });
 
   it('says it could not check, rather than offering a new import, when the job cannot be read', async () => {
@@ -931,7 +949,7 @@ describe('opened for a named import', () => {
       },
     };
     await fireEvent.press(screen.getByText('Try again'));
-    await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Import complete')).toBeTruthy());
   });
 
   it('opens the importer for a link that carries no job id', async () => {
@@ -1008,11 +1026,13 @@ describe('the way on', () => {
     mockRpcResults = { import_status: { status: 'applying', counts: {}, completed_at: null } };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('Leave it running')).toBeTruthy());
-    expect(screen.getByText(/Your import will keep running/)).toBeTruthy();
-    expect(screen.getByText(/may take a few minutes/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Done')).toBeTruthy());
+    expect(screen.getByText(/We’ll let you know in bingd when it’s done\./)).toBeTruthy();
+    // Founder QA, 2026-11-16: one explanation, not three fragments.
+    expect(screen.queryByText(/may take a few minutes/)).toBeNull();
+    expect(screen.queryByText(/Leave it running/)).toBeNull();
 
-    await fireEvent.press(screen.getByText('Leave it running'));
+    await fireEvent.press(screen.getByText('Done'));
     expect(mockBack).toHaveBeenCalled();
     // Leaving is only navigation: nothing is discarded or cancelled.
     expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_discard');
@@ -1023,8 +1043,8 @@ describe('the way on', () => {
     mockRpcResults = { import_status: { status: 'matching', counts: {}, completed_at: null } };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('Leave it running')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Leave it running'));
+    await waitFor(() => expect(screen.getByText('Done')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Done'));
     expect(mockReplace).toHaveBeenCalledWith('/settings');
   });
 });
@@ -1065,7 +1085,7 @@ describe('the words', () => {
   const headlines: Record<string, string> = {
     entry: 'Bring over your Letterboxd history',
     running: 'Importing your Letterboxd history',
-    finished: 'Your Letterboxd history is in',
+    finished: 'Import complete',
     failed: 'We couldn’t finish your Letterboxd import',
   };
 
@@ -1087,4 +1107,33 @@ describe('the words', () => {
       expect(screen.queryAllByText(/—/)).toHaveLength(0);
     },
   );
+});
+
+/**
+ * **The active import, heading first** (founder QA, 2026-11-16): the heading, then the
+ * indicator that belongs to it, then one line that is true for the phase — balanced, never
+ * shrunk to fit.
+ */
+describe('the active import screen', () => {
+  it('draws the heading, then the indicator, then one balanced line', async () => {
+    const view = await renderWithProviders(
+      <Waiting
+        title="Importing your Letterboxd history"
+        detail="Keep bingd open while your file uploads."
+      />,
+    );
+    type Child = { props: { testID?: string; children?: unknown } } | null | false;
+    const order = (view.getByTestId('import-waiting').props.children as Child[])
+      .filter((child): child is Exclude<Child, null | false> => Boolean(child))
+      .map((child) => child.props.testID ?? child.props.children);
+    expect(order.slice(0, 3)).toEqual([
+      'Importing your Letterboxd history',
+      'import-waiting-indicator',
+      'Keep bingd open while your file uploads.',
+    ]);
+    const line = view.getByText('Keep bingd open while your file uploads.');
+    expect(line.props.textBreakStrategy).toBe('balanced');
+    expect(line.props.lineBreakStrategyIOS).toBe('push-out');
+    expect(line.props.adjustsFontSizeToFit).toBeUndefined();
+  });
 });
