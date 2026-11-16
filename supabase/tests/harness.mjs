@@ -74,7 +74,11 @@ export const buildShim = ({ citext = 'domain' } = {}) => `
     email_confirmed_at timestamptz,
     banned_until       timestamptz,
     deleted_at         timestamptz,
-    is_anonymous       boolean not null default false
+    is_anonymous       boolean not null default false,
+    -- Read by the H-2 trigger (20261124000100) whenever a test confirms an address.
+    encrypted_password   varchar(255),
+    confirmation_sent_at timestamptz,
+    recovery_sent_at     timestamptz
   );
   ${citext === 'extension' ? 'create extension if not exists citext;' : 'create domain citext as text;'}
 
