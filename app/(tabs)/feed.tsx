@@ -25,6 +25,7 @@ import {
   tailFor,
   verbFor,
   watchLabel,
+  watchlistTailAction,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
@@ -41,6 +42,7 @@ import {
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { WatchlistGroupSheet } from '@/features/feed/WatchlistGroupSheet';
 import { batchMedium } from '@/features/ranking/RankedSummary';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import { activityReaction } from '@/features/feed/reaction-summary';
@@ -441,6 +443,7 @@ export default function FeedScreen() {
    */
   const [followStoryFor, setFollowStoryFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
   const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
     null,
   );
@@ -961,7 +964,7 @@ export default function FeedScreen() {
                                 medium: batchMedium(event.kind),
                               }),
                           }
-                        : null
+                        : watchlistTailAction(event, setWatchlistGroupFor)
                     }
                     companions={event.companions}
                     title={event.title}
@@ -1027,7 +1030,7 @@ export default function FeedScreen() {
                               medium: batchMedium(event.kind),
                             }),
                         }
-                      : null
+                      : watchlistTailAction(event, setWatchlistGroupFor)
                   }
                   companions={event.companions}
                   title={event.title}
@@ -1201,6 +1204,19 @@ export default function FeedScreen() {
           eventId={rankingBatchFor.id}
           medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
           onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
+
+      {/* The titles one grouped watchlist post holds (20261125000100). Mounted only while
+          open, like the sitting's sheet above it. A title closes the sheet and opens. */}
+      {watchlistGroupFor ? (
+        <WatchlistGroupSheet
+          eventId={watchlistGroupFor}
+          onPressTitle={(mediaItemId) => {
+            setWatchlistGroupFor(null);
+            router.push(`/title/${mediaItemId}`);
+          }}
+          onClose={() => setWatchlistGroupFor(null)}
         />
       ) : null}
 

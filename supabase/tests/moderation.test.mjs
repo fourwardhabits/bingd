@@ -470,6 +470,12 @@ describe('the guard is wired in, not merely present', () => {
      * and the act it belongs to, `rank_batch_note`, does call the guard.
      */
     'ranking_batch_titles',
+    /**
+     * 20261125000100. The titles in one grouped watchlist post — the same shape as the
+     * ranking reader above: `language sql stable`, writes nothing, gated on
+     * `can_view_profile` for the post's actor; its act, `set_watchlist`, calls the guard.
+     */
+    'watchlist_group_titles',
     'can_i_view',
     'watch_tag_visible',
     'list_by_id',

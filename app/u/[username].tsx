@@ -12,13 +12,19 @@ import {
 } from 'react-native';
 
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
+import { WatchlistGroupSheet } from '@/features/feed/WatchlistGroupSheet';
 import { batchMedium } from '@/features/ranking/RankedSummary';
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { ProfileAwards } from '@/features/awards/ProfileAwards';
 import { useLoggedCollection } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
-import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
+import {
+  activityMetadata,
+  tailFor,
+  verbFor,
+  watchlistTailAction,
+} from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { feedItems, useActorActivity } from '@/features/feed/use-feed';
@@ -90,6 +96,7 @@ export default function PublicProfileScreen() {
   const router = useRouter();
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
   const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
     null,
   );
@@ -700,7 +707,7 @@ export default function PublicProfileScreen() {
                               medium: batchMedium(event.kind),
                             }),
                         }
-                      : null
+                      : watchlistTailAction(event, setWatchlistGroupFor)
                   }
                   companions={event.companions}
                   title={event.title}
@@ -792,6 +799,19 @@ export default function PublicProfileScreen() {
           eventId={rankingBatchFor.id}
           medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
           onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
+
+      {/* The titles one grouped watchlist post holds (20261125000100). Mounted only while
+          open, like the sitting's sheet above it. A title closes the sheet and opens. */}
+      {watchlistGroupFor ? (
+        <WatchlistGroupSheet
+          eventId={watchlistGroupFor}
+          onPressTitle={(mediaItemId) => {
+            setWatchlistGroupFor(null);
+            router.push(`/title/${mediaItemId}`);
+          }}
+          onClose={() => setWatchlistGroupFor(null)}
         />
       ) : null}
 

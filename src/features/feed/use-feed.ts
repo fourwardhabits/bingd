@@ -171,6 +171,12 @@ export type FeedItem = {
    * The row names the first and counts the rest, so the tail is this less one.
    */
   rankedCount: number | null;
+  /**
+   * How many titles one watchlist post holds (`watchlist_added` only, 20261125000100).
+   * Null on a post written before grouping, which is a single title; the row names the
+   * first title and counts the rest.
+   */
+  watchlistCount: number | null;
 };
 
 /** One person named by a follow story. Identity only: this is a discovery list. */
@@ -242,7 +248,10 @@ type FeedRow = {
     /** A TV ranking update (20261114000300). */
     update?: boolean;
     bucket?: Bucket;
-    /** ranking_batch rows only (20261020000100): how many titles that sitting placed. */
+    /**
+     * ranking_batch rows (20261020000100): how many titles that sitting placed.
+     * watchlist_added rows (20261125000100): how many titles that post holds.
+     */
     count?: number;
     sitting?: string;
     /** award_earned rows only (20260828000100). */
@@ -847,6 +856,10 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       followed: [],
       rankedCount:
         row.type === 'ranking_batch' && typeof row.payload?.count === 'number'
+          ? row.payload.count
+          : null,
+      watchlistCount:
+        row.type === 'watchlist_added' && typeof row.payload?.count === 'number'
           ? row.payload.count
           : null,
       award: award(row),
