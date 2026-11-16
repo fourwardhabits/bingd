@@ -241,6 +241,38 @@ describe('a hidden member that gains a conversation or a review (Codex, PR 313)'
     );
   });
 
+  it('a group that loses its named title is named by one it still shows', async () => {
+    const { g, members } = await groupOfThree();
+    const named = members.find((m) => m.media_item_id === g.media_item_id);
+    await t.sql(
+      `insert into reactions (feed_event_id, user_id, kind) values ($1, $2, 'love')`,
+      [named.id, friend],
+    );
+    const after = (await allPosts()).find((p) => p.id === g.id);
+    assert.equal(after.payload.count, 2);
+    assert.notEqual(after.media_item_id, named.media_item_id);
+    assert.ok(
+      members.some((m) => m.media_item_id === after.media_item_id && m.id !== named.id),
+    );
+  });
+
+  it('a group of two that loses one dissolves: both cards come back, the group hides', async () => {
+    await groupNote(await ranked('movie', 'Pair 1'));
+    await groupNote(await ranked('movie', 'Pair 2'));
+    const before = await allPosts();
+    const g = before.find((p) => p.type === 'ranking_batch');
+    const [a, b] = before.filter((p) => p.type === 'title_ranked');
+    await t.sql(`insert into comments (feed_event_id, author_id, body) values ($1, $2, 'oh')`, [
+      a.id,
+      friend,
+    ]);
+    const seen = await visibleTo(friend);
+    assert.deepEqual(new Set(seen.map((p) => p.id)), new Set([a.id, b.id]));
+    const after = (await allPosts()).find((p) => p.id === g.id);
+    assert.equal(after.presented_in, a.id, 'the empty group is hidden, not deleted');
+    assert.equal(after.payload.dissolved, true);
+  });
+
   it('a comment does the same', async () => {
     const { members } = await groupOfThree();
     await t.sql(

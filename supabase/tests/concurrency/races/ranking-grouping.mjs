@@ -227,6 +227,61 @@ export default function suite() {
       }
     });
 
+    it('RG6: two readers reacting at once to a hidden ranking both land, and its card comes back (Codex, PR 313)', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const titles = [await ranked(me), await ranked(me), await ranked(me)];
+      for (const id of titles) {
+        await db.rows(
+          `insert into watch_events (user_id, media_item_id, watched_on, basis) values ($1, $2, null, 'none')`,
+          [me, id],
+        );
+        await db.rows(
+          `insert into feed_events (actor_id, type, media_item_id, payload)
+           values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+          [me, id],
+        );
+      }
+      const owner = await db.session('owner');
+      await owner.actAs(me);
+      for (const id of titles)
+        await call(owner, `rank_group_note($1, $2)`, [await newOp(db), id]);
+      await owner.end();
+      const [{ id: hidden }] = await ctx.db.rows(
+        `select id from feed_events where actor_id = $1 and type = 'title_ranked' and presented_in is not null
+          order by created_at limit 1`,
+        [me],
+      );
+
+      const a = await fx.createUser();
+      const b = await fx.createUser();
+      const ta = await db.session('reader-a');
+      const tb = await db.session('reader-b');
+      try {
+        await ta.actAs(a);
+        await tb.actAs(b);
+        await ta.begin();
+        await tb.begin();
+        await call(ta, `set_reaction($1, $2, 'love')`, [await newOp(db), hidden]);
+        const pb = fire(tb, `set_reaction($1, $2, 'love')`, [await newOp(db), hidden]);
+        await ta.commit();
+        await pb;
+        await tb.commit();
+        const [{ n, shown }] = await ctx.db.rows(
+          `select (select count(*)::int from reactions where feed_event_id = $1) n,
+                  (select presented_in is null from feed_events where id = $1) shown`,
+          [hidden],
+        );
+        assert.equal(n, 2, 'RG6: both reactions land; nobody is aborted by a deadlock');
+        assert.equal(shown, true, 'RG6: the reacted-to ranking has its own card again');
+      } finally {
+        await ta.rollback().catch(() => {});
+        await tb.rollback().catch(() => {});
+        await ta.end().catch(() => {});
+        await tb.end().catch(() => {});
+      }
+    });
+
     it('RG3: a comment written on a draft as it ends is kept: the draft publishes on its own', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();

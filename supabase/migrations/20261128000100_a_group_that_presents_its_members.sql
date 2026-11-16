@@ -1187,15 +1187,60 @@ security definer
 set search_path = public
 as $$
 declare
-  v_group uuid;
+  v_group  uuid;
+  v_g      record;
+  v_count  integer;
+  v_rep    uuid;
 begin
-  select presented_in into v_group from feed_events where id = p_event_id for update;
+  -- A cheap look first: almost every comment or reaction is on a visible event, and those
+  -- take no lock here at all (Codex, PR 313).
+  select presented_in into v_group from feed_events where id = p_event_id;
   if v_group is null then
     return;
   end if;
+
+  -- `for no key update`, never `for update`: the writer that fired this already holds the
+  -- foreign key's key-share lock on the event, and two readers reacting at once must not
+  -- deadlock on an upgrade (Codex, PR 313). Then re-read under the lock.
+  perform 1 from feed_events where id in (p_event_id, v_group) order by id for no key update;
+  select presented_in into v_group from feed_events where id = p_event_id;
+  if v_group is null then
+    return;
+  end if;
+
   update feed_events set presented_in = null where id = p_event_id;
+
+  select fe.id, fe.media_item_id, fe.payload into v_g from feed_events fe where fe.id = v_group;
+  v_count := _group_title_count(v_group);
+
+  /**
+   * A group that grouping made (its titles all come from the members it presents) and
+   * that nobody has talked about dissolves once it would show one title or none: its last
+   * members get their own cards back, and the empty group is hidden behind the member that
+   * left, rather than deleted. Nothing is lost and a revert still finds it.
+   */
+  if v_count <= 1
+     and coalesce(v_g.payload ->> 'origin', '') in ('title', 'history')
+     and not exists (select 1 from feed_ranking_titles where event_id = v_group)
+     and not exists (select 1 from feed_watchlist_titles where event_id = v_group)
+     and not _feed_event_referenced(v_group) then
+    update feed_events set presented_in = null where presented_in = v_group;
+    update feed_events
+       set presented_in = p_event_id,
+           payload = payload || jsonb_build_object('count', 0, 'dissolved', true)
+     where id = v_group;
+    return;
+  end if;
+
+  -- Otherwise the group stays, counting what it still shows, and named by a title it
+  -- still shows: never by the one that just left it (Codex, PR 313).
+  select gt.media_item_id into v_rep
+    from _group_titles(v_group) gt
+   order by (gt.media_item_id = v_g.media_item_id) desc, gt.joined_at, gt.tiebreak
+   limit 1;
   update feed_events
-     set payload = payload || jsonb_build_object('count', _group_title_count(v_group))
+     set payload = payload || jsonb_build_object('count', v_count),
+         media_item_id = coalesce(v_rep, media_item_id)
    where id = v_group;
 end;
 $$;
