@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -462,5 +462,30 @@ describe('one read for the page', () => {
     const calls = mockRpcCalls.filter((call) => call.name === 'feed_group_previews');
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).toEqual({ p_event_ids: ['w1', 'r1'], p_limit: 12 });
+  });
+});
+
+describe('refreshing', () => {
+  it('pull to refresh reads the rails again, so a rerank’s new score shows', async () => {
+    mockRows = [
+      event('r1', 'ranking_batch', DUNE, { payload: { count: 3 }, mediaId: 'film-r1' }),
+    ];
+    mockRpc.feed_group_previews = answer(RANKING_MEMBERS);
+    const view = await renderWithProviders(<FeedScreen />);
+    await loadedRail(view, /^Heat, 2021, scored 9\.2/);
+
+    // Reranked elsewhere: same post, same count, a new score.
+    mockRpc.feed_group_previews = answer(
+      RANKING_MEMBERS.map((row) =>
+        row.media_item_id === 'film-r1' ? { ...row, score: 7.4 } : row,
+      ),
+    );
+    const control = view.getByTestId('feed-scroll').props.refreshControl;
+    await act(async () => {
+      control.props.onRefresh();
+    });
+    await loadedRail(view, /^Heat, 2021, scored 7\.4/);
+    // Still one post, in its place.
+    expect(view.getAllByTestId('feed-card')).toHaveLength(1);
   });
 });

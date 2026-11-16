@@ -724,6 +724,10 @@ export default function FeedScreen() {
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
+              // The rails too (Codex, PR 312): a rerank or an unrank keeps a group's id
+              // and count, so its preview key does not move, and only a refetch here
+              // brings a poster's score up to what the member sheet already shows.
+              void groupPreviews.refetch();
               // The bell is on this screen, so a reader pulling to see what is new is
               // asking about it too. Leaving it out meant the one deliberate "refresh
               // this page" gesture in the app refreshed everything on it except the
