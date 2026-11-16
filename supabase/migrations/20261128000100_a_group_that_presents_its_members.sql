@@ -1199,9 +1199,18 @@ begin
     return;
   end if;
 
+  /**
+   * **One change to a group at a time** (Codex, PR 313). The group's own key, exclusively,
+   * before any row lock: two readers reaching two members of one group are serialised here
+   * rather than locking rows in opposite orders, and a conversation being written on the
+   * group itself holds the same key shared (`_unpresent_on_reference`), so a dissolution
+   * waits for it to commit and then sees it.
+   */
+  perform pg_advisory_xact_lock(hashtextextended('feed_group:' || v_group::text, 0));
+
   -- `for no key update`, never `for update`: the writer that fired this already holds the
-  -- foreign key's key-share lock on the event, and two readers reacting at once must not
-  -- deadlock on an upgrade (Codex, PR 313). Then re-read under the lock.
+  -- foreign key's key-share lock on the event, and an upgrade could deadlock against
+  -- another reader's (Codex, PR 313). Then re-read under the lock.
   perform 1 from feed_events where id in (p_event_id, v_group) order by id for no key update;
   select presented_in into v_group from feed_events where id = p_event_id;
   if v_group is null then
@@ -1210,7 +1219,11 @@ begin
 
   update feed_events set presented_in = null where id = p_event_id;
 
-  select fe.id, fe.media_item_id, fe.payload into v_g from feed_events fe where fe.id = v_group;
+  select fe.id, fe.type, fe.media_item_id, fe.payload into v_g from feed_events fe where fe.id = v_group;
+  -- A dissolved group is hidden behind a single post; showing it again needs nothing more.
+  if v_g.type not in ('ranking_batch', 'watchlist_added') then
+    return;
+  end if;
   v_count := _group_title_count(v_group);
 
   /**
@@ -1251,12 +1264,24 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_event uuid;
 begin
   if tg_table_name in ('comments', 'reactions', 'proactive_cluster_actors') then
-    perform _unpresent(new.feed_event_id);
+    v_event := new.feed_event_id;
   elsif tg_table_name = 'notifications' and new.subject_type = 'feed_event' then
-    perform _unpresent(new.subject_id);
+    v_event := new.subject_id;
   end if;
+  if v_event is null then
+    return null;
+  end if;
+  -- A reference to a group holds that group's key, shared, until it commits, so a member
+  -- leaving cannot dissolve the group past a conversation still being written on it.
+  if exists (select 1 from feed_events
+              where id = v_event and type in ('ranking_batch', 'watchlist_added')) then
+    perform pg_advisory_xact_lock_shared(hashtextextended('feed_group:' || v_event::text, 0));
+  end if;
+  perform _unpresent(v_event);
   return null;
 end;
 $$;

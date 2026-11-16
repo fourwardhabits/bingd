@@ -282,6 +282,110 @@ export default function suite() {
       }
     });
 
+    /** A backfill group of `n` hidden rankings for a fresh actor, through `rank_group_note`. */
+    const backfillGroup = async (n) => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      for (let i = 0; i < n; i += 1) {
+        const id = await ranked(me);
+        await db.rows(
+          `insert into watch_events (user_id, media_item_id, watched_on, basis) values ($1, $2, null, 'none')`,
+          [me, id],
+        );
+        await db.rows(
+          `insert into feed_events (actor_id, type, media_item_id, payload)
+           values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+          [me, id],
+        );
+        const owner = await db.session(`owner-${i}`);
+        await owner.actAs(me);
+        await call(owner, `rank_group_note($1, $2)`, [await newOp(db), id]);
+        await owner.end();
+      }
+      const [group] = await db.rows(
+        `select id from feed_events where actor_id = $1 and type = 'ranking_batch'`,
+        [me],
+      );
+      const members = (
+        await db.rows(
+          `select id from feed_events where presented_in = $1 order by created_at, id`,
+          [group.id],
+        )
+      ).map((row) => row.id);
+      const groupKey = (
+        await db.rows(`select hashtextextended('feed_group:' || $1::text, 0)::text as k`, [
+          group.id,
+        ])
+      )[0].k;
+      return { me, group: group.id, members, groupKey };
+    };
+
+    it('RG7: a conversation being written on a group is never hidden by a member leaving (Codex, PR 313)', async () => {
+      const { db, fx } = ctx;
+      const { group, members, groupKey } = await backfillGroup(2);
+      const talker = await fx.createUser();
+      const reactor = await fx.createUser();
+      const t1 = await db.session('talker');
+      const t2 = await db.session('reactor');
+      try {
+        await t1.actAs(talker);
+        await t2.actAs(reactor);
+        await t1.begin();
+        await call(t1, `add_comment($1, $2, 'love this set', false)`, [await newOp(db), group]);
+        const p2 = fire(t2, `set_reaction($1, $2, 'love')`, [await newOp(db), members[0]]);
+        await t2.awaitBlocked({ on: 'advisory', advisoryKey: groupKey });
+        await t1.commit();
+        await p2;
+        const [{ hidden, comments }] = await db.rows(
+          `select (select presented_in from feed_events where id = $1) as hidden,
+                  (select count(*)::int from comments where feed_event_id = $1) as comments`,
+          [group],
+        );
+        assert.equal(comments, 1);
+        assert.equal(hidden, null, 'RG7: the group with a conversation stays visible');
+      } finally {
+        await t1.rollback().catch(() => {});
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+      }
+    });
+
+    it('RG8: two readers on two members of one group are serialised, not deadlocked (Codex, PR 313)', async () => {
+      const { db, fx } = ctx;
+      const { members, groupKey } = await backfillGroup(2);
+      const a = await fx.createUser();
+      const b = await fx.createUser();
+      const ta = await db.session('reader-a');
+      const tb = await db.session('reader-b');
+      try {
+        await ta.actAs(a);
+        await tb.actAs(b);
+        await ta.begin();
+        await call(ta, `set_reaction($1, $2, 'love')`, [await newOp(db), members[0]]);
+        const pb = fire(tb, `set_reaction($1, $2, 'love')`, [await newOp(db), members[1]]);
+        await tb.awaitBlocked({ on: 'advisory', advisoryKey: groupKey });
+        await ta.commit();
+        await pb;
+        const rows = await db.rows(
+          `select fe.id, fe.presented_in, (select count(*)::int from reactions r where r.feed_event_id = fe.id) n
+             from feed_events fe where fe.id = any ($1::uuid[])`,
+          [members],
+        );
+        assert.ok(
+          rows.every((row) => row.n === 1),
+          'RG8: both reactions land',
+        );
+        assert.ok(
+          rows.every((row) => row.presented_in === null),
+          'RG8: both cards are back',
+        );
+      } finally {
+        await ta.rollback().catch(() => {});
+        await ta.end().catch(() => {});
+        await tb.end().catch(() => {});
+      }
+    });
+
     it('RG3: a comment written on a draft as it ends is kept: the draft publishes on its own', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
