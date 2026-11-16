@@ -107,7 +107,7 @@ export type SheetProps = {
    * an identical height").
    *
    *   - `short` (default): sized to its content, up to 90%. Selection and statement sheets.
-   *   - `dense`: **an alias of `size="standard"` since FU1113-B** — the standard 80% height
+   *   - `dense`: **an alias of `size="standard"` since FU1113-B** — the standard 85% height
    *     replaced the 90% this used to take.
    */
   density?: 'dense' | 'short';
@@ -115,7 +115,7 @@ export type SheetProps = {
    * **The standard browsing sheet** (FU1113-B, 2026-11-13).
    *
    *   - `content` (default): today's behaviour — sized to its content, up to 90%.
-   *   - `standard`: a fixed height of `STANDARD_SHEET_FRACTION` (80%) of the window below
+   *   - `standard`: a fixed height of `STANDARD_SHEET_FRACTION` (85%) of the window below
    *     the top safe-area inset, whatever the content — so a list sheet is the same size
    *     with four rows or four hundred, loading or loaded, and never jumps. The header the
    *     caller draws first stays put, the content flexes and scrolls, and the `footer`
@@ -134,8 +134,11 @@ export type SheetProps = {
 
 export type SheetSize = 'content' | 'standard';
 
-/** The standard sheet's share of the usable window height (FU1113-B). */
-export const STANDARD_SHEET_FRACTION = 0.8;
+/**
+ * The standard sheet's share of the usable window height (FU1113-B). 85% since founder QA,
+ * 2026-11-16: 90% felt too tall on Group Recommendations, 80% too short.
+ */
+export const STANDARD_SHEET_FRACTION = 0.85;
 
 /**
  * The standard sheet's height in points: `STANDARD_SHEET_FRACTION` of the window height

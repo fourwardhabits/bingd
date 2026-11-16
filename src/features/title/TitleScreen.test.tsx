@@ -5394,7 +5394,7 @@ describe('the immersive title page (experiment)', () => {
       /**
        * **The standard sheet, and one count everywhere** (FU1113-F, F4).
        *
-       * See all is B's standard 80% sheet with its pinned Close, and a vote cast in it is
+       * See all is B's standard 85% sheet with its pinned Close, and a vote cast in it is
        * the same cache entry the page's preview reads, so closing the sheet shows the page
        * already agreeing.
        */

@@ -471,7 +471,7 @@ export function RankedTitlesSheet({
       visible
       onClose={onClose}
       label={whose}
-      // The densest list in the app's sheets: the standard 80% (FU1113-B), kept while its
+      // The densest list in the app's sheets: the standard 85% (FU1113-B), kept while its
       // tabs, sorts and filters change what is in it.
       size="standard"
       footer={<DismissFooter onPress={onClose} />}

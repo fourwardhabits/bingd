@@ -626,17 +626,17 @@ describe('the sheet around the list', () => {
     entry({ mediaItemId: `m${n}`, title: `Film ${n}`, position: n + 1, year: 2000 + (n % 20) }),
   );
 
-  it('takes the standard 80% height, with no fixed cap on the list', async () => {
+  it('takes the standard 85% height, with no fixed cap on the list', async () => {
     mockMovies = many;
     const view = await open();
     await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
 
     const body = StyleSheet.flatten(view.getByTestId('sheet-body').props.style);
     const list = StyleSheet.flatten(view.getByTestId('ranked-list').props.style);
-    // The standard sheet (FU1113-B): 80% of the window below the top inset, in points.
+    // The standard sheet (FU1113-B): 85% of the window below the top inset, in points.
     // 47 is `renderWithProviders`' iPhone top inset.
     const { height } = Dimensions.get('window');
-    expect(body.height).toBe(Math.round(0.8 * (height - 47)));
+    expect(body.height).toBe(Math.round(0.85 * (height - 47)));
     expect(list.maxHeight).toBeUndefined();
     expect(list.flex).toBe(1);
   });

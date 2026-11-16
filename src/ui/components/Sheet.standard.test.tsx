@@ -5,7 +5,7 @@ import { DismissFooter } from './DismissFooter';
 import { STANDARD_SHEET_FRACTION, Sheet, useStandardSheetHeight } from './Sheet';
 
 /**
- * **The standard browsing sheet** (FU1113-B, B7): a fixed 80% of the usable window height
+ * **The standard browsing sheet** (FU1113-B, B7): a fixed 85% of the usable window height
  * whatever the content, a stable header, a scrolling body, and Close pinned below it.
  */
 const mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
@@ -67,15 +67,15 @@ const bodyStyle = (view: Awaited<ReturnType<typeof draw>>) =>
   StyleSheet.flatten(view.getByTestId('sheet-body').props.style);
 
 describe('the standard sheet height', () => {
-  it('is 80% of the window below the top safe-area inset', async () => {
-    expect(STANDARD_SHEET_FRACTION).toBe(0.8);
+  it('is 85% of the window below the top safe-area inset', async () => {
+    expect(STANDARD_SHEET_FRACTION).toBe(0.85);
     let height = 0;
     function Probe() {
       height = useStandardSheetHeight();
       return null;
     }
     await render(<Probe />);
-    expect(height).toBe(Math.round(0.8 * usable()));
+    expect(height).toBe(Math.round(0.85 * usable()));
   });
 
   it.each([
@@ -83,7 +83,7 @@ describe('the standard sheet height', () => {
     ['a long list', 300],
   ])('is the same fixed height for %s', async (_, count) => {
     const view = await draw(count);
-    expect(bodyStyle(view).height).toBe(Math.round(0.8 * usable()));
+    expect(bodyStyle(view).height).toBe(Math.round(0.85 * usable()));
     // The content flexes to whatever the header and footer leave.
     expect(StyleSheet.flatten(view.getByTestId('sheet-content').props.style)).toMatchObject({
       flex: 1,
@@ -160,6 +160,6 @@ describe('density="dense"', () => {
         <View />
       </Sheet>,
     );
-    expect(bodyStyle(dense as never).height).toBe(Math.round(0.8 * usable()));
+    expect(bodyStyle(dense as never).height).toBe(Math.round(0.85 * usable()));
   });
 });
