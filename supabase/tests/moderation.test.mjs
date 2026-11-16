@@ -482,6 +482,11 @@ describe('the guard is wired in, not merely present', () => {
      * `can_view_profile`.
      */
     'feed_group_previews',
+    /**
+     * 20261128000100. Where a hidden member is shown: `language sql stable`, writes nothing,
+     * and returns a group id only when `can_view_profile` allows the group's actor.
+     */
+    'feed_event_presentation',
     'can_i_view',
     'watch_tag_visible',
     'list_by_id',

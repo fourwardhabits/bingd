@@ -261,6 +261,11 @@ const ALLOWED = {
   // Feed poster rails (20261127000100): a bounded, ordered preview of the posts above,
   // a page at a time, gated per post on the same `can_view_profile` as the two readers.
   'feed_group_previews(uuid[],integer)': ['authenticated'],
+  // Feed PR 2 (20261128000100). The title-page backfill grouping note acts on auth.uid()'s
+  // own newest post only, and re-validates everything; the presentation lookup returns a
+  // group id only when the caller may see that group's actor.
+  'rank_group_note(uuid,uuid)': ['authenticated'],
+  'feed_event_presentation(uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

@@ -184,6 +184,49 @@ export default function suite() {
       }
     });
 
+    it('RG5: two devices grouping two backfill rankings at once leave one group (20261128000100)', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      // Two first-time rankings with undated (historical) watches and their own posts.
+      const titles = [await ranked(me), await ranked(me)];
+      for (const id of titles) {
+        await db.rows(
+          `insert into watch_events (user_id, media_item_id, watched_on, basis) values ($1, $2, null, 'none')`,
+          [me, id],
+        );
+        await db.rows(
+          `insert into feed_events (actor_id, type, media_item_id, payload)
+           values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+          [me, id],
+        );
+      }
+      const t1 = await db.session('phone');
+      const t2 = await db.session('tablet');
+      try {
+        await t1.actAs(me);
+        await t2.actAs(me);
+        const [r1, r2] = await Promise.all([
+          call(t1, `rank_group_note($1, $2)`, [await newOp(db), titles[0]]),
+          call(t2, `rank_group_note($1, $2)`, [await newOp(db), titles[1]]),
+        ]);
+        assert.deepEqual([r1.status, r2.status].sort(), ['grouped', 'solo']);
+        const groups = await ctx.db.rows(
+          `select id, payload from feed_events where actor_id = $1 and type = 'ranking_batch'`,
+          [me],
+        );
+        assert.equal(groups.length, 1, 'RG5: one group, not one per device');
+        assert.equal(groups[0].payload.count, 2);
+        const [{ n }] = await ctx.db.rows(
+          `select count(*)::int as n from feed_events where actor_id = $1 and presented_in = $2`,
+          [me, groups[0].id],
+        );
+        assert.equal(n, 2, 'RG5: both rankings are shown through it');
+      } finally {
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+      }
+    });
+
     it('RG3: a comment written on a draft as it ends is kept: the draft publishes on its own', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
