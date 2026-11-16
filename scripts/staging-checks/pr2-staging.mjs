@@ -102,6 +102,16 @@ try {
   for (const id of [films[7].id, films[8].id]) await rankFromTitlePage(shy, id);
   check('a private account’s group is invisible to a non-follower', (await visible(reader, shy.id)).length === 0);
 
+  // 4b. A stale device's reaction, or a review written later, puts a hidden card back.
+  const hidden = (await service.from('feed_events').select('id, media_item_id').eq('actor_id', actor.id).eq('presented_in', g.id).order('created_at').limit(2)).data;
+  await rpc(reader, 'set_reaction', { p_operation_id: op(), p_feed_event_id: hidden[0].id, p_kind: 'love' });
+  seen = await visible(reader, actor.id);
+  check('a late reaction on a hidden member gives it its card back', seen.some((p) => p.id === hidden[0].id) && seen.find((p) => p.id === g.id)?.payload?.count === 6, `count=${seen.find((p) => p.id === g.id)?.payload?.count}`);
+  const { data: um2 } = await service.from('user_media').select('note_updated_at').eq('user_id', actor.id).eq('media_item_id', hidden[1].media_item_id).single();
+  await rpc(actor, 'save_note', { p_operation_id: op(), p_media_item_id: hidden[1].media_item_id, p_note: 'PR2 staging late review', p_base_updated_at: um2?.note_updated_at ?? null, p_note_visibility: 'public', p_note_spoilers: false });
+  seen = await visible(reader, actor.id);
+  check('a review published later gives its ranking its card back', seen.some((p) => p.id === hidden[1].id) && seen.find((p) => p.id === g.id)?.payload?.count === 5);
+
   // 5. Retrospective consolidation of an older burst (backdated on disposable accounts only).
   const old = await person('old');
   await rpc(reader, 'follow', { p_operation_id: op(), p_followee_id: old.id });
@@ -145,7 +155,7 @@ try {
   seen = await visible(reader, old.id);
   check('revert shows every post again and removes the group', reverted.deleted_groups === 1 && seen.filter((p) => p.type === 'title_ranked').length === 5 && !seen.some((p) => p.type === 'ranking_batch'));
 
-  check('no notifications came from grouping or consolidation (beyond the follow, comment and reaction)', (await notes([reader.id, actor.id])) - notesBefore <= 1, `${notesBefore}→${await notes([reader.id, actor.id])}`);
+  check('no notifications came from grouping or consolidation (beyond the follow, comment and reaction)', (await notes([reader.id, actor.id])) - notesBefore <= 2, `${notesBefore}→${await notes([reader.id, actor.id])}`);
 } catch (error) {
   check('run completed', false, error.message);
 } finally {
