@@ -35,8 +35,8 @@ Each auth user carries `app_metadata: { qa_fixture: 'social-v1', qa_fixture_gene
 key). The password is derived at runtime: `HMAC-SHA256(QA_FIXTURE_PASSWORD, "qa-fixture:social-v1:<username>")`,
 never written down and never logged. The date of birth is `1990-01-01`.
 
-Titles are looked up by TMDB id and kind (`media_items` where `kind = 'movie'` and
-`tmdb_id = …`), never by uuid, and **no catalogue row is ever inserted**. A title the
+Titles are looked up by TMDB id and kind (`media_items` where `kind = 'movie'` or
+`'season'` and `tmdb_id = …`), never by uuid, and **no catalogue row is ever inserted**. A title the
 target does not hold is logged (`result: "missing"`) and every entry that touches it is
 skipped.
 
@@ -45,6 +45,12 @@ skipped.
 | `tmdb150540` | 150540 | Inside Out (2015) |
 | `tmdb361743` | 361743 | Top Gun: Maverick (2022) |
 | `tmdb2062` | 2062 | Ratatouille (2007) |
+| `tv3572` | 3572 (season) | Breaking Bad, Season 1 |
+| `tv144593` | 144593 (season) | The Last of Us, Season 1 |
+
+The two seasons are looked up with `kind = 'season'` and the season's own TMDB id. They are
+only recommended, never ranked or reviewed: a recommendation names a movie or a season
+(`rankable_category`), and they give Sent to You's Movies and TV tabs an unread count each.
 
 ### The scenario
 
@@ -94,6 +100,18 @@ Recommendations (`recommend_title`, at most 3 per sender, far inside the 20 per 
 | fx2 → fx1 | Inside Out | delivered | unread |
 | fx4 → fx1 | Top Gun: Maverick | **pending** request (fx1 does not follow fx4) | n/a |
 | fx3 → fx5 | Ratatouille | **pending** request (fx5 does not follow fx3) | n/a |
+| fx2 → fx1 | Breaking Bad, Season 1 | delivered | unread (fx1: one unread movie, one unread TV) |
+| fx3 → fx2 | The Last of Us, Season 1 | delivered | unread (fx2: opened and seen movies, unread TV) |
+
+A watch's own note (`set_watch_details`, `watch_events.note`), never the title's review:
+
+| entry | author | watch | note | who can read it |
+| --- | --- | --- | --- | --- |
+| `watch-note:fx1:tmdb150540` | fx1 | the Inside Out watch its ranking created | "QA fixture watch note: rewatched on a plane, still cried." | fx1 only (verify checks fx2…fx5 read no row) |
+
+fx1's Inside Out review is a different text, so "Share as a review" from Watch History can be
+tried on this watch and the two seen to stay separate. Doing that replaces fx1's review: run
+`verify` afterwards and it reports the drift; a teardown and a fresh `--generation` restores it.
 
 Helpful votes go through `set_review_helpful` and are never self-votes (`plan.mjs`
 refuses one). Every entry has a stable id such as `review:fx2:tmdb150540` or
