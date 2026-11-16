@@ -116,6 +116,37 @@ describe('joining the open group', () => {
     assert.equal(first.result.status, 'ok');
   });
 
+  it('a placement still in flight when its sitting joined follows it into the group (Codex, PR 311)', async () => {
+    await sitting([await rankedMovie('Heat')]);
+    const [group] = await posts();
+    await ageGroup(group.id, 5);
+
+    // The app fires the note without waiting for it: the sitting ends, joins, and only then
+    // does its last placement's note arrive.
+    const s = await uuid();
+    await note(s, await rankedMovie('Ronin'));
+    const ended = await finalize(s);
+    assert.equal(ended.joined, true);
+    const late = await rankedMovie('Collateral');
+    const landed = await note(s, late);
+
+    assert.equal(landed.status, 'ok');
+    assert.equal(
+      landed.event_id,
+      group.id,
+      'the late title went to the group the sitting joined',
+    );
+    assert.equal(landed.joined, true);
+    const all = await posts();
+    assert.equal(all.length, 1, 'no invisible draft is left that nothing will ever finalise');
+    assert.equal(all[0].payload.count, 3);
+    assert.equal(all[0].media_item_id, group.media_item_id, 'the representative is unchanged');
+    assert.deepEqual((await members(group.id)).at(-1), late);
+
+    // And it is idempotent: the same title again adds nothing.
+    assert.equal((await note(s, late)).count, 3);
+  });
+
   it('keeps the post’s comments and reactions as it grows', async () => {
     await sitting([await rankedMovie('Alien')]);
     const [group] = await posts();

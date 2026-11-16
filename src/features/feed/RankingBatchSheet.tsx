@@ -60,6 +60,11 @@ export function RankingBatchSheet({
     queryKey: ['ranking-batch', eventId],
     enabled: Boolean(eventId),
     queryFn: () => rankingBatchTitles(eventId as string),
+    // Read afresh every time the sheet opens (Codex, PR 311). A published sitting can now
+    // grow in place when a later sitting joins it (20261126000100), keeping its id, so the
+    // app-wide 60-second staleTime would reopen it on the members it had before the post's
+    // count went up. Mounted only while open: one read per open, nothing in the background.
+    staleTime: 0,
   });
 
   const titles = data ?? [];

@@ -17,6 +17,10 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  * **RG3. A comment being written on a draft is never lost to a join** (Codex, PR 311). The
  * finaliser locks the draft row, so it waits for the uncommitted comment, sees it, and
  * publishes the draft on its own rather than deleting it into the open group.
+ *
+ * **RG4. A placement note racing the join is never orphaned** (Codex, PR 311). The note takes
+ * the same actor key, so it waits for the finaliser, then finds the join and adds its title
+ * to the group rather than drafting an invisible post nothing would ever finalise.
  */
 export default function suite() {
   const rc = raceContext();
@@ -135,6 +139,44 @@ export default function suite() {
         const rows = await posts(me);
         assert.equal(rows.length, 1);
         assert.equal(rows[0].payload.count, 2);
+      } finally {
+        await t1.rollback().catch(() => {});
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+      }
+    });
+
+    it('RG4: a placement note racing the join waits for it, then lands in the group (Codex, PR 311)', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const t1 = await db.session('finaliser');
+      const t2 = await db.session('late-note');
+      try {
+        await t1.actAs(me);
+        await t2.actAs(me);
+        const s0 = await drafted(t1, me);
+        await call(t1, `rank_batch_finalize($1, $2)`, [await newOp(db), s0]);
+        const s1 = await drafted(t1, me);
+        const late = await ranked(me);
+
+        await t1.begin();
+        const ended = await call(t1, `rank_batch_finalize($1, $2)`, [await newOp(db), s1]);
+        assert.equal(ended.joined, true);
+        const p2 = fire(t2, `rank_batch_note($1, $2, $3)`, [await newOp(db), s1, late]);
+        await t2.awaitBlocked({ on: 'advisory', advisoryKey: await storyKey(me) });
+        await t1.commit();
+
+        const r2 = (await p2).rows[0].r;
+        assert.equal(r2.status, 'ok');
+        assert.equal(
+          r2.joined,
+          true,
+          'RG4: the late title followed its sitting into the group',
+        );
+        const rows = await posts(me);
+        assert.equal(rows.length, 1, 'RG4: no orphaned draft');
+        assert.equal(rows[0].type, 'ranking_batch');
+        assert.equal(rows[0].payload.count, 3);
       } finally {
         await t1.rollback().catch(() => {});
         await t1.end().catch(() => {});

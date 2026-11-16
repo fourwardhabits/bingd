@@ -1,4 +1,6 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, waitFor } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -88,5 +90,54 @@ describe('the expanded list', () => {
 
     await waitFor(() => expect(view.getByTestId('ranking-batch-scroll')).toBeTruthy());
     expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(2);
+  });
+});
+
+/**
+ * **Reopening a grown group reads it again** (Codex, PR 311). A published sitting can grow in
+ * place when a later sitting joins it (20261126000100). Under the app's own staleTime (60 s;
+ * the test providers use 0, which would hide the bug) the second open must fetch.
+ */
+describe('the member sheet under the app’s cache settings', () => {
+  it('fetches the members again on every open, so a grown group shows its new titles', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { staleTime: 60_000, gcTime: 60_000, retry: false } },
+    });
+    const metrics = {
+      frame: { x: 0, y: 0, width: 390, height: 844 },
+      insets: { top: 47, left: 0, right: 0, bottom: 34 },
+    };
+    const sheet = () => (
+      <QueryClientProvider client={client}>
+        <SafeAreaProvider initialMetrics={metrics}>
+          <RankingBatchSheet eventId="event-1" medium="movies" onClose={() => {}} />
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    );
+    const heat = {
+      media_item_id: 'heat',
+      title: 'Heat',
+      poster_path: null,
+      position: 3,
+      score: 10,
+      bucket: 'loved',
+    };
+    const ronin = { ...heat, media_item_id: 'ronin', title: 'Ronin', position: 4, score: 9.5 };
+    try {
+      mockRpc.mockResolvedValue({ data: [heat], error: null });
+      const first = await render(sheet());
+      await waitFor(() => expect(first.getByText('Heat')).toBeTruthy());
+      await first.unmount();
+
+      mockRpc.mockResolvedValue({ data: [heat, ronin], error: null });
+      const second = await render(sheet());
+      await waitFor(() => expect(second.getByText('Ronin')).toBeTruthy());
+      expect(
+        mockRpc.mock.calls.filter(([name]) => name === 'ranking_batch_titles'),
+      ).toHaveLength(2);
+      await second.unmount();
+    } finally {
+      client.clear();
+    }
   });
 });
