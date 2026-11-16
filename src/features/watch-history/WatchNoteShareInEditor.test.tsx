@@ -53,6 +53,17 @@ jest.mock('@/features/auth/session', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'qa_a', display_name: 'QA account A' }),
 }));
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
+const mockInvalidate = jest.fn();
+jest.mock('@/features/collection/invalidate', () => {
+  const actual = jest.requireActual('@/features/collection/invalidate');
+  return {
+    ...actual,
+    invalidateAfterCollectionChange: (...args: unknown[]) => {
+      mockInvalidate(...args);
+      return actual.invalidateAfterCollectionChange(...args);
+    },
+  };
+});
 jest.mock('@/features/collection/use-companions', () => ({
   ...jest.requireActual('@/features/collection/use-companions'),
   useTaggablePeople: () => ({
@@ -108,6 +119,14 @@ jest.mock('@/lib/supabase', () => {
     if (name === 'set_watch_details' && held) {
       (globalThis as { __held?: Promise<void> | null }).__held = null;
       return held.then(() => rpc(name, args));
+    }
+    // A test can have the next `save_note` refused as a version conflict (its 55000).
+    const g = globalThis as { __conflictOnce?: (() => void) | null };
+    if (name === 'save_note' && g.__conflictOnce) {
+      g.__conflictOnce(); // what the server now holds, for the re-read to find
+      g.__conflictOnce = null;
+      client.rpcCalls.push({ name, args });
+      return Promise.resolve({ data: null, error: { code: '55000', message: 'note changed' } });
     }
     if (name === 'set_watch_details' && !client.broken.has(name)) {
       const rows = client.tables.watch_events as Record<string, unknown>[];
@@ -255,6 +274,7 @@ beforeEach(() => {
   mockTitleNote.note = '';
   mockTitleNote.visibility = 'private';
   mockLogLoaded = true;
+  (globalThis as { __conflictOnce?: (() => void) | null }).__conflictOnce = null;
   alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 
@@ -434,6 +454,31 @@ describe('Share as a review, decided in the editor', () => {
     await waitFor(() => expect(view.queryByTestId('watch-editor-w2')).toBeNull());
     // The watch was already saved: the retry writes only the review, once.
     expect(pg().rpcCalls.map((call) => call.name)).toEqual(['save_note']);
+  });
+
+  it('a review changed elsewhere refuses the share, re-reads it, and the retry asks before replacing', async () => {
+    // A review written on another device, which the refused publish is answered with.
+    (globalThis as { __conflictOnce?: (() => void) | null }).__conflictOnce = () => {
+      mockTitleNote.note = 'Written on the tablet.';
+      mockTitleNote.visibility = 'public';
+    };
+    const view = await loaded();
+    const editor = await open(view, 'w3'); // its saved note, unchanged: only the review is sent
+    await fireEvent.press(shareChip(editor));
+    mockInvalidate.mockClear();
+    await save(view, 'w3');
+
+    await waitFor(() =>
+      expect(
+        within(view.getByTestId('watch-editor-w3')).getByText(/changed somewhere else/),
+      ).toBeTruthy(),
+    );
+    expect(mockInvalidate).toHaveBeenCalled(); // the title note is read again
+
+    await act(() => new Promise((resolve) => setTimeout(resolve, 650)));
+    await save(view, 'w3');
+    await waitFor(() => expect(alert).toHaveBeenCalled());
+    expect(alert.mock.calls[0]?.[0]).toBe('Replace your review?');
   });
 
   it('Share with no text asks for a note instead of publishing an empty review', async () => {

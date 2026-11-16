@@ -322,6 +322,8 @@ export default function WatchHistoryScreen() {
     let reviewFailure: string | null = null;
     /** The review's write failed in a way that may still have committed (a dropped reply). */
     let reviewUnknown = false;
+    /** The review changed elsewhere since this screen read it: re-read it before a retry. */
+    let reviewStale = false;
     try {
       if (edit.watchedOn !== undefined) {
         results.push(
@@ -367,6 +369,10 @@ export default function WatchHistoryScreen() {
         if (published.outcome === 'failed') {
           reviewFailure = published.message;
           reviewUnknown = published.changed === true;
+          // Codex (PR 308): without a re-read, every retry would send the same stale version
+          // and be refused again. Refreshed, the next Save asks before replacing the newer
+          // review, as a first Share would.
+          reviewStale = published.conflict === true;
         } else {
           results.push(published);
         }
@@ -379,6 +385,7 @@ export default function WatchHistoryScreen() {
     // `mustReconcile`'s rule, inline: a write that landed, or may have, refreshes the caches.
     if (
       reviewUnknown ||
+      reviewStale ||
       results.some((result) => result.outcome !== 'failed' || result.changed === true)
     ) {
       reconcile();
@@ -392,7 +399,9 @@ export default function WatchHistoryScreen() {
         ok: false,
         message: reviewUnknown
           ? 'Your note is saved on this watch. We couldn’t confirm it was shared as a review; save again to make sure.'
-          : `Your note is saved on this watch, but it wasn’t shared as a review. ${reviewFailure}`,
+          : reviewStale
+            ? 'Your note is saved on this watch, but it wasn’t shared: your review of this title changed somewhere else. Save again to choose whether to replace it.'
+            : `Your note is saved on this watch, but it wasn’t shared as a review. ${reviewFailure}`,
       };
     }
     return { ok: true };
