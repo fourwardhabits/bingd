@@ -139,6 +139,74 @@ export function PosterShelf({
   );
 }
 
+export type PosterRailProps = {
+  /** The rail's accessible name, e.g. "Titles Maya added to their watchlist". */
+  label: string;
+  tiles: PosterTile[];
+  onPressTile: (tile: PosterTile) => void;
+  /**
+   * The width the rail lives in. A Feed card is inset by the gutter on both sides, so the
+   * rail is sized to the card rather than to the screen the way a shelf is.
+   */
+  width: number;
+  /** Placeholder frames while the members load, instead of tiles. */
+  loadingCount?: number;
+  testID?: string;
+};
+
+/** How many whole posters a rail shows before the peek (Feed poster rails, 2026-11-16). */
+const RAIL_COLUMNS = 3;
+
+/**
+ * **A group's posters, inside a card** (Feed poster rails, founder spec 2026-11-16).
+ *
+ * The shelf's own tile — its press scale, its 2:3 poster, its Maroon score chip and its
+ * season pill, its spoken label — in a row sized to the width it is given rather than to
+ * the screen: three whole posters and part of a fourth, so the clip says there is more.
+ * Free scrolling, no snapping, no labels under the artwork.
+ *
+ * The horizontal scroll is a plain nested `ScrollView`, which hands vertical drags to the
+ * Feed and keeps horizontal ones, and a tap is resolved by the tile that was pressed — every
+ * tile is keyed by its own title, so a recycled card never opens a neighbour's.
+ */
+export function PosterRail({
+  label,
+  tiles,
+  onPressTile,
+  width,
+  loadingCount = 0,
+  testID,
+}: PosterRailProps) {
+  const { gap, peek } = theme.layout.posterShelf;
+  const cardWidth = Math.floor((width - RAIL_COLUMNS * gap) / (RAIL_COLUMNS + peek));
+  const cardHeight = Math.round((cardWidth * 3) / 2);
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      accessibilityLabel={label}
+      contentContainerStyle={[styles.railRow, { gap }]}
+      decelerationRate="fast"
+      testID={testID}
+    >
+      {tiles.length
+        ? tiles.map((tile) => (
+            <Tile key={tile.id} tile={tile} width={cardWidth} onPress={() => onPressTile(tile)} />
+          ))
+        : Array.from({ length: loadingCount }, (_, index) => (
+            <View
+              key={`placeholder-${index}`}
+              style={[styles.railPlaceholder, { width: cardWidth, height: cardHeight }]}
+              testID="poster-rail-placeholder"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            />
+          ))}
+    </ScrollView>
+  );
+}
+
 export type PosterGridProps = {
   title?: string;
   tiles: PosterTile[];
@@ -584,6 +652,13 @@ const labelFor = (tile: PosterTile) => {
 const styles = StyleSheet.create({
   shelf: { gap: theme.space[2] },
   shelfRow: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[1] },
+  // No gutter of its own: the Feed card that holds a rail is already inset.
+  railRow: { paddingVertical: theme.space[1] },
+  // Parchment, the colour a poster with no artwork already is.
+  railPlaceholder: {
+    borderRadius: theme.radius.control,
+    backgroundColor: theme.surface.sunken,
+  },
   grid: { gap: theme.space[2] },
   gridRows: {
     flexDirection: 'row',

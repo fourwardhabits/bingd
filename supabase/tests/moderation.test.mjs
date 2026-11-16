@@ -476,6 +476,12 @@ describe('the guard is wired in, not merely present', () => {
      * `can_view_profile` for the post's actor; its act, `set_watchlist`, calls the guard.
      */
     'watchlist_group_titles',
+    /**
+     * 20261127000100. The Feed's poster-rail preview: the two readers above, a page of
+     * posts at once and capped — `language sql stable`, writes nothing, gated per post on
+     * `can_view_profile`.
+     */
+    'feed_group_previews',
     'can_i_view',
     'watch_tag_visible',
     'list_by_id',

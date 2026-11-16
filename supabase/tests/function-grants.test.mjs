@@ -258,6 +258,9 @@ const ALLOWED = {
   'rank_batch_finalize(uuid,uuid)': ['authenticated'],
   'ranking_batch_titles(uuid)': ['authenticated'],
   'watchlist_group_titles(uuid)': ['authenticated'],
+  // Feed poster rails (20261127000100): a bounded, ordered preview of the posts above,
+  // a page at a time, gated per post on the same `can_view_profile` as the two readers.
+  'feed_group_previews(uuid[],integer)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

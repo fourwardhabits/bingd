@@ -29,6 +29,7 @@ import {
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
+import { groupCount, previewKey, useGroupPreviews } from '@/features/feed/use-group-previews';
 import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -469,6 +470,44 @@ export default function FeedScreen() {
   const eventIds = useMemo(() => events.map((event) => event.id), [events]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
+  const groupPreviews = useGroupPreviews(events, profile.id);
+
+  /**
+   * **A grouped post's rail, or null for the cinematic card** (Feed poster rails).
+   *
+   * A group with two or more previewed members is drawn as its posters. While the preview
+   * loads it is drawn as placeholders, already sized. If the read failed, or it found fewer
+   * than two members it may show, the post falls back to the representative card it always
+   * had — with its "and N others" and the complete list — so the post and its
+   * conversation are never hidden and a short preview never passes for the whole group.
+   */
+  const railFor = (event: FeedItem) => {
+    const total = groupCount(event);
+    if (!total) return null;
+    const rows = groupPreviews.data?.get(previewKey(event, total));
+    const openAll = () =>
+      event.type === 'ranking_batch'
+        ? setRankingBatchFor({ id: event.id, medium: batchMedium(event.kind) })
+        : setWatchlistGroupFor(event.id);
+    if (rows === undefined) {
+      if (groupPreviews.isError) return null;
+      return { total, tiles: [], loading: true, onPressTile: () => {}, onPressAll: openAll };
+    }
+    if (rows.length < 2) return null;
+    return {
+      total,
+      tiles: rows.map((row) => ({
+        id: row.mediaItemId,
+        title: row.title,
+        year: row.year,
+        posterUri: posterUri(row.posterPath, 'card'),
+        score: row.score,
+        season: row.seasonNumber,
+      })),
+      onPressTile: (tile: { id: string }) => router.push(`/title/${tile.id}`),
+      onPressAll: openAll,
+    };
+  };
   const { setReaction } = useSetReaction(profile.id);
 
   const choose = async (eventId: string, kind: ReactionKind | null) => {
@@ -1001,6 +1040,9 @@ export default function FeedScreen() {
                     }
                     saved={saved.has(event.mediaItemId!)}
                     onPressShare={() => openRecommend(event)}
+                    // A group's Save and Share would act on its first title alone, so
+                    // FeedCard draws neither beside a rail; each poster opens its title.
+                    rail={railFor(event)}
                   />
                 ) : (
                 <ActivityRow
