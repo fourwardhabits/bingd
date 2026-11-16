@@ -148,7 +148,10 @@ export default function WatchHistoryScreen() {
    * screen that scrolls and one that stutters, and it is the lint rule's whole point.
    */
   const events = useMemo(() => history.data?.events ?? EMPTY_EVENTS, [history.data]);
-  const placements = useMemo(() => history.data?.placements ?? EMPTY_PLACEMENTS, [history.data]);
+  const placements = useMemo(
+    () => history.data?.placements ?? EMPTY_PLACEMENTS,
+    [history.data],
+  );
 
   /**
    * The opinion held at each watch (founder delta QA, 2026-09-21): the same frozen number
@@ -194,8 +197,7 @@ export default function WatchHistoryScreen() {
       events.findIndex((candidate) => candidate.id === event.id),
     );
 
-  const reconcile = () =>
-    invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
+  const reconcile = () => invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
 
   /** Back to the title page behind this one, or to it when this page was opened cold. */
   const leave = () =>
@@ -282,6 +284,19 @@ export default function WatchHistoryScreen() {
      * either — and the editor keeps the draft. The same question `shareNote` asks.
      */
     if (edit.review) {
+      /**
+       * Not before the title's own note is known (Codex, PR 308). Without it, a different
+       * stored review would be replaced without asking, and `save_note` would get no base
+       * version and so no conflict check. The collapsed card's Share waits on the same
+       * thing (`canShareNote`). Refused before anything is written; the draft is kept.
+       */
+      if (!canShareNote) {
+        return {
+          ok: false,
+          message:
+            'We couldn’t load your review of this title yet, so nothing was saved. Try again in a moment.',
+        };
+      }
       const stored = logState.data;
       const existing = stored?.note.trim() ?? '';
       if (existing && existing !== edit.review.note.trim()) {
@@ -427,12 +442,19 @@ export default function WatchHistoryScreen() {
     }
     setBusy(true);
     setError(null);
-    const result = await deleteWatchEvent({ operationId: newOperationId(), watchEventId: eventId });
+    const result = await deleteWatchEvent({
+      operationId: newOperationId(),
+      watchEventId: eventId,
+    });
     setBusy(false);
     setEditingId(null);
     reconcile();
     if (result.outcome === 'failed') {
-      setError(result.lastWatch ? 'A title in your collection has at least one watch.' : result.message);
+      setError(
+        result.lastWatch
+          ? 'A title in your collection has at least one watch.'
+          : result.message,
+      );
     }
   };
 
@@ -452,9 +474,7 @@ export default function WatchHistoryScreen() {
   const header = (
     <>
       <Stack.Screen options={{ headerShown: false, title: 'Watch history' }} />
-      <AppHeader
-        back={{ onPress: leave }}
-      />
+      <AppHeader back={{ onPress: leave }} />
       <HeaderBoundary />
     </>
   );
@@ -551,7 +571,8 @@ export default function WatchHistoryScreen() {
           // virtualisation tuning this screen is sized for.
           const group = groups.find((candidate) => candidate.events.includes(item));
           const first = group?.events[0]?.id === item.id;
-          const showYear = first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
+          const showYear =
+            first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
           const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 

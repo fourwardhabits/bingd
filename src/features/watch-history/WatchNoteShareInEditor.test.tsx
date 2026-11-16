@@ -68,15 +68,19 @@ const mockTitleNote: { note: string; visibility: 'public' | 'private' } = {
   note: '',
   visibility: 'private',
 };
+/** False while the title's log state is still loading (or failed): no data at all. */
+let mockLogLoaded = true;
 jest.mock('@/features/collection/use-log-state', () => ({
   useLogState: () => ({
-    data: {
-      note: mockTitleNote.note,
-      noteVisibility: mockTitleNote.visibility,
-      noteSpoilers: false,
-      noteVersion: '2026-11-01T00:00:00Z',
-      ranked: true,
-    },
+    data: !mockLogLoaded
+      ? undefined
+      : {
+          note: mockTitleNote.note,
+          noteVisibility: mockTitleNote.visibility,
+          noteSpoilers: false,
+          noteVersion: '2026-11-01T00:00:00Z',
+          ranked: true,
+        },
   }),
 }));
 
@@ -132,7 +136,6 @@ jest.mock('@/lib/supabase', () => {
 });
 
 const pg = () => (globalThis as unknown as { __pg: Postgrest }).__pg;
-
 
 const THIRD_NOTE = 'Third time, on the big screen, and it still lands.';
 const REVIEW = {
@@ -205,7 +208,6 @@ const seedThreeWatches = () => {
   db.tables.user_media = [{ ...REVIEW }];
 };
 
-
 const notes = () =>
   Object.fromEntries(
     (pg().tables.watch_events as { id: string; note: string | null }[]).map((row) => [
@@ -252,6 +254,7 @@ beforeEach(() => {
   seedThreeWatches();
   mockTitleNote.note = '';
   mockTitleNote.visibility = 'private';
+  mockLogLoaded = true;
   alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 
@@ -373,6 +376,24 @@ describe('Share as a review, decided in the editor', () => {
     await save(view, 'w3');
     await waitFor(() => expect(view.queryByTestId('watch-editor-w3')).toBeNull());
     expect(calls('save_note')).toHaveLength(0);
+  });
+
+  it('refuses to share before the title’s own note has loaded: nothing written, draft kept', async () => {
+    mockLogLoaded = false; // still loading, or failed: no stored note and no version to check
+    const view = await loaded();
+    const editor = await open(view, 'w2');
+    await fireEvent.changeText(field(editor), 'Not yet.');
+    await fireEvent.press(shareChip(editor));
+    await save(view, 'w2');
+
+    await waitFor(() =>
+      expect(
+        within(view.getByTestId('watch-editor-w2')).getByText(/couldn’t load your review/),
+      ).toBeTruthy(),
+    );
+    expect(pg().rpcCalls).toHaveLength(0);
+    expect(alert).not.toHaveBeenCalled();
+    expect(field(within(view.getByTestId('watch-editor-w2'))).props.value).toBe('Not yet.');
   });
 
   it('a failed watch write publishes nothing, and says so beside the draft', async () => {
