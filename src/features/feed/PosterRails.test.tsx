@@ -188,7 +188,10 @@ const DUNE: Media = {
   backdrop_path: '/dune-wide.jpg',
 };
 
-const preview = (eventId: string, rows: Partial<Record<string, unknown>>[]) =>
+const preview = (
+  eventId: string,
+  rows: Partial<Record<string, unknown>>[],
+): Record<string, unknown>[] =>
   rows.map((row, index) => ({
     event_id: eventId,
     ordinal: index + 1,
