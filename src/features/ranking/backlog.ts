@@ -182,6 +182,26 @@ export async function noteBatchRanking(sitting: string, mediaItemId: string): Pr
 }
 
 /**
+ * **A title-page backfill ranking joins its burst** (Feed PR 2, `20261128000100`).
+ *
+ * Called once after a first-time ranking from any surface but Unranked, whose sitting has
+ * its own draft. The server decides everything — whether the watch evidence is historical,
+ * whether the post is untouched and unreviewed, whether a group is open — and an after-watch
+ * ranking simply keeps its own card. Fire and forget: the ranking is already saved, and a
+ * grouping that did not happen is not an error anybody should see.
+ */
+export async function groupBackfillRanking(mediaItemId: string): Promise<void> {
+  try {
+    await supabase.rpc('rank_group_note', {
+      p_operation_id: Crypto.randomUUID(),
+      p_media_item_id: mediaItemId,
+    });
+  } catch {
+    // The ranking is saved either way; the post stays a single card.
+  }
+}
+
+/**
  * **Ends the sitting and publishes its post** (founder, 2026-09-25; `20261023000100`).
  *
  * Until this runs the sitting is a draft that no activity read asks for, so nobody

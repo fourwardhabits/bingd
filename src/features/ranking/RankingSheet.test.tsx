@@ -1114,7 +1114,20 @@ describe('the reveal names what it landed between', () => {
     expect(callsTo('rank_answer')).toHaveLength(0);
     expect(callsTo('rank_rebucket')).toHaveLength(0);
     expect(callsTo('rank_again')).toHaveLength(0);
-    expect(mockRpc.mock.calls).toHaveLength(1);
+    // The reveal reads nothing. The one other call is the first ranking's backfill
+    // grouping note (Feed PR 2), made once per placement and never for the reveal.
+    expect(callsTo('rank_group_note')).toHaveLength(1);
+    expect(mockRpc.mock.calls).toHaveLength(2);
+  });
+
+  it('asks to group a first ranking, once, by its title', async () => {
+    ranked(movies);
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    expect(callsTo('rank_group_note')).toEqual([
+      ['rank_group_note', expect.objectContaining({ p_media_item_id: 'film-a' })],
+    ]);
   });
 });
 

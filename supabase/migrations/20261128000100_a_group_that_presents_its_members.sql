@@ -831,7 +831,9 @@ create or replace function consolidate_feed_history(
   p_since          timestamptz,
   p_until          timestamptz,
   p_apply          boolean default false,
-  p_window_minutes integer default 30
+  p_window_minutes integer default 30,
+  -- One account only, for a staged rollout or a staging check. Null is everyone.
+  p_actor          uuid default null
 )
 returns jsonb
 language plpgsql
@@ -882,6 +884,7 @@ begin
     into v_excluded
     from feed_events e
    where e.created_at >= p_since and e.created_at < p_until
+     and (p_actor is null or e.actor_id = p_actor)
      and e.presented_in is null
      and e.type in ('watchlist_added', 'title_ranked');
 
@@ -890,6 +893,7 @@ begin
            case when e.type = 'watchlist_added' then 'watchlist' else 'ranking' end as fam
       from feed_events e
      where e.created_at >= p_since and e.created_at < p_until
+       and (p_actor is null or e.actor_id = p_actor)
        and e.presented_in is null
        and e.media_item_id is not null
        and not exists (select 1 from feed_events c where c.presented_in = e.id)
@@ -1058,7 +1062,7 @@ begin
 end;
 $$;
 
-revoke execute on function consolidate_feed_history(text, timestamptz, timestamptz, boolean, integer) from public, anon, authenticated;
+revoke execute on function consolidate_feed_history(text, timestamptz, timestamptz, boolean, integer, uuid) from public, anon, authenticated;
 revoke execute on function revert_feed_consolidation(text) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------

@@ -30,7 +30,15 @@ export type RankingBatchTitle = {
   position: number | null;
   score: number | null;
   bucket: string | null;
+  /**
+   * The title's own ladder (20261128000100). A group may span movies, shows and seasons
+   * since then, so each standing is labelled by its own list; null from an older backend,
+   * when the sheet's `medium` stands in as it always did.
+   */
+  category: RankingCategory | null;
 };
+
+const CATEGORIES: readonly RankingCategory[] = ['movies', 'tv_seasons', 'tv_shows'];
 
 export async function rankingBatchTitles(eventId: string): Promise<RankingBatchTitle[]> {
   const { data, error } = await supabase.rpc('ranking_batch_titles', { p_event_id: eventId });
@@ -43,6 +51,9 @@ export async function rankingBatchTitles(eventId: string): Promise<RankingBatchT
     position: typeof row.position === 'number' ? row.position : null,
     score: typeof row.score === 'number' ? row.score : Number(row.score) || null,
     bucket: (row.bucket as string | null) ?? null,
+    category: CATEGORIES.includes(row.category as RankingCategory)
+      ? (row.category as RankingCategory)
+      : null,
   }));
 }
 
@@ -85,7 +96,11 @@ export function RankingBatchSheet({
         ) : (
           <View style={styles.rows}>
             {titles.map((title) => (
-              <RankedSummaryRow key={title.mediaItemId} title={title} medium={medium} />
+              <RankedSummaryRow
+                key={title.mediaItemId}
+                title={title}
+                medium={title.category ?? medium}
+              />
             ))}
           </View>
         )}
