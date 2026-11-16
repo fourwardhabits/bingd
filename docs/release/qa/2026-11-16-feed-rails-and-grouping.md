@@ -65,11 +65,13 @@ Full report: `2026-11-16-consolidation-dryrun-production.json`.
 
 ### PR 2 status (PR 313)
 
-- **PR and review:** [fourwardhabits/bingd#313](https://github.com/fourwardhabits/bingd/pull/313), a draft with base #312. Codex review requested.
-- **Staging migration:** `20261128000100` is applied (203 migrations). Backfill grouping is on in staging.
-- **Staging integration:** `scripts/staging-checks/pr2-staging.mjs` passes 21/21 with disposable accounts, all deleted afterwards.
+- **PR and review:** [fourwardhabits/bingd#313](https://github.com/fourwardhabits/bingd/pull/313), a draft with base #312. **Head `87987a43`: Codex found no issues; CI is green, including the concurrency suite.**
+- **Codex findings addressed along the way:** a reference added after a post was hidden (a comment, reaction, notification or proactive item) now restores it, as does a review published later or mid-grouping. `_unpresent` serializes on `feed_group:<id>`, and the review trigger on `ranking_story:<actor>`. Lock order is `ranking_story` then `feed_group` on every path.
+- **Staging migration:** `20261128000100` re-applied with the final file (203 migrations). Backfill grouping is on in staging.
+- **Staging integration:** `scripts/staging-checks/pr2-staging.mjs` passes 23/23 with disposable accounts, all deleted afterwards. It includes a late reaction and a late review each restoring a hidden card.
 - **Equivalence:** on staging, `consolidate_feed_history` in dry-run mode and `docs/feed/consolidation-candidates.sql` produce the same plan: 3 ranking and 2 watchlist groups, 56 members.
-- **Local gates:** test:db 3297 pass, then allow-lists fixed (38/38). Races 209/209, including RG5. Client 6327 pass.
+- **Local gates on `87987a43`:** test:db 3307/0; races 213/213 on real Postgres (RG5–RG9; RG9 fails with the review lock removed); jest 7015 passed, 4 skipped.
+- **Race limit, disclosed:** RG6 cannot force the exact deadlock interleaving it guards against. RG7–RG9 do prove the blocking order.
 - **Preview:** left on PR 312 (`e94589b6`) for the founder's rail check. A Preview of PR 2 would replace it, so it is published only on request or after that check.
 - **Production prerequisites, when authorized:**
   1. Release #312 first.
