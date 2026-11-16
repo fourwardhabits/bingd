@@ -62,3 +62,18 @@ Full report: `2026-11-16-consolidation-dryrun-production.json`.
   - (a) Keep the safe rule. Grouping then applies to undated or explicitly older watches only.
   - (b) Treat a burst of `today_default` first rankings as backfill. This is a heuristic the spec currently disallows.
   - (c) Change the log sheet so backfill is recorded as such. This is a product change.
+
+### PR 2 status (PR 313)
+
+- **PR and review:** [fourwardhabits/bingd#313](https://github.com/fourwardhabits/bingd/pull/313), a draft with base #312. Codex review requested.
+- **Staging migration:** `20261128000100` is applied (203 migrations). Backfill grouping is on in staging.
+- **Staging integration:** `scripts/staging-checks/pr2-staging.mjs` passes 21/21 with disposable accounts, all deleted afterwards.
+- **Equivalence:** on staging, `consolidate_feed_history` in dry-run mode and `docs/feed/consolidation-candidates.sql` produce the same plan: 3 ranking and 2 watchlist groups, 56 members.
+- **Local gates:** test:db 3297 pass, then allow-lists fixed (38/38). Races 209/209, including RG5. Client 6327 pass.
+- **Preview:** left on PR 312 (`e94589b6`) for the founder's rail check. A Preview of PR 2 would replace it, so it is published only on request or after that check.
+- **Production prerequisites, when authorized:**
+  1. Release #312 first.
+  2. Pre-insert `feed.ranking_backfill_grouping_enabled = false` in production.
+  3. Apply `20261128000100`, then CI, the release gate and the OTA on the merged SHA.
+  4. Enable the flag.
+  5. Run the consolidation only with a separate authorization and the batch name recorded: read-only dry run, then `consolidate_feed_history(batch, since, until, true)`; revert with `revert_feed_consolidation(batch)`.

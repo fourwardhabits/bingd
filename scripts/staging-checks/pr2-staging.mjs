@@ -123,7 +123,8 @@ try {
   const batch = `pr2-staging-${randomBytes(3).toString('hex')}`;
   const since = new Date(Date.now() - 5 * 86400000).toISOString();
   const dry = (await sql(`select consolidate_feed_history('${batch}', '${since}', now(), false, 30, '${old.id}') r`))[0].r;
-  check('dry run: the commented and the reacted-to posts are left out, so nothing groups', dry.planned_groups.ranking === 0 && dry.excluded.referenced === 2, JSON.stringify(dry.planned_groups));
+  check('dry run: the commented and reacted-to posts are left out; the two clean ones would group', dry.planned_groups.ranking === 1 && dry.planned_groups.members === 2 && dry.excluded.referenced === 2, JSON.stringify(dry.planned_groups));
+  check('and a dry run writes nothing', (await service.from('feed_events').select('id', { count: 'exact', head: true }).eq('actor_id', old.id).not('presented_in', 'is', null)).count === 0);
   // A fifth historical post next to the two clean ones makes a group of three.
   const extra = films[13].id;
   await service.from('app_config').update({ value: false }).eq('key', 'feed.ranking_backfill_grouping_enabled');
