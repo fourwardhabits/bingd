@@ -39,3 +39,11 @@ The founder authorized this order on 2026-11-16.
 
 - **Production OTA before Feed:** Android `30bf8eef-acc3-4946-9126-db55ae9110c9`, iOS `cacbef1e-0ab1-4ed1-bed6-037e17a142a0` (`fb44d469`).
 - **Production OTA before #308:** Android `46fd8420-8ac6-4183-86b3-18a19f8af07d`, iOS `4c6412a8-9b40-4b80-8713-75eeba728f11` (`979e3c21`).
+
+## State at 08:30Z: Feed grouping shipped
+
+- **Production:** OTA `9d11a797` (Android `b82a0376`, iOS `0c141d10`).
+  - Backend: 201 migrations, head `20261126000100`. Both grouping flags were enabled at 08:26:36Z.
+  - Record: `docs/release/manifests/production-2026-11-16-feed-grouping.json`.
+- **Health after enabling:** anon smoke 137/137. Integrity reads are clean: 232/232 watchlist groups with members, 0 stale drafts.
+- **Rollback:** flags off first, then republish #308's groups if needed. Never revert the migrations.
