@@ -306,6 +306,8 @@ export default function suite() {
         `select id from feed_events where actor_id = $1 and type = 'ranking_batch'`,
         [me],
       );
+      // One ranking is a marked single, not yet a group.
+      if (!group) return { me, group: null, members: [], groupKey: null };
       const members = (
         await db.rows(
           `select id from feed_events where presented_in = $1 order by created_at, id`,
@@ -383,6 +385,58 @@ export default function suite() {
         await ta.rollback().catch(() => {});
         await ta.end().catch(() => {});
         await tb.end().catch(() => {});
+      }
+    });
+
+    it('RG9: a review published while a grouping is in flight still gets its card back (Codex, PR 313)', async () => {
+      const { db } = ctx;
+      // One backfill ranking already marked, a second about to pair with it.
+      const { me } = await backfillGroup(1);
+      const second = await ranked(me);
+      await db.rows(
+        `insert into watch_events (user_id, media_item_id, watched_on, basis) values ($1, $2, null, 'none')`,
+        [me, second],
+      );
+      await db.rows(
+        `insert into feed_events (actor_id, type, media_item_id, payload)
+         values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+        [me, second],
+      );
+      await db.rows(
+        `insert into user_media (user_id, media_item_id) values ($1, $2) on conflict do nothing`,
+        [me, second],
+      );
+      const storyKey = (
+        await db.rows(`select hashtextextended('ranking_story:' || $1::text, 0)::text as k`, [
+          me,
+        ])
+      )[0].k;
+      const tg = await db.session('grouping');
+      const tr = await db.session('review');
+      try {
+        await tg.actAs(me);
+        await tr.actAs(me);
+        await tg.begin();
+        const grouped = await call(tg, `rank_group_note($1, $2)`, [await newOp(db), second]);
+        assert.equal(grouped.status, 'grouped');
+        const pr = fire(
+          tr,
+          `save_note($1, $2, 'Written while it grouped.', null, 'public', false)`,
+          [await newOp(db), second],
+        );
+        await tr.awaitBlocked({ on: 'advisory', advisoryKey: storyKey });
+        await tg.commit();
+        await pr;
+        const [{ presented }] = await db.rows(
+          `select presented_in as presented from feed_events
+            where actor_id = $1 and media_item_id = $2 and type = 'title_ranked'`,
+          [me, second],
+        );
+        assert.equal(presented, null, 'RG9: the reviewed ranking is not left hidden');
+      } finally {
+        await tg.rollback().catch(() => {});
+        await tg.end().catch(() => {});
+        await tr.end().catch(() => {});
       }
     });
 

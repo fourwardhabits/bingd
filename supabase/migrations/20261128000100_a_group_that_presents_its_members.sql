@@ -1296,6 +1296,11 @@ declare
   v_event uuid;
 begin
   if new.note_visibility = 'public' and nullif(btrim(coalesce(new.note, '')), '') is not null then
+    -- The key grouping and consolidation hold while they hide a ranking (Codex, PR 313):
+    -- a review published while a grouping is in flight waits for it, and the read below,
+    -- a fresh statement, then sees the hidden member; a grouping that waits for this one
+    -- sees the review and leaves the ranking alone.
+    perform pg_advisory_xact_lock(hashtextextended('ranking_story:' || new.user_id::text, 0));
     for v_event in
       select fe.id from feed_events fe
        where fe.actor_id = new.user_id and fe.media_item_id = new.media_item_id
