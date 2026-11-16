@@ -270,7 +270,7 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
    * FU1113-A (2026-11-13). A watch's note is `watch_events.note`, owner-only by schema, so
    * the review's two claims have nothing to do here; the line says who can read it.
    */
-  it('offers no review claims on a watch’s own note, only that it is private', async () => {
+  it('offers the review claims on a watch’s own note, both off, and writes nothing on opening', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -286,9 +286,10 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
     await fireEvent.press(view.getByLabelText(/^Note/));
 
-    expect(view.getByText('Only you see this note')).toBeTruthy();
-    expect(view.queryByLabelText('This note contains spoilers')).toBeNull();
-    expect(view.queryByLabelText('Share this note as a public review')).toBeNull();
+    // Founder QA, 2026-11-16: visible before the note has ever been saved, both off.
+    expect(view.getByText('Only you see this note.')).toBeTruthy();
+    expect(view.getByLabelText('This note contains spoilers')).toBeTruthy();
+    expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
     // Opening the field is not an act: nothing is written until Save.
     expect(mockSaveNote).not.toHaveBeenCalled();
     expect(mockDetails).not.toHaveBeenCalled();

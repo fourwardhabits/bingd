@@ -9,7 +9,7 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
 import { useLogState } from '@/features/collection/use-log-state';
-import { removeFromCollection, type WriteResult } from '@/features/collection/writes';
+import { removeFromCollection, saveNote, type WriteResult } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
@@ -274,10 +274,39 @@ export default function WatchHistoryScreen() {
    * leaves the card exactly as it was.
    */
   const saveEdit = async (eventId: string, edit: WatchEdit): Promise<WatchSaveResult> => {
-    if (edit.watchedOn === undefined && !edit.details) return { ok: true };
+    if (edit.watchedOn === undefined && !edit.details && !edit.review) return { ok: true };
+    /**
+     * **Share as a review from the editor** (founder QA, 2026-11-16). Asked before anything
+     * is written: a title note that exists and reads differently is replaced only on
+     * *Replace*. *Cancel* writes nothing at all — not the review, and not this watch's note
+     * either — and the editor keeps the draft. The same question `shareNote` asks.
+     */
+    if (edit.review) {
+      const stored = logState.data;
+      const existing = stored?.note.trim() ?? '';
+      if (existing && existing !== edit.review.note.trim()) {
+        const noun = stored?.noteVisibility === 'public' ? 'review' : 'note';
+        const replace = await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            `Replace your ${noun}?`,
+            `This title already has your ${noun}. Sharing this watch’s note will replace it.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          ),
+        );
+        if (!replace) return { ok: false, cancelled: true };
+      }
+    }
     setBusy(true);
     setError(null);
     const results: WriteResult[] = [];
+    /** Set when this watch's own writes landed and only the review did not. */
+    let reviewFailure: string | null = null;
+    /** The review's write failed in a way that may still have committed (a dropped reply). */
+    let reviewUnknown = false;
     try {
       if (edit.watchedOn !== undefined) {
         results.push(
@@ -302,17 +331,56 @@ export default function WatchHistoryScreen() {
           }),
         );
       }
+      /**
+       * Then, and only when everything above landed, the review: a copy of the text as the
+       * title's note, public, with the editor's spoiler flag, through the one writer the
+       * title page's composer uses. Two records, written in order and never claimed to be
+       * one: a failure here leaves this watch's note saved and says exactly that. It is
+       * checked against the version this screen read, so a review changed elsewhere is
+       * never overwritten (save_note's 55000). A retry rewrites the same row, so a second
+       * attempt cannot publish twice.
+       */
+      if (edit.review && !results.some((result) => result.outcome === 'failed')) {
+        const published = await saveNote({
+          operationId: newOperationId(),
+          mediaItemId,
+          note: edit.review.note,
+          baseVersion: logState.data?.noteVersion ?? null,
+          noteVisibility: 'public',
+          noteSpoilers: edit.review.spoilers,
+        });
+        if (published.outcome === 'failed') {
+          reviewFailure = published.message;
+          reviewUnknown = published.changed === true;
+        } else {
+          results.push(published);
+        }
+      }
     } catch {
       results.push({ outcome: 'failed', message: 'Could not save this watch.' });
     } finally {
       setBusy(false);
     }
     // `mustReconcile`'s rule, inline: a write that landed, or may have, refreshes the caches.
-    if (results.some((result) => result.outcome !== 'failed' || result.changed === true)) {
+    if (
+      reviewUnknown ||
+      results.some((result) => result.outcome !== 'failed' || result.changed === true)
+    ) {
       reconcile();
     }
     const failed = results.find((result) => result.outcome === 'failed');
-    return failed?.outcome === 'failed' ? { ok: false, message: failed.message } : { ok: true };
+    if (failed?.outcome === 'failed') return { ok: false, message: failed.message };
+    if (reviewFailure !== null) {
+      // This watch is saved; the draft stays in the editor so Save can share it again. A
+      // reply that never came is said as what it is: it may or may not have been shared.
+      return {
+        ok: false,
+        message: reviewUnknown
+          ? 'Your note is saved on this watch. We couldn’t confirm it was shared as a review; save again to make sure.'
+          : `Your note is saved on this watch, but it wasn’t shared as a review. ${reviewFailure}`,
+      };
+    }
+    return { ok: true };
   };
 
   /**

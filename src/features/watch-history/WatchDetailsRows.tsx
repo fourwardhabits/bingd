@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { CompanionPicker } from '@/features/collection/CompanionPicker';
 import { formatWatchDate, today } from '@/features/collection/dates';
 import { NoteClaims, NoteInput } from '@/features/collection/NoteComposer';
+import type { NoteVisibility } from '@/features/collection/writes';
 import type { TitleNote } from '@/features/collection/use-title-note';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
@@ -35,7 +36,27 @@ export type WatchDetailsNote =
       onChangeText: (next: string) => void;
       /** The column's limit; typing stops here. */
       maxLength: number;
+      /**
+       * **Share as a review, decided while writing** (founder QA, 2026-11-16). The same two
+       * claims the log sheet's note has. They do not make this note public — it stays on
+       * this watch, owner-only — they ask Save to publish a copy of it as the title's
+       * review, with this spoiler flag. Off whenever the editor opens.
+       */
+      share?: {
+        visibility: NoteVisibility;
+        spoilers: boolean;
+        onVisibility: (next: NoteVisibility) => void;
+        onSpoilers: (next: boolean) => void;
+      };
     };
+
+/** What the claims say under a watch's note: what Save will do with each choice. */
+export function watchShareCaption(visibility: NoteVisibility, spoilers: boolean): string {
+  if (visibility === 'private') return 'Only you see this note.';
+  return spoilers
+    ? 'Save also shares it as your review, hidden from people who haven’t seen it until they tap. This watch’s note stays private.'
+    : 'Save also shares it as your review of this title. This watch’s note stays private.';
+}
 
 export type WatchDetailsRowsProps = {
   /** `YYYY-MM-DD`, or null for *Earlier* — seen, at a time nobody recorded. */
@@ -184,12 +205,26 @@ export function WatchDetailsRows({
             // Nothing saves on blur: the editor's Save writes the watch, or Cancel drops it.
             onBlur={() => {}}
           />
-          {/* Private by schema: no Share and no Spoilers, because nobody else reads it. */}
-          <Text variant="footnote" tone="tertiary" testID="watch-note-private-hint">
-            {watchNoteLength(note.value) >= note.maxLength - NEAR_LIMIT
-              ? `Only you see this note · ${watchNoteLength(note.value)}/${note.maxLength}`
-              : 'Only you see this note'}
-          </Text>
+          {note.share ? (
+            <View pointerEvents={disabled ? 'none' : 'auto'} testID="watch-note-claims">
+              <NoteClaims
+                visibility={note.share.visibility}
+                spoilers={note.share.spoilers}
+                onVisibility={note.share.onVisibility}
+                onSpoilers={note.share.onSpoilers}
+                caption={watchShareCaption(note.share.visibility, note.share.spoilers)}
+              />
+            </View>
+          ) : null}
+          {/* The watch's note itself is private by schema; with the claims above, the line
+              says so only near the limit, where the count is what it adds. */}
+          {!note.share || watchNoteLength(note.value) >= note.maxLength - NEAR_LIMIT ? (
+            <Text variant="footnote" tone="tertiary" testID="watch-note-private-hint">
+              {watchNoteLength(note.value) >= note.maxLength - NEAR_LIMIT
+                ? `Only you see this note · ${watchNoteLength(note.value)}/${note.maxLength}`
+                : 'Only you see this note'}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 

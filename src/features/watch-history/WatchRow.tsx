@@ -37,10 +37,24 @@ export type WatchEdit = {
    * `companionIds` is present only when the companions changed, and absent leaves them.
    */
   details?: { note: string | null; companionIds?: string[] };
+  /**
+   * Present only when the reader chose **Share as a review** in this editor (founder QA,
+   * 2026-11-16): publish `note` as the title's review (`user_media.note`, `save_note`)
+   * with this spoiler flag, after this watch's own note is written. The watch's note stays
+   * private either way; nothing here ties the two together afterwards.
+   */
+  review?: { note: string; spoilers: boolean };
 };
 
-/** What a save came to: the editor closes only on `ok`, and says `message` otherwise. */
-export type WatchSaveResult = { ok: true } | { ok: false; message: string };
+/**
+ * What a save came to: the editor closes only on `ok`, and says `message` otherwise.
+ * `cancelled` is the reader declining to replace their review: nothing was written, the
+ * editor stays open with the draft, and there is nothing to say.
+ */
+export type WatchSaveResult =
+  | { ok: true }
+  | { ok: false; message: string }
+  | { ok: false; cancelled: true };
 
 export type WatchRowProps = {
   event: WatchEvent;
@@ -403,6 +417,13 @@ function WatchEditor({
    */
   const [noteDraft, setNoteDraft] = useState(() => note ?? '');
   const [selected, setSelected] = useState(() => companions.map((person) => person.id));
+  /**
+   * **Share as a review, chosen in the editor** (founder QA, 2026-11-16). Private until the
+   * reader turns it on, every time the editor opens: editing a watch's note never publishes
+   * or republishes anything by itself.
+   */
+  const [shareAsReview, setShareAsReview] = useState(false);
+  const [spoilers, setSpoilers] = useState(false);
   /** Why the last save failed, said inside the editor that still holds the draft. */
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -423,8 +444,13 @@ function WatchEditor({
         ...(companionsChanged ? { companionIds: selected } : {}),
       };
     }
+    // Shared only when chosen, and only text there is: an empty note is not a review.
+    if (shareAsReview && nextNote) edit.review = { note: nextNote, spoilers };
     return edit;
   };
+
+  const nothingToWrite = (edit: WatchEdit) =>
+    edit.watchedOn === undefined && !edit.details && !edit.review;
 
   /**
    * Whether this editor is still the one open. A save that lands after the reader has
@@ -464,14 +490,18 @@ function WatchEditor({
    * before the server says so.
    */
   const commit = async (edit: WatchEdit): Promise<boolean> => {
-    if (edit.watchedOn === undefined && !edit.details) return true;
+    if (nothingToWrite(edit)) return true;
     setFailure(null);
     const result = await onSave(edit);
-    if (!result.ok && mounted.current) setFailure(result.message);
+    if (!result.ok && 'message' in result && mounted.current) setFailure(result.message);
     return result.ok;
   };
 
   const save = async () => {
+    if (shareAsReview && !normalWatchNote(noteDraft)) {
+      setFailure('Write a note to share it as a review.');
+      return;
+    }
     if (!begin()) return;
     let saved = false;
     try {
@@ -500,7 +530,7 @@ function WatchEditor({
   const editRanking = (open: () => void) => {
     if (inFlight.current) return;
     const edit = pendingEdit();
-    if (edit.watchedOn === undefined && !edit.details) {
+    if (nothingToWrite(edit)) {
       open();
       return;
     }
@@ -589,6 +619,15 @@ function WatchEditor({
           value: noteDraft,
           onChangeText: setNoteDraft,
           maxLength: WATCH_NOTE_MAX_LENGTH,
+          share: {
+            visibility: shareAsReview ? 'public' : 'private',
+            spoilers,
+            onVisibility: (next) => {
+              setShareAsReview(next === 'public');
+              setFailure(null);
+            },
+            onSpoilers: setSpoilers,
+          },
         }}
       />
 
