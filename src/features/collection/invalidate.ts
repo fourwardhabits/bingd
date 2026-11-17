@@ -71,6 +71,12 @@ export function invalidateAfterCollectionChange(
   invalidate(['ranking-backlog', userId]);
   invalidate(['refine-availability', userId]);
 
+  // The Feed's poster rails (20261127000100), every viewer's prefix: a rerank or an
+  // unrank moves the author's score on a grouped post without changing its id or count,
+  // which is all the preview's key holds (Codex, PR 312). Cheap — only rails on screen
+  // are mounted, and each refetches one bounded read.
+  invalidate(['feed-group-previews']);
+
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger
   // in `20260815040000` takes a title off the watchlist the moment it is logged or

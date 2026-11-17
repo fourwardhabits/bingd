@@ -433,6 +433,13 @@ export default function suite() {
       await tFollow.actAs(recipient);
       await tFollow.begin();
       const pFollow = tFollow.start(`select follow($1, $2) as r`, [await newOp(db), sender]);
+      // Settled into a value at once: the follow is refused while this test is still
+      // awaiting the block's commit, and a rejection nobody has subscribed to yet is an
+      // `unhandledRejection` that fails the run before `assert.rejects` below sees it.
+      const followOutcome = pFollow.then(
+        () => null,
+        (error) => error,
+      );
       await tFollow.awaitBlocked({
         on: 'advisory',
         advisoryKey: await db.pairKey(sender, recipient),
@@ -444,7 +451,8 @@ export default function suite() {
 
       // `_assert_reachable` refuses a blocked target, so the follow that queued behind
       // the block cannot happen at all — and there is nothing left for it to release.
-      await assert.rejects(pFollow, (e) => e.code === 'P0002');
+      const refused = await followOutcome;
+      assert.equal(refused?.code, 'P0002', 'R5: the queued follow is refused');
       await tFollow.rollback();
 
       assert.equal(

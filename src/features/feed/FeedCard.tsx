@@ -6,6 +6,7 @@ import type { Bucket } from '@/features/collection/score';
 import {
   Avatar,
   Poster,
+  PosterRail,
   ReactionSlot,
   ReactionSummary,
   ScoreBadge,
@@ -13,6 +14,7 @@ import {
   Text,
 } from '@/ui/components';
 import type { ActivityReaction } from '@/ui/components/ActivityRow';
+import type { PosterTile } from '@/ui/components/PosterWall';
 import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
@@ -57,6 +59,26 @@ export type FeedCardProps = {
   saved?: boolean;
   /** The Recommend sheet, which ends in "Share off bingd". Absent for a whole series. */
   onPressShare?: () => void;
+  /**
+   * **A group drawn as its posters** (Feed poster rails, founder spec 2026-11-16).
+   *
+   * Present only on a grouped watchlist post or ranking sitting. The sentence then names the
+   * group by its size ("ranked 8 titles"), the artwork is a horizontal rail of the members'
+   * posters, each opening its own title, and the group's name in the sentence ("8 titles")
+   * opens the complete list; there is no separate "View all" under the rail (founder,
+   * 2026-11-17: the posters are the way in). The
+   * metadata line keeps only the time: one title's genres and certification do not describe
+   * a batch. A caller passes no Save and no Share with a rail, since both would act on the
+   * representative title alone.
+   */
+  rail?: {
+    total: number;
+    tiles: PosterTile[];
+    /** Placeholder frames while the preview loads. */
+    loading?: boolean;
+    onPressTile: (tile: PosterTile) => void;
+    onPressAll: () => void;
+  } | null;
 };
 
 /**
@@ -105,8 +127,11 @@ export function FeedCard({
   saved = false,
   onPressShare,
   leading = false,
+  rail = null,
 }: FeedCardProps) {
-  const filmName = title ?? 'a title';
+  const grouped = rail != null;
+  const groupName = rail ? `${rail.total} titles` : null;
+  const filmName = groupName ?? title ?? 'a title';
   const { width } = useWindowDimensions();
   const cardWidth = width - theme.layout.gutter * 2;
   // With no artwork anywhere the frame holds only the initials, so it takes the compact
@@ -114,7 +139,9 @@ export function FeedCard({
   const height = artwork.treatment === 'none' ? NO_ARTWORK_HEIGHT : artworkHeight(cardWidth);
   const posterHeight = height - theme.space[3] * 2;
   const posterWidth = Math.round((posterHeight * 2) / 3);
-  const subline = [timeLabel, watchLabel, metadata].filter(Boolean).join(' · ');
+  const subline = (grouped ? [timeLabel] : [timeLabel, watchLabel, metadata])
+    .filter(Boolean)
+    .join(' · ');
 
   const canReact = reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
@@ -150,15 +177,20 @@ export function FeedCard({
               {actorName}
             </Text>
             {` ${verb} `}
-            <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
+            <Text
+              variant="subhead"
+              style={styles.entity}
+              onPress={rail ? rail.onPressAll : onPressTitle}
+              accessibilityRole={rail ? 'button' : undefined}
+            >
               {filmName}
-              {year ? (
+              {year && !grouped ? (
                 <Text variant="subhead" tone="secondary" style={styles.year}>
                   {` (${year})`}
                 </Text>
               ) : null}
             </Text>
-            {companions.length ? (
+            {companions.length && !grouped ? (
               <Text variant="subhead" tone="secondary">
                 {' with '}
                 <Text variant="subhead" style={styles.entity}>
@@ -169,7 +201,7 @@ export function FeedCard({
             {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
                 (20261125000100) "added Dune and 4 others to their watchlist": the count
                 comes before the tail, so a sentence can carry both. */}
-            {tailAction ? (
+            {tailAction && !grouped ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
                 <Text
@@ -192,7 +224,19 @@ export function FeedCard({
         </View>
       </View>
 
-      {/* 2 and 3. The artwork, and the score on it. */}
+      {/* 2 and 3. The artwork, and the score on it — or, for a group, its posters. */}
+      {rail ? (
+        <View style={styles.rail} testID="feed-card-rail">
+          <PosterRail
+            label={`${actorName}'s ${rail.total} titles`}
+            tiles={rail.tiles}
+            onPressTile={rail.onPressTile}
+            width={cardWidth}
+            loadingCount={rail.loading ? Math.min(rail.total, 4) : 0}
+            testID="feed-card-rail-scroll"
+          />
+        </View>
+      ) : (
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={[filmName, year, score != null ? null : metadata]
@@ -245,9 +289,10 @@ export function FeedCard({
           </View>
         ) : null}
       </Pressable>
+      )}
 
       {/* 4. The review the actor published, prominently — or nothing at all. */}
-      {review ? (
+      {review && !grouped ? (
         <View style={styles.review}>
           <SpoilerNote
             text={review.text}
@@ -334,7 +379,7 @@ export function FeedCard({
           />
         ) : null}
 
-        {onPressSave ? (
+        {onPressSave && !grouped ? (
           <Action
             icon={saved ? 'bookmark' : 'bookmark-outline'}
             active={saved}
@@ -348,7 +393,7 @@ export function FeedCard({
           />
         ) : null}
 
-        {onPressShare ? (
+        {onPressShare && !grouped ? (
           <Action
             icon="paper-plane-outline"
             label="Share"
@@ -422,6 +467,8 @@ function companionNames(names: string[]) {
 }
 
 const styles = StyleSheet.create({
+  // The rail sits where the artwork would, on the card's gutters.
+  rail: { marginHorizontal: theme.layout.gutter },
   /**
    * **28pt above each post, 12pt more than before** (UI cohesion pass, 2026-11-06). The
    * one hairline between posts stays; the extra air above the next avatar is what makes

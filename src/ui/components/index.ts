@@ -50,8 +50,10 @@ export { Poster } from './Poster';
 export {
   PosterGrid,
   PosterGridList,
+  PosterRail,
   PosterShelf,
   type PosterGridListProps,
+  type PosterRailProps,
   type PosterGridProps,
   type PosterShelfProps,
   type PosterTile,

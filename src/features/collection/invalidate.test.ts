@@ -106,6 +106,9 @@ const KEYS = {
   otherTitle: ['title', 'film-2'],
   otherUserFeed: ['feed', OTHER, { cursor: undefined }],
   otherUserCollection: ['collection', OTHER],
+  // The Feed's poster rails, keyed by viewer and post: a rerank moves an author's score on
+  // a grouped post without changing its id or count (Codex, PR 312).
+  groupPreviews: ['feed-group-previews', USER, 'e1#3'],
 } as const;
 
 const all = Object.values(KEYS);
@@ -129,6 +132,10 @@ describe('after a ranking completes', () => {
 
   it('refreshes the Feed — the one that was missing', async () => {
     expect(has(touched(), KEYS.feed)).toBe(true);
+  });
+
+  it('refreshes the Feed’s poster rails, whose scores a rerank moves', async () => {
+    expect(has(touched(), KEYS.groupPreviews)).toBe(true);
   });
 
   it('refreshes Profile’s recent activity', async () => {
