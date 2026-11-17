@@ -113,8 +113,13 @@ export const BENCH_ENGINES: BenchEngine[] = [
   'v2_metadata',
   'v2_metadata_social',
 ];
-/** The configurations a verdict may pick. The baseline can win only as "other tested engine". */
-const CANDIDATES: BenchEngine[] = ['v2_metadata', 'v2_metadata_social', 'popularity'];
+/**
+ * The configurations a verdict may pick. **The popularity baseline is not one.** It is a
+ * reference, not a shipped engine, and offline recall favours it for a reason that is not taste:
+ * people rank what they watched, and they mostly watch what is popular, so held-out titles skew
+ * popular (exposure bias). `TRIAL_OTHER_TESTED_ENGINE` is for a future tested engine.
+ */
+const CANDIDATES: BenchEngine[] = ['v2_metadata', 'v2_metadata_social'];
 
 // ---------------------------------------------------------------------------
 // Ground truth: one unit per film, one unit per series
@@ -852,9 +857,12 @@ function segmentsOf(split: Split, w: World): string[] {
  * metric, and is non-inferior on the other (interval above −{@link NON_INFERIORITY}). Among
  * winners, the largest Recall@50 gain is chosen.
  *
- * - Fewer than {@link MIN_FINAL_USERS} people in the final half: INSUFFICIENT_EVIDENCE.
- * - No winner, and no candidate's interval reaches above +{@link NON_INFERIORITY} on either
- *   primary metric: KEEP_V1. V1 is at least as good, within the margin.
+ * - Fewer than {@link MIN_FINAL_USERS} people in the final half, or either primary estimate
+ *   missing or from fewer than that many people for any candidate: INSUFFICIENT_EVIDENCE.
+ * - A candidate is **ruled out** if, on either primary metric, its whole interval lies below
+ *   −{@link NON_INFERIORITY}: it is worse than V1, whatever the other metric says.
+ * - No winner, and every candidate either ruled out or never above +{@link NON_INFERIORITY} on
+ *   either primary metric: KEEP_V1.
  * - Otherwise: INSUFFICIENT_EVIDENCE. The result is inconclusive, and V1 stays.
  */
 export function verdictFor(
@@ -894,7 +902,8 @@ export function verdictFor(
     const rec = d[engine]!['m2.recall50']!;
     if ((acc.lo > 0 && rec.lo > -NON_INFERIORITY) || (rec.lo > 0 && acc.lo > -NON_INFERIORITY))
       winners.push({ engine, gain: rec.mean });
-    if (acc.hi > NON_INFERIORITY || rec.hi > NON_INFERIORITY) anyAbove = true;
+    const ruledOut = acc.hi < -NON_INFERIORITY || rec.hi < -NON_INFERIORITY;
+    if (!ruledOut && (acc.hi > NON_INFERIORITY || rec.hi > NON_INFERIORITY)) anyAbove = true;
   }
   if (winners.length) {
     const best = winners.sort((a, b) => b.gain - a.gain)[0]!.engine;
@@ -915,7 +924,7 @@ export function verdictFor(
       call: 'KEEP_V1',
       engine: 'v1',
       reason:
-        'no candidate is better than V1 by more than the margin on either primary metric, final half',
+        'every candidate is ruled out (worse than V1 on a primary metric) or no better than V1 by more than the margin, final half',
     };
   return {
     call: 'INSUFFICIENT_EVIDENCE',
@@ -1211,8 +1220,11 @@ export function renderBenchmark(
   }
   line('## V2 hybrid');
   line();
+  const measurable = hybrid.accounts > 0 && hybrid.withTwo / hybrid.accounts >= 0.5;
   line(
-    `**NOT MEASURABLE.** A collaborative row needs two taste neighbours. ${hybrid.withTwo}/${hybrid.accounts} people have two or more, ${hybrid.withOne}/${hybrid.accounts} have one or more. It is neither better nor worse; it is not tested.`,
+    measurable
+      ? `**NOT REPLAYED.** ${hybrid.withTwo}/${hybrid.accounts} people have the two taste neighbours a collaborative row needs, so it could be measured, but this benchmark does not mirror \`collaborative_candidates\`. It is neither better nor worse; it is not tested.`
+      : `**NOT MEASURABLE.** A collaborative row needs two taste neighbours: ${hybrid.withTwo}/${hybrid.accounts} people have two or more, ${hybrid.withOne}/${hybrid.accounts} one or more. It is neither better nor worse; it is not tested.`,
   );
   line();
   line('## Limitations printed with every run');

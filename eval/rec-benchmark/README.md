@@ -99,10 +99,13 @@ The tests build deliberately leaky splits and require each one to be caught:
   - TV whole-show rankers vs season rankers.
 - **Dev and final halves:** people are split by a hash of their key. Any tuning reads **dev only**, and the verdict reads **final only**. No weights are tuned in this release.
 - **The verdict, pre-registered in `verdictFor`:** one call per medium, from `KEEP_V1`, `TRIAL_V2_METADATA`, `TRIAL_V2_SOCIAL`, `TRIAL_OTHER_TESTED_ENGINE` and `INSUFFICIENT_EVIDENCE`.
+  - **Candidates:** V2 Metadata and V2 Metadata + Social. The popularity baseline is a reference, never a candidate: offline recall favours popular titles because people rank what they watched (exposure bias).
   - **Winner:** an engine wins if its paired 95% interval on one primary metric is above zero, and on the other it is above −0.02.
-  - **INSUFFICIENT_EVIDENCE:** fewer than 15 people in the final half.
-  - **KEEP_V1:** no candidate can be more than 0.02 better on either primary metric.
+  - **Ruled out:** a candidate whose whole interval on either primary metric is below −0.02 is worse than V1, whatever the other metric says.
+  - **INSUFFICIENT_EVIDENCE:** fewer than 15 people in the final half, or either primary estimate missing or resting on fewer than 15 people for any candidate.
+  - **KEEP_V1:** no winner, and every candidate is either ruled out or never more than 0.02 better on either primary metric.
   - **Otherwise:** inconclusive, which is also `INSUFFICIENT_EVIDENCE`, and V1 stays.
+  - **Fixed before any real data was seen.** The ruled-out clause and the baseline exclusion were added on 2026-11-17, after the synthetic run showed the first rule calling a clear V1 win "inconclusive". No real export has been run.
 
 ## Running on real data: AWAITING FOUNDER AUTHORIZATION
 

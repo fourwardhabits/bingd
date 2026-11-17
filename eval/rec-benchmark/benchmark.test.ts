@@ -399,6 +399,52 @@ describe('the verdict rule', () => {
     ).toBe('TRIAL_V2_SOCIAL');
   });
 
+  it('keeps V1 when every candidate is clearly worse on one primary metric, even if it might be better on the other', () => {
+    const both = {
+      table: {},
+      paired: {
+        final: {
+          all: {
+            v2_metadata: {
+              'm1.accuracy': est(0.01, -0.03, 0.05),
+              'm2.recall50': est(-0.2, -0.28, -0.14),
+            },
+            v2_metadata_social: {
+              'm1.accuracy': est(0.01, -0.03, 0.05),
+              'm2.recall50': est(-0.2, -0.28, -0.14),
+            },
+          },
+        },
+      },
+    };
+    expect(verdictFor(both, 30).call).toBe('KEEP_V1');
+  });
+
+  it('never lets the popularity baseline decide a verdict', () => {
+    const popular = {
+      table: {},
+      paired: {
+        final: {
+          all: {
+            v2_metadata: {
+              'm1.accuracy': est(-0.05, -0.09, -0.03),
+              'm2.recall50': est(-0.05, -0.09, -0.03),
+            },
+            v2_metadata_social: {
+              'm1.accuracy': est(-0.05, -0.09, -0.03),
+              'm2.recall50': est(-0.05, -0.09, -0.03),
+            },
+            popularity: {
+              'm1.accuracy': est(0.1, 0.05, 0.15),
+              'm2.recall50': est(0.3, 0.2, 0.4),
+            },
+          },
+        },
+      },
+    };
+    expect(verdictFor(popular, 30).call).toBe('KEEP_V1');
+  });
+
   it('keeps V1 when no candidate is better by more than the margin', () => {
     expect(
       verdictFor(with_('v2_metadata', est(-0.05, -0.09, -0.01), est(-0.04, -0.08, 0.01)), 30)
@@ -418,10 +464,10 @@ describe('the verdict rule', () => {
     ).toBe('INSUFFICIENT_EVIDENCE');
   });
 
-  it('does not trial a candidate that wins one metric and loses the other', () => {
+  it('keeps V1 over a candidate that wins one metric but is clearly worse on the other', () => {
     expect(
       verdictFor(with_('v2_metadata', est(0.05, 0.01, 0.09), est(-0.1, -0.2, -0.05)), 30).call,
-    ).toBe('INSUFFICIENT_EVIDENCE');
+    ).toBe('KEEP_V1');
   });
 });
 
@@ -442,7 +488,7 @@ describe('end to end on a small synthetic export', () => {
     }
     const report = renderBenchmark(results, hybridReport(synthetic), 'synthetic (small)');
     expect(report).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
-    expect(report).toContain('NOT MEASURABLE');
+    expect(report).toMatch(/NOT (MEASURABLE|REPLAYED)/);
   });
 
   it('Suite B runs too', () => {
