@@ -79,3 +79,38 @@ Full report: `2026-11-16-consolidation-dryrun-production.json`.
   3. Apply `20261128000100`, then CI, the release gate and the OTA on the merged SHA.
   4. Enable the flag.
   5. Run the consolidation only with a separate authorization and the batch name recorded: read-only dry run, then `consolidate_feed_history(batch, since, until, true)`; revert with `revert_feed_consolidation(batch)`.
+
+## Production release, 2026-11-17 (founder-authorized)
+
+- **Released:** #312 and #313, merged to main as `0170506e`. The tree is identical to `e0694a1a`, which Codex reviewed with no issues. CI, Database races and the release gate passed.
+- **Changes before release:**
+  - The founder asked to remove "View all N" under a grouped rail (`3818036a`). The group's name in the card's sentence still opens the full list.
+  - Codex asked for a season tile's spoken name to include its season (`8ce5f391`, `a45e26a8`).
+- **Backend:**
+  - The flag `feed.ranking_backfill_grouping_enabled` was pre-inserted as false.
+  - `20261127000100`, then `20261128000100`, were applied, giving 203 migrations.
+  - The flag was enabled at 01:10:40Z.
+- **Over-the-air update:**
+  - Published for both platforms from `0170506e`: Android group `80f10846`, iOS group `7d2f3828`.
+  - Live manifest ok. u.expo.dev serves the new ids with the production ref only.
+- **Anon smoke:** 137/137 before, after the migrations, and after the OTA.
+- **Rollback:**
+  - OTA: Android `b82a0376`, iOS `0c141d10` (`9d11a797`).
+  - Database: set the flag false.
+- **Record:** `docs/release/manifests/production-2026-11-17-feed-rails.json`.
+- **Out of scope, per the founder:**
+  - The watch-date (`today_default`) rule was not changed.
+  - A border around grouped cards is deferred as optional polish. It isn't isolated: it changes the card's full-bleed layout and the rail's width.
+
+### Historical consolidation: prepared, not run
+
+- **Not automatic.** The release groups new activity only. Existing posts stay as they are until a consolidation batch is applied.
+- **Full-history plan (read-only), 2026-08-14 to 2026-11-17, in 12 windows of 8 days.** The SQL dry run and the function's own plan agree window for window:
+  - **74 ranking groups and 41 watchlist groups**, gathering **702 posts** into 115 cards. That is 587 fewer cards.
+  - The plan runs in a `READ ONLY` transaction. Nothing was written: 0 hidden posts, 0 log rows.
+  - Records: `2026-11-17-consolidation-plan-production.txt` and `2026-11-17-consolidation-dryrun-full-history.json`.
+- **Real run (needs explicit authorization):** `python3 scripts/ops/prod-consolidate.py apply --authorized`.
+  - Each window is its own batch, `history-20261117-w01` to `w12`, in its own transaction.
+  - Members are locked and re-read before they are hidden.
+  - No notifications are sent. Nothing is deleted, and no ranking, score or watchlist record changes.
+- **Revert:** `python3 scripts/ops/prod-consolidate.py revert --authorized`, or `revert_feed_consolidation('<batch>')` for a single window.

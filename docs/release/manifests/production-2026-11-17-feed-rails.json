@@ -1,0 +1,53 @@
+{
+ "$comment": "Production Feed poster rails (#312) and expanded grouping (#313), authorized by the founder on 2026-11-17. Founder changes before release: the View all button under a grouped rail removed (3818036a); Codex then asked for the season in a season tile's spoken name (8ce5f391, a45e26a8). Codex found no issues on #312 a45e26a8 and #313 e0694a1a. Merged as 3f127568 (#312) and 0170506e (#313), whose tree is identical to e0694a1a; CI, Database races and the release gate (release/2026-11-17-feed-rails) passed on 0170506e. Order: (1) feed.ranking_backfill_grouping_enabled pre-inserted false at 00:59:49Z; (2) prod-migrate.py applied exactly 20261127000100, then 20261128000100, one transaction each, from a clean checkout of 0170506e, with files byte-identical to staging; verified 203 migrations, new functions present, anon cannot execute them, consolidation functions not granted to clients, feed_consolidation_log RLS on with no client select, 0 hidden posts, read policy updated, anon smoke 137/137; (3) ota-production-check 01a1e705 (all jobs SUCCESS), then ota-production 01a1e707 published both platforms; live manifest ok, u.expo.dev serves the new update ids on the store runtimes with the production ref only, smoke 137/137; (4) the flag was enabled at 01:10:40Z. No historical consolidation was run: the function's read-only plan over 2026-08-14..2026-11-17 (12 windows) equals the SQL dry run, 115 groups, 702 posts, nothing written. No production test accounts were created. No physical-device verification was performed. The watch-date (today_default) rule was not changed.",
+ "lane": "production",
+ "channel": "production",
+ "gitSha": "0170506ef47f7357502af82cd5fc47175b369de6",
+ "status": "published",
+ "backend": {
+  "ref": "abheeqyjzekiowkztfxv",
+  "name": "bingd-production",
+  "migrationHead": "20261128000100",
+  "migrationsApplied": 203,
+  "migrationsThisRelease": [
+   "20261127000100",
+   "20261128000100"
+  ],
+  "flags": {
+   "feed.ranking_backfill_grouping_enabled": "false before migrations (00:59:49Z); true at 2026-11-17T01:10:40Z",
+   "feed.ranking_backfill_days": 7
+  },
+  "consolidation": "not run; requires a separate founder authorization"
+ },
+ "platforms": {
+  "android": {
+   "updateId": "01a1e70c-cdc5-760e-96af-6c7d92f4e471",
+   "groupId": "80f10846-a79e-4eb5-bf19-4cef3fad544f",
+   "runtimeVersion": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+   "gitCommitHash": "0170506ef47f7357502af82cd5fc47175b369de6",
+   "createdAt": "2026-11-17T01:08:58.437Z",
+   "message": "Feed poster rails and expanded grouping (0170506)"
+  },
+  "ios": {
+   "updateId": "01a1e70c-cdc5-7fc4-a858-2e5e4e534210",
+   "groupId": "7d2f3828-30e3-4a77-90c6-1aa9c0dc410d",
+   "runtimeVersion": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+   "gitCommitHash": "0170506ef47f7357502af82cd5fc47175b369de6",
+   "createdAt": "2026-11-17T01:08:58.437Z",
+   "message": "Feed poster rails and expanded grouping (0170506)"
+  }
+ },
+ "rollback": {
+  "ota": {
+   "android": {
+    "groupId": "b82a0376-a21e-44a8-a713-b36dca1a5949",
+    "gitSha": "9d11a7977b6af2b987dd6f8b27e26ab4071d67a9"
+   },
+   "ios": {
+    "groupId": "0c141d10-c5f0-4901-8922-d3e240b33137",
+    "gitSha": "9d11a7977b6af2b987dd6f8b27e26ab4071d67a9"
+   }
+  },
+  "database": "Set feed.ranking_backfill_grouping_enabled to false. The migrations are additive and are not reverted; with no hidden rows they behave as before. A consolidation batch, if ever applied, reverts with revert_feed_consolidation(batch)."
+ }
+}
