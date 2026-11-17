@@ -263,7 +263,7 @@ describe('a grouped watchlist post', () => {
     expect(view.queryByTestId('feed-card-artwork')).toBeNull();
   });
 
-  it('opens each poster’s own title, and View all opens the complete list', async () => {
+  it('opens each poster’s own title, and the group’s name opens the complete list', async () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = answer(WATCHLIST_MEMBERS);
     mockRpc.watchlist_group_titles = [];
@@ -284,8 +284,11 @@ describe('a grouped watchlist post', () => {
     await fireEvent.press(within(rail).getByLabelText('Arrival, 2021'));
     expect(mockPush).toHaveBeenLastCalledWith('/title/arrival');
 
-    expect(view.getByLabelText('View all 4 titles')).toBeTruthy();
-    await fireEvent.press(view.getByTestId('feed-card-view-all'));
+    // No separate "View all" under the rail (founder, 2026-11-17): the posters are the
+    // way in, and "4 titles" in the sentence opens the whole list.
+    expect(view.queryByTestId('feed-card-view-all')).toBeNull();
+    expect(view.queryByText(/View all/)).toBeNull();
+    await fireEvent.press(view.getByText('4 titles'));
     await waitFor(() =>
       expect(mockRpcCalls).toContainEqual({
         name: 'watchlist_group_titles',
@@ -329,7 +332,7 @@ describe('a grouped watchlist post', () => {
       ).toHaveLength(4),
     );
     expect(textOf(view.toJSON())).toMatch(/Ada added 6 titles to their watchlist/);
-    expect(view.getByLabelText('View all 6 titles')).toBeTruthy();
+    expect(view.queryByText(/View all/)).toBeNull();
   });
 });
 
@@ -360,7 +363,7 @@ describe('a grouped ranking sitting', () => {
     expect(view.queryByTestId('feed-card-score')).toBeNull();
   });
 
-  it('opens a member’s title, and View all opens the sitting', async () => {
+  it('opens a member’s title, and the group’s name opens the sitting', async () => {
     mockRows = [
       event('r1', 'ranking_batch', DUNE, { payload: { count: 3 }, mediaId: 'film-r1' }),
     ];
@@ -371,7 +374,8 @@ describe('a grouped ranking sitting', () => {
 
     await fireEvent.press(within(rail).getByLabelText(/^Severance/));
     expect(mockPush).toHaveBeenLastCalledWith('/title/severance-s1');
-    await fireEvent.press(view.getByTestId('feed-card-view-all'));
+    expect(view.queryByTestId('feed-card-view-all')).toBeNull();
+    await fireEvent.press(view.getByText('3 titles'));
     await waitFor(() =>
       expect(mockRpcCalls).toContainEqual({
         name: 'ranking_batch_titles',
@@ -440,7 +444,7 @@ describe('degrading safely', () => {
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => view.getByTestId('feed-card-rail'));
     expect(textOf(view.toJSON())).toMatch(/Ada added 30 titles to their watchlist/);
-    expect(view.getByLabelText('View all 30 titles')).toBeTruthy();
+    expect(view.getByText('30 titles')).toBeTruthy();
   });
 });
 
