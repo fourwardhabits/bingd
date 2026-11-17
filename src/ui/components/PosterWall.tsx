@@ -635,6 +635,9 @@ export function SeasonAverageBadge({
 
 const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
+  // A season tile is titled by its show, and its pill is hidden from the screen reader, so
+  // the spoken name says which season it opens (Codex review, 2026-11-17).
+  if (tile.season != null) parts.push(`season ${tile.season}`);
   if (tile.year) parts.push(String(tile.year));
   // A season average says so before its number, so the two kinds of score are told apart
   // by ear as they are by eye (WS-TVC).
