@@ -455,19 +455,26 @@ describe('end to end on a small synthetic export', () => {
 // The runner (run.mjs), off by default
 // ---------------------------------------------------------------------------
 
+/**
+ * The synthetic reference world: the A3 generator at 300 people and 1,500 titles. The full
+ * 4,000-person world takes hours through five splits, four engines and three launch seeds, and
+ * the real cohort is tens of people, so this size is the representative one.
+ */
+const REFERENCE_WORLD = { ...DEFAULT_WORLD, titles: 1500, people: 300 };
+
 const RUNNER = process.env.REC_BENCHMARK === '1';
 (RUNNER ? describe : describe.skip)('REC_BENCHMARK_RUNNER', () => {
   it('REC_BENCHMARK_RUNNER', () => {
     const input =
       process.env.REC_BENCHMARK_SYNTHETIC === '1'
-        ? JSON.parse(JSON.stringify(syntheticExport(generateWorld(DEFAULT_WORLD))))
+        ? JSON.parse(JSON.stringify(syntheticExport(generateWorld(REFERENCE_WORLD))))
         : (() => {
             const raw = JSON.parse(readFileSync(process.env.REC_BENCHMARK_EXPORT!, 'utf8'));
             return raw && typeof raw === 'object' && 'replay' in raw ? raw.replay : raw;
           })();
     const label =
       process.env.REC_BENCHMARK_SYNTHETIC === '1'
-        ? 'synthetic (full-size A3 world)'
+        ? 'synthetic reference world (300 people, 1,500 titles)'
         : 'real export';
     const results = [...benchmark(input, 'A'), ...benchmark(input, 'B')];
     const report = renderBenchmark(results, hybridReport(input), label);

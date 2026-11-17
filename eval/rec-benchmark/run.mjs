@@ -2,7 +2,7 @@
  * The recommendation quality benchmark (eval/rec-benchmark), started by the coordinator.
  *
  *   REC_BENCHMARK_EXPORT=/path/outside/the/repo/replay.json node eval/rec-benchmark/run.mjs
- *   node eval/rec-benchmark/run.mjs --synthetic          (the full-size synthetic export)
+ *   node eval/rec-benchmark/run.mjs --synthetic          (the synthetic reference world, 300 people)
  *
  * Optional: REC_BENCHMARK_OUT=/path/outside/the/repo writes the Markdown report there too.
  *

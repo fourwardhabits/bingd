@@ -7,7 +7,7 @@ This extends [`../rec-v2-replay`](../rec-v2-replay/README.md). It reuses the rep
 server-source mirrors and the shipped For You wall (`wall()`). It writes nothing anywhere.
 
 ```bash
-node eval/rec-benchmark/run.mjs --synthetic                       # full-size synthetic world
+node eval/rec-benchmark/run.mjs --synthetic                       # synthetic reference world (300 people)
 REC_BENCHMARK_EXPORT=/outside/repo/export.json node eval/rec-benchmark/run.mjs   # real, see below
 npx jest eval/rec-benchmark                                       # the tests (CI)
 ```
