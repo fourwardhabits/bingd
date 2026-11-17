@@ -64,7 +64,9 @@ export type FeedCardProps = {
    *
    * Present only on a grouped watchlist post or ranking sitting. The sentence then names the
    * group by its size ("ranked 8 titles"), the artwork is a horizontal rail of the members'
-   * posters, each opening its own title, and "View all 8" opens the complete list. The
+   * posters, each opening its own title, and the group's name in the sentence ("8 titles")
+   * opens the complete list; there is no separate "View all" under the rail (founder,
+   * 2026-11-17: the posters are the way in). The
    * metadata line keeps only the time: one title's genres and certification do not describe
    * a batch. A caller passes no Save and no Share with a rail, since both would act on the
    * representative title alone.
@@ -179,6 +181,7 @@ export function FeedCard({
               variant="subhead"
               style={styles.entity}
               onPress={rail ? rail.onPressAll : onPressTitle}
+              accessibilityRole={rail ? 'button' : undefined}
             >
               {filmName}
               {year && !grouped ? (
@@ -232,18 +235,6 @@ export function FeedCard({
             loadingCount={rail.loading ? Math.min(rail.total, 4) : 0}
             testID="feed-card-rail-scroll"
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`View all ${rail.total} titles`}
-            onPress={rail.onPressAll}
-            hitSlop={theme.space[2]}
-            style={({ pressed }) => [styles.viewAll, pressed && styles.pressed]}
-            testID="feed-card-view-all"
-          >
-            <Text variant="footnote" tone="action">
-              {`View all ${rail.total}`}
-            </Text>
-          </Pressable>
         </View>
       ) : (
       <Pressable
@@ -476,9 +467,8 @@ function companionNames(names: string[]) {
 }
 
 const styles = StyleSheet.create({
-  // The rail and its "View all" sit where the artwork would, on the card's gutters.
-  rail: { marginHorizontal: theme.layout.gutter, gap: theme.space[1] },
-  viewAll: { alignSelf: 'flex-start', paddingVertical: theme.space[1] },
+  // The rail sits where the artwork would, on the card's gutters.
+  rail: { marginHorizontal: theme.layout.gutter },
   /**
    * **28pt above each post, 12pt more than before** (UI cohesion pass, 2026-11-06). The
    * one hairline between posts stays; the extra air above the next avatar is what makes
