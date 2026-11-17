@@ -265,6 +265,34 @@ Empty the allowlist again when you are done: `update app_config set value = '[]'
 where key = 'welcome.canary_addresses';` The same sequence runs in CI on every pull request
 (`supabase/tests/welcome-email.test.mjs`, "canary on the real draft copy").
 
+### The canary from GitHub Actions, with nothing private in a public log
+
+This repository is public, so a workflow's dispatch inputs and every plain value in its
+job's `env:` block are printed in a log anybody can read. The workflow therefore takes no
+address and no account id as inputs. Its only canary input is a yes/no switch, and the test
+account comes from two secrets of the target Environment, which GitHub masks in every log.
+The worker and the SQL are the same as for the local canary above: the address must still
+be that account's confirmed address **and** be on `welcome.canary_addresses`, or nothing is
+claimed.
+
+1. **Settings → Environments → production → Add environment secret**, twice:
+   `WELCOME_CANARY_USER` (the test account's user id) and `WELCOME_CANARY_EMAIL` (its
+   confirmed address). Never at repository level.
+2. In the production SQL editor, put that same address, and only it, on the allowlist (the
+   `update app_config … welcome.canary_addresses` statement above).
+3. **Actions → Welcome email → Run workflow**, on `main`: target `production`, mode
+   `dry-run`, canary checked. Expect `would claim 1`.
+4. The same with mode `send`. Expect `claimed 1`, `sent 1`. In the SQL editor:
+   `select status, attempts, canary, resend_id is not null, sent_at from welcome_emails where canary;`
+   gives exactly one row: `sent`, 1, true, true.
+5. Confirm the message in the inbox: subject, rendering, the invite and unsubscribe links,
+   and that Reply goes to `suraj@bingd.app`. Resend's dashboard shows that message id as
+   delivered.
+6. Run step 4 again. Expect `claimed 0`, `sent 0`, and still exactly one canary row.
+7. Check nobody else was touched: the cohort count
+   (`select count(*) from welcome_emails where not canary;`) is what it was before step 4.
+8. Empty the allowlist again, and delete the two canary secrets.
+
 ---
 
 ## Rehearsing the cohort without waiting 48 hours
