@@ -354,7 +354,7 @@ describe('a grouped ranking sitting', () => {
     expect(within(rail).getByTestId('poster-season-pill', hidden)).toBeTruthy();
     expect(within(rail).getByText('S1 - 9.8', hidden)).toBeTruthy();
     expect(
-      within(rail).getByLabelText(/^Severance, 2021, scored 9\.8 out of 10$/),
+      within(rail).getByLabelText(/^Severance, season 1, 2021, scored 9\.8 out of 10$/),
     ).toBeTruthy();
     // Unranked since: the poster stays, no number is invented.
     expect(within(rail).getByLabelText('Ronin, 2021')).toBeTruthy();
