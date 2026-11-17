@@ -643,13 +643,11 @@ export function modeTwo(split: Split, w: World, engine: BenchEngine): WallMetric
     if (positives.size) {
       add(
         'recall20',
-        items.filter((s) => positives.has(s.mediaItemId)).length /
-          Math.min(positives.size, SLATE_SIZE),
+        items.filter((s) => positives.has(s.mediaItemId)).length / positives.size,
       );
       add(
         'recall50',
-        extended.filter((s) => positives.has(s.mediaItemId)).length /
-          Math.min(positives.size, EXTENDED),
+        extended.filter((s) => positives.has(s.mediaItemId)).length / positives.size,
       );
       const pool = new Set(scored.map((s) => s.mediaItemId));
       const found = [...positives].filter((id) => pool.has(id));
@@ -873,10 +871,27 @@ export function verdictFor(
   const d = result.paired.final?.all ?? {};
   const winners: { engine: BenchEngine; gain: number }[] = [];
   let anyAbove = false;
+  // A conclusive call needs both paired primary estimates for every candidate, each from at
+  // least MIN_FINAL_USERS people: a person with no held-out like has no recall, and one with no
+  // ordered pair has no accuracy, so the nominal cohort can be far larger than the evidence.
+  const thin: string[] = [];
   for (const engine of CANDIDATES) {
     const acc = d[engine]?.['m1.accuracy'];
     const rec = d[engine]?.['m2.recall50'];
-    if (!acc || !rec) continue;
+    if (!acc || !rec || acc.n < MIN_FINAL_USERS || rec.n < MIN_FINAL_USERS) {
+      thin.push(`${engine} (accuracy n=${acc?.n ?? 0}, recall n=${rec?.n ?? 0})`);
+    }
+  }
+  if (thin.length) {
+    return {
+      call: 'INSUFFICIENT_EVIDENCE',
+      engine: null,
+      reason: `too few people with both primary metrics in the final half: ${thin.join('; ')}; at least ${MIN_FINAL_USERS} each are needed`,
+    };
+  }
+  for (const engine of CANDIDATES) {
+    const acc = d[engine]!['m1.accuracy']!;
+    const rec = d[engine]!['m2.recall50']!;
     if ((acc.lo > 0 && rec.lo > -NON_INFERIORITY) || (rec.lo > 0 && acc.lo > -NON_INFERIORITY))
       winners.push({ engine, gain: rec.mean });
     if (acc.hi > NON_INFERIORITY || rec.hi > NON_INFERIORITY) anyAbove = true;

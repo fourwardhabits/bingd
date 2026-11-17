@@ -360,10 +360,24 @@ describe('metrics', () => {
 });
 
 describe('the verdict rule', () => {
-  const est = (mean: number, lo: number, hi: number) => ({ mean, lo, hi, n: 30 });
+  const est = (mean: number, lo: number, hi: number, n = 30) => ({ mean, lo, hi, n });
+  const flat = est(0, -0.01, 0.01);
+  // Every candidate needs both estimates; the others sit flat unless a test sets them.
   const with_ = (engine: string, acc: ReturnType<typeof est>, rec: ReturnType<typeof est>) => ({
     table: {},
-    paired: { final: { all: { [engine]: { 'm1.accuracy': acc, 'm2.recall50': rec } } } },
+    paired: {
+      final: {
+        all: {
+          v2_metadata: { 'm1.accuracy': flat, 'm2.recall50': flat },
+          v2_metadata_social: { 'm1.accuracy': flat, 'm2.recall50': flat },
+          popularity: {
+            'm1.accuracy': est(-0.2, -0.3, -0.1),
+            'm2.recall50': est(-0.2, -0.3, -0.1),
+          },
+          [engine]: { 'm1.accuracy': acc, 'm2.recall50': rec },
+        },
+      },
+    },
   });
 
   it('is INSUFFICIENT_EVIDENCE below the minimum final cohort, whatever the numbers', () => {
@@ -390,6 +404,18 @@ describe('the verdict rule', () => {
       verdictFor(with_('v2_metadata', est(-0.05, -0.09, -0.01), est(-0.04, -0.08, 0.01)), 30)
         .call,
     ).toBe('KEEP_V1');
+  });
+
+  it('is INSUFFICIENT_EVIDENCE when a primary estimate is missing or rests on too few people', () => {
+    const missing = {
+      table: {},
+      paired: { final: { all: { v2_metadata: { 'm1.accuracy': est(0.1, 0.05, 0.2) } } } },
+    };
+    expect(verdictFor(missing, 30).call).toBe('INSUFFICIENT_EVIDENCE');
+    // One contributing person gives a zero-width interval; it must not trigger a trial.
+    expect(
+      verdictFor(with_('v2_metadata', est(0.3, 0.3, 0.3, 1), est(0.3, 0.3, 0.3, 1)), 30).call,
+    ).toBe('INSUFFICIENT_EVIDENCE');
   });
 
   it('does not trial a candidate that wins one metric and loses the other', () => {

@@ -55,6 +55,9 @@ Mode 1 is a diagnostic. It is never the quality of the product's wall.
   **An unranked title is unknown, never a negative.** So missing rankings, unseen titles, unmatched
   imports and watchlist adds are never counted as dislikes. Wall NDCG removes unjudged titles
   (a condensed list).
+- **Recall@k is hits divided by all held-out liked units**, the standard definition. The older
+  replay divides by `min(liked, k)`, a capacity-normalised figure, so the two do not compare
+  directly.
 - **Order is the ladder position.** It uses `projectedScore`, the unrounded 0–10 projection, which orders a ladder exactly as its positions do. A within-band pair counts only when the true scores are at least 1.0 apart.
 - **Movies and TV are separate experiments.** A movie split hides only movies; a TV split hides only TV. Ladders are never mixed.
 
