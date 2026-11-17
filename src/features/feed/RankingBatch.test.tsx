@@ -141,3 +141,36 @@ describe('the member sheet under the app’s cache settings', () => {
     }
   });
 });
+
+describe('a group across ladders (20261128000100)', () => {
+  it('labels each standing by its own list', async () => {
+    mockRpc.mockResolvedValue({
+      data: [
+        {
+          media_item_id: 'heat',
+          title: 'Heat',
+          poster_path: null,
+          position: 3,
+          score: 10,
+          bucket: 'loved',
+          category: 'movies',
+        },
+        {
+          media_item_id: 'sev',
+          title: 'Severance',
+          poster_path: null,
+          position: 1,
+          score: 9.8,
+          bucket: 'loved',
+          category: 'tv_seasons',
+        },
+      ],
+      error: null,
+    });
+    const view = await renderWithProviders(
+      <RankingBatchSheet eventId="event-1" medium="movies" onClose={() => {}} />,
+    );
+    await waitFor(() => expect(view.getByText('#3 in Movies')).toBeTruthy());
+    expect(view.getByText('#1 in TV seasons')).toBeTruthy();
+  });
+});

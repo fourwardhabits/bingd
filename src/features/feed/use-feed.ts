@@ -708,7 +708,7 @@ async function activityRows(
  * `.limit(1)` and not `.single()`: `single()` treats no rows as an *error*, and an
  * unavailable conversation is an ordinary outcome on this path rather than a fault.
  */
-async function oneActivity(eventId: string): Promise<FeedItem | null> {
+async function oneActivity(eventId: string, followed = false): Promise<FeedItem | null> {
   const { data, error } = await supabase
     .from('feed_events')
     .select(ACTIVITY_SELECT)
@@ -720,7 +720,19 @@ async function oneActivity(eventId: string): Promise<FeedItem | null> {
   if (error) throw error;
 
   const items = await hydrate((data ?? []) as unknown as FeedRow[]);
-  return items[0] ?? null;
+  if (items[0] || followed) return items[0] ?? null;
+
+  /**
+   * **A link to an activity that is now shown through a group** (20261128000100, Codex,
+   * PR 313). The row is hidden, never deleted, so an old link finds nothing; the server
+   * says which visible group shows it, if this reader may see that group, and the page
+   * opens the group instead. Once only: a group is never itself shown through another.
+   */
+  const { data: groupId, error: lookupError } = await supabase.rpc('feed_event_presentation', {
+    p_event_id: eventId,
+  });
+  if (lookupError || typeof groupId !== 'string') return null;
+  return oneActivity(groupId, true);
 }
 
 /**
