@@ -478,8 +478,9 @@ describe('the verdict rule', () => {
 describe('end to end on a small synthetic export', () => {
   // Small on purpose: this suite runs in CI beside timing-sensitive UI tests, and the full
   // pipeline (five splits, four engines, three launch seeds, both suites) is CPU-heavy. The
-  // reference-size run is `run.mjs --synthetic`, not CI.
-  const small = { ...DEFAULT_WORLD, titles: 160, people: 24, watchedMedian: 20 };
+  // reference-size run is `run.mjs --synthetic`, not CI. (Below about 300 titles at this watched
+  // median the A3 generator itself never finishes: it cannot draw enough distinct titles.)
+  const small = { ...DEFAULT_WORLD, titles: 300, people: 30, watchedMedian: 22 };
   const synthetic = JSON.parse(JSON.stringify(syntheticExport(generateWorld(small))));
 
   it('runs every engine on both media, and its report names no person or title', () => {
