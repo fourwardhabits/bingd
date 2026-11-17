@@ -47,19 +47,36 @@ The order matters: nothing is deleted until both scheduled jobs have passed on t
      back to them.
 2. **Delete the six repository copies.** Open **Settings → Secrets and variables → Actions**. Delete all six names
    above. Keep the variable `BINGD_PRODUCTION_TRENDING`.
-3. **Verify right away.** Run **Actions → Trending refresh → Run workflow**, target `both`. Then run **Welcome
-   email**, target `production`, mode `dry-run`.
-   - Both must pass. A missing secret shows as an immediate `SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set`
-     refusal that sends nothing.
-   - If one fails, add that secret to its Environment and run it again.
+3. **Verify right away.**
+   - **Trending:** run **Actions → Trending refresh → Run workflow**, target `both`. This exercises both Supabase pairs.
+   - **Welcome:** run **Actions → Welcome email → Run workflow**, target `production`, mode **`send`**.
+     - This is the same job the hourly schedule already runs on production. It mails only accounts that are already due.
+     - A **dry run would not do**: it returns before it reads the Resend key or the postal address.
+     - A send-mode run refuses before claiming anyone, with a non-zero exit, if `RESEND_API_KEY_WELCOME` or `WELCOME_POSTAL_ADDRESS` is missing. It refuses the same way when the Supabase pair is missing.
+     - So a green send run proves all four are present on the Environment.
+   - **If either job fails,** add that secret to its Environment and run it again.
+   - **Presence is not validity.** The Resend key is proven valid only when a real send records `sent` with a message id. Check after the next send that claimed anyone:
+     `select status, failed_reason is null, sent_at from welcome_emails where not canary order by claimed_at desc limit 3;`
+   - For a pure relocation (the same values), presence is enough.
 4. **Re-probe.** An agent pushes the same presence-only probe (`git show f2c7feb6`) to a branch. The expected output
    is all six `absent`, with both Environment jobs refused. Then the agent removes the probe.
 5. **Observe one scheduled run of each job.**
 
-**H-1 closes at step 4.** It is a relocation, not a rotation: nothing indicates a value leaked. A rotation is
-optional hardening, and the founder decides on it.
-- **If rotating:** create the new key, put it in the Environment, verify step 3, and only then revoke the old one.
-- **Whichever key is revoked**, revoke it only after the jobs pass on the new one.
+**H-1 closes at step 4.** It is a relocation, not a rotation: nothing indicates a value leaked. Rotation is optional
+hardening, the founder's decision, and **outside this runbook** for the Supabase keys.
+
+- **The Resend welcome key, if rotated:**
+  1. Create the new key with sending access on `bingd.app`.
+  2. Put it in the `production` Environment.
+  3. Prove it with a real send that records `sent`: the canary in `emails/welcome/automation/README.md`, or the next cohort send.
+  4. Only then revoke the old key in Resend.
+- **The Supabase service-role keys: do not rotate under this runbook.** The production key has another consumer outside
+  GitHub. A Vault secret, `service_role_key`, is the bearer credential for `_drain_push_outbox()` and
+  `_import_enrich_nudge()` (`docs/release/production-environment.md` §3). A rotation needs its own plan:
+  - update and verify the Vault copy and those background requests;
+  - then update the GitHub Environment;
+  - then verify Trending and Welcome;
+  - only then revoke.
 
 ## m-3 log deletion (founder; AWAITING FOUNDER AUTHORIZATION)
 
