@@ -90,6 +90,28 @@ describe('GitHub Actions', () => {
   });
 });
 
+describe('the welcome job', () => {
+  const text = readFileSync(join(workflowsDir, 'welcome-email.yml'), 'utf8');
+
+  it('takes no address and no account id as a dispatch input', () => {
+    // The repository is public: a dispatch input, and every value the job's env block
+    // names, is printed in a log anybody can read. The canary is resolved by the worker
+    // from welcome.canary_addresses instead (--canary-from-allowlist).
+    const inputs = text.slice(text.indexOf('    inputs:'), text.indexOf('\nconcurrency:'));
+    const names = [...inputs.matchAll(/^ {6}([a-z_]+):\n/gm)].map(([, name]) => name);
+    assert.deepEqual(names.sort(), ['canary', 'mode', 'target']);
+    assert.doesNotMatch(inputs, /type:\s*string/, 'a free-text input could carry an address');
+  });
+
+  it('reads the canary account only from masked Environment secrets', () => {
+    const used = [...text.matchAll(/github\.event\.inputs\.([a-z_]+)/g)].map(([, name]) => name);
+    assert.ok(used.length > 0, 'the scan found no input use, so it is not reading this file');
+    for (const name of used) assert.ok(['canary', 'mode', 'target'].includes(name), name);
+    assert.match(text, /CANARY_USER: \$\{\{ github\.event\.inputs\.canary == 'true' && secrets\.WELCOME_CANARY_USER \|\| '' \}\}/);
+    assert.match(text, /CANARY_EMAIL: \$\{\{ github\.event\.inputs\.canary == 'true' && secrets\.WELCOME_CANARY_EMAIL \|\| '' \}\}/);
+  });
+});
+
 describe('the trending job', () => {
   it('needs nothing that an install would provide', () => {
     // The reason `npm ci` could go. A package import here would fail at runtime on the first

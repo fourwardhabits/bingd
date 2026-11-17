@@ -45,14 +45,16 @@ on:
         required: true
         default: dry-run
         options: [dry-run, send]
-      canary_user:
-        description: Canary only. The test account's user id. Leave empty for the cohort.
-        type: string
+      # No address and no account id as inputs: this repository is public, so a dispatch
+      # input, and every plain value in the job's env block, is printed in a log anybody can
+      # read. The test account comes from two secrets of the target Environment,
+      # WELCOME_CANARY_USER and WELCOME_CANARY_EMAIL, which GitHub masks in every log. The
+      # address must also be on that project's welcome.canary_addresses, checked in SQL.
+      canary:
+        description: Canary only. Mail the one test account configured for the target Environment, ignoring the cohort.
+        type: boolean
         required: false
-      canary_email:
-        description: Canary only. That account's confirmed address, which must be on welcome.canary_addresses.
-        type: string
-        required: false
+        default: false
 
 # Two runs never overlap. The claim is safe under overlap anyway (see the race suite);
 # this keeps the logs readable.
@@ -98,13 +100,15 @@ jobs:
           # forgotten secret costs nobody their one chance at the note.
           WELCOME_POSTAL_ADDRESS: ${{ secrets.WELCOME_POSTAL_ADDRESS }}
           MODE: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }}
-          CANARY_USER: ${{ github.event.inputs.canary_user }}
-          CANARY_EMAIL: ${{ github.event.inputs.canary_email }}
+          CANARY_USER: ${{ github.event.inputs.canary == 'true' && secrets.WELCOME_CANARY_USER || '' }}
+          CANARY_EMAIL: ${{ github.event.inputs.canary == 'true' && secrets.WELCOME_CANARY_EMAIL || '' }}
+          CANARY: ${{ github.event.inputs.canary == 'true' && 'true' || 'false' }}
         run: |
           set -euo pipefail
           args=()
           if [ "$MODE" = "dry-run" ]; then args+=(--dry-run); fi
-          if [ -n "$CANARY_USER" ] || [ -n "$CANARY_EMAIL" ]; then
+          if [ "$CANARY" = "true" ]; then
+            # Both are required; the worker refuses half a canary before touching anything.
             args+=(--canary "$CANARY_USER" --canary-email "$CANARY_EMAIL")
           fi
           node emails/welcome/automation/send-welcome.mjs "${args[@]}"
