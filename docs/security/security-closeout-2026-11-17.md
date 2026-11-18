@@ -21,7 +21,7 @@ rule. Neither is a high-severity exposure.
 | Post-deletion dry runs (runs 44240581085, 44240583979) | Production reached the production project, with the Resend key and postal address present (masked, non-empty: these can only be the Environment copies now). Nonprod reached the staging project with **no** postal address, which confirms the repository fallback is gone. Nonprod holds no mail secrets by design |
 | Scheduled send (run 44238100146, 04:33Z) | Passed the Resend-key presence and postal-address format checks, which run before any claim. Claimed 0 |
 | First scheduled Trending after deletion (run 44309130885, 12:59Z) | **PASS**: both jobs succeeded on the Environment-only configuration. Production refreshed all five lists on `abheeqyjzekiowkztfxv` |
-| First scheduled Welcome send after deletion | **Pending.** No scheduled run has started since 04:33Z: GitHub has been running the hourly schedule every few hours. The post-deletion production dry run already proved the Supabase pair, and showed the mail secrets present on the Environment |
+| First scheduled Welcome send after deletion (run 44322495767, 14:16Z) | **PASS**: `send on production` succeeded on the Environment-only configuration. It reached `abheeqyjzekiowkztfxv` and passed the Resend-key and postal-address checks before claiming. `claimed 0`, `sent 0  failed 0  unrecorded 0` |
 | Not tested | Resend API authentication. Only a real send recorded `sent` proves it, and the key value did not change |
 
 ## Finding register
@@ -46,7 +46,7 @@ rule. Neither is a high-severity exposure.
 - **The beta review's "Nice" item.** Custom-scheme token interception (`docs/security/beta-security-review.md`) stays
   as documented there.
 
-## H-1 runbook (remediation completed 2026-11-18; scheduled-run observation: Trending done, Welcome pending)
+## H-1 runbook (completed 2026-11-18, including the scheduled-run observation; kept for reference)
 
 The order matters: nothing is deleted until both scheduled jobs have passed on the Environment copies.
 
