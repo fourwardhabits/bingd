@@ -418,3 +418,80 @@ export const today = () => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
+
+/**
+ * What `rank_reorder` answered (20261129000100): where the title is now and was, its band,
+ * and its score before and after. Read only to reconcile and to word the confirmation.
+ */
+export type ReorderReply = {
+  moved: boolean;
+  position: number;
+  fromPosition: number;
+  score: number | null;
+  fromScore: number | null;
+};
+
+/**
+ * A Collection drag's outcome (#318). Four, because the screen does four different things:
+ *
+ *   moved    applied, or answered from the ledger for a replayed operation id;
+ *   stale    55000: the list the drop was computed from is not the list any more. Nothing
+ *            moved. Refetch and say so;
+ *   outside  22023: the target is in another band. Nothing moved. The client refuses this
+ *            itself before sending, so this is the server's backstop;
+ *   failed   anything else. `changed` is true when the outcome is unknown (a lost reply),
+ *            which is when a retry must reuse the same operation id.
+ */
+export type ReorderResult =
+  | { outcome: 'moved'; reply: ReorderReply }
+  | { outcome: 'stale' }
+  | { outcome: 'outside' }
+  | { outcome: 'failed'; message: string; changed: boolean };
+
+const toNumber = (value: unknown): number | null =>
+  value === null || value === undefined ? null : Number(value);
+
+/**
+ * Moves a ranked title inside its own band: `rank_reorder`, with both stale-list guards.
+ *
+ * `expectedPosition` is where the screen drew the title, and `anchorId` is the title the
+ * screen drew at the target. The server refuses with 55000 when either is no longer true,
+ * so a ranking changed by another device is never moved by a stale index.
+ */
+export async function reorderRanking(input: {
+  operationId: string;
+  mediaItemId: string;
+  toPosition: number;
+  expectedPosition: number;
+  anchorId: string;
+}): Promise<ReorderResult> {
+  const { data, error } = await supabase.rpc('rank_reorder', {
+    p_media_item_id: input.mediaItemId,
+    p_new_position: input.toPosition,
+    p_operation_id: input.operationId,
+    p_expected_position: input.expectedPosition,
+    p_anchor_media_item_id: input.anchorId,
+  });
+
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+
+  const reply = (data ?? {}) as Record<string, unknown>;
+  return {
+    outcome: 'moved',
+    reply: {
+      moved: reply.moved !== false,
+      position: Number(reply.position ?? input.toPosition),
+      fromPosition: Number(reply.from_position ?? input.expectedPosition),
+      score: toNumber(reply.score),
+      fromScore: toNumber(reply.from_score),
+    },
+  };
+}

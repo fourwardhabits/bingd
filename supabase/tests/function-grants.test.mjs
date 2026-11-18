@@ -147,12 +147,12 @@ const ALLOWED = {
   'rank_unrank(uuid,uuid)': ['authenticated'],
   // Added 2026-08-14 with the comparison screen, which needed a way out of a session.
   'rank_cancel(uuid)': ['authenticated'],
-  // `rank_reorder` is DELIBERATELY ABSENT since 20261004000100, and its absence is the
-  // assertion. It moves a ranking without writing a `ranking_placements` row, so a title
-  // could sit at #7 with nothing in the ledger explaining how it got there -- which is
-  // the one hole that makes a placement history untrustworthy. It has never had a
-  // caller, and a drag-to-reorder UI is an explicit non-goal (epic §Q). Granting it back
-  // means teaching it to write a `manual` placement first (§E.1).
+  // `rank_reorder` was revoked by 20261004000100 because it moved a ranking without writing a
+  // `ranking_placements` row. 20261129000100 (#318, Collection drag-to-rerank, which
+  // supersedes the epic's §Q non-goal) taught it to write a `manual` placement first, as
+  // §E.1 required, added two stale-list guards, and granted it back. The old three-argument
+  // form is dropped, so every installed call resolves to this one.
+  'rank_reorder(uuid,integer,uuid,integer,uuid)': ['authenticated'],
   //
   // 20261114000300 added a trailing `p_linked_placement_id` (default null) to both
   // correction RPCs, for Update Show, and dropped the old forms rather than overloading

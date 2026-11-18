@@ -127,13 +127,37 @@ export function watchedItems(
    */
   shows: readonly RankedEntry[] = [],
 ): CollectionItem[] {
-  const byId = new Map(logged.map((entry) => [entry.mediaItemId, entry]));
-
   // **TV is one poster per series** (WS-TVC, founder spec t168u §2): see `seriesItems`.
   if (medium === 'tv_seasons') return seriesItems(ranked, shows, logged);
 
+  const items = rankedPoolItems(ranked, logged);
+  const seen = new Set(items.map((item) => item.mediaItemId));
+
+  for (const entry of filterByMedium(logged, medium)) {
+    if (seen.has(entry.mediaItemId)) continue;
+    items.push({
+      ...toItem(entry),
+      score: null,
+      bucket: null,
+      unfinished: rankingStateOf({ ranked: false, bucket: entry.bucket }) === 'unfinished',
+    });
+  }
+
+  return items;
+}
+
+/**
+ * **One pool's ranked titles, each with its own explicit score** (#318's TV pool editors,
+ * and the ranked half of the Movies wall). No unranked rows, and nothing projected across
+ * pools: a season is a season and a show is a show, each scored against its own bands.
+ */
+export function rankedPoolItems(
+  ranked: readonly RankedEntry[],
+  logged: readonly LoggedEntry[],
+): CollectionItem[] {
+  const byId = new Map(logged.map((entry) => [entry.mediaItemId, entry]));
   const sizes = bandSizes(ranked);
-  const items: CollectionItem[] = ranked.map((entry) => ({
+  return ranked.map((entry) => ({
     mediaItemId: entry.mediaItemId,
     title: entry.title,
     seriesTitle: entry.seriesTitle,
@@ -154,19 +178,6 @@ export function watchedItems(
     watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
     addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
   }));
-  const seen = new Set(items.map((item) => item.mediaItemId));
-
-  for (const entry of filterByMedium(logged, medium)) {
-    if (seen.has(entry.mediaItemId)) continue;
-    items.push({
-      ...toItem(entry),
-      score: null,
-      bucket: null,
-      unfinished: rankingStateOf({ ranked: false, bucket: entry.bucket }) === 'unfinished',
-    });
-  }
-
-  return items;
 }
 
 /** The latest of two ISO dates or timestamps, either of which may be missing. */
