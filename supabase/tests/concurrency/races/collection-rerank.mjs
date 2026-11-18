@@ -15,6 +15,10 @@ import { fire, newOp, raceContext } from './_shared.mjs';
  * off**. That is the whole reason the guards exist: without them the second move's
  * absolute position would be applied to a list it was not computed from.
  *
+ * **CR1b/CR1c (Codex, PR 319).** A title shifted by another title's move while this one waits
+ * for the category lock is re-read inside it: a stale expected position is refused, and an
+ * unguarded move records where the title really was.
+ *
  * **CR2. Two moves whose guards still hold both land**, in commit order, and I1–I4 and the
  * ledger's P1–P4 survive.
  *
@@ -106,6 +110,82 @@ export default function suite() {
       assert.equal(refusal?.code, '55000', 'the stale move is refused, not applied one place off');
       assert.deepEqual(await order(user), [ids[3], ids[0], ids[1], ids[2]], "only A's move landed");
       assert.equal(await manualCount(user), 1);
+      await valid(user);
+
+      await first.end();
+      await second.end();
+    });
+
+    it('CR1b: a title shifted by another move while waiting is re-read, and the stale move refused', async () => {
+      // Codex, PR 319: A/B/C/D. Device A moves B from #2 to #3. Device B read C at #3 and
+      // moves it to #1, above A — an anchor that never changes. Only the title's own
+      // position moved (to #2), so the expected-position guard is the only thing that can
+      // notice, and only if the row is re-read after the category lock is taken.
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const ids = await band(user, 4, 'CR1b');
+
+      const first = await db.session('device-a');
+      const second = await db.session('device-b');
+      await first.actAs(user);
+      await second.actAs(user);
+
+      await first.begin();
+      await first.q(`select rank_reorder($1, 3, $2, 2, $3)`, [ids[1], await newOp(db), ids[2]]);
+
+      await second.begin();
+      const moving = second.errorFrom(`select rank_reorder($1, 1, $2, 3, $3)`, [
+        ids[2],
+        await newOp(db),
+        ids[0],
+      ]);
+      await second.awaitBlocked({ on: 'advisory', advisoryKey: await db.categoryKey(user, 'movies') });
+
+      await first.commit();
+      const refusal = await moving;
+      await second.rollback();
+
+      assert.equal(refusal?.code, '55000', 'the title is at #2 now, not the #3 the client saw');
+      assert.deepEqual(await order(user), [ids[0], ids[2], ids[1], ids[3]], "only A's move landed");
+      assert.equal(await manualCount(user), 1);
+      await valid(user);
+
+      await first.end();
+      await second.end();
+    });
+
+    it('CR1c: without guards, a waiting move still records where the title really was', async () => {
+      // The same interleaving with no guards (an installed client never sends them): the
+      // move lands, and the immutable ledger row must carry the position the title held
+      // when the move ran, not the one read before the wait.
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const ids = await band(user, 4, 'CR1c');
+
+      const first = await db.session('device-a');
+      const second = await db.session('device-b');
+      await first.actAs(user);
+      await second.actAs(user);
+
+      await first.begin();
+      await first.q(`select rank_reorder($1, 3, $2)`, [ids[1], await newOp(db)]);
+
+      await second.begin();
+      const moving = fire(second, `rank_reorder($1, 1, $2)`, [ids[2], await newOp(db)]);
+      await second.awaitBlocked({ on: 'advisory', advisoryKey: await db.categoryKey(user, 'movies') });
+
+      await first.commit();
+      const reply = (await moving).rows[0].r;
+      await second.commit();
+
+      assert.equal(reply.from_position, 2, 'C was at #2 when its move ran');
+      const [row] = await db.rows(
+        `select from_position from ranking_placements
+          where user_id = $1 and media_item_id = $2 and kind = 'manual'`,
+        [user, ids[2]],
+      );
+      assert.equal(row.from_position, 2);
+      assert.deepEqual(await order(user), [ids[2], ids[0], ids[1], ids[3]]);
       await valid(user);
 
       await first.end();

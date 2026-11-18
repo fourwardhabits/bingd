@@ -86,6 +86,15 @@ begin
   -- Media, then category: the §9 order. The band is read inside the category lock.
   perform pg_advisory_xact_lock(hashtextextended(v_user::text || v_r.category::text, 0));
 
+  -- **Re-read inside the category lock** (Codex, PR 319). The media lock protects this
+  -- title from writers naming it, not from another title's move shifting it: while this
+  -- transaction waited, a move of a neighbour may have committed and renumbered it. Under
+  -- READ COMMITTED this statement takes a fresh snapshot, so the guards, the shift and the
+  -- ledger's `from_*` all use where the title is now. Its category cannot have changed:
+  -- that takes a writer naming this title, which the media lock excludes.
+  select * into v_r from rankings
+   where user_id = v_user and media_item_id = p_media_item_id;
+
   -- #318: the list the drop was computed from is still the list. Checked inside the lock,
   -- before the band, because a stale position makes the band arithmetic below meaningless.
   if p_expected_position is not null and v_r.position <> p_expected_position then
