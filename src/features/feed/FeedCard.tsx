@@ -470,13 +470,14 @@ const styles = StyleSheet.create({
   // The rail sits where the artwork would, on the card's gutters.
   rail: { marginHorizontal: theme.layout.gutter },
   /**
-   * **28pt above each post, 12pt more than before** (UI cohesion pass, 2026-11-06). The
-   * one hairline between posts stays; the extra air above the next avatar is what makes
-   * a post read as the end of one thing and the start of another, while everything
-   * inside a post keeps its compact 12pt rhythm.
+   * **16pt above each post** (founder, device, 2026-11-19: "cut in half" from the 28pt of
+   * the UI cohesion pass, 2026-11-06). On a phone the 28pt read as a gap between the
+   * hairline and the next avatar rather than as a boundary. 16 is the 4pt-grid step nearest
+   * half, and still a step above the post's own 12pt rhythm, so the line is still where
+   * one post ends and the next begins.
    */
   card: {
-    paddingTop: theme.space[4] + theme.space[3],
+    paddingTop: theme.space[4],
     paddingBottom: theme.space[2],
     gap: theme.space[3],
     borderBottomWidth: StyleSheet.hairlineWidth * 2,

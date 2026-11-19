@@ -537,10 +537,12 @@ describe('the actions', () => {
       return found;
     });
     // The first post sits 20pt under RECENT ACTIVITY (marquee cohesion sprint); every
-    // later one has 28pt above its avatar. The post's own rhythm is unchanged.
+    // later one has 16pt above its avatar (founder, 2026-11-19: half the old 28pt), still a
+    // step above the post's own 12pt rhythm, which is unchanged.
     expect(StyleSheet.flatten(cards[0]!.props.style).paddingTop).toBe(theme.space[5]);
     const card = StyleSheet.flatten(cards[1]!.props.style);
-    expect(card.paddingTop).toBe(28);
+    expect(card.paddingTop).toBe(16);
+    expect(card.paddingTop).toBeGreaterThan(card.gap as number);
     expect(card.gap).toBe(theme.space[3]);
     // The separator is the card's own foot, and the only one.
     expect(card.borderBottomWidth).toBeGreaterThan(0);
