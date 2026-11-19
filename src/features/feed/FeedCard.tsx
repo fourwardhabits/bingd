@@ -1,19 +1,21 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import type { Bucket } from '@/features/collection/score';
 import {
   Avatar,
+  CompanionNames,
+  ENGAGEMENT_EDGE,
+  EngagementRow,
   Poster,
   PosterRail,
-  ReactionSlot,
   ReactionSummary,
   ScoreBadge,
+  SentenceLink,
   SpoilerNote,
   Text,
+  type ActivityReaction,
 } from '@/ui/components';
-import type { ActivityReaction } from '@/ui/components/ActivityRow';
 import type { PosterTile } from '@/ui/components/PosterWall';
 import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 
@@ -35,6 +37,11 @@ export type FeedCardProps = {
   /** "ranked Sheroes **and 2 more**" — see `ActivityRow`, whose grammar this keeps. */
   tailAction?: { connector: string; label: string; onPress: () => void } | null;
   companions?: string[];
+  /**
+   * Opens every person the actor watched with. Given, "with Anna and **2 others**" makes
+   * the count a link (founder, 2026-11-19); absent, the count is plain entity ink.
+   */
+  onPressCompanions?: () => void;
   title: string | null;
   year?: number | null;
   /** `PG-13 · 148m · Science Fiction · Adventure`. */
@@ -54,10 +61,10 @@ export type FeedCardProps = {
   reaction: ActivityReaction;
   onPressComments?: () => void;
   commentCount?: number;
-  /** Save to the reader's watchlist. Absent on their own activity. */
+  /** Save to the reader's watchlist. Absent on their own activity and on a group. */
   onPressSave?: () => void;
   saved?: boolean;
-  /** The Recommend sheet, which ends in "Share off bingd". Absent for a whole series. */
+  /** The Recommend sheet, which ends in "Share off bingd". Absent on a group. */
   onPressShare?: () => void;
   /**
    * **A group drawn as its posters** (Feed poster rails, founder spec 2026-11-16).
@@ -68,8 +75,9 @@ export type FeedCardProps = {
    * opens the complete list; there is no separate "View all" under the rail (founder,
    * 2026-11-17: the posters are the way in). The
    * metadata line keeps only the time: one title's genres and certification do not describe
-   * a batch. A caller passes no Save and no Share with a rail, since both would act on the
-   * representative title alone.
+   * a batch. A caller passes no Save and no Share for a group, rail or not, since both
+   * would act on the representative title alone (founder, 2026-11-19); the card draws
+   * neither beside a rail in any case.
    */
   rail?: {
     total: number;
@@ -91,8 +99,7 @@ export type FeedCardProps = {
  *     └──────────────────────────────────────────┘
  *     "The review, if one was published…"            ← absent, not empty, without one
  *     ❤️😂 Priya and 3 others reacted                 ← absent with no reactions
- *     ──────────────────────────────────────────      ← hairline, only under a summary
- *     ♡ Like      💬 Comment      🔖 Save      ➤ Share
+ *     ♡ Like      💬 Comment      🔖 Save      ➤ Share    ← `EngagementRow`
  *
  * Feed only. The profile's Recent activity and the conversation page keep `ActivityRow`,
  * which is the compact form those surfaces were designed around.
@@ -110,6 +117,7 @@ export function FeedCard({
   tail = null,
   tailAction = null,
   companions = [],
+  onPressCompanions,
   title,
   year,
   metadata,
@@ -146,6 +154,10 @@ export function FeedCard({
   const canReact = reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
   const othersGlyphs = (reaction.glyphs ?? []).filter((glyph) => glyph !== mine).slice(0, 3);
+  // A sentence that ends in a control is never clamped: the count is the only way into the
+  // rest, and truncation would cut exactly that.
+  const companionsLink = !grouped && companions.length > 2 && onPressCompanions != null;
+  const holdsLink = grouped || tailAction != null || companionsLink;
 
   return (
     <View style={[styles.card, leading && styles.cardLeading]} testID="feed-card">
@@ -172,30 +184,38 @@ export function FeedCard({
           {/* Three lines, like the row — and no clamp at all when the sentence ends in a
               control: "and 2 more" is the only way into a sitting, and truncation would
               cut exactly that (independent review, 2026-11-04). */}
-          <Text variant="subhead" tone="secondary" numberOfLines={tailAction ? undefined : 3}>
+          <Text variant="subhead" tone="secondary" numberOfLines={holdsLink ? undefined : 3}>
             <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
               {actorName}
             </Text>
             {` ${verb} `}
-            <Text
-              variant="subhead"
-              style={styles.entity}
-              onPress={rail ? rail.onPressAll : onPressTitle}
-              accessibilityRole={rail ? 'button' : undefined}
-            >
-              {filmName}
-              {year && !grouped ? (
-                <Text variant="subhead" tone="secondary" style={styles.year}>
-                  {` (${year})`}
-                </Text>
-              ) : null}
-            </Text>
+            {/* A group is named by its size, and the size opens the complete list — never
+                the representative title (founder, 2026-11-19). */}
+            {rail && groupName ? (
+              <SentenceLink
+                label={groupName}
+                onPress={rail.onPressAll}
+                testID="feed-card-group-link"
+              />
+            ) : (
+              <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
+                {filmName}
+                {year ? (
+                  <Text variant="subhead" tone="secondary" style={styles.year}>
+                    {` (${year})`}
+                  </Text>
+                ) : null}
+              </Text>
+            )}
             {companions.length && !grouped ? (
               <Text variant="subhead" tone="secondary">
                 {' with '}
-                <Text variant="subhead" style={styles.entity}>
-                  {companionNames(companions)}
-                </Text>
+                <CompanionNames
+                  names={companions}
+                  onPressAll={onPressCompanions}
+                  entityStyle={styles.entity}
+                  testID="feed-card-companions-link"
+                />
               </Text>
             ) : null}
             {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
@@ -204,14 +224,11 @@ export function FeedCard({
             {tailAction && !grouped ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
-                <Text
-                  variant="subhead"
-                  style={styles.entity}
+                <SentenceLink
+                  label={tailAction.label}
                   onPress={tailAction.onPress}
-                  accessibilityRole="button"
-                >
-                  {tailAction.label}
-                </Text>
+                  testID="feed-card-tail-link"
+                />
               </Text>
             ) : null}
             {tail ? ` ${tail}` : null}
@@ -305,11 +322,15 @@ export function FeedCard({
       ) : null}
 
       {/*
-       * 5. One social area: the reaction summary, then the actions — on the card's
-       * gutters, so the cluster's first glyph and the Like icon share one left edge and
-       * Share ends on the artwork's right edge (post-QA sprint 2, 2026-11-05). No line
-       * between the two (UI cohesion pass, 2026-11-06): they are one group, and proximity
-       * says so. With no reactions there is no summary: just the row.
+       * 5. One social area: the reaction summary, then the actions. The summary sits on
+       * the card's gutters (post-QA sprint 2, 2026-11-05); no line between the two (UI
+       * cohesion pass, 2026-11-06): they are one group, and proximity says so. With no
+       * reactions there is no summary: just the row.
+       *
+       * The row is `EngagementRow`, the one every Feed post draws (founder, 2026-11-19):
+       * equal columns across the card's width, so a group's Like and Comment read as a
+       * pair rather than as two controls at opposite edges. The Like is offered on the
+       * reader's own post too (founder, 2026-11-11); Save is not.
        */}
       <View style={styles.social} testID="feed-card-social">
         {reaction.count > 0 ? (
@@ -328,81 +349,18 @@ export function FeedCard({
 
         {reaction.picker && canReact ? <View style={styles.picker}>{reaction.picker}</View> : null}
 
-        <View style={styles.actions}>
-        {/* Not on the reader's own post (founder, 2026-11-10): reacting to yourself is
-            not something the card offers. Everyone else's reactions stay on the line
-            above, and it still opens the list. */}
-        {canReact ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(mine) }}
-            accessibilityLabel={
-              mine
-                ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${filmName}. Tap to remove, long press to change.`
-                : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
-            }
-            accessibilityHint={
-              reaction.onLongPress ? 'Long press to choose a different reaction' : undefined
-            }
-            onPress={reaction.onPress}
-            onLongPress={reaction.onLongPress}
-            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-            testID="feed-card-like"
-          >
-            {/* Every selected state is its emoji and its word, a Like included: the ❤️ and
-                Liked, the way 😂 Laugh and 😮 Wow are drawn (founder, nav cohesion sprint,
-                2026-11-06). The filled Maroon heart was a seventh look for one of six.
-                Both states sit in the one fixed slot, so a tap moves nothing. */}
-            <ReactionSlot glyph={mine} color={theme.text.secondary} />
-            <Text
-              variant="footnote"
-              tone={mine ? 'action' : 'secondary'}
-              numberOfLines={1}
-              style={styles.shrink}
-            >
-              {mine ? (reaction.mineLabel ?? 'Reacted') : 'Like'}
-            </Text>
-          </Pressable>
-        ) : null}
-
-        {onPressComments ? (
-          <Action
-            icon="chatbubble-outline"
-            label={commentCount > 0 ? String(commentCount) : 'Comment'}
-            accessibilityLabel={
-              commentCount > 0
-                ? `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} on ${actorName}'s activity about ${filmName}. Open them.`
-                : `Comment on ${actorName}'s activity about ${filmName}`
-            }
-            onPress={onPressComments}
-            testID="feed-card-comment"
-          />
-        ) : null}
-
-        {onPressSave && !grouped ? (
-          <Action
-            icon={saved ? 'bookmark' : 'bookmark-outline'}
-            active={saved}
-            selected={saved}
-            label={saved ? 'Saved' : 'Save'}
-            accessibilityLabel={
-              saved ? `${filmName} is in your watchlist` : `Add ${filmName} to your watchlist`
-            }
-            onPress={onPressSave}
-            testID="feed-card-save"
-          />
-        ) : null}
-
-        {onPressShare && !grouped ? (
-          <Action
-            icon="paper-plane-outline"
-            label="Share"
-            accessibilityLabel={`Share ${filmName} with a friend`}
-            onPress={onPressShare}
-            testID="feed-card-share"
-          />
-        ) : null}
-        </View>
+        <EngagementRow
+          actorName={actorName}
+          subject={filmName}
+          reaction={reaction}
+          onPressComments={onPressComments}
+          commentCount={commentCount}
+          onPressSave={grouped ? undefined : onPressSave}
+          saved={saved}
+          onPressShare={grouped ? undefined : onPressShare}
+          style={styles.actions}
+          testID="feed-card"
+        />
       </View>
     </View>
   );
@@ -415,56 +373,6 @@ export function reactionCountLabel(count: number) {
 
 /** The frame for a title with no artwork at all: a 64×96 initials poster and the score. */
 const NO_ARTWORK_HEIGHT = 120;
-
-function Action({
-  icon,
-  label,
-  accessibilityLabel,
-  onPress,
-  active = false,
-  selected,
-  testID,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  accessibilityLabel: string;
-  onPress: () => void;
-  active?: boolean;
-  selected?: boolean;
-  testID?: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={selected === undefined ? undefined : { selected }}
-      onPress={onPress}
-      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-      testID={testID}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.sm}
-        color={active ? theme.semantic.action : theme.text.secondary}
-      />
-      <Text
-        variant="footnote"
-        tone={active ? 'action' : 'secondary'}
-        numberOfLines={1}
-        style={styles.shrink}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-/** "Anna", "Anna and Raj", or "Anna and 3 others" — `ActivityRow`'s rule. */
-function companionNames(names: string[]) {
-  if (names.length === 1) return names[0];
-  if (names.length === 2) return `${names[0]} and ${names[1]}`;
-  return `${names[0]} and ${names.length - 1} others`;
-}
 
 const styles = StyleSheet.create({
   // The rail sits where the artwork would, on the card's gutters.
@@ -534,28 +442,11 @@ const styles = StyleSheet.create({
   summary: { marginHorizontal: theme.layout.gutter },
   picker: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   /**
-   * The actions sit on the gutters too: each target is padded 8pt either side, and the
-   * row is inset 8pt less than the gutter, so the Like icon starts on the same edge as
-   * the reaction cluster and Share ends on the artwork's right edge. Each keeps a 44pt
-   * minimum in both directions; under large text a label shortens before anything
-   * leaves the row.
+   * The actions span the card, `ENGAGEMENT_EDGE` in from the screen's edges, in equal
+   * columns (founder, 2026-11-19). That replaced a row of content-sized targets spread
+   * edge to edge, which put a group's two actions at opposite ends of the card. Each
+   * column keeps a 44pt minimum in both directions; see `EngagementRow`.
    */
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.layout.gutter - theme.space[2],
-  },
-  action: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 1,
-    gap: theme.space[1] + 2,
-    minHeight: theme.layout.minTapTarget,
-    minWidth: theme.layout.minTapTarget,
-    paddingHorizontal: theme.space[2],
-  },
-  shrink: { flexShrink: 1 },
+  actions: { paddingHorizontal: ENGAGEMENT_EDGE },
   pressed: { opacity: 0.7 },
 });
