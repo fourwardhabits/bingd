@@ -31,12 +31,13 @@
 
     "founderProfile": {
       "classification": "A",
-      "url": "https://bingd.app/u/saisurajkan",
+      "url": "https://bingd.app/u/surajkan",
       "capability": "The founder's public profile, with Follow in its action row. Following a public account is approved at once.",
       "deepLink": "/u/* is in appPaths; app/u/[username].tsx renders the profile and FollowControl.",
       "webFallback": "web/dist/u.html resolves the display name and avatar and offers the install row plus Open in bingd.",
       "needsUserData": false,
-      "verified": "2026-09-11 against production: the handle resolves and the account is public. 2026-09-13: route and fallback unchanged on main; https://bingd.app/u/saisurajkan answers 200."
+      "verified": "2026-09-11 against production: the handle resolves and the account is public. 2026-09-13: route and fallback unchanged on main; https://bingd.app/u/saisurajkan answers 200.",
+      "renamed": "2026-11-19: the founder changed his handle from saisurajkan to surajkan in production (username_changed_at 06:13Z, read-only check). The app and public_profile_card look a profile up by its current username only, so /u/saisurajkan no longer resolves; this target follows the current handle. The account is public and active."
     }
   },
 

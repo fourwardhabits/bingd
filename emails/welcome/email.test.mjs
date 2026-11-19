@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -35,7 +36,9 @@ import {
  *      paths the app claims, in both parts.
  *   4. **Every product label is one the app renders.** targets.json lists them; the
  *      2026-09-18 letter names none.
- *   5. **It is a letter.** No images, no buttons, and no bold: the approved copy asks for none.
+ *   5. **It is a letter.** One image, the founder's photo, and no buttons and no bold: the
+ *      approved copy asks for none. The photo is a real file the site publishes, small and
+ *      stripped of its camera metadata.
  *   6. **The test send cannot reach a user list.**
  */
 
@@ -48,8 +51,8 @@ const repo = join(here, '..', '..');
  * Changing a word of it changes this hash. Do not update it to make a test pass: update it
  * because the founder changed his letter.
  */
-// The founder's letter, revised 2026-09-18 after he read the real staging send in Gmail.
-const LOCKED_LETTER = 'acef1efc973b3e79364c8a4717ea2318047be6f42628761594926b529152e8e5';
+// The short founder note with the cafe photo, 2026-11-19, replacing the 2026-09-18 letter.
+const LOCKED_LETTER = 'c3e7d952b002add4e11a8b963ab234ae7bcba6134a600db7d1713138b34356ac';
 
 const read = (path) => readFile(join(repo, path), 'utf8');
 
@@ -97,8 +100,8 @@ after(async () => {
 
 describe('welcome email: the founder letter', () => {
   it('is exactly the letter the founder approved', () => {
-    const { greeting, paragraphs, signoff } = copy.letter;
-    const hash = createHash('sha256').update(JSON.stringify({ greeting, paragraphs, signoff })).digest('hex');
+    const { greeting, paragraphs, signoff, closing } = copy.letter;
+    const hash = createHash('sha256').update(JSON.stringify({ greeting, paragraphs, signoff, closing })).digest('hex');
     assert.equal(hash, LOCKED_LETTER, 'the founder letter changed. If he changed it, update LOCKED_LETTER in the same commit.');
     assert.equal(copy.letter.status, 'APPROVED');
   });
@@ -111,19 +114,95 @@ describe('welcome email: the founder letter', () => {
     assert.equal((html.match(/<b>|font-weight:\s*(bold|[5-9]00)/g) ?? []).length, 0, 'no bold or semibold text, links included');
   });
 
-  it('is a letter: no images, no buttons, no cards', () => {
-    assert.doesNotMatch(html, /<img\b/i);
+  it('is a letter: one image, the founder photo, and no buttons or cards', () => {
+    const images = html.match(/<img\b[^>]*>/gi) ?? [];
+    assert.equal(images.length, 1, 'exactly one image');
+    const [img] = images;
+    assert.ok(img.includes(`src="${copy.photo.src}"`), 'the image is the founder photo');
+    assert.match(img, /alt="[^"]{10,}"/, 'the photo is described for a reader with images off');
+    assert.ok(img.includes(`width="${copy.photo.width}"`) && img.includes(`height="${copy.photo.height}"`), 'a stated size, so nothing jumps');
+    assert.match(img, /display:block;width:100%;max-width:\d+px;height:auto/, 'fluid, never wider than the column');
     assert.doesNotMatch(html, /btn-wrap|class="btn"|dk-raised|dk-fill|dk-outline/);
   });
 
-  it('keeps the plain-text part as the approved letter reads', () => {
+  it('keeps the plain-text part as the approved note reads', () => {
     assert.match(text, /^\{\{greeting\}\}\n\nThanks for giving bingd a shot!/);
     // Whitespace-tolerant, because the text part is word-wrapped at 72 columns.
-    assert.match(text, /\nThe app was inspired by my experience using Beli,\s+which changed the way\s+I enjoyed\s+restaurants\./);
-    assert.match(text, /See where your latest movie lands in your rankings,/);
-    assert.match(text, /\nI built bingd because I think movies and TV are missing that same loop,/);
+    assert.match(text, /\nBeli changed the way I experienced restaurants\./);
+    assert.match(text, /\nI built bingd because I wanted that same post-watch ritual for movies\s+and TV:/);
+    assert.match(text, /\nHope you enjoy it as much as I do\.\n/);
     assert.doesNotMatch(text, /\*\*/);
-    assert.match(text, /\nHappy binging,\nSuraj\n/);
+    assert.match(text, /\nHappy binging,\nSuraj\nThe movie nerd who made bingd\.\n/);
+  });
+
+  it('carries none of the long 2026-09-18 letter it replaced', () => {
+    assert.doesNotMatch(
+      html + text,
+      /The app was inspired by my experience using Beli|missing that same loop|See where your latest movie lands|stronger recommendations with a better rating system/,
+    );
+  });
+
+  it('closes as the founder asked, under the signature', () => {
+    assert.equal(copy.letter.closing, 'The movie nerd who made bingd.');
+    assert.ok(html.indexOf('The movie nerd who made bingd.') > html.indexOf('Suraj</p>'), 'the closing line sits under the signature');
+  });
+});
+
+/**
+ * THE PHOTO IS A REAL FILE, PUBLISHED BY THE SITE, AND CARRIES NOTHING BUT PIXELS.
+ *
+ * `web/build.mjs` copies `web/src/` into bingd.app as-is, so `photo.file` is served at
+ * `photo.src` by the Cloudflare Pages deploy of main. A phone photo arrives with EXIF:
+ * the camera, the time and, often, where it was taken. None of that may ship.
+ */
+describe('welcome email: the founder photo', () => {
+  let bytes;
+  before(async () => {
+    bytes = await readFile(join(repo, copy.photo.file));
+  });
+
+  /** Width and height from a JPEG's start-of-frame segment. */
+  const jpegSize = (buf) => {
+    let at = 2;
+    while (at < buf.length) {
+      if (buf[at] !== 0xff) return null;
+      const marker = buf[at + 1];
+      const length = buf.readUInt16BE(at + 2);
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        return { height: buf.readUInt16BE(at + 5), width: buf.readUInt16BE(at + 7) };
+      }
+      at += 2 + length;
+    }
+    return null;
+  };
+
+  it('is the web/src/ file the site publishes at the URL the email uses', () => {
+    assert.match(copy.photo.src, /^https:\/\/bingd\.app\/email\/[a-z0-9-]+\.jpg$/);
+    assert.equal(copy.photo.file, `web/src/${copy.photo.src.slice('https://bingd.app/'.length)}`);
+    assert.equal(bytes[0], 0xff);
+    assert.equal(bytes[1], 0xd8, 'not a JPEG');
+  });
+
+  it('is small, square, and at least twice its display size for high-density screens', () => {
+    assert.ok(bytes.length < 200_000, `${bytes.length} bytes`);
+    const size = jpegSize(bytes);
+    assert.ok(size, 'no start-of-frame segment');
+    assert.ok(size.width <= 1200, `${size.width}px wide`);
+    assert.equal(size.width * copy.photo.height, size.height * copy.photo.width, 'the stated size has a different shape from the file');
+    assert.ok(size.width >= copy.photo.width * 2 * 0.95, 'too small for a 2x screen');
+  });
+
+  it('carries no EXIF, GPS, XMP or other camera metadata', () => {
+    // APP1 (0xFFE1) holds EXIF and XMP; anything from APP1 to APP15 is metadata a photo
+    // does not need to be shown. Only JFIF (APP0) may remain.
+    let at = 2;
+    while (at < bytes.length && bytes[at] === 0xff && bytes[at + 1] !== 0xda) {
+      const marker = bytes[at + 1];
+      assert.ok(!(marker >= 0xe1 && marker <= 0xef), `APP${marker - 0xe0} segment present`);
+      at += 2 + bytes.readUInt16BE(at + 2);
+    }
+    assert.equal(bytes.includes(Buffer.from('Exif\0')), false);
+    assert.equal(bytes.includes(Buffer.from('GPS')), false);
   });
 });
 
@@ -174,12 +253,13 @@ describe('welcome email: every link lands', () => {
   const hrefs = () => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
 
   it('carries exactly the invite link, the founder profile and the unsubscribe', () => {
-    assert.deepEqual(hrefs().sort(), ['https://bingd.app/i/{{inviteToken}}', 'https://bingd.app/u/saisurajkan', '{{unsubscribeUrl}}'].sort());
+    assert.deepEqual(hrefs().sort(), ['https://bingd.app/i/{{inviteToken}}', 'https://bingd.app/u/surajkan', '{{unsubscribeUrl}}'].sort());
   });
 
   it('links "invite link" to the invite and "follow me on bingd" to the founder profile', () => {
     assert.match(html, /<a href="https:\/\/bingd\.app\/i\/\{\{inviteToken\}\}"[^>]*>invite link<\/a>/);
-    assert.match(html, /<a href="https:\/\/bingd\.app\/u\/saisurajkan"[^>]*>follow me on bingd<\/a>/);
+    // surajkan since 2026-11-19, when the founder renamed his handle; see targets.json.
+    assert.match(html, /<a href="https:\/\/bingd\.app\/u\/surajkan"[^>]*>follow me on bingd<\/a>/);
   });
 
   it('uses the same invite URL shape the app shares', async () => {
@@ -368,6 +448,25 @@ describe('welcome email: the test send cannot reach anybody it was not given', (
       [...new Set([...code.matchAll(/rpc\(\s*'([a-z_]+)'/g)].map((m) => m[1]))].sort(),
       ['welcome_email_claim', 'welcome_email_preview', 'welcome_email_record'],
     );
+  });
+
+  it('can carry the photo inline for a test, as the same bytes the site will serve', async () => {
+    const out = await mkdtemp(join(tmpdir(), 'welcome-inline-'));
+    try {
+      await execFileAsync(process.execPath, [join(here, 'send-test.mjs'), '--to', 'a@b.co', '--inline-photo', '--out', out], {
+        env: { ...process.env, RESEND_API_KEY: '', WELCOME_POSTAL_ADDRESS: '1 Example Street, Sampleton EX1 2MP' },
+      });
+      const request = JSON.parse(await readFile(join(out, 'request.json'), 'utf8'));
+      assert.equal((request.html.match(/<img\b/g) ?? []).length, 1);
+      assert.ok(request.html.includes('src="cid:founder-photo"'));
+      assert.equal(request.html.includes(copy.photo.src), false);
+      assert.equal(request.attachments.length, 1);
+      const [attachment] = request.attachments;
+      assert.equal(attachment.content_id, 'founder-photo');
+      assert.ok(Buffer.from(attachment.content, 'base64').equals(await readFile(join(repo, copy.photo.file))), 'not the committed file');
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
   });
 
   it('refuses a second recipient, a list, a bcc, and a real send without an invite link', async () => {
