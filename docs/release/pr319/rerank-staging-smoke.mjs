@@ -28,6 +28,23 @@ const readOnly = async (sql) => {
   });
   return r.json();
 };
+/**
+ * The two assert_* checkers are revoked from every client role, including the API's
+ * read-only one, so they run as the owner inside a READ ONLY transaction that is rolled
+ * back: nothing can be written. A violation raises, and the reply carries the message.
+ */
+const checkInvariants = async (users) => {
+  const calls = users
+    .map((u) => `select assert_ranking_valid('${u}', 'movies'); select assert_placements_valid('${u}');`)
+    .join(' ');
+  const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: `begin transaction read only; ${calls} rollback;`, read_only: false }),
+  });
+  const body = await r.json();
+  return { ok: r.ok && !(body && (body.message || body.error)), body };
+};
 const people = [];
 async function person(label) {
   const email = `rr-${label}-${randomBytes(5).toString('hex')}@example.invalid`;
@@ -103,8 +120,8 @@ try {
     (await count('comparisons', 'user_id', me.id)) === cmpBefore &&
     (await count('watch_events', 'user_id', me.id)) === watchBefore);
 
-  const inv = await readOnly(`select assert_ranking_valid('${me.id}', 'movies') as a, assert_placements_valid('${me.id}') as b`);
-  check('I1–I3 and P1–P4 hold', Array.isArray(inv) && inv.length === 1, JSON.stringify(inv).slice(0, 120));
+  const inv = await checkInvariants([me.id, other.id]);
+  check('I1–I3 and P1–P4 hold', inv.ok, JSON.stringify(inv.body).slice(0, 160));
 } catch (error) {
   check('run completed', false, error.message);
 } finally {
