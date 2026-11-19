@@ -30,6 +30,18 @@ import { fire, newOp, raceContext } from './_shared.mjs';
  * dragging the same title queue on its media lock (CR5); and a move rolled back leaves no
  * category change, collection change or placement, while the move behind it lands (CR6).
  * I1–I4, P1–P4 and I3 (user_media agrees) hold after each.
+ *
+ * **CR7–CR10. The TV wall** (20261129000300). A promotion computed from a wall another
+ * device just changed waits on the show category lock and is refused (CR7); two devices
+ * promoting the same show serialise on its media lock and only one lands (CR8); an Undo
+ * racing a move of the promoted show waits on the media lock and is refused once the move
+ * lands (CR9); and a promotion rolled back leaves no collection row, ranking, placement,
+ * record or watch, while the promotion behind it lands (CR10). W1 holds after each.
+ *
+ * **CR11–CR12 (Codex, PR 319).** Two devices removing a promoted show's last two seasons
+ * serialise their commit-time evidence check on the series, so the second backfills the
+ * show's undated event and W1 holds (CR11). A promotion waiting behind its last season's
+ * unranking re-checks inside the seasons' category lock and is refused (CR12).
  */
 export default function suite() {
   const rc = raceContext();
@@ -421,6 +433,296 @@ export default function suite() {
       assert.deepEqual(placements.map((p) => p.media_item_id), [fine[1]]);
       await valid(user);
       await agrees(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    /** A wall: `n` explicit I loved it shows, and one show with a ranked season only. */
+    const tvWall = async (user, n, label) => {
+      const solo = await ctx.db.session('setup');
+      await solo.actAs(user);
+      const place = async (item) => {
+        let step = (await solo.one(`select rank_start($1, 'loved') as r`, [item])).r;
+        let guard = 0;
+        while (!step.done) {
+          step = (await solo.one(`select rank_answer($1, $2) as r`, [step.session_id, step.pivot])).r;
+          guard += 1;
+          if (guard > 32) throw new Error('did not converge');
+        }
+      };
+      const shows = [];
+      for (let i = 0; i < n; i += 1) {
+        const show = await ctx.fx.createSeries(`${label} show ${i}`);
+        await place(show);
+        shows.push(show);
+      }
+      const avg = await ctx.fx.createSeries(`${label} avg`);
+      const season = await ctx.fx.createSeason(avg, 1);
+      await place(season);
+      await solo.end();
+      return { shows, avg, season };
+    };
+
+    const showOrder = async (user) =>
+      (
+        await ctx.db.rows(
+          `select media_item_id from rankings where user_id = $1 and category = 'tv_shows' order by position`,
+          [user],
+        )
+      ).map((r) => r.media_item_id);
+
+    const tvValid = async (user) => {
+      await ctx.db.sql(`select assert_ranking_valid($1, 'tv_shows')`, [user]);
+      await ctx.db.sql(`select assert_ranking_valid($1, 'tv_seasons')`, [user]);
+      await ctx.db.sql(`select assert_placements_valid($1)`, [user]);
+      await ctx.db.sql(`select assert_watch_history_valid($1)`, [user]);
+    };
+
+    const ownWatches = async (user, item) =>
+      Number(
+        (
+          await ctx.db.rows(
+            `select count(*) as n from watch_events where user_id = $1 and media_item_id = $2`,
+            [user, item],
+          )
+        )[0].n,
+      );
+
+    it('CR7: a promotion computed before another move committed waits on the category, then is refused', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg } = await tvWall(user, 3, 'CR7');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      // Device A moves show 2 to the top.
+      await a.begin();
+      await a.q(`select rank_reorder($1, 1, $2, 3, $3)`, [shows[2], await newOp(db), shows[0]]);
+
+      // Device B drops the SN AVG poster onto show 1 (#2), from the wall before A's move.
+      await b.begin();
+      const promoting = b.errorFrom(`select rank_promote_show($1, 2, 'loved', $2, $3)`, [
+        avg,
+        await newOp(db),
+        shows[1],
+      ]);
+      const waiting = await b.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.categoryKey(user, 'tv_shows'),
+      });
+      assert.equal(waiting.wait_event, 'advisory');
+
+      await a.commit();
+      const refusal = await promoting;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'show 0 is at #2 now, not show 1');
+      assert.deepEqual(await showOrder(user), [shows[2], shows[0], shows[1]]);
+      assert.equal(await ownWatches(user, avg), 0);
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR8: two devices promoting the same show serialise on its media lock, and one lands', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg } = await tvWall(user, 2, 'CR8');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [avg, await newOp(db), shows[0]]);
+
+      await b.begin();
+      const promoting = b.errorFrom(`select rank_promote_show($1, 3, 'loved', $2, null)`, [
+        avg,
+        await newOp(db),
+      ]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.mediaKey(user, avg) });
+
+      await a.commit();
+      const refusal = await promoting;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'already ranked by the time it ran');
+      assert.deepEqual(await showOrder(user), [avg, shows[0], shows[1]]);
+      const [{ n }] = await db.rows(`select count(*)::int as n from show_promotions where user_id = $1`, [user]);
+      assert.equal(n, 1);
+      assert.equal(await ownWatches(user, avg), 0);
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR9: an Undo racing a move of the promoted show waits on its media lock and is refused', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg } = await tvWall(user, 2, 'CR9');
+      const setup = await db.session('setup');
+      await setup.actAs(user);
+      const promoted = (
+        await setup.one(`select rank_promote_show($1, 1, 'loved', $2, $3) as r`, [avg, await newOp(db), shows[0]])
+      ).r;
+      await setup.end();
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_reorder($1, 3, $2, 1, $3)`, [avg, await newOp(db), shows[1]]);
+
+      await b.begin();
+      const undoing = b.errorFrom(`select rank_unpromote_show($1, $2, $3, 1)`, [
+        avg,
+        promoted.placement_id,
+        await newOp(db),
+      ]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.mediaKey(user, avg) });
+
+      await a.commit();
+      const refusal = await undoing;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'placed again since: the Undo would erase that move');
+      assert.deepEqual(await showOrder(user), [shows[0], shows[1], avg]);
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR10: a promotion rolled back leaves nothing, and the promotion waiting on it lands', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg } = await tvWall(user, 2, 'CR10');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [avg, await newOp(db), shows[0]]);
+
+      await b.begin();
+      const promoting = fire(b, `rank_promote_show($1, 2, 'loved', $2, $3)`, [avg, await newOp(db), shows[1]]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.mediaKey(user, avg) });
+
+      await a.rollback();
+      const landed = (await promoting).rows[0].r;
+      await b.commit();
+
+      assert.equal(landed.promoted, true);
+      assert.equal(landed.position, 2);
+      assert.deepEqual(await showOrder(user), [shows[0], avg, shows[1]]);
+      const placements = await db.rows(
+        `select position from ranking_placements where user_id = $1 and media_item_id = $2`,
+        [user, avg],
+      );
+      assert.deepEqual(placements.map((p) => p.position), [2], "A's rolled-back promotion left no placement");
+      const [{ n }] = await db.rows(`select count(*)::int as n from show_promotions where user_id = $1`, [user]);
+      assert.equal(n, 1);
+      assert.equal(await ownWatches(user, avg), 0, 'no watch at commit either');
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR11: two devices removing the last two seasons of a promoted show serialise, and W1 holds', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg, season } = await tvWall(user, 1, 'CR11');
+      const setup = await db.session('setup');
+      await setup.actAs(user);
+      const second = await fx.createSeason(avg, 2);
+      let step = (await setup.one(`select rank_start($1, 'loved') as r`, [second])).r;
+      while (!step.done) step = (await setup.one(`select rank_answer($1, $2) as r`, [step.session_id, step.pivot])).r;
+      await setup.q(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [avg, await newOp(db), shows[0]]);
+      // Unranked but still logged: their watches are the show's evidence.
+      await setup.q(`select rank_unrank($1, $2)`, [season, await newOp(db)]);
+      await setup.q(`select rank_unrank($1, $2)`, [second, await newOp(db)]);
+      await setup.end();
+      assert.equal(await ownWatches(user, avg), 0);
+
+      const key = (
+        await db.rows(`select hashtextextended('series-evidence:' || $1 || ':' || $2, 0)::text as k`, [user, avg])
+      )[0].k;
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      // A removes one season and holds the show's evidence key, as its own commit-time
+      // check would; B removes the other and commits.
+      await a.begin();
+      await a.q(`select unlog($1, $2)`, [await newOp(db), season]);
+      await a.q(`select pg_advisory_xact_lock($1::bigint)`, [key]);
+      await b.begin();
+      await b.q(`select unlog($1, $2)`, [await newOp(db), second]);
+      const committing = b.start('commit');
+      const waiting = await b.awaitBlocked({ on: 'advisory', advisoryKey: key });
+      assert.equal(waiting.wait_event, 'advisory', "B's commit-time check waits for the show's key");
+
+      await a.commit();
+      await committing;
+
+      const events = await db.rows(
+        `select basis from watch_events where user_id = $1 and media_item_id = $2`,
+        [user, avg],
+      );
+      assert.deepEqual(events.map((e) => e.basis), ['none'], 'the second to commit backfilled the show');
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR12: a promotion waiting behind its last season being unranked re-checks, and is refused', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg, season } = await tvWall(user, 1, 'CR12');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_unrank($1, $2)`, [season, await newOp(db)]);
+
+      await b.begin();
+      const promoting = b.errorFrom(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [
+        avg,
+        await newOp(db),
+        shows[0],
+      ]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.categoryKey(user, 'tv_seasons') });
+
+      await a.commit();
+      const refusal = await promoting;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'no ranked season by the time it ran');
+      assert.deepEqual(await showOrder(user), [shows[0]]);
+      const [{ n }] = await db.rows(
+        `select count(*)::int as n from user_media where user_id = $1 and media_item_id = $2`,
+        [user, avg],
+      );
+      assert.equal(n, 0);
+      await tvValid(user);
 
       await a.end();
       await b.end();

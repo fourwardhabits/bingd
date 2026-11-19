@@ -1,5 +1,5 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -47,8 +47,8 @@ import {
   type CollectionSortState,
 } from './filters';
 import { landingBucket, ladderOf, moveActions, notices, screenBlock, type Ladder } from './rerank';
-import { BUCKET_LABEL, type Bucket } from './score';
-import type { RankingCategory } from './use-collection';
+import { landingIndex, planTvMove, tvMoveActions, tvWallOf, type TvWall } from './tv-wall';
+import type { RankedEntry, RankingCategory } from './use-collection';
 import { useLiftDrag } from './use-lift-drag';
 import type { RerankController } from './use-rerank';
 
@@ -150,9 +150,10 @@ export type CollectionViewProps = {
 export type CollectionRerank = {
   controller: RerankController;
   /**
-   * The ranking these titles are, or null for a wall that mixes pools: the TV wall, one
-   * poster per series with an explicit show score or a season average. Null is never
-   * dragged; a long-press there points at the pool editors.
+   * The ranking these titles are, or null for the TV wall: one poster per series with an
+   * explicit show score or a season average. The TV wall is dragged directly (#319,
+   * `tv-wall.ts`): an explicit show moves among the explicit shows, and an average poster
+   * becomes an explicit show where it is dropped. The pool editors stay, under Reorder.
    */
   pool: RankingCategory | null;
   /**
@@ -224,12 +225,50 @@ export function CollectionView({
         segment,
         sort: editor ? RANKING_ORDER : sort,
         filters: editor ? emptyFilters() : state.filters,
-        pool: rerank.pool,
       })
     : 'segment';
   const ladder: Ladder | null =
     rerank && block === null && rerank.pool ? ladderOf(visible, rerank.pool) : null;
-  const rungCount = ladder?.rungs.length ?? 0;
+  /** The TV wall as a ranking (#319): its posters, and the explicit shows' ladder. */
+  const wall: TvWall | null =
+    rerank && block === null && rerank.pool === null ? tvWallOf(visible) : null;
+  const rungCount = ladder?.rungs.length ?? wall?.posters.length ?? 0;
+
+  /** The `tv_shows` row a promoted poster becomes, for the cache to draw at once. */
+  const showEntryFor = (
+    index: number,
+    toPosition: number,
+    bucket: RankedEntry['bucket'],
+  ): RankedEntry | undefined => {
+    const item = visible[index];
+    if (!item) return undefined;
+    return {
+      mediaItemId: item.mediaItemId,
+      title: item.title,
+      year: item.year ?? null,
+      posterPath: item.posterPath ?? null,
+      genres: item.genres ?? [],
+      runtimeMinutes: null,
+      kind: 'series',
+      seriesTitle: null,
+      seriesId: null,
+      language: item.language ?? null,
+      bucket,
+      position: toPosition,
+      category: 'tv_shows',
+      rankedAt: new Date().toISOString(),
+    };
+  };
+
+  /** A TV wall drop or action, planned and handed to the controller. */
+  const placeOnWall = (from: number, to: number, toBucket?: RankedEntry['bucket']) => {
+    if (!wall || !rerank) return;
+    const plan = planTvMove(wall, from, to, toBucket);
+    rerank.controller.place(
+      plan,
+      plan?.kind === 'promote' ? showEntryFor(from, plan.toPosition, plan.toBucket) : undefined,
+    );
+  };
 
   const listRef = useRef<FlashListRef<unknown>>(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -244,30 +283,63 @@ export function CollectionView({
     // applied, and recategorises the title. The tick and the label say it is happening.
     // The view and the width decide where a cell's left edge sits (Codex, PR 319).
     layoutKey: `${state.mode}:${windowWidth}`,
-    isOutside: (from, to) =>
-      ladder ? landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket : false,
+    // A new list starts at the top: the offset the drag tracks starts there with it.
+    listKey: state.mode,
+    isOutside: (from, to) => {
+      if (ladder) return landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket;
+      if (wall) {
+        const plan = planTvMove(wall, from, to);
+        return plan?.kind === 'move' ? plan.toBucket !== plan.bucket : false;
+      }
+      return false;
+    },
+    // The TV wall re-sorts by score once a move lands, so the copy glides to where the
+    // show will be drawn, not just the cell it was dropped on. A drag past averages only
+    // goes home and says why.
+    resolve: wall
+      ? (from, to) => {
+          const plan = planTvMove(wall, from, to);
+          if (!plan || (plan.kind !== 'move' && plan.kind !== 'promote')) return null;
+          const at = landingIndex(visible, wall, plan, RANKING_ORDER);
+          return at < 0 ? to : at;
+        }
+      : undefined,
+    onRefuse: (from, to) => {
+      if (wall && rerank && wall.posters[from]?.mediaItemId === liftedId.current) {
+        rerank.controller.place(planTvMove(wall, from, to));
+      }
+    },
     onDrop: (from, to) => {
-      if (!ladder || !rerank) return;
+      if (!rerank) return;
+      const names = ladder ? ladder.rungs[from]?.mediaItemId : wall?.posters[from]?.mediaItemId;
       // A refetch can land mid-drag and renumber the screen. If the index no longer names
       // the title in the reader's hand, nothing is moved.
-      if (ladder.rungs[from]?.mediaItemId !== liftedId.current) {
+      if (!names || names !== liftedId.current) {
         rerank.controller.explain(notices.blocked('ambiguous', { mediaItemId: '', title: '' }));
         return;
       }
-      rerank.controller.move(ladder, from, to);
+      if (ladder) rerank.controller.move(ladder, from, to);
+      else placeOnWall(from, to);
     },
   });
   const lifted = drag.state;
-  /** The category the lifted title would land in, when that is not its own. */
-  const crossingInto: Bucket | null =
-    lifted && ladder && lifted.outside ? landingBucket(ladder, lifted.from, lifted.to) : null;
-  const crossLabel = crossingInto ? (
-    <View style={styles.crossLabel} testID="collection-lifted-category">
-      <Text variant="caption" style={styles.crossLabelText} numberOfLines={1}>
-        {`Move to ${BUCKET_LABEL[crossingInto]}`}
-      </Text>
-    </View>
-  ) : null;
+  /**
+   * **The drop has landed in the list** (Android QA, 2026-11-20). After a release the copy
+   * sits in its new slot over the gap the others made. The moment this list is drawn in
+   * the new order (the moved title at `to`), the copy, the gap and the shifts go in this
+   * same render: the copy becomes the cell where it already is, with no frame of the old
+   * order between. The query cache notifies on a later task than the drop, so this is read
+   * from what is drawn rather than assumed from the drop.
+   */
+  const landed =
+    lifted?.phase === 'dropped' &&
+    lifted.id !== null &&
+    visible[lifted.to]?.mediaItemId === lifted.id;
+  const shiftAt = (index: number) => (landed ? null : drag.shiftOf(index));
+  const { settle } = drag;
+  useEffect(() => {
+    if (landed) settle();
+  }, [landed, settle]);
 
   /**
    * What stands in for the titles, when something does: the section's own placeholder
@@ -332,25 +404,32 @@ export function CollectionView({
     if (!rerank || block === 'segment') return;
     const explain = (kind: Parameters<typeof notices.blocked>[0]) =>
       rerank.controller.explain(notices.blocked(kind, nameAndId(item)));
-    if (block === 'tv-wall') return explain('tv-wall');
     if (item.score == null || item.position == null) return explain('unranked');
     if (block) return explain(block);
-    if (!ladder || index >= rungCount) return explain('ambiguous');
-    if (rerank.controller.busy) return;
+    if ((!ladder && !wall) || index >= rungCount) return explain('ambiguous');
+    // Not refused while the last move is still saving (Android QA, 2026-11-20): a second
+    // drag is queued behind it by the controller, rather than a long-press that does
+    // nothing at all.
     liftedId.current = item.mediaItemId;
-    drag.lift(index, node);
+    drag.lift(index, node, item.mediaItemId);
   };
 
   /** The same moves as a drag, as VoiceOver and TalkBack actions on each rung. */
   const a11yFor = (index: number) => {
-    if (!ladder || !rerank || index >= rungCount) return null;
-    const actions = moveActions(ladder, index);
+    if ((!ladder && !wall) || !rerank || index >= rungCount) return null;
+    const actions = ladder
+      ? moveActions(ladder, index)
+      : wall
+        ? tvMoveActions(wall, index)
+        : [];
     if (actions.length === 0) return null;
     return {
       accessibilityActions: actions.map(({ name, label }) => ({ name, label })),
       onAccessibilityAction: (event: AccessibilityActionEvent) => {
         const action = actions.find((a) => a.name === event.nativeEvent.actionName);
-        if (action) rerank.controller.move(ladder, index, action.to, action.toBucket);
+        if (!action) return;
+        if (ladder) rerank.controller.move(ladder, index, action.to, action.toBucket);
+        else placeOnWall(index, action.to, action.toBucket);
       },
       accessibilityHint: 'Touch and hold to move it',
     };
@@ -371,9 +450,6 @@ export function CollectionView({
       case 'openTitle':
         rerank.controller.dismiss();
         return notice.mediaItemId ? onPressItem(notice.mediaItemId) : undefined;
-      case 'reorderTv':
-        rerank.controller.dismiss();
-        return rerank.onReorderTv?.();
       default:
         return undefined;
     }
@@ -526,14 +602,14 @@ export function CollectionView({
         <View style={styles.body} ref={containerRef} {...drag.containerProps}>
         <PosterGridList
           listRef={listRef as RefObject<FlashListRef<PosterTile>>}
-          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${rungCount}:${rerank?.controller.busy}`}
+          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${lifted?.phase}:${landed}:${rungCount}:${rerank?.controller.busy}`}
           scrollEnabled={lifted === null}
           onScroll={drag.onScroll}
           tileExtras={
             rerank
               ? (_tile, index) => {
                   const item = shown[index];
-                  const shift = drag.shiftOf(index);
+                  const shift = shiftAt(index);
                   return {
                     onLongPress: item
                       ? (node) => onLongPressItem(item, index, node)
@@ -560,13 +636,13 @@ export function CollectionView({
           }
           paddingBottom={styles.wall.paddingBottom}
         />
-        {lifted?.frame && shown[lifted.from] ? (
+        {lifted?.frame && !landed && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
               styles.lifted,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
+              { transform: [...drag.travel.getTranslateTransform(), { scale: drag.scale }] },
             ]}
             testID="collection-lifted"
           >
@@ -575,7 +651,6 @@ export function CollectionView({
               width={lifted.frame.width}
               badge={rankLabel(lifted.from)}
             />
-            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -584,7 +659,7 @@ export function CollectionView({
         <FlashList
           ref={listRef as RefObject<FlashListRef<CollectionItem>>}
           data={shown}
-          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${rungCount}:${rerank?.controller.busy}`}
+          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${lifted?.phase}:${landed}:${rungCount}:${rerank?.controller.busy}`}
           scrollEnabled={lifted === null}
           onScroll={drag.onScroll}
           scrollEventThrottle={16}
@@ -595,7 +670,7 @@ export function CollectionView({
           ListHeaderComponent={header}
           contentContainerStyle={styles.list}
           renderItem={({ item, index }) => {
-            const shift = rerank ? drag.shiftOf(index) : null;
+            const shift = rerank ? shiftAt(index) : null;
             const label = rankLabel(index);
             const row: TitleRowProps = {
               title: label ? `${label}  ${nameOf(item)}` : nameOf(item),
@@ -652,14 +727,14 @@ export function CollectionView({
             );
           }}
         />
-        {lifted?.frame && shown[lifted.from] ? (
+        {lifted?.frame && !landed && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
               styles.lifted,
               styles.liftedRow,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
+              { transform: [...drag.travel.getTranslateTransform(), { scale: drag.scale }] },
             ]}
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
@@ -671,7 +746,6 @@ export function CollectionView({
               posterUri={posterUri((shown[lifted.from] as CollectionItem).posterPath)}
               onPress={() => {}}
             />
-            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -716,9 +790,6 @@ export function CollectionView({
 }
 
 const LIST_POSITION = { disabled: true } as const;
-
-/** How much a lifted title grows, so it reads as picked up. */
-const LIFT_SCALE = 1.04;
 
 /** One Collection title as a wall tile. The lifted copy draws the same tile. */
 const tileOf = (item: CollectionItem): PosterTile => ({
@@ -851,21 +922,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     ...theme.elevation.e2,
   },
-  /**
-   * Over another category: the drop recategorises the title (founder, 2026-11-19), so the
-   * lifted copy names where it is going, on the copy itself, so the label travels with the
-   * finger and never covers the place being dropped on.
-   */
-  crossLabel: {
-    position: 'absolute',
-    top: theme.space[2],
-    alignSelf: 'center',
-    paddingHorizontal: theme.space[2],
-    paddingVertical: theme.space[1],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.semantic.action,
-  },
-  crossLabelText: { color: theme.semantic.actionText },
   hiddenRow: { opacity: 0 },
   fill: { justifyContent: 'center' },
 });

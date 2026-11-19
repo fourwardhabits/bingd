@@ -8,7 +8,7 @@ import { applyMove, ladderOf, type Ladder } from './rerank';
 import type { CollectionItem } from './filters';
 import type { RankedEntry } from './use-collection';
 import { NOTICE_MS, useRerank } from './use-rerank';
-import type { ReorderResult } from './writes';
+import type { PromoteResult, ReorderResult } from './writes';
 
 /**
  * #318: one move path for a drag, an accessibility action, Undo and Retry. The server is
@@ -17,10 +17,14 @@ import type { ReorderResult } from './writes';
  */
 
 const mockReorder = jest.fn<Promise<ReorderResult>, [Record<string, unknown>]>();
+const mockPromote = jest.fn<Promise<PromoteResult>, [Record<string, unknown>]>();
+const mockUnpromote = jest.fn<Promise<PromoteResult>, [Record<string, unknown>]>();
 let issued = 0;
 
 jest.mock('./writes', () => ({
   reorderRanking: (input: Record<string, unknown>) => mockReorder(input),
+  promoteShow: (input: Record<string, unknown>) => mockPromote(input),
+  unpromoteShow: (input: Record<string, unknown>) => mockUnpromote(input),
   newOperationId: () => `op-${(issued += 1)}`,
 }));
 
@@ -107,6 +111,8 @@ const setup = async () => {
 
 beforeEach(() => {
   mockReorder.mockReset();
+  mockPromote.mockReset();
+  mockUnpromote.mockReset();
   issued = 0;
   jest.useRealTimers();
 });
@@ -211,18 +217,50 @@ describe('a move', () => {
     expect(result.current.notice?.message).toBe('Moved “Title c” back to I liked it · #3');
   });
 
-  it('one move at a time: a second drop while the first is in flight is not sent', async () => {
-    const { result } = await setup();
+  /**
+   * **A second drop while the first is saving is queued** (Android QA, 2026-11-20): drawn
+   * at once, sent when the first is answered, and a third springs back.
+   */
+  it('queues a second drop behind the first, sends it after, and refuses a third', async () => {
+    const { result, client } = await setup();
     const answer = deferred();
     mockReorder.mockReturnValueOnce(answer.promise);
     await act(async () => {
       result.current.move(ladderFrom(pool()), 2, 0);
     });
+    // c a b d is drawn. Drag d (index 3) to the top of what is drawn.
+    const drawn = client.getQueryData<RankedEntry[]>(KEY) as RankedEntry[];
     await act(async () => {
-      expect(result.current.move(ladderFrom(pool()), 1, 0)).toBeNull();
+      expect(result.current.move(ladderFrom(drawn), 2, 1)?.kind).toBe('move');
+    });
+    expect(order(client.getQueryData(KEY))).toEqual(['c', 'b', 'a', 'd']);
+    await act(async () => {
+      expect(result.current.move(ladderFrom(drawn), 3, 0)).toBeNull();
     });
     expect(mockReorder).toHaveBeenCalledTimes(1);
+
+    mockReorder.mockImplementationOnce(lands());
     await act(async () => answer.resolve(await lands()({ mediaItemId: 'c', toPosition: 1 })));
+    expect(mockReorder).toHaveBeenCalledTimes(2);
+    expect(mockReorder.mock.calls[1]?.[0]).toMatchObject({ mediaItemId: 'b', toPosition: 2 });
+    expect(order(client.getQueryData(KEY))).toEqual(['c', 'b', 'a', 'd']);
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('a queued drop is not sent when the first fails, and the rollback takes both back', async () => {
+    const { result, client } = await setup();
+    const answer = deferred();
+    mockReorder.mockReturnValueOnce(answer.promise);
+    await act(async () => {
+      result.current.move(ladderFrom(pool()), 2, 0);
+    });
+    const drawn = client.getQueryData<RankedEntry[]>(KEY) as RankedEntry[];
+    await act(async () => {
+      result.current.move(ladderFrom(drawn), 2, 1);
+    });
+    await act(async () => answer.resolve({ outcome: 'stale' }));
+    expect(mockReorder).toHaveBeenCalledTimes(1);
+    expect(order(client.getQueryData(KEY))).toEqual(['a', 'b', 'c', 'd']);
   });
 });
 
@@ -348,5 +386,179 @@ describe('Undo', () => {
     });
     expect(result.current.notice).toBeNull();
     jest.useRealTimers();
+  });
+});
+
+describe('the TV wall (#319)', () => {
+  const SHOWS = queryKeys.rankings(USER, 'tv_shows');
+  const shows = (): RankedEntry[] =>
+    (['x', 'y'] as const).map(
+      (id, i) =>
+        ({
+          mediaItemId: id,
+          title: `Show ${id}`,
+          position: i + 1,
+          bucket: 'loved',
+          category: 'tv_shows',
+        }) as unknown as RankedEntry,
+    );
+  const avg = {
+    mediaItemId: 'avg',
+    title: 'Shameless',
+    position: 2,
+    bucket: 'loved',
+    category: 'tv_shows',
+    kind: 'series',
+  } as unknown as RankedEntry;
+  const promotion = {
+    kind: 'promote' as const,
+    category: 'tv_shows' as const,
+    mediaItemId: 'avg',
+    title: 'Shameless',
+    toBucket: 'loved' as const,
+    toPosition: 2,
+    anchorId: 'y',
+  };
+
+  let tv: RankedEntry[] = [];
+  const setupTv = async () => {
+    tv = shows();
+    const hook = await renderHookWithProviders(() => {
+      useQuery({ queryKey: SHOWS, queryFn: async () => tv });
+      return useRerank(USER);
+    });
+    await waitFor(() => expect(hook.client.getQueryData(SHOWS)).toBeDefined());
+    return hook;
+  };
+
+  it('a promotion inserts the show at once, sends its place and anchor, and offers Undo', async () => {
+    const { result, client } = await setupTv();
+    let release!: (v: PromoteResult) => void;
+    mockPromote.mockReturnValueOnce(new Promise((r) => (release = r)));
+
+    await act(async () => {
+      result.current.place(promotion, avg);
+    });
+    expect(order(client.getQueryData(SHOWS))).toEqual(['x', 'avg', 'y']);
+    expect(mockPromote).toHaveBeenCalledWith({
+      operationId: 'op-1',
+      mediaItemId: 'avg',
+      toPosition: 2,
+      toBucket: 'loved',
+      anchorId: 'y',
+    });
+    expect(mockReorder).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tv = [tv[0]!, avg, { ...tv[1]!, position: 3 }];
+      release({ outcome: 'promoted', reply: { position: 2, score: 8.5, placementId: 'pl-1' } });
+    });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.notice?.message).toBe('Ranked “Shameless” as a show · #2 · 8.5');
+    expect(result.current.notice?.action?.kind).toBe('undo');
+
+    mockUnpromote.mockResolvedValueOnce({
+      outcome: 'promoted',
+      reply: { position: 2, score: null, placementId: null },
+    });
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(mockUnpromote).toHaveBeenCalledWith({
+      operationId: 'op-2',
+      mediaItemId: 'avg',
+      placementId: 'pl-1',
+      expectedPosition: 2,
+    });
+    await waitFor(() =>
+      expect(result.current.notice?.message).toBe(
+        '“Shameless” is back to its seasons’ average',
+      ),
+    );
+  });
+
+  it('the Undo removes the show from the cache at once', async () => {
+    const { result, client } = await setupTv();
+    mockPromote.mockResolvedValueOnce({
+      outcome: 'promoted',
+      reply: { position: 2, score: 8.5, placementId: 'pl-1' },
+    });
+    await act(async () => {
+      result.current.place(promotion, avg);
+    });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    let release!: (v: PromoteResult) => void;
+    mockUnpromote.mockReturnValueOnce(new Promise((r) => (release = r)));
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(order(client.getQueryData(SHOWS))).toEqual(['x', 'y']);
+    await act(async () => {
+      release({ outcome: 'promoted', reply: { position: 2, score: null, placementId: null } });
+    });
+  });
+
+  it('a stale promotion rolls back and says the ranking changed', async () => {
+    const { result, client } = await setupTv();
+    mockPromote.mockResolvedValueOnce({ outcome: 'stale' });
+    await act(async () => {
+      result.current.place(promotion, avg);
+    });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(order(client.getQueryData(SHOWS))).toEqual(['x', 'y']);
+    expect(result.current.notice?.message).toMatch(/changed on another device/);
+    expect(result.current.notice?.action).toBeUndefined();
+  });
+
+  it('a drag past averages only sends nothing and explains', async () => {
+    const { result } = await setupTv();
+    await act(async () => {
+      result.current.place({ kind: 'passover', title: 'Show x' });
+    });
+    expect(mockPromote).not.toHaveBeenCalled();
+    expect(mockReorder).not.toHaveBeenCalled();
+    expect(result.current.notice?.message).toMatch(/still between the same ranked shows/);
+  });
+
+  it('an explicit show on the wall is an ordinary guarded move in tv_shows', async () => {
+    const { result, client } = await setupTv();
+    mockReorder.mockImplementationOnce(async () => {
+      tv = applyMove(tv, 'x', 2) ?? tv;
+      return {
+        outcome: 'moved',
+        reply: {
+          moved: true,
+          position: 2,
+          fromPosition: 1,
+          bucket: null,
+          fromBucket: null,
+          score: 7,
+          fromScore: 10,
+        },
+      };
+    });
+    await act(async () => {
+      result.current.place({
+        kind: 'move',
+        category: 'tv_shows',
+        mediaItemId: 'x',
+        title: 'Show x',
+        bucket: 'loved',
+        toBucket: 'loved',
+        fromPosition: 1,
+        toPosition: 2,
+        anchorId: 'y',
+      });
+    });
+    expect(order(client.getQueryData(SHOWS))).toEqual(['y', 'x']);
+    expect(mockReorder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaItemId: 'x',
+        toPosition: 2,
+        expectedPosition: 1,
+        anchorId: 'y',
+      }),
+    );
+    await waitFor(() => expect(result.current.busy).toBe(false));
   });
 });

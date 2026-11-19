@@ -153,6 +153,11 @@ const ALLOWED = {
   // §E.1 required, added two stale-list guards, and granted it back. The old three-argument
   // form is dropped, so every installed call resolves to this one.
   'rank_reorder(uuid,integer,uuid,integer,uuid,taste_bucket,taste_bucket)': ['authenticated'],
+  // The TV wall's drag of a show shown at its seasons' average, and its Undo (#319,
+  // 20261129000300). Both write a `manual` placement (or remove the one they wrote), take the
+  // media then the category lock, carry the stale-list guards and call assert_can_write.
+  'rank_promote_show(uuid,integer,taste_bucket,uuid,uuid)': ['authenticated'],
+  'rank_unpromote_show(uuid,uuid,uuid,integer)': ['authenticated'],
   //
   // 20261114000300 added a trailing `p_linked_placement_id` (default null) to both
   // correction RPCs, for Update Show, and dropped the old forms rather than overloading
