@@ -80,14 +80,17 @@ const touch = (pageX: number, pageY: number) =>
 const setup = async (layouts: Rect[], { scroll = 0, count = layouts.length, viewport = 700 } = {}) => {
   const fake: Fake = { layouts, header: HEADER, scroll, scrolledTo: [] };
   const onDrop = jest.fn();
-  const hook = await renderHook(() =>
-    useLiftDrag({
-      listRef: fakeList(fake),
-      containerRef: { current: {} as View },
-      count,
-      isOutside: () => false,
-      onDrop,
-    }),
+  const hook = await renderHook(
+    ({ layoutKey }: { layoutKey: string }) =>
+      useLiftDrag({
+        listRef: fakeList(fake),
+        containerRef: { current: {} as View },
+        count,
+        isOutside: () => false,
+        onDrop,
+        layoutKey,
+      }),
+    { initialProps: { layoutKey: 'poster:360' } },
   );
   await act(async () => {
     hook.result.current.containerProps.onLayout?.({
@@ -157,6 +160,20 @@ describe('the copy is drawn where the title is, after a scroll (reproductions 1 
       width: TILE.width,
       height: TILE.height,
     });
+  });
+
+  it('a change of view or width forgets the learned left edge (Codex, PR 319)', async () => {
+    const layouts = grid(30);
+    const { hook } = await setup(layouts);
+    await act(async () => hook.result.current.lift(1, cell(layouts[1])));
+    await act(async () => flushMeasures());
+    await act(async () => hook.result.current.cancel());
+
+    // Poster -> List: the wall's gutter is not the list's, so the next lift measures again.
+    await act(async () => hook.rerender({ layoutKey: 'list:360' }));
+    await act(async () => hook.result.current.lift(2, cell(layouts[2])));
+    expect(pendingMeasures).toHaveLength(1);
+    expect(hook.result.current.state?.frame).toBeNull();
   });
 
   it('a measurement that lands after the release changes nothing', async () => {

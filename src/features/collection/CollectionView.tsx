@@ -232,6 +232,7 @@ export function CollectionView({
   const rungCount = ladder?.rungs.length ?? 0;
 
   const listRef = useRef<FlashListRef<unknown>>(null);
+  const { width: windowWidth } = useWindowDimensions();
   const containerRef = useRef<View>(null);
   /** The title that was lifted, so a drop can confirm its index still names it. */
   const liftedId = useRef<string | null>(null);
@@ -241,6 +242,8 @@ export function CollectionView({
     count: rungCount,
     // "Outside" is now "lands in another category" (founder, 2026-11-19): a drop there is
     // applied, and recategorises the title. The tick and the label say it is happening.
+    // The view and the width decide where a cell's left edge sits (Codex, PR 319).
+    layoutKey: `${state.mode}:${windowWidth}`,
     isOutside: (from, to) =>
       ladder ? landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket : false,
     onDrop: (from, to) => {
