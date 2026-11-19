@@ -83,8 +83,8 @@ const collectionBucket = async (who, id) =>
 
 try {
   const sig = await readOnly(`select p.oid::regprocedure::text as sig, has_function_privilege('authenticated', p.oid, 'execute') as auth, has_function_privilege('anon', p.oid, 'execute') as anon from pg_proc p where proname = 'rank_reorder'`);
-  check('one rank_reorder, the six-argument form, executable by authenticated only',
-    sig.length === 1 && sig[0].sig === 'rank_reorder(uuid,integer,uuid,integer,uuid,taste_bucket)' && sig[0].auth === true && sig[0].anon === false, JSON.stringify(sig));
+  check('one rank_reorder, the seven-argument form, executable by authenticated only',
+    sig.length === 1 && sig[0].sig === 'rank_reorder(uuid,integer,uuid,integer,uuid,taste_bucket,taste_bucket)' && sig[0].auth === true && sig[0].anon === false, JSON.stringify(sig));
 
   const { data: films } = await service.from('media_items').select('id, title').eq('kind', 'movie').not('poster_path', 'is', null).range(60, 67);
   const me = await person('me');
@@ -99,7 +99,7 @@ try {
   const watchBefore = await count('watch_events', 'user_id', me.id);
 
   // The founder's acceptance case: a 10.0 dropped among the It was fine titles.
-  const { data: down, error: downErr } = await reorder(me, { p_media_item_id: loved[0], p_new_position: 6, p_operation_id: op(), p_expected_position: 1, p_anchor_media_item_id: fine[2], p_new_bucket: 'fine' });
+  const { data: down, error: downErr } = await reorder(me, { p_media_item_id: loved[0], p_new_position: 6, p_operation_id: op(), p_expected_position: 1, p_anchor_media_item_id: fine[1], p_new_bucket: 'fine', p_expected_bucket: 'loved' });
   check('a drag from I liked it onto an It was fine title lands', !downErr && down?.moved === true && down?.bucket === 'fine' && down?.from_bucket === 'loved' && down?.position === 6, downErr?.message);
   check('it is rescored in the It was fine range', Number(down?.score) < 7 && Number(down?.score) >= 3.5 && Number(down?.from_score) === 10, `${down?.score}`);
   // "Reload": a fresh read of the stored ranking, not the reply.
