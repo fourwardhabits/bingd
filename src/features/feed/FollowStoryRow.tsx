@@ -1,7 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, IconAction, ReactionControl, Text } from '@/ui/components';
-import type { ActivityReaction } from '@/ui/components/ActivityRow';
+import { Avatar, EngagementRow, Text, type ActivityReaction } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { followTail, relativeTime, verbFor } from './activity';
@@ -70,11 +69,13 @@ export type FollowStoryRowProps = {
  * ---------------------------------------------------------------------------
  * REACTIONS AND COMMENTS (founder decision, 2026-11-19; replaces §A9's exclusion)
  *
- * A heart and a comment control at the trailing end, each a real 44pt box, outside the
- * text column that opens the list, so neither can open it and screen readers keep three
- * separate elements. No "who reacted" sentence line: that is what keeps the row compact.
- * One shared conversation per story, grouped or not. Who may engage, and when a story stops
- * being open to somebody, is the server's single predicate (20261130000100).
+ * The Feed's one labelled engagement row (`EngagementRow`, founder 2026-11-19): Like and
+ * Comment, in the same equal 44pt columns every other post uses, under the sentence and
+ * outside the text column that opens the list, so neither can open it. No Save and no
+ * Share: there is no title to save, and nothing to link to. No "who reacted" sentence line,
+ * which keeps the row compact. One shared conversation per story, grouped or not. Who may
+ * engage, and when a story stops being open to somebody, is the server's single predicate
+ * (20261130000100).
  */
 export function FollowStoryRow({
   event,
@@ -97,11 +98,10 @@ export function FollowStoryRow({
     .filter(Boolean)
     .join(' ');
 
-  const whose = `${event.actorName}'s follow activity`;
   const reacts = Boolean(reaction && reaction.canReact !== false);
-  // A reader who may not react still sees everybody else's count, as on a title row.
-  const showsReaction = Boolean(reaction && (reacts || reaction.count > 0));
-  const engages = showsReaction || Boolean(onPressComments);
+  const engages = reacts || Boolean(onPressComments);
+  // "React to Abi's activity about following Ravi", in EngagementRow's own grammar.
+  const subject = `following ${first.name}${tail ? ` ${tail}` : ''}`;
 
   return (
     <View style={styles.frame} testID="follow-story-row">
@@ -160,50 +160,22 @@ export function FollowStoryRow({
             {relativeTime(event.createdAt)}
           </Text>
         </Pressable>
-
-        {engages ? (
-          <View style={styles.actions} testID="follow-story-actions">
-            {reaction && showsReaction ? (
-              <View style={styles.box} testID="follow-story-reaction">
-                <ReactionControl
-                  label={
-                    reaction.mineGlyph
-                      ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${whose}. Tap to remove, long press to change.`
-                      : `React to ${whose}. Long press for more reactions.`
-                  }
-                  active={Boolean(reaction.mineGlyph)}
-                  mineGlyph={reaction.mineGlyph}
-                  // The count only, never the glyph cluster: the compact row's whole budget.
-                  glyphs={[]}
-                  count={reaction.count}
-                  canReact={reacts}
-                  onToggle={reaction.onPress}
-                  onOpenPicker={reaction.onLongPress}
-                  onOpenDetail={reaction.onPressSummary}
-                />
-              </View>
-            ) : null}
-            {onPressComments ? (
-              <IconAction
-                square
-                icon={commentCount > 0 ? 'chatbubble' : 'chatbubble-outline'}
-                active={commentCount > 0}
-                label={
-                  commentCount > 0
-                    ? `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} on ${whose}. Open them.`
-                    : `Comment on ${whose}`
-                }
-                onPress={onPressComments}
-                badge={commentCount > 0 ? String(commentCount) : undefined}
-                testID="follow-story-comments"
-              />
-            ) : null}
-          </View>
-        ) : null}
       </View>
 
-      {/* The picker under the row, inside its hairline — `ActivityRow`'s placement. */}
+      {/* The picker under the sentence, above the actions — `FeedCard`'s placement. */}
       {reaction?.picker && reacts ? <View style={styles.picker}>{reaction.picker}</View> : null}
+
+      {engages ? (
+        <EngagementRow
+          actorName={event.actorName}
+          subject={subject}
+          reaction={reacts ? reaction : null}
+          onPressComments={onPressComments}
+          commentCount={commentCount}
+          style={styles.actions}
+          testID="follow-story"
+        />
+      ) : null}
     </View>
   );
 }
@@ -236,17 +208,8 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   copy: { flex: 1, gap: 1 },
-  /**
-   * The trailing cluster: each control a real 44pt box, because on Android a touch outside
-   * a parent's bounds is dropped, so slop cannot make up a target here.
-   */
-  actions: { flexDirection: 'row', alignItems: 'center', minHeight: theme.layout.minTapTarget },
-  box: {
-    minWidth: theme.layout.minTapTarget,
-    minHeight: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  /** The labelled row sits under the sentence, aligned with its text column. */
+  actions: { marginTop: theme.space[1] },
   picker: { paddingTop: theme.space[2] },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
   // name reads the same weight here as it does two rows up.

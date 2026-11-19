@@ -956,12 +956,11 @@ describe('a follow story above the conversation', () => {
     mockEvent = followStory();
     const view = await renderWithProviders(<ActivityScreen />);
 
-    await waitFor(() =>
-      expect(view.getByLabelText(/^React to Anna's follow activity/)).toBeTruthy(),
-    );
-    await fireEvent.press(view.getByLabelText(/^React to Anna's follow activity/));
+    await waitFor(() => expect(view.getByTestId('follow-story-like')).toBeTruthy());
+    expect(view.getByText('Like')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('follow-story-like'));
     await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
-    expect(view.queryByTestId('follow-story-comments')).toBeNull();
+    expect(view.queryByTestId('follow-story-comment')).toBeNull();
   });
 
   it('opens a named person, and the list of everyone', async () => {
