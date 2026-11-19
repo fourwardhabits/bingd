@@ -571,7 +571,12 @@ describe('the actions', () => {
     );
   });
 
-  it('puts the summary and actions on the card’s gutters, 44pt targets each', async () => {
+  /**
+   * Changed on 2026-11-19 (founder: consistent engagement on every Feed post). The actions
+   * were content-sized targets spread edge to edge, each landing its icon on the gutter;
+   * they are now equal columns across the card, which is what every other post type draws.
+   */
+  it('puts the summary on the gutters and the actions in equal 44pt columns', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
@@ -582,10 +587,10 @@ describe('the actions', () => {
       const style = StyleSheet.flatten(view.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(44);
       expect(style.minWidth).toBeGreaterThanOrEqual(44);
-      // The target's own padding plus the row's inset lands its icon on the gutter.
-      const row = StyleSheet.flatten(view.getByTestId(id).parent?.props.style);
-      expect((row?.paddingHorizontal ?? 0) + style.paddingHorizontal).toBe(gutter);
+      expect(style).toMatchObject({ flexGrow: 1, flexBasis: 0, justifyContent: 'center' });
     }
+    const row = StyleSheet.flatten(view.getByTestId('feed-card-actions').props.style);
+    expect(row.flexDirection).toBe('row');
   });
 
   it('saves to the watchlist and shares into Recommend', async () => {

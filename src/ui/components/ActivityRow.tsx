@@ -5,40 +5,18 @@ import type { Bucket } from '@/features/collection/score';
 
 import { fontFamily, theme } from '../tokens';
 import { Avatar } from './Avatar';
+import { ENGAGEMENT_EDGE, EngagementRow, type ActivityReaction } from './EngagementRow';
 import { Poster } from './Poster';
 import { ReactionControl } from './ReactionControl';
 import { ReactionSummary } from './ReactionSummary';
 import { ScoreBadge } from './ScoreBadge';
+import { CompanionNames, SentenceLink } from './SentenceLink';
 import { SpoilerNote } from './SpoilerNote';
 import { Text } from './Text';
 
-export type ActivityReaction = {
-  /** How many people have reacted at all. */
-  count: number;
-  /** The reader's own glyph, or null. Its presence is what fills the control. */
-  mineGlyph?: string | null;
-  /** The word for the reader's own reaction (Liked, Laugh…), or null. Spoken with it. */
-  mineLabel?: string | null;
-  /** The distinct glyphs present, most common first (PRD §14). */
-  glyphs?: string[];
-  /** A plain tap: toggles the default reaction on or off. */
-  onPress: () => void;
-  /** A long press: opens the full picker. */
-  onLongPress?: () => void;
-  /** Tapping the summary opens the list of who reacted. */
-  onPressSummary?: () => void;
-  /** Rendered inside the row, above the actions — see `ReactionPill`. */
-  picker?: React.ReactNode;
-  /**
-   * False on the viewer's own activity: no heart and no picker, only everyone else's
-   * reactions on the summary line (founder, 2026-11-10). Defaults to true.
-   */
-  canReact?: boolean;
-  /** "Priya and 3 others like this", longest first (`summaryForms`). */
-  summaryForms?: string[];
-  /** The summary's glyphs, the viewer's own first (`clusterKinds`). Falls back to `glyphs`. */
-  summaryGlyphs?: string[];
-};
+// Defined beside the engagement row that draws it since 2026-11-19; still exported from
+// here, where every caller has always imported it.
+export type { ActivityReaction };
 
 export type ActivityRowProps = {
   actorName: string;
@@ -70,6 +48,11 @@ export type ActivityRowProps = {
   tailAction?: { connector: string; label: string; onPress: () => void } | null;
   /** Names the actor said they watched it with (PRD §14). */
   companions?: string[];
+  /**
+   * Opens every person the actor watched with. Given, "with Anna and **2 others**" makes
+   * the count a link (founder, 2026-11-19); absent, the count is plain entity ink.
+   */
+  onPressCompanions?: () => void;
   /** Already in its compact form — "Parks and Recreation, S2" (`lib/titles.ts`). */
   title: string | null;
   year?: number | null;
@@ -122,6 +105,20 @@ export type ActivityRowProps = {
    * never holds a body at all. The bodies are fetched when the sheet opens.
    */
   commentCount?: number;
+  /**
+   * **The Feed's labelled actions** (founder, 2026-11-19): Like · Comment · Save · Share as
+   * `EngagementRow` draws them on every Feed post, in place of this row's compact icons.
+   *
+   * The Feed draws an award, a goal and a post with no title through this row, and those
+   * read as two tiny glyphs beside a card's labelled row. With this set the row carries
+   * the card's controls: the reaction summary and the actions span the row, and the time
+   * moves up under the metadata, where the card keeps it. Save is still the watchlist
+   * bookmark and Share the Recommend sheet, so each appears only where the caller wired
+   * one; an award and a goal have neither.
+   *
+   * Off by default: the profile and the conversation page keep the compact form.
+   */
+  labelledActions?: boolean;
 };
 
 /**
@@ -238,6 +235,7 @@ export function ActivityRow({
   verb,
   tail = null,
   companions = [],
+  onPressCompanions,
   title,
   year,
   posterUri,
@@ -258,8 +256,12 @@ export function ActivityRow({
   reaction,
   onPressComments,
   commentCount = 0,
+  labelledActions = false,
 }: ActivityRowProps) {
   const filmName = title ?? 'a title';
+  // A sentence that ends in a control is never clamped (the Feed card's rule): the count
+  // is the only way into the rest, and truncation would cut exactly that.
+  const holdsLink = tailAction != null || (companions.length > 2 && onPressCompanions != null);
 
   return (
     <View style={styles.row}>
@@ -350,7 +352,7 @@ export function ActivityRow({
            * `flex: 1` in a column would have it claim the column's height and
            * squeeze that line rather than sit above it.
            */}
-          <Text variant="subhead" tone="secondary" numberOfLines={3}>
+          <Text variant="subhead" tone="secondary" numberOfLines={holdsLink ? undefined : 3}>
             <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
               {actorName}
             </Text>
@@ -383,9 +385,12 @@ export function ActivityRow({
             {companions.length ? (
               <Text variant="subhead" tone="secondary">
                 {' with '}
-                <Text variant="subhead" style={styles.entity}>
-                  {companionNames(companions)}
-                </Text>
+                <CompanionNames
+                  names={companions}
+                  onPressAll={onPressCompanions}
+                  entityStyle={styles.entity}
+                  testID="activity-companions-link"
+                />
               </Text>
             ) : null}
             {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
@@ -394,14 +399,11 @@ export function ActivityRow({
             {tailAction ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
-                <Text
-                  variant="subhead"
-                  style={styles.entity}
+                <SentenceLink
+                  label={tailAction.label}
                   onPress={tailAction.onPress}
-                  accessibilityRole="button"
-                >
-                  {tailAction.label}
-                </Text>
+                  testID="activity-tail-link"
+                />
               </Text>
             ) : null}
             {tail ? ` ${tail}` : null}
@@ -418,6 +420,14 @@ export function ActivityRow({
           {watchLabel ? (
             <Text variant="caption" tone="tertiary" numberOfLines={1} testID="activity-watch-label">
               {watchLabel}
+            </Text>
+          ) : null}
+          {/* With the Feed's labelled actions the time is not on the actions line, so it
+              sits here, last, as the card's subline keeps it. Its own line, so an award's
+              achievement keeps the whole of the line above. */}
+          {labelledActions ? (
+            <Text variant="caption" tone="tertiary" numberOfLines={1} testID="activity-time">
+              {timeLabel}
             </Text>
           ) : null}
         </View>
@@ -453,7 +463,7 @@ export function ActivityRow({
               : [`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}`]
           }
           onPress={reaction.onPressSummary}
-          style={styles.summary}
+          style={labelledActions ? undefined : styles.summary}
           testID="activity-reactions"
         />
       ) : null}
@@ -462,9 +472,24 @@ export function ActivityRow({
           the founder preferred on the device (§17): the pill sits directly on top of
           the heart it belongs to, not in a floating band of its own. */}
       {reaction?.picker && reaction.canReact !== false ? (
-        <View style={styles.picker}>{reaction.picker}</View>
+        <View style={labelledActions ? undefined : styles.picker}>{reaction.picker}</View>
       ) : null}
 
+      {labelledActions ? (
+        // The Feed card's row, at the card's width: a column per action, labelled, 44pt.
+        <EngagementRow
+          actorName={actorName}
+          subject={filmName}
+          reaction={reaction}
+          onPressComments={onPressComments}
+          commentCount={commentCount}
+          onPressSave={onPressWatchlist}
+          saved={inWatchlist}
+          onPressShare={onPressRecommend}
+          style={styles.labelledActions}
+          testID="activity"
+        />
+      ) : (
       <View style={styles.actions}>
         {reaction && reaction.canReact !== false ? (
           /**
@@ -542,6 +567,7 @@ export function ActivityRow({
           {timeLabel}
         </Text>
       </View>
+      )}
     </View>
   );
 }
@@ -563,20 +589,6 @@ function ActorFace({ uri, name }: { uri?: string | null; name: string }) {
       <Avatar size="xxs" uri={uri} name={name} />
     </View>
   );
-}
-
-/**
- * "Anna", "Anna and Raj", or "Anna and 3 others".
- *
- * Two names is the ceiling here as it is for reactions, and for the same reason: the
- * sentence has to stay one line at a footnote size, and ten tagged friends written
- * out would push the title off the row they are attached to.
- */
-function companionNames(names: string[]) {
-  if (names.length === 1) return names[0];
-  if (names.length === 2) return `${names[0]} and ${names[1]}`;
-  const rest = names.length - 1;
-  return `${names[0]} and ${rest} others`;
 }
 
 /**
@@ -729,5 +741,11 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
   },
   time: { flex: 1, textAlign: 'right' },
+  /**
+   * The labelled row reaches past the row's gutter to the card's: `ENGAGEMENT_EDGE` from
+   * the screen's edge, as `FeedCard` sets it, so an award's Like and Comment sit in the
+   * same columns a movie post's would with two actions.
+   */
+  labelledActions: { marginHorizontal: ENGAGEMENT_EDGE - theme.layout.gutter },
   pressed: { opacity: 0.7 },
 });

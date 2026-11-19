@@ -24,6 +24,12 @@ export {
 export { Divider } from './Divider';
 export { ContentToolbar, FiltersAction } from './ContentToolbar';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
+export {
+  ENGAGEMENT_EDGE,
+  EngagementRow,
+  type ActivityReaction,
+  type EngagementRowProps,
+} from './EngagementRow';
 export { EpisodeRow, type EpisodeRowProps } from './EpisodeRow';
 export { Field, type FieldProps } from './Field';
 export { FilterChip, type FilterChipProps } from './FilterChip';
@@ -85,6 +91,13 @@ export { useKeyboardHeight } from './use-keyboard-height';
 export { usePullRefresh } from './use-pull-refresh';
 export { Screen } from './Screen';
 export { ScreenError, type ScreenErrorProps } from './ScreenError';
+export {
+  CompanionNames,
+  companionNames,
+  othersLabel,
+  SentenceLink,
+  type SentenceLinkProps,
+} from './SentenceLink';
 export {
   Sheet,
   SheetHeader,
