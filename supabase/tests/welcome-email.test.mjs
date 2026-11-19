@@ -849,7 +849,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.match(token, /^[0-9a-f]{32}$/);
     assert.ok(body.html.includes(`href="https://bingd.app/i/${token}"`), 'HTML carries the recipient invite link');
     assert.ok(body.text.includes(`https://bingd.app/i/${token}`), 'text carries the recipient invite link');
-    assert.ok(body.html.includes('href="https://bingd.app/u/saisurajkan"'));
+    assert.ok(body.html.includes('href="https://bingd.app/u/surajkan"'));
 
     // THE SENT TEXT IS THE APPROVED LETTER, paragraph for paragraph — read from copy.json
     // rather than restated here, so this proves the payload and cannot drift from the copy.
@@ -877,7 +877,7 @@ describe('welcome email: the worker, against the real SQL', () => {
       /Post-watch Ranking|Pre-vetted Watchlist|Smooth Planning|Avengers|Emoji Movie|Tell me what you think|hit reply to this email|Rank your latest binge|post-watch experience|hit reply\. It comes/,
       'text from the retired letter is in the sent payload',
     );
-    assert.ok(body.text.includes('https://bingd.app/u/saisurajkan'));
+    assert.ok(body.text.includes('https://bingd.app/u/surajkan'));
     assert.equal(await tokenCount(), tokensBefore, 'the send job never mints an invite token');
 
     const [row] = await ledger();
