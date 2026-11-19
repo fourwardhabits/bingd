@@ -56,13 +56,14 @@ untouched: no session is opened or closed.
 A long-press on a ranked title explains this and offers **Sort by rating** (one tap clears the
 filters and sets Rating, highest first). Unranked titles: a long-press says to rank it first.
 
-**TV.** The TV wall is one poster per series, and the score is either the explicit show
-ranking or the mean of the ranked seasons. That wall has no single ladder, so it is never
-dragged directly. A long-press there offers the pool editors instead.
+**TV.** The TV wall is dragged directly, like Movies (#319, founder QA 2026-11-20). See
+"TV, dragged on the wall" below. The pool editors stay as a secondary action:
 - **Reorder** in the count row opens **Reorder TV shows** or **Reorder TV seasons**, each with its ranked count.
 - The editor draws that pool's ranked titles in position order, in Poster or List, each labelled with its rank (`#3`).
-- Only explicitly ranked units appear. A series scored only by its seasons' average is not in the shows pool. A footnote says to rank the show from its page to add it.
+- Only explicitly ranked units appear. A series scored only by its seasons' average is not in the shows pool. A footnote says to drag it on the TV wall to rank it as a show.
 - **Done** leaves the editor.
+
+The "TV shows and seasons are ranked separately" refusal is gone.
 
 ## Across a category (founder decision, 2026-11-19)
 
@@ -113,7 +114,9 @@ rankings and need no data change.
 - **Success:** the bar reads `Moved “Heat” to #4 · 9.6` with **Undo**, or `Moved “Heat” to It was fine · #14 · 4.6` across a category. The relevant caches are reconciled through `invalidateAfterCollectionChange`.
 - **Undo** is a second, ordinary `rank_reorder` back to the old position. It has a new operation id and the same guards. If anything moved in between, it is refused like any stale move, rather than undoing the wrong thing.
 - **Failure** restores the snapshot and reconciles. A lost reply may have committed, so the refetch is the truth. The bar offers **Retry**, which resends the **same** operation id, so a move that did land is answered from the ledger rather than applied twice.
-- One move is in flight at a time. A second drag waits for it.
+- One write is in flight at a time. One more drop meanwhile is drawn at once and sent when
+  the first is answered; a third springs back. If the first fails, the rollback takes both
+  back and the second is not sent.
 
 ## Where the lifted copy is drawn (Android QA, 2026-11-20)
 
@@ -156,6 +159,94 @@ produces it; that copy was removed with the cross-category change. It is `f010b5
 previous Preview. The app applies a new update on the next cold start
 (`fallbackToCacheTimeout: 0`), so attempts made before that restart ran the old bundle.
 Settings → Diagnostics shows which update is running.
+
+## Final QA refinements (founder QA, 2026-11-20, second pass)
+
+**A. The top three stopped responding after a few drags.** Root cause: the copy's top used
+FlashList's `getAbsoluteLastScrollOffset()`. That is the tracked offset plus the *current*
+header height, and the tracked offset is only refreshed by a scroll event. At the top of
+the list, before any scroll or after the header changed height (the notice bar, a card
+appearing), it is off by the header. The copy was drawn a header's height away from #1–#3,
+the target under the finger was computed from that wrong top, and the drop either went
+nowhere or was refused as "not moved". The hook now tracks the list's own `contentOffset`
+from `onScroll` (zero at the top, reset when the view mode changes) and never reads FlashList's.
+`use-lift-drag.test.tsx` lifts #1, #2 and #3 repeatedly at offset zero with a FlashList that
+misreports the header, and after scrolling down and back.
+
+**B. The drop flashed.** After a release the copy now glides into its slot (160 ms, ease-out,
+native driver; instant under Reduce Motion) and stays there over the gap until the list is
+drawn in the new order. The query cache notifies on a later task than the drop, so the screen
+waits for that render (`landed`) and removes the copy, the gap and the shifts in it. A
+cell that changes identity is placed at once rather than animated, so a recycled cell never
+slides in from another title's offset. A caller that never confirms is released after 800 ms.
+
+**C. The floating "Move to …" label is gone.** The lifted poster keeps its lifted scale, the
+one haptic tick on crossing a category stays, and the bar after the drop still
+names the new category.
+
+## TV, dragged on the wall (#319, founder QA 2026-11-20)
+
+`tv-wall.ts`. The wall is one poster per series, scored either by the reader's explicit
+`tv_shows` ranking or by the mean of their ranked seasons (`SN AVG`). Only the first kind is a
+place in a ranking, so a drop is read against the **explicit shows either side of where it
+lands**, and the average posters in between are passed over:
+
+- **An explicit show** moves among the explicit shows with `rank_reorder` in `tv_shows`: to
+  just below the last explicit show above the drop. A category change works as on Movies.
+- **An `SN AVG` show** is promoted with `rank_promote_show`. It becomes an explicit
+  `tv_shows` ranking at that same place, with the score that place has. Its seasons'
+  rankings, scores and history are not read for the place and not written.
+- **The category** is the one the drop lands among (the displaced poster's, an average's
+  read from its score), clamped to fit between the explicit neighbours, so the server never
+  has to refuse it.
+- **A drag of an explicit show past averages only** changes nothing. It springs back, and
+  the bar says the show is still between the same ranked shows.
+
+**The visual-order limitation.** After the move the wall re-sorts by score, as always.
+Explicit shows keep the order the reader made. An average poster stays where its average puts
+it, so a moved or promoted show can sort a few posters away from the exact cell it was dropped
+on, among the averages, but never past an explicit show. The copy glides to where the show
+will be drawn (`landingIndex`, the wall's own comparator over the predicted scores), not just
+the drop cell, so it becomes the cell in place.
+
+**What a promotion writes** (`20261129000300`): the ranking (an insertion: the shows at and
+below shift down one), the collection row's category (I3), one `manual` placement with
+outcome `placed` (P4: no prior), and a server-only `show_promotions` record of the
+collection row and watchlist entry before it. It takes the media lock, then the `tv_shows`
+category lock; it is idempotent on its operation id; it refuses a non-series (22023), a show
+already ranked or with no ranked season (55000), a place outside the category's run (22023)
+and a stale anchor (55000). **No watch event, comparison, post, notification or award.** The
+watch backstop, the rankings and watchlist awards and the provenance flip stand aside for
+the promotion's own transaction and title (`_show_promoting`). W1 accepts a series' seasons'
+watches as its evidence (`_show_seen_through_seasons`, the rule `_viewer_has_seen` already
+reads). If those seasons later leave the collection while the show stays ranked, the show gets
+the ordinary undated backstop event then.
+
+**Undo** is `rank_unpromote_show`. It applies only while that promotion is still the show's
+latest placement, not undone, and the show is where the client last saw it (55000 otherwise,
+and the bar says the ranking changed). It removes the show ranking, closes up the shows
+below, removes the collection row if the promotion created it and it carries nothing of its
+own (else restores its category), and puts back the watchlist entry the rating consumed, with
+its own date. Seasons and watches are untouched.
+
+**Accessibility.** An explicit show: **Move up** and **Move down**, one explicit show at a
+time. An average poster: **Rank as a show here**, **Rank as a show, higher** and
+**Rank as a show, lower**. Both views, the same planner and the same writes as a drag.
+
+## Silent ranking updates (founder, 2026-11-20)
+
+| Action | Feed |
+|---|---|
+| First ranking of a film, show or season | posts, as before |
+| Rewatch / log another watch | posts by its own rule, as before |
+| Update rating, manual move, change of category, correction, Refine | **nothing new** |
+
+Until `20261129000300` a TV correction that moved its title posted a `title_ranked` marked
+`update: true`. That branch is removed. The latest watch's existing post now takes a TV
+correction's new score and category, exactly as a film's does (`_correction_follows_latest_watch`
+no longer skips TV). Placement records, watch history and the score on earlier posts behave as
+before. Historic `update: true` posts are left as they are: nothing is deleted, rewritten or
+backfilled.
 
 ## Accessibility
 

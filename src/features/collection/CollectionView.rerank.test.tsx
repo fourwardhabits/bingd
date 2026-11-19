@@ -58,12 +58,14 @@ const controller = (notice: RerankNotice | null = null) =>
     busy: false,
     notice,
     move: jest.fn(),
+    place: jest.fn(),
     undo: jest.fn(),
     retry: jest.fn(),
     dismiss: jest.fn(),
     explain: jest.fn(),
   }) as unknown as RerankController & {
     move: jest.Mock;
+    place: jest.Mock;
     undo: jest.Mock;
     retry: jest.Mock;
     dismiss: jest.Mock;
@@ -206,32 +208,76 @@ describe('a screen that is not the ranking is never mutated from a display index
   });
 });
 
-describe('the TV wall: one poster per series, never dragged', () => {
+describe('the TV wall, dragged directly (#319)', () => {
   const SERIES = [
     film('s1', 'Explicit show', 1, 'loved', {
       kind: 'series',
       category: 'tv_shows',
+      score: 9,
       showScore: { sumTenths: 90, n: 1, source: 'explicit', rankedSeasonCount: 0 },
     }),
     film('s2', 'Average show', 2, 'loved', {
       kind: 'series',
       category: 'tv_shows',
+      score: 8.5,
+      bucket: null,
       showScore: { sumTenths: 170, n: 2, source: 'average', rankedSeasonCount: 2 },
     }),
   ];
 
-  it('offers no move, explains the pool editors on a long-press, and shows Reorder', async () => {
+  it('lifts both kinds of poster, with no "ranked separately" refusal, and keeps Reorder', async () => {
     const onReorderTv = jest.fn();
     const rerank = { controller: controller(), pool: null, onReorderTv };
     const { titleButton, getByTestId } = await draw({ items: SERIES, rerank });
-    expect(actionsOf(titleButton('Explicit show'))).toEqual([]);
+    await fireEvent(titleButton('Average show') as never, 'longPress');
+    await fireEvent(titleButton('Explicit show') as never, 'longPress');
+    expect(rerank.controller.explain).not.toHaveBeenCalled();
+    await fireEvent.press(getByTestId('collection-reorder-tv'));
+    expect(onReorderTv).toHaveBeenCalled();
+  });
+
+  it('offers an average poster "Rank as a show here", which promotes it with its row', async () => {
+    const rerank = { controller: controller(), pool: null };
+    const { titleButton } = await draw({ items: SERIES, rerank });
+    expect(actionsOf(titleButton('Average show'))).toEqual(['rankHere', 'moveUp']);
+    await fireEvent(titleButton('Average show') as never, 'accessibilityAction', {
+      nativeEvent: { actionName: 'rankHere' },
+    });
+    expect(rerank.controller.place).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'promote',
+        mediaItemId: 's2',
+        toPosition: 2,
+        toBucket: 'loved',
+        anchorId: null,
+      }),
+      expect.objectContaining({
+        mediaItemId: 's2',
+        kind: 'series',
+        category: 'tv_shows',
+        position: 2,
+      }),
+    );
+  });
+
+  it('in List view too', async () => {
+    const rerank = { controller: controller(), pool: null };
+    const { titleButton } = await draw({ items: SERIES, rerank, mode: 'list' });
+    expect(actionsOf(titleButton('Average show'))).toContain('rankHere');
+  });
+
+  it('any order but Rating is not a ranking on the TV wall either', async () => {
+    const rerank = { controller: controller(), pool: null };
+    const { titleButton } = await draw({
+      items: SERIES,
+      rerank,
+      state: { sort: { axis: 'title', direction: 'asc' } },
+    });
     expect(actionsOf(titleButton('Average show'))).toEqual([]);
     await fireEvent(titleButton('Average show') as never, 'longPress');
     expect(rerank.controller.explain).toHaveBeenCalledWith(
-      expect.objectContaining({ action: expect.objectContaining({ kind: 'reorderTv' }) }),
+      expect.objectContaining({ action: expect.objectContaining({ kind: 'sortByRating' }) }),
     );
-    await fireEvent.press(getByTestId('collection-reorder-tv'));
-    expect(onReorderTv).toHaveBeenCalled();
   });
 });
 

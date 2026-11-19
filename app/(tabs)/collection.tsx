@@ -719,9 +719,11 @@ function Watched({
 
   /**
    * **Drag-to-rerank** (#318, `docs/architecture/collection-rerank.md`). Movies drag in
-   * place: the wall is the `movies` ranking. The TV wall is one poster per series, so it is
-   * never dragged; **Reorder** opens one pool at a time — the explicit show rankings or the
-   * season rankings — drawn as its own ladder, and nothing is derived between the two.
+   * place: the wall is the `movies` ranking. The TV wall is dragged in place too (#319,
+   * `tv-wall.ts`): an explicit show moves among the explicit shows, and a show scored by its
+   * seasons' average becomes an explicit show where it is dropped. **Reorder** still opens
+   * one pool at a time — the explicit show rankings or the season rankings — drawn as its
+   * own ladder, and nothing is derived between the two.
    */
   const rerank = useRerank(userId);
   const [editingPool, setEditingPool] = useState<'tv_shows' | 'tv_seasons' | null>(null);
@@ -794,7 +796,7 @@ function Watched({
               onDone: () => setEditingPool(null),
               footnote:
                 editing === 'tv_shows'
-                  ? 'Only shows you ranked as a whole show. A show scored by its seasons’ average is not here; rank the show from its page to add it.'
+                  ? 'Only shows you ranked as a whole show. A show scored by its seasons’ average is not here; drag it on the TV wall to rank it as a show.'
                   : 'Seasons only. Moving a season never changes a show’s own ranking.',
             }
           : undefined,

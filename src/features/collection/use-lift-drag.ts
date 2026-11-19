@@ -132,6 +132,8 @@ export function useLiftDrag<T>({
   count,
   isOutside,
   onDrop,
+  resolve,
+  onRefuse,
   layoutKey = '',
   listKey = '',
 }: {
@@ -142,6 +144,15 @@ export function useLiftDrag<T>({
   count: number;
   isOutside: (from: number, to: number) => boolean;
   onDrop: (from: number, to: number) => void;
+  /**
+   * **Where a drop will be drawn once it lands**, when that is not simply the slot it was
+   * dropped on (the TV wall, #319: the wall re-sorts by score, so a show can land a few
+   * posters from the exact cell). The copy glides there, and the cells make room there, so
+   * it becomes the cell in place. Null means the drop changes nothing: the copy glides home
+   * and `onRefuse` is called instead of `onDrop`. Absent, the drop slot is the landing.
+   */
+  resolve?: (from: number, to: number) => number | null;
+  onRefuse?: (from: number, to: number) => void;
   /**
    * What the list's horizontal geometry depends on: the view (a poster wall has a gutter, a
    * list of rows has none) and the width. The left edge learned at a lift is reused only
@@ -310,14 +321,32 @@ export function useLiftDrag<T>({
     const current = live.current;
     if (!current || current.phase !== 'held') return;
     stopAuto();
-    const moved = current.start !== null && current.to !== current.from;
+    const dropTo = current.to;
+    let moved = current.start !== null && dropTo !== current.from;
+    let refused = false;
+    if (moved && resolve) {
+      const landing = resolve(current.from, dropTo);
+      if (landing === null) {
+        moved = false;
+        refused = true;
+      } else {
+        current.to = landing;
+      }
+    }
+    const hand = () => {
+      if (moved) onDrop(current.from, dropTo);
+      else if (refused) onRefuse?.(current.from, dropTo);
+    };
     const slot = moved ? layoutOf(current.to) : current.origin;
     if (current.x === null || !slot) {
       clear();
-      if (moved) onDrop(current.from, current.to);
+      hand();
       return;
     }
     current.phase = 'settling';
+    // The cells make room where it will land (or close up, for a drop that goes home).
+    if (!moved) current.to = current.from;
+    if (current.to !== dropTo) publish(current);
     const inset = current.x - current.origin.x;
     const target = {
       x: inset + slot.x - current.x,
@@ -327,6 +356,7 @@ export function useLiftDrag<T>({
       if (live.current !== current) return;
       if (!moved) {
         clear();
+        hand();
         return;
       }
       current.phase = 'dropped';
@@ -334,7 +364,7 @@ export function useLiftDrag<T>({
       fallback.current = setTimeout(() => {
         if (live.current === current) clear();
       }, DROP_FALLBACK_MS);
-      onDrop(current.from, current.to);
+      hand();
     };
     if (reduced) {
       travel.setValue(target);

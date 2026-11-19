@@ -38,32 +38,29 @@ export type Ladder = {
  * fixes them in, so the first one named is the one to act on.
  *
  *   segment   Watchlist or Unranked: nothing there has a position.
- *   tv-wall   The TV wall: one poster per series, each an explicit show score or a season
- *             average. It has no single ladder, so it is never mutated from a display index.
  *   sort      Any order but Rating, highest first. A display index is not a position.
  *   filters   Any filter. The positions on screen are not contiguous.
  *   unranked  The title has no position to move.
  *   ambiguous The rows do not read as positions 1..n of one pool. Never expected; a guard.
  */
-export type RerankBlock = 'segment' | 'tv-wall' | 'sort' | 'filters' | 'unranked' | 'ambiguous';
+export type RerankBlock = 'segment' | 'sort' | 'filters' | 'unranked' | 'ambiguous';
 
 /**
- * Whether the screen as configured can be a ladder at all. `pool` is the ranking the drawn
- * items belong to, or null for a wall that mixes pools (the TV wall).
+ * Whether the screen as configured can be a ranking at all. The Movies wall and a TV pool
+ * editor are one ladder; the TV wall is dragged through `tv-wall.ts` (#319, founder QA
+ * 2026-11-20: the "ranked separately" refusal is gone). Either way, only the Rating order
+ * with no filter is a ranking on screen.
  */
 export function screenBlock({
   segment,
   sort,
   filters,
-  pool,
 }: {
   segment: CollectionSegment;
   sort: CollectionSortState;
   filters: CollectionFilters;
-  pool: RankingCategory | null;
 }): RerankBlock | null {
   if (segment !== 'watched') return 'segment';
-  if (pool === null) return 'tv-wall';
   if (sort.axis !== 'rating' || sort.direction !== 'desc') return 'sort';
   if (activeFilterCount(filters) > 0) return 'filters';
   return null;
@@ -334,7 +331,7 @@ export function moveActions(ladder: Ladder, index: number): MoveAction[] {
 // What the reader is told
 // ---------------------------------------------------------------------------
 
-export type RerankNoticeAction = 'undo' | 'retry' | 'sortByRating' | 'openTitle' | 'reorderTv';
+export type RerankNoticeAction = 'undo' | 'retry' | 'sortByRating' | 'openTitle';
 
 export type RerankNotice = {
   message: string;
@@ -370,6 +367,24 @@ export const notices = {
     message: `Couldn’t place ${quoted(title)} there. Your list has been refreshed, so try the move again.`,
     tone: 'error',
   }),
+  /** An SN AVG show placed from the TV wall (#319): it is a ranked show now. */
+  promoted: (title: string, position: number, score: number): RerankNotice => ({
+    message: `Ranked ${quoted(title)} as a show · #${position} · ${formatScore(score)}`,
+    action: { kind: 'undo', label: 'Undo' },
+    tone: 'info',
+  }),
+  unpromoted: (title: string): RerankNotice => ({
+    message: `${quoted(title)} is back to its seasons’ average`,
+    tone: 'info',
+  }),
+  /**
+   * A ranked show dragged past average posters only. Its place among the shows the reader
+   * ranked did not change, and the averages are placed by their seasons.
+   */
+  passover: (title: string): RerankNotice => ({
+    message: `${quoted(title)} is still between the same ranked shows. Shows scored by their seasons’ average move with their seasons.`,
+    tone: 'info',
+  }),
   stale: (): RerankNotice => ({
     message: 'Your ranking changed on another device. It has been refreshed, so try the move again.',
     tone: 'error',
@@ -386,12 +401,6 @@ export const notices = {
         return {
           message: 'To reorder, sort by Rating, highest first, with no filters.',
           action: { kind: 'sortByRating', label: 'Sort by rating' },
-          tone: 'info',
-        };
-      case 'tv-wall':
-        return {
-          message: 'TV shows and seasons are ranked separately. Choose one to reorder.',
-          action: { kind: 'reorderTv', label: 'Reorder' },
           tone: 'info',
         };
       case 'unranked':

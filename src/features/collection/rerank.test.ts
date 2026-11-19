@@ -72,7 +72,7 @@ const entries = (ids: string[], buckets: Bucket[]): RankedEntry[] =>
   );
 
 describe('screenBlock: only Watched, in Rating highest first, with no filters, is a ladder', () => {
-  const ok = { segment: 'watched' as const, sort: { axis: 'rating' as const, direction: 'desc' as const }, filters: emptyFilters(), pool: 'movies' as const };
+  const ok = { segment: 'watched' as const, sort: { axis: 'rating' as const, direction: 'desc' as const }, filters: emptyFilters() };
 
   it('allows the ranking order', () => {
     expect(screenBlock(ok)).toBeNull();
@@ -81,7 +81,6 @@ describe('screenBlock: only Watched, in Rating highest first, with no filters, i
   it.each([
     ['segment', { segment: 'watchlist' as const }],
     ['segment', { segment: 'unranked' as const }],
-    ['tv-wall', { pool: null }],
     ['sort', { sort: { axis: 'rating' as const, direction: 'asc' as const } }],
     ['sort', { sort: { axis: 'year' as const, direction: 'desc' as const } }],
     ['sort', { sort: { axis: 'shuffle' as const, direction: 'desc' as const } }],
@@ -448,7 +447,6 @@ describe('what the reader is told', () => {
   it('a blocked long-press offers the way to an eligible view', () => {
     expect(notices.blocked('sort', { mediaItemId: 'x', title: 'Heat' })?.action?.kind).toBe('sortByRating');
     expect(notices.blocked('filters', { mediaItemId: 'x', title: 'Heat' })?.action?.kind).toBe('sortByRating');
-    expect(notices.blocked('tv-wall', { mediaItemId: 'x', title: 'Heat' })?.action?.kind).toBe('reorderTv');
     expect(notices.blocked('unranked', { mediaItemId: 'x', title: 'Heat' })?.action?.kind).toBe('openTitle');
     expect(notices.blocked('segment', { mediaItemId: 'x', title: 'Heat' })).toBeNull();
   });

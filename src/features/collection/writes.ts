@@ -511,3 +511,84 @@ export async function reorderRanking(input: {
     },
   };
 }
+
+export type PromoteResult =
+  | {
+      outcome: 'promoted';
+      reply: { position: number; score: number | null; placementId: string | null };
+    }
+  | { outcome: 'stale' }
+  | { outcome: 'outside' }
+  | { outcome: 'failed'; message: string; changed: boolean };
+
+/**
+ * **A show drawn at its seasons' average, placed from the TV wall** (#319,
+ * 20261129000300): `rank_promote_show`. It becomes an explicit `tv_shows` ranking at
+ * `toPosition` in `toBucket`, with that place's score. No watch, post or season change.
+ * `anchorId` is the explicit show at that position now (null past the last), so a wall
+ * gone stale is refused (55000) rather than misplaced.
+ */
+export async function promoteShow(input: {
+  operationId: string;
+  mediaItemId: string;
+  toPosition: number;
+  toBucket: string;
+  anchorId: string | null;
+}): Promise<PromoteResult> {
+  const { data, error } = await supabase.rpc('rank_promote_show', {
+    p_media_item_id: input.mediaItemId,
+    p_new_position: input.toPosition,
+    p_new_bucket: input.toBucket,
+    p_operation_id: input.operationId,
+    p_anchor_media_item_id: input.anchorId,
+  });
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+  const reply = (data ?? {}) as Record<string, unknown>;
+  return {
+    outcome: 'promoted',
+    reply: {
+      position: Number(reply.position ?? input.toPosition),
+      score: toNumber(reply.score),
+      placementId: typeof reply.placement_id === 'string' ? reply.placement_id : null,
+    },
+  };
+}
+
+/**
+ * Undo of {@link promoteShow}: `rank_unpromote_show`, only while that promotion is still the
+ * show's latest placement and the show is at `expectedPosition` (55000 otherwise).
+ */
+export async function unpromoteShow(input: {
+  operationId: string;
+  mediaItemId: string;
+  placementId: string;
+  expectedPosition: number;
+}): Promise<PromoteResult> {
+  const { error } = await supabase.rpc('rank_unpromote_show', {
+    p_media_item_id: input.mediaItemId,
+    p_placement_id: input.placementId,
+    p_operation_id: input.operationId,
+    p_expected_position: input.expectedPosition,
+  });
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+  return {
+    outcome: 'promoted',
+    reply: { position: input.expectedPosition, score: null, placementId: null },
+  };
+}

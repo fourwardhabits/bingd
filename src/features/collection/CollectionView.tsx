@@ -47,7 +47,8 @@ import {
   type CollectionSortState,
 } from './filters';
 import { landingBucket, ladderOf, moveActions, notices, screenBlock, type Ladder } from './rerank';
-import type { RankingCategory } from './use-collection';
+import { landingIndex, planTvMove, tvMoveActions, tvWallOf, type TvWall } from './tv-wall';
+import type { RankedEntry, RankingCategory } from './use-collection';
 import { useLiftDrag } from './use-lift-drag';
 import type { RerankController } from './use-rerank';
 
@@ -149,9 +150,10 @@ export type CollectionViewProps = {
 export type CollectionRerank = {
   controller: RerankController;
   /**
-   * The ranking these titles are, or null for a wall that mixes pools: the TV wall, one
-   * poster per series with an explicit show score or a season average. Null is never
-   * dragged; a long-press there points at the pool editors.
+   * The ranking these titles are, or null for the TV wall: one poster per series with an
+   * explicit show score or a season average. The TV wall is dragged directly (#319,
+   * `tv-wall.ts`): an explicit show moves among the explicit shows, and an average poster
+   * becomes an explicit show where it is dropped. The pool editors stay, under Reorder.
    */
   pool: RankingCategory | null;
   /**
@@ -223,12 +225,50 @@ export function CollectionView({
         segment,
         sort: editor ? RANKING_ORDER : sort,
         filters: editor ? emptyFilters() : state.filters,
-        pool: rerank.pool,
       })
     : 'segment';
   const ladder: Ladder | null =
     rerank && block === null && rerank.pool ? ladderOf(visible, rerank.pool) : null;
-  const rungCount = ladder?.rungs.length ?? 0;
+  /** The TV wall as a ranking (#319): its posters, and the explicit shows' ladder. */
+  const wall: TvWall | null =
+    rerank && block === null && rerank.pool === null ? tvWallOf(visible) : null;
+  const rungCount = ladder?.rungs.length ?? wall?.posters.length ?? 0;
+
+  /** The `tv_shows` row a promoted poster becomes, for the cache to draw at once. */
+  const showEntryFor = (
+    index: number,
+    toPosition: number,
+    bucket: RankedEntry['bucket'],
+  ): RankedEntry | undefined => {
+    const item = visible[index];
+    if (!item) return undefined;
+    return {
+      mediaItemId: item.mediaItemId,
+      title: item.title,
+      year: item.year ?? null,
+      posterPath: item.posterPath ?? null,
+      genres: item.genres ?? [],
+      runtimeMinutes: null,
+      kind: 'series',
+      seriesTitle: null,
+      seriesId: null,
+      language: item.language ?? null,
+      bucket,
+      position: toPosition,
+      category: 'tv_shows',
+      rankedAt: new Date().toISOString(),
+    };
+  };
+
+  /** A TV wall drop or action, planned and handed to the controller. */
+  const placeOnWall = (from: number, to: number, toBucket?: RankedEntry['bucket']) => {
+    if (!wall || !rerank) return;
+    const plan = planTvMove(wall, from, to, toBucket);
+    rerank.controller.place(
+      plan,
+      plan?.kind === 'promote' ? showEntryFor(from, plan.toPosition, plan.toBucket) : undefined,
+    );
+  };
 
   const listRef = useRef<FlashListRef<unknown>>(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -245,17 +285,41 @@ export function CollectionView({
     layoutKey: `${state.mode}:${windowWidth}`,
     // A new list starts at the top: the offset the drag tracks starts there with it.
     listKey: state.mode,
-    isOutside: (from, to) =>
-      ladder ? landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket : false,
+    isOutside: (from, to) => {
+      if (ladder) return landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket;
+      if (wall) {
+        const plan = planTvMove(wall, from, to);
+        return plan?.kind === 'move' ? plan.toBucket !== plan.bucket : false;
+      }
+      return false;
+    },
+    // The TV wall re-sorts by score once a move lands, so the copy glides to where the
+    // show will be drawn, not just the cell it was dropped on. A drag past averages only
+    // goes home and says why.
+    resolve: wall
+      ? (from, to) => {
+          const plan = planTvMove(wall, from, to);
+          if (!plan || (plan.kind !== 'move' && plan.kind !== 'promote')) return null;
+          const at = landingIndex(visible, wall, plan, RANKING_ORDER);
+          return at < 0 ? to : at;
+        }
+      : undefined,
+    onRefuse: (from, to) => {
+      if (wall && rerank && wall.posters[from]?.mediaItemId === liftedId.current) {
+        rerank.controller.place(planTvMove(wall, from, to));
+      }
+    },
     onDrop: (from, to) => {
-      if (!ladder || !rerank) return;
+      if (!rerank) return;
+      const names = ladder ? ladder.rungs[from]?.mediaItemId : wall?.posters[from]?.mediaItemId;
       // A refetch can land mid-drag and renumber the screen. If the index no longer names
       // the title in the reader's hand, nothing is moved.
-      if (ladder.rungs[from]?.mediaItemId !== liftedId.current) {
+      if (!names || names !== liftedId.current) {
         rerank.controller.explain(notices.blocked('ambiguous', { mediaItemId: '', title: '' }));
         return;
       }
-      rerank.controller.move(ladder, from, to);
+      if (ladder) rerank.controller.move(ladder, from, to);
+      else placeOnWall(from, to);
     },
   });
   const lifted = drag.state;
@@ -340,10 +404,9 @@ export function CollectionView({
     if (!rerank || block === 'segment') return;
     const explain = (kind: Parameters<typeof notices.blocked>[0]) =>
       rerank.controller.explain(notices.blocked(kind, nameAndId(item)));
-    if (block === 'tv-wall') return explain('tv-wall');
     if (item.score == null || item.position == null) return explain('unranked');
     if (block) return explain(block);
-    if (!ladder || index >= rungCount) return explain('ambiguous');
+    if ((!ladder && !wall) || index >= rungCount) return explain('ambiguous');
     // Not refused while the last move is still saving (Android QA, 2026-11-20): a second
     // drag is queued behind it by the controller, rather than a long-press that does
     // nothing at all.
@@ -353,14 +416,20 @@ export function CollectionView({
 
   /** The same moves as a drag, as VoiceOver and TalkBack actions on each rung. */
   const a11yFor = (index: number) => {
-    if (!ladder || !rerank || index >= rungCount) return null;
-    const actions = moveActions(ladder, index);
+    if ((!ladder && !wall) || !rerank || index >= rungCount) return null;
+    const actions = ladder
+      ? moveActions(ladder, index)
+      : wall
+        ? tvMoveActions(wall, index)
+        : [];
     if (actions.length === 0) return null;
     return {
       accessibilityActions: actions.map(({ name, label }) => ({ name, label })),
       onAccessibilityAction: (event: AccessibilityActionEvent) => {
         const action = actions.find((a) => a.name === event.nativeEvent.actionName);
-        if (action) rerank.controller.move(ladder, index, action.to, action.toBucket);
+        if (!action) return;
+        if (ladder) rerank.controller.move(ladder, index, action.to, action.toBucket);
+        else placeOnWall(index, action.to, action.toBucket);
       },
       accessibilityHint: 'Touch and hold to move it',
     };
@@ -381,9 +450,6 @@ export function CollectionView({
       case 'openTitle':
         rerank.controller.dismiss();
         return notice.mediaItemId ? onPressItem(notice.mediaItemId) : undefined;
-      case 'reorderTv':
-        rerank.controller.dismiss();
-        return rerank.onReorderTv?.();
       default:
         return undefined;
     }

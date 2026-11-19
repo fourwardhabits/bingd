@@ -81,9 +81,23 @@ const flushMeasures = () => {
 const touch = (pageX: number, pageY: number) =>
   ({ nativeEvent: { pageX, pageY } }) as unknown as GestureResponderEvent;
 
-const setup = async (layouts: Rect[], { scroll = 0, count = layouts.length, viewport = 700 } = {}) => {
+const setup = async (
+  layouts: Rect[],
+  {
+    scroll = 0,
+    count = layouts.length,
+    viewport = 700,
+    resolve,
+  }: {
+    scroll?: number;
+    count?: number;
+    viewport?: number;
+    resolve?: (from: number, to: number) => number | null;
+  } = {},
+) => {
   const fake: Fake = { layouts, header: HEADER, scroll, scrolledTo: [] };
   const onDrop = jest.fn();
+  const onRefuse = jest.fn();
   const hook = await renderHook(
     ({ layoutKey }: { layoutKey: string }) =>
       useLiftDrag({
@@ -92,6 +106,8 @@ const setup = async (layouts: Rect[], { scroll = 0, count = layouts.length, view
         count,
         isOutside: () => false,
         onDrop,
+        resolve,
+        onRefuse,
         layoutKey,
       }),
     { initialProps: { layoutKey: 'poster:360' } },
@@ -102,7 +118,7 @@ const setup = async (layouts: Rect[], { scroll = 0, count = layouts.length, view
     } as never);
     hook.result.current.onScroll({ nativeEvent: { contentOffset: { x: 0, y: scroll } } } as never);
   });
-  return { fake, onDrop, hook };
+  return { fake, onDrop, onRefuse, hook };
 };
 
 beforeEach(() => {
@@ -374,6 +390,78 @@ describe('the drop', () => {
       await act(async () => hook.result.current.settle());
       expect(hook.result.current.state).toBeNull();
       expect((hook.result.current.scale as unknown as { __getValue: () => number }).__getValue()).toBe(LIFT_SCALE);
+    } finally {
+      timing.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('the TV wall: glides to where the show will be drawn, and hands over the drop slot', async () => {
+    mockReduced = false;
+    jest.useFakeTimers();
+    const timing = jest.spyOn(Animated, 'timing');
+    try {
+      const layouts = rows(20);
+      const { hook, onDrop, onRefuse } = await setup(layouts, { resolve: () => 7 });
+      await act(async () => hook.result.current.lift(2, cell(layouts[2]), 'show'));
+      await act(async () => flushMeasures());
+      await act(async () =>
+        hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)),
+      );
+      await act(async () =>
+        hook.result.current.containerProps.onResponderMove?.(touch(50, 300 + 72 * 3 + 20)),
+      );
+      await act(async () =>
+        hook.result.current.containerProps.onResponderRelease?.(touch(50, 300 + 72 * 3 + 20)),
+      );
+      // The cells make room at the landing at once.
+      expect(hook.result.current.state?.to).toBe(7);
+      await act(async () => {
+        jest.advanceTimersByTime(SETTLE_MS + 20);
+      });
+      const targets = timing.mock.calls.map(
+        ([, config]) => (config as { toValue: unknown }).toValue,
+      );
+      expect(targets).toContainEqual({ x: 0, y: 72 * 5 });
+      expect(onDrop).toHaveBeenCalledWith(2, 5);
+      expect(onRefuse).not.toHaveBeenCalled();
+      expect(hook.result.current.state).toMatchObject({ phase: 'dropped', id: 'show', to: 7 });
+    } finally {
+      timing.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('the TV wall: a drop that changes nothing glides home and is refused, not dropped', async () => {
+    mockReduced = false;
+    jest.useFakeTimers();
+    const timing = jest.spyOn(Animated, 'timing');
+    try {
+      const layouts = rows(20);
+      const { hook, onDrop, onRefuse } = await setup(layouts, { resolve: () => null });
+      await act(async () => hook.result.current.lift(2, cell(layouts[2]), 'show'));
+      await act(async () => flushMeasures());
+      await act(async () =>
+        hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)),
+      );
+      await act(async () =>
+        hook.result.current.containerProps.onResponderMove?.(touch(50, 300 + 72 * 3 + 20)),
+      );
+      await act(async () =>
+        hook.result.current.containerProps.onResponderRelease?.(touch(50, 300 + 72 * 3 + 20)),
+      );
+      // The gap closes while the copy goes home.
+      expect(hook.result.current.state?.to).toBe(2);
+      await act(async () => {
+        jest.advanceTimersByTime(SETTLE_MS + 20);
+      });
+      const targets = timing.mock.calls.map(
+        ([, config]) => (config as { toValue: unknown }).toValue,
+      );
+      expect(targets).toContainEqual({ x: 0, y: 0 });
+      expect(onDrop).not.toHaveBeenCalled();
+      expect(onRefuse).toHaveBeenCalledWith(2, 5);
+      expect(hook.result.current.state).toBeNull();
     } finally {
       timing.mockRestore();
       jest.useRealTimers();
