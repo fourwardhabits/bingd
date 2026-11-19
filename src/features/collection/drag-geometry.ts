@@ -108,3 +108,29 @@ export function autoScrollSpeed(centreY: number, height: number): number {
   }
   return 0;
 }
+
+/**
+ * **Where an item is on screen, from the list's own numbers** (Android QA, 2026-11-20).
+ *
+ * `FlashListRef.getLayout` is in the items container's coordinates, which start below the
+ * header (`getFirstItemOffset`). The list's viewport is that content scrolled by `scrollTop`
+ * (`getAbsoluteLastScrollOffset`, the raw content offset). So an item's top inside the
+ * viewport is `firstItemOffset + layoutY - scrollTop`.
+ *
+ * This replaces `measureLayout` for the vertical position of a lifted copy. On the new
+ * architecture that measurement is computed from the shadow tree, whose idea of a scroll
+ * view's offset can lag the native one after a scroll on Android: the founder's "scroll down
+ * slightly, then lift Iron Man" put the copy a scroll's distance from the finger.
+ */
+export function itemTopInViewport(layoutY: number, firstItemOffset: number, scrollTop: number) {
+  return firstItemOffset + layoutY - scrollTop;
+}
+
+/**
+ * The inverse: the item-layout `y` under a viewport `y`. Hit-testing goes through this from
+ * what is on screen (the copy under the finger), so a header that changes height, an
+ * auto-scroll, or an item re-measured mid-gesture cannot move the target away from the finger.
+ */
+export function layoutYAtViewport(viewportY: number, firstItemOffset: number, scrollTop: number) {
+  return viewportY + scrollTop - firstItemOffset;
+}

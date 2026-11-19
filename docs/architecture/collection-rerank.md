@@ -115,6 +115,48 @@ rankings and need no data change.
 - **Failure** restores the snapshot and reconciles. A lost reply may have committed, so the refetch is the truth. The bar offers **Retry**, which resends the **same** operation id, so a move that did land is answered from the ledger rather than applied twice.
 - One move is in flight at a time. A second drag waits for it.
 
+## Where the lifted copy is drawn (Android QA, 2026-11-20)
+
+The founder's Galaxy S25 Ultra showed the lifted poster or row away from the finger after a
+scroll: "scroll down slightly, then lift Iron Man", and "scroll to Battleship, and it floats
+near the bottom". The slot it left looked like an empty gap, because the copy was elsewhere.
+
+**Root cause.** The copy's top came from `measureLayout(cell, container)`. On the new
+architecture, which Expo 57 / React Native 0.86 always runs, that value is computed from the
+shadow tree. The shadow tree's idea of a scroll view's offset can lag the native one after a
+scroll on Android. The copy was therefore drawn up to a scroll's distance from where the
+title really was.
+
+**Fix.** The copy's top comes from the list's own numbers, synchronously at the lift:
+`getFirstItemOffset() + getLayout(i).y − getAbsoluteLastScrollOffset()` (`itemTopInViewport`).
+`measureLayout` now supplies only the left edge, which no vertical scroll changes. It is
+measured once per screen and reused. The target under the finger is read back from the copy
+on screen (`layoutYAtViewport`), so an auto-scroll, a header that changes height, or a cell
+re-measured mid-gesture cannot separate the target from what the reader sees.
+
+**Also fixed:**
+- **Scrolling.** It now turns off at the lift itself. Before, it waited for the measurement
+  a frame later, so Android's scroll view could take the first move.
+- **The original slot.** It is hidden only once its copy is drawn, so the slot is never blank
+  on its own.
+- **Making room.** The titles that make room ease into place (`useMakeRoom`, 140 ms, native
+  driver, off under Reduce Motion) instead of jumping.
+- **Drop.** The drop writes the predicted order synchronously in the drop's own event, so
+  the new order and the settled cells are one commit. Before, the drop awaited a query
+  cancel first, which left a frame of the old order with no shifts.
+- **Android Back.** Back while holding a title puts it back and consumes the press.
+
+`use-lift-drag.test.tsx` drives the hook against a fake FlashList whose `measureLayout`
+answers late, with a stale `y`. Six of its twelve tests fail on the previous implementation.
+Native feel (touch latency, the handoff from a real scroll view, frame pacing) is verified on
+the device, not in Jest.
+
+**The "Drag it within that group" notice seen on 2026-11-20.** No code path in `bf721a9a`
+produces it; that copy was removed with the cross-category change. It is `f010b51f`'s, the
+previous Preview. The app applies a new update on the next cold start
+(`fallbackToCacheTimeout: 0`), so attempts made before that restart ran the old bundle.
+Settings → Diagnostics shows which update is running.
+
 ## Accessibility
 
 Every draggable title carries actions:

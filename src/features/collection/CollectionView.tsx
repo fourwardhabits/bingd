@@ -27,6 +27,7 @@ import {
 import type { TitleRowProps } from '@/ui/components/TitleRow';
 import { coerceSortState, filterSortSpoken } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
+import { useMakeRoom } from '@/ui/use-make-room';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
 import { RerankNoticeBar } from './RerankNoticeBar';
@@ -556,7 +557,7 @@ export function CollectionView({
           }
           paddingBottom={styles.wall.paddingBottom}
         />
-        {lifted && shown[lifted.from] ? (
+        {lifted?.frame && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
@@ -638,6 +639,7 @@ export function CollectionView({
             };
             return rerank ? (
               <LiftableRow
+                identity={item.mediaItemId}
                 shift={shift}
                 onLongPress={(node) => onLongPressItem(item, index, node)}
                 row={row}
@@ -647,7 +649,7 @@ export function CollectionView({
             );
           }}
         />
-        {lifted && shown[lifted.from] ? (
+        {lifted?.frame && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
@@ -750,23 +752,25 @@ function LiftableRow({
   shift,
   onLongPress,
   row,
+  identity,
 }: {
   shift: { hidden: boolean; x: number; y: number } | null;
   onLongPress: (node: View | null) => void;
   row: TitleRowProps;
+  /** The title the (recycled) cell draws now, so a new title is placed, not eased in. */
+  identity: string;
 }) {
   const node = useRef<View>(null);
+  // Eased to its place while another title is held over it, rather than jumped there.
+  const offset = useMakeRoom(shift && !shift.hidden ? { x: 0, y: shift.y } : null, identity);
   return (
-    <View
+    <Animated.View
       ref={node}
       collapsable={false}
-      style={[
-        shift && !shift.hidden ? { transform: [{ translateY: shift.y }] } : null,
-        shift?.hidden ? styles.hiddenRow : null,
-      ]}
+      style={[{ transform: [{ translateY: offset.y }] }, shift?.hidden ? styles.hiddenRow : null]}
     >
       <TitleRow {...row} onLongPress={() => onLongPress(node.current)} />
-    </View>
+    </Animated.View>
   );
 }
 
