@@ -1,0 +1,50 @@
+{
+  "purpose": "Card 03 (Friends/Feed): replace the Nathan for You feed capture inside the main phone with the founder's Crazy Rich Asians feed capture. Nothing else on the card changes.",
+  "expectedFileName": "Screenshot_20261119_160109_bingd.jpg",
+  "captureFileName": null,
+  "captureSha256": null,
+  "captureSize": null,
+  "crop": {
+    "top": 0.0381,
+    "bottom": 0.9541,
+    "note": "The legacy Android chrome crop every approved card uses (lib.mjs loadScreen rawCapture): status bar and navigation bar off. On a 1080 x 2340 capture this keeps rows 89..2233, a 1080 x 2144 screen with the approved layer's 1.985 aspect. Full width, no resize: the phone frame scales it exactly as it scaled the approved 945 x 1876 layer."
+  },
+  "visibleRows": 2006,
+  "redactionRule": "Blur every person's name and avatar that is visible on the screen (rows 0..visibleRows): post authors, 'and others' names, liked-by or engagement names, commenters. Keep titles, posters, scores, timestamps and UI labels. Names: hard-edged rectangles, sigma 12. Avatars: soft discs, sigma 10. The same treatment as the approved card 03 (Nathan for You post and the Witcher comments).",
+  "redactions": [
+    {
+      "what": "post 1 author name (placeholder from the approved layout; move to the real position)",
+      "kind": "rect",
+      "x": 149,
+      "y": 918,
+      "w": 360,
+      "h": 62
+    },
+    {
+      "what": "post 1 author avatar (placeholder)",
+      "kind": "circle",
+      "cx": 82,
+      "cy": 1002,
+      "r": 54
+    },
+    {
+      "what": "post 2 author name (placeholder)",
+      "kind": "rect",
+      "x": 149,
+      "y": 1853,
+      "w": 200,
+      "h": 56
+    },
+    {
+      "what": "post 2 author avatar (placeholder)",
+      "kind": "circle",
+      "cx": 82,
+      "cy": 1906,
+      "r": 54
+    }
+  ],
+  "reviewed": false,
+  "reviewedBy": null,
+  "layer": "sources/layers/03-friends__main-screen__2026-11-19.png",
+  "layerSha256": null
+}
