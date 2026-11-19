@@ -1,9 +1,13 @@
 import { act, renderHook } from '@testing-library/react-native';
 import type { FlashListRef } from '@shopify/flash-list';
-import { BackHandler, type GestureResponderEvent, type View } from 'react-native';
+import { Animated, BackHandler, type GestureResponderEvent, type View } from 'react-native';
 
 import { itemTopInViewport, layoutYAtViewport, type Rect } from './drag-geometry';
-import { useLiftDrag } from './use-lift-drag';
+import { DROP_FALLBACK_MS, LIFT_SCALE, SETTLE_MS, useLiftDrag } from './use-lift-drag';
+
+// Reduce Motion settles a release at once; most tests use it, the settle tests turn it off.
+let mockReduced = true;
+jest.mock('@/ui/motion', () => ({ useReducedMotion: () => mockReduced }));
 
 /**
  * The Collection drag against a fake FlashList (Android QA, 2026-11-20).
@@ -103,6 +107,7 @@ const setup = async (layouts: Rect[], { scroll = 0, count = layouts.length, view
 
 beforeEach(() => {
   pendingMeasures.length = 0;
+  mockReduced = true;
 });
 
 describe('the copy is drawn where the title is, after a scroll (reproductions 1 and 2)', () => {
@@ -276,6 +281,9 @@ describe('the finger and the target', () => {
     await act(async () => hook.result.current.containerProps.onResponderMove?.(touch(50, 300 + 72 * 3)));
     await act(async () => hook.result.current.containerProps.onResponderRelease?.(touch(50, 300 + 72 * 3)));
     expect(onDrop).toHaveBeenCalledWith(2, 5);
+    // Held, as dropped, until the caller's list shows the move.
+    expect(hook.result.current.state).toMatchObject({ phase: 'dropped', from: 2, to: 5 });
+    await act(async () => hook.result.current.settle());
     expect(hook.result.current.state).toBeNull();
 
     await act(async () => hook.result.current.lift(4, cell(layouts[4])));
@@ -324,5 +332,171 @@ describe('Android Back', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+/**
+ * **Release** (Android QA, 2026-11-20: "a visible flash or abrupt repositioning"). The copy
+ * glides into its slot and settles to its resting size; the move is handed over only then;
+ * and the copy and the gap stay until the caller's list shows the new order.
+ */
+describe('the drop', () => {
+  it('glides the copy into the target slot, then hands the move over, then waits to be settled', async () => {
+    mockReduced = false;
+    jest.useFakeTimers();
+    const timing = jest.spyOn(Animated, 'timing');
+    try {
+      const layouts = rows(20);
+      const { hook, onDrop } = await setup(layouts, { scroll: 0 });
+      await act(async () => hook.result.current.lift(2, cell(layouts[2]), 'heat'));
+      await act(async () => flushMeasures());
+      await act(async () => hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)));
+      await act(async () => hook.result.current.containerProps.onResponderMove?.(touch(50, 300 + 72 * 3 + 20)));
+      await act(async () => hook.result.current.containerProps.onResponderRelease?.(touch(50, 300 + 72 * 3 + 20)));
+
+      // Gliding: nothing handed over yet, and a new lift is not taken.
+      expect(onDrop).not.toHaveBeenCalled();
+      await act(async () => hook.result.current.lift(9, cell(layouts[9])));
+      expect(hook.result.current.state?.from).toBe(2);
+
+      await act(async () => {
+        jest.advanceTimersByTime(SETTLE_MS + 20);
+      });
+      expect(onDrop).toHaveBeenCalledWith(2, 5);
+      // The copy is sent exactly over slot 5 (three rows down from where it was lifted),
+      // at its resting size. Asserted as the animation's target: native-driver animations
+      // in Jest finish without writing the JS-side value.
+      const targets = timing.mock.calls.map(([, config]) => (config as { toValue: unknown }).toValue);
+      expect(targets).toContainEqual({ x: 0, y: 72 * 3 });
+      expect(targets).toContainEqual(1);
+      expect(hook.result.current.state).toMatchObject({ phase: 'dropped', id: 'heat', to: 5 });
+
+      await act(async () => hook.result.current.settle());
+      expect(hook.result.current.state).toBeNull();
+      expect((hook.result.current.scale as unknown as { __getValue: () => number }).__getValue()).toBe(LIFT_SCALE);
+    } finally {
+      timing.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('a release that moves nothing glides back and drops nothing', async () => {
+    mockReduced = false;
+    jest.useFakeTimers();
+    try {
+      const layouts = rows(20);
+      const { hook, onDrop } = await setup(layouts);
+      await act(async () => hook.result.current.lift(2, cell(layouts[2])));
+      await act(async () => flushMeasures());
+      await act(async () => hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)));
+      await act(async () => hook.result.current.containerProps.onResponderMove?.(touch(50, 310)));
+      await act(async () => hook.result.current.containerProps.onResponderRelease?.(touch(50, 310)));
+      await act(async () => {
+        jest.advanceTimersByTime(SETTLE_MS + 20);
+      });
+      expect(onDrop).not.toHaveBeenCalled();
+      expect(hook.result.current.state).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a drop the caller never confirms is released after a moment, so no copy is left behind', async () => {
+    jest.useFakeTimers();
+    try {
+      const layouts = rows(20);
+      const { hook } = await setup(layouts);
+      await act(async () => hook.result.current.lift(2, cell(layouts[2])));
+      await act(async () => flushMeasures());
+      await act(async () => hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)));
+      await act(async () => hook.result.current.containerProps.onResponderMove?.(touch(50, 300 + 144)));
+      await act(async () => hook.result.current.containerProps.onResponderRelease?.(touch(50, 300 + 144)));
+      expect(hook.result.current.state?.phase).toBe('dropped');
+      await act(async () => {
+        jest.advanceTimersByTime(DROP_FALLBACK_MS + 10);
+      });
+      expect(hook.result.current.state).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a long-press during the wait after a drop is taken, not refused', async () => {
+    const layouts = rows(20);
+    const { hook } = await setup(layouts);
+    await act(async () => hook.result.current.lift(2, cell(layouts[2])));
+    await act(async () => flushMeasures());
+    await act(async () => hook.result.current.containerProps.onResponderGrant?.(touch(50, 300)));
+    await act(async () => hook.result.current.containerProps.onResponderMove?.(touch(50, 444)));
+    await act(async () => hook.result.current.containerProps.onResponderRelease?.(touch(50, 444)));
+    expect(hook.result.current.state?.phase).toBe('dropped');
+    await act(async () => hook.result.current.lift(0, cell(layouts[0]), 'top'));
+    expect(hook.result.current.state).toMatchObject({ phase: 'held', from: 0, id: 'top' });
+  });
+});
+
+/**
+ * **The top of the list, after drags** (Android QA, 2026-11-20: "the top three posters
+ * sometimes stop responding"). FlashList's `getAbsoluteLastScrollOffset()` reports the
+ * header's height for a list at the very top before any scroll, and after the header changes
+ * height. The fake reports exactly that; the copy must still be drawn over the title.
+ */
+describe('the top three, repeatedly', () => {
+  it('lifts #1, #2 and #3 over themselves at offset zero, drag after drag, even when FlashList misreports the offset', async () => {
+    const layouts = grid(30);
+    const { fake, hook, onDrop } = await setup(layouts, { scroll: 0 });
+    // FlashList's tracker before any scroll: header height, not 0.
+    fake.scroll = HEADER;
+    for (let round = 0; round < 4; round += 1) {
+      for (const index of [0, 1, 2]) {
+        await act(async () => hook.result.current.lift(index, cell(layouts[index]), `t${index}`));
+        await act(async () => flushMeasures());
+        const frame = hook.result.current.state?.frame;
+        expect(frame?.y).toBe(itemTopInViewport(0, HEADER, 0));
+        expect(frame?.x).toBe(INSET_X + (layouts[index] as Rect).x);
+        await act(async () => hook.result.current.containerProps.onResponderGrant?.(touch(60, 300)));
+        await act(async () =>
+          hook.result.current.containerProps.onResponderMove?.(touch(60, 300 + TILE.height + GAP_Y)),
+        );
+        await act(async () =>
+          hook.result.current.containerProps.onResponderRelease?.(touch(60, 300 + TILE.height + GAP_Y)),
+        );
+        await act(async () => hook.result.current.settle());
+        expect(hook.result.current.state).toBeNull();
+      }
+    }
+    expect(onDrop).toHaveBeenCalledTimes(12);
+  });
+
+  it('after scrolling down and back to the top, #1 is drawn over itself', async () => {
+    const layouts = grid(30);
+    const { hook } = await setup(layouts, { scroll: 0 });
+    await act(async () => hook.result.current.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 900 } } } as never));
+    await act(async () => hook.result.current.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 0 } } } as never));
+    await act(async () => hook.result.current.lift(0, cell(layouts[0])));
+    await act(async () => flushMeasures());
+    expect(hook.result.current.state?.frame?.y).toBe(HEADER);
+  });
+
+  it('a new list (Poster to List) starts at the top', async () => {
+    const layouts = rows(20);
+    const fake: Fake = { layouts, header: HEADER, scroll: 0, scrolledTo: [] };
+    const hook = await renderHook(
+      ({ listKey }: { listKey: string }) =>
+        useLiftDrag({
+          listRef: fakeList(fake),
+          containerRef: { current: {} as View },
+          count: 20,
+          isOutside: () => false,
+          onDrop: jest.fn(),
+          listKey,
+        }),
+      { initialProps: { listKey: 'poster' } },
+    );
+    await act(async () => hook.result.current.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 640 } } } as never));
+    await act(async () => hook.rerender({ listKey: 'list' }));
+    await act(async () => hook.result.current.lift(0, cell(layouts[0])));
+    await act(async () => flushMeasures());
+    expect(hook.result.current.state?.frame?.y).toBe(HEADER);
   });
 });

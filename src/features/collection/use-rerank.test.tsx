@@ -211,18 +211,50 @@ describe('a move', () => {
     expect(result.current.notice?.message).toBe('Moved “Title c” back to I liked it · #3');
   });
 
-  it('one move at a time: a second drop while the first is in flight is not sent', async () => {
-    const { result } = await setup();
+  /**
+   * **A second drop while the first is saving is queued** (Android QA, 2026-11-20): drawn
+   * at once, sent when the first is answered, and a third springs back.
+   */
+  it('queues a second drop behind the first, sends it after, and refuses a third', async () => {
+    const { result, client } = await setup();
     const answer = deferred();
     mockReorder.mockReturnValueOnce(answer.promise);
     await act(async () => {
       result.current.move(ladderFrom(pool()), 2, 0);
     });
+    // c a b d is drawn. Drag d (index 3) to the top of what is drawn.
+    const drawn = client.getQueryData<RankedEntry[]>(KEY) as RankedEntry[];
     await act(async () => {
-      expect(result.current.move(ladderFrom(pool()), 1, 0)).toBeNull();
+      expect(result.current.move(ladderFrom(drawn), 2, 1)?.kind).toBe('move');
+    });
+    expect(order(client.getQueryData(KEY))).toEqual(['c', 'b', 'a', 'd']);
+    await act(async () => {
+      expect(result.current.move(ladderFrom(drawn), 3, 0)).toBeNull();
     });
     expect(mockReorder).toHaveBeenCalledTimes(1);
+
+    mockReorder.mockImplementationOnce(lands());
     await act(async () => answer.resolve(await lands()({ mediaItemId: 'c', toPosition: 1 })));
+    expect(mockReorder).toHaveBeenCalledTimes(2);
+    expect(mockReorder.mock.calls[1]?.[0]).toMatchObject({ mediaItemId: 'b', toPosition: 2 });
+    expect(order(client.getQueryData(KEY))).toEqual(['c', 'b', 'a', 'd']);
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('a queued drop is not sent when the first fails, and the rollback takes both back', async () => {
+    const { result, client } = await setup();
+    const answer = deferred();
+    mockReorder.mockReturnValueOnce(answer.promise);
+    await act(async () => {
+      result.current.move(ladderFrom(pool()), 2, 0);
+    });
+    const drawn = client.getQueryData<RankedEntry[]>(KEY) as RankedEntry[];
+    await act(async () => {
+      result.current.move(ladderFrom(drawn), 2, 1);
+    });
+    await act(async () => answer.resolve({ outcome: 'stale' }));
+    expect(mockReorder).toHaveBeenCalledTimes(1);
+    expect(order(client.getQueryData(KEY))).toEqual(['a', 'b', 'c', 'd']);
   });
 });
 

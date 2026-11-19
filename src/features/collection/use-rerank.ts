@@ -77,13 +77,12 @@ export function useRerank(userId: string) {
 
   const keyOf = (move: Move) => queryKeys.rankings(userId, move.category);
 
-  const send = async (move: Move, operationId: string, isUndo: boolean) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    undoable.current = null;
-    retryable.current = null;
-
+  /**
+   * Draws a move in the cache now, before the server answers, and returns what the cache
+   * held before it. Synchronous, in the drop's own event; `revert: false` keeps the
+   * prediction if a refetch was in flight.
+   */
+  const predict = (move: Move) => {
     const key = keyOf(move);
     const before = queryClient.getQueryData<RankedEntry[]>(key);
     // Across a category the cached row takes its new category too, so every score in both
@@ -91,15 +90,41 @@ export function useRerank(userId: string) {
     const predicted = before
       ? applyMove(before, move.mediaItemId, move.toPosition, move.toBucket)
       : null;
-    /**
-     * **Synchronously, in the drop's own event** (Android QA, 2026-11-20). The drag clears
-     * its shifts in that event too, so React draws the new order and the settled cells in
-     * one commit. Awaiting the cancel first left a frame of the old order with no shifts,
-     * the titles snapping back before they moved. The cancel still stops a refetch from
-     * drawing the old order over the prediction; `revert: false` keeps the prediction.
-     */
     void queryClient.cancelQueries({ queryKey: key }, { revert: false });
     if (predicted) queryClient.setQueryData<RankedEntry[]>(key, predicted);
+    return { before, predicted };
+  };
+
+  /**
+   * **A second drop while the first is saving is queued, not refused** (Android QA,
+   * 2026-11-20). Refusing it made a quick second long-press do nothing at all, which read
+   * as the titles "not responding". It is drawn at once and sent the moment the first is
+   * answered, from the order the first produced, which is the order the reader dragged on.
+   * If the first fails, the rollback takes both back and the second is not sent. One at a
+   * time: a third drop while one is queued springs back.
+   */
+  const queued = useRef<{
+    move: Move;
+    operationId: string;
+    snapshot: ReturnType<typeof predict>;
+  } | null>(null);
+
+  const send = async (
+    move: Move,
+    operationId: string,
+    isUndo: boolean,
+    prepared?: ReturnType<typeof predict>,
+  ) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    undoable.current = null;
+    retryable.current = null;
+
+    const key = keyOf(move);
+    const { before, predicted } = prepared ?? predict(move);
+    // A prediction drawn earlier (a queued move) is still the cache's; keep it so.
+    if (prepared) void queryClient.cancelQueries({ queryKey: key }, { revert: false });
     hapticDecision();
 
     const result = await reorderRanking({
@@ -158,6 +183,12 @@ export function useRerank(userId: string) {
     }
 
     inFlight.current = false;
+    const next = queued.current;
+    queued.current = null;
+    if (next && result.outcome === 'moved') {
+      void send(next.move, next.operationId, false, next.snapshot);
+      return;
+    }
     setBusy(false);
   };
 
@@ -175,7 +206,11 @@ export function useRerank(userId: string) {
   ): PlannedMove | null => {
     const plan = planMove(ladder, from, to, toBucket);
     if (!plan || plan.kind === 'noop') return plan;
-    if (inFlight.current) return null;
+    if (inFlight.current) {
+      if (queued.current) return null;
+      queued.current = { move: plan, operationId: newOperationId(), snapshot: predict(plan) };
+      return plan;
+    }
     void send(plan, newOperationId(), false);
     return plan;
   };

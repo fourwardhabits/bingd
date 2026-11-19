@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   Animated,
   BackHandler,
+  Easing,
   type GestureResponderEvent,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 
 import { hapticSelection } from '@/ui/haptics';
+import { useReducedMotion } from '@/ui/motion';
 
 import {
   autoScrollSpeed,
@@ -23,6 +25,9 @@ import {
 } from './drag-geometry';
 
 /** Every displacement while `from` is held over `to`, keyed by index. */
+/** How long a dropped copy waits for the caller's list to show the move before it goes. */
+export const DROP_FALLBACK_MS = 800;
+
 const shiftsFor = (
   from: number,
   to: number,
@@ -39,9 +44,23 @@ const shiftsFor = (
 /** The lifted title's frame, in the container's coordinates, at the moment it was lifted. */
 export type LiftFrame = { x: number; y: number; width: number; height: number };
 
+/** How much a lifted title grows, so it reads as picked up. Back to 1 as it settles. */
+export const LIFT_SCALE = 1.04;
+/** How long a released title takes to settle into its slot: brief, and eased out. */
+export const SETTLE_MS = 160;
+
 export type LiftState = {
   from: number;
   to: number;
+  /**
+   * `held` while the finger is down. `dropped` once the copy has settled into its new slot
+   * and the move is handed to the caller: the copy and the gap stay exactly where they are
+   * until the caller sees its list drawn in the new order and calls `settle()`, so the two
+   * swap in one render (Android QA, 2026-11-20: "a visible flash" on release).
+   */
+  phase: 'held' | 'dropped';
+  /** What the caller said it lifted, so it can tell when its list shows it at `to`. */
+  id: string | null;
   /**
    * Where the floating copy is drawn, or null for the one frame before its horizontal
    * position is known (the first lift on a screen). The copy, and the hiding of the
@@ -61,6 +80,9 @@ export type LiftState = {
 type Live = {
   from: number;
   to: number;
+  /** `settling`: released, the copy gliding to its slot; nothing else is accepted. */
+  phase: 'held' | 'settling' | 'dropped';
+  id: string | null;
   /** The copy's top, in the container, from the list's numbers at the lift. Never measured. */
   y: number;
   /** Its left edge, null until known (see `LiftState.frame`). */
@@ -111,6 +133,7 @@ export function useLiftDrag<T>({
   isOutside,
   onDrop,
   layoutKey = '',
+  listKey = '',
 }: {
   listRef: RefObject<FlashListRef<T> | null>;
   /** The view the list sits in, which the floating copy is positioned in. */
@@ -126,9 +149,17 @@ export function useLiftDrag<T>({
    * inset.
    */
   layoutKey?: string;
+  /**
+   * Which list is mounted (Poster or List). A new list starts at the top, so the offset
+   * this hook tracks starts at zero with it.
+   */
+  listKey?: string;
 }) {
+  const reduced = useReducedMotion();
   const [state, setState] = useState<LiftState | null>(null);
   const [travel] = useState(() => new Animated.ValueXY({ x: 0, y: 0 }));
+  const [scale] = useState(() => new Animated.Value(LIFT_SCALE));
+  const fallback = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewport = useRef(0);
   const scrollY = useRef(0);
   const auto = useRef<{ timer: ReturnType<typeof setInterval> | null; speed: number }>({
@@ -160,15 +191,22 @@ export function useLiftDrag<T>({
     }
   };
 
-  /** The list's own record of its offset, else the last one this hook was told. */
-  const listScrollTop = () => {
-    try {
-      const offset = listRef.current?.getAbsoluteLastScrollOffset();
-      return typeof offset === 'number' && Number.isFinite(offset) ? offset : scrollY.current;
-    } catch {
-      return scrollY.current;
-    }
-  };
+  /**
+   * **The scroll offset is this hook's own, from the list's scroll events, and nothing
+   * else** (Android QA, 2026-11-20: "the top three posters sometimes stop responding").
+   * `getAbsoluteLastScrollOffset()` is FlashList's tracker offset plus the header height
+   * *now*, and the tracker starts at 0 and stores offsets relative to the header height *at
+   * the last scroll*. So before any scroll, and after the header changes height, it
+   * reported the header's height for a list at the very top: a lift there drew the copy a
+   * header above the finger, over the toolbar, with the slot hidden, and the list view
+   * auto-scrolled the wrong way. The raw `contentOffset.y` this hook records is 0 at mount
+   * and exact after every scroll event.
+   */
+  const scrollTop = () => scrollY.current;
+
+  useEffect(() => {
+    scrollY.current = 0;
+  }, [listKey]);
 
   const frameOf = (current: Live): LiftFrame | null =>
     current.x === null
@@ -179,6 +217,8 @@ export function useLiftDrag<T>({
     setState({
       from: current.from,
       to: current.to,
+      phase: current.phase === 'dropped' ? 'dropped' : 'held',
+      id: current.id,
       frame: frameOf(current),
       outside: current.outside,
       shifts,
@@ -193,7 +233,7 @@ export function useLiftDrag<T>({
 
   const retarget = () => {
     const current = live.current;
-    if (!current) return;
+    if (!current || current.phase !== 'held') return;
     // The centre of the copy under the finger, in the viewport, read back into the list's
     // layout coordinates at the list's current scroll and header.
     const point = {
@@ -201,7 +241,7 @@ export function useLiftDrag<T>({
       y: layoutYAtViewport(
         current.y + current.origin.height / 2 + current.dy,
         firstItemOffset(),
-        scrollY.current,
+        scrollTop(),
       ),
     };
     const hit = hitIndex(point, count, layoutOf);
@@ -244,15 +284,83 @@ export function useLiftDrag<T>({
     if (speed === 0 && auto.current.timer) stopAuto();
   };
 
-  const end = (commit: boolean) => {
+  /** Everything back to rest, at once: the copy gone, the cells in place. */
+  const clear = () => {
     stopAuto();
-    const current = live.current;
+    if (fallback.current) clearTimeout(fallback.current);
+    fallback.current = null;
+    travel.stopAnimation();
+    scale.stopAnimation();
     live.current = null;
     setState(null);
     travel.setValue({ x: 0, y: 0 });
-    if (commit && current && current.start && current.to !== current.from) {
-      onDrop(current.from, current.to);
+    scale.setValue(LIFT_SCALE);
+  };
+
+  /**
+   * **Release** (Android QA, 2026-11-20). The copy glides from under the finger into the slot
+   * it is going to (or back to its own, for a release that moves nothing), shrinking to its
+   * resting size, in `SETTLE_MS`. Only then is the move handed over. The copy and the gap
+   * stay as they are until the caller's list shows the new order (`settle()`), so the copy
+   * becomes the cell in place: no flash of the old order, no duplicate and no blank slot.
+   * Reduce Motion settles at once. A caller that never confirms is released after a moment,
+   * so a refused move cannot leave a copy on screen.
+   */
+  const release = () => {
+    const current = live.current;
+    if (!current || current.phase !== 'held') return;
+    stopAuto();
+    const moved = current.start !== null && current.to !== current.from;
+    const slot = moved ? layoutOf(current.to) : current.origin;
+    if (current.x === null || !slot) {
+      clear();
+      if (moved) onDrop(current.from, current.to);
+      return;
     }
+    current.phase = 'settling';
+    const inset = current.x - current.origin.x;
+    const target = {
+      x: inset + slot.x - current.x,
+      y: itemTopInViewport(slot.y, firstItemOffset(), scrollTop()) - current.y,
+    };
+    const done = () => {
+      if (live.current !== current) return;
+      if (!moved) {
+        clear();
+        return;
+      }
+      current.phase = 'dropped';
+      publish(current);
+      fallback.current = setTimeout(() => {
+        if (live.current === current) clear();
+      }, DROP_FALLBACK_MS);
+      onDrop(current.from, current.to);
+    };
+    if (reduced) {
+      travel.setValue(target);
+      scale.setValue(1);
+      done();
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(travel, {
+        toValue: target,
+        duration: SETTLE_MS,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 1,
+        duration: SETTLE_MS,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(done);
+  };
+
+  /** The caller's list now shows the move: the copy and the gap can go, in this render. */
+  const settle = () => {
+    if (live.current?.phase === 'dropped') clear();
   };
 
   /**
@@ -261,17 +369,22 @@ export function useLiftDrag<T>({
    * The copy's top is computed here, synchronously, from the list (see the header). Only its
    * left edge is measured, and only the first time on a screen: every later lift reuses it.
    */
-  const lift = (index: number, node: View | null) => {
+  const lift = (index: number, node: View | null, id: string | null = null) => {
     const container = containerRef.current;
-    if (live.current || !node || !container || index < 0 || index >= count) return;
+    if (!node || !container || index < 0 || index >= count) return;
+    // A title still settling from the last drop is finished now, rather than refusing the
+    // reader's next long-press: the copy and the gap belong to a move already handed over.
+    if (live.current?.phase === 'dropped') clear();
+    if (live.current) return;
     const origin = layoutOf(index);
     // Not laid out (never expected for a title the reader is touching): nothing to lift.
     if (!origin) return;
-    scrollY.current = listScrollTop();
     const lifted: Live = {
       from: index,
       to: index,
-      y: itemTopInViewport(origin.y, firstItemOffset(), scrollY.current),
+      phase: 'held',
+      id,
+      y: itemTopInViewport(origin.y, firstItemOffset(), scrollTop()),
       x: insetFor(layoutKey) === null ? null : (insetFor(layoutKey) as number) + origin.x,
       origin,
       start: null,
@@ -283,6 +396,7 @@ export function useLiftDrag<T>({
     // the list stops scrolling now rather than a frame from now.
     live.current = lifted;
     travel.setValue({ x: 0, y: 0 });
+    scale.setValue(LIFT_SCALE);
     hapticSelection();
     publish(lifted);
     if (lifted.x !== null) return;
@@ -297,7 +411,7 @@ export function useLiftDrag<T>({
         publish(lifted);
       },
       () => {
-        if (live.current === lifted) end(false);
+        if (live.current === lifted) clear();
       },
     );
   };
@@ -307,32 +421,34 @@ export function useLiftDrag<T>({
   useEffect(() => {
     if (!holding) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!live.current) return false;
-      end(false);
+      if (live.current?.phase !== 'held') return false;
+      clear();
       return true;
     });
     return () => subscription.remove();
-    // `end` reads refs only; re-subscribing on every render would add nothing.
+    // `clear` reads refs only; re-subscribing on every render would add nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holding]);
 
   /** A lift released before the finger moved is not a drop: the press ended it. */
   const releaseWithoutMoving = () => {
-    if (live.current && live.current.start === null) end(false);
+    if (live.current?.phase === 'held' && live.current.start === null) clear();
   };
 
   const containerProps: ViewProps = {
     onLayout: (event: LayoutChangeEvent) => {
       viewport.current = event.nativeEvent.layout.height;
     },
-    onMoveShouldSetResponderCapture: () => live.current !== null,
-    onMoveShouldSetResponder: () => live.current !== null,
+    onMoveShouldSetResponderCapture: () => live.current?.phase === 'held',
+    onMoveShouldSetResponder: () => live.current?.phase === 'held',
     onResponderGrant: (event: GestureResponderEvent) => {
-      if (live.current) live.current.start = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      if (live.current?.phase === 'held') {
+        live.current.start = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      }
     },
     onResponderMove: (event: GestureResponderEvent) => {
       const current = live.current;
-      if (!current?.start) return;
+      if (!current?.start || current.phase !== 'held') return;
       current.dx = event.nativeEvent.pageX - current.start.x;
       current.dy = event.nativeEvent.pageY - current.start.y;
       travel.setValue({ x: current.dx, y: current.dy });
@@ -340,8 +456,12 @@ export function useLiftDrag<T>({
       steer();
     },
     onResponderTerminationRequest: () => false,
-    onResponderRelease: () => end(true),
-    onResponderTerminate: () => end(false),
+    onResponderRelease: () => release(),
+    // The system took the gesture: put the title back at once. Not while settling, when the
+    // finger has already let go and the move is being handed over.
+    onResponderTerminate: () => {
+      if (live.current?.phase === 'held') clear();
+    },
   };
 
   const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -362,12 +482,14 @@ export function useLiftDrag<T>({
   return {
     state,
     travel,
+    scale,
     containerProps,
     onScroll,
     lift,
     releaseWithoutMoving,
     shiftOf,
-    cancel: () => end(false),
+    settle,
+    cancel: clear,
   };
 }
 

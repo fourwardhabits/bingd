@@ -1,5 +1,5 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -47,7 +47,6 @@ import {
   type CollectionSortState,
 } from './filters';
 import { landingBucket, ladderOf, moveActions, notices, screenBlock, type Ladder } from './rerank';
-import { BUCKET_LABEL, type Bucket } from './score';
 import type { RankingCategory } from './use-collection';
 import { useLiftDrag } from './use-lift-drag';
 import type { RerankController } from './use-rerank';
@@ -244,6 +243,8 @@ export function CollectionView({
     // applied, and recategorises the title. The tick and the label say it is happening.
     // The view and the width decide where a cell's left edge sits (Codex, PR 319).
     layoutKey: `${state.mode}:${windowWidth}`,
+    // A new list starts at the top: the offset the drag tracks starts there with it.
+    listKey: state.mode,
     isOutside: (from, to) =>
       ladder ? landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket : false,
     onDrop: (from, to) => {
@@ -258,16 +259,23 @@ export function CollectionView({
     },
   });
   const lifted = drag.state;
-  /** The category the lifted title would land in, when that is not its own. */
-  const crossingInto: Bucket | null =
-    lifted && ladder && lifted.outside ? landingBucket(ladder, lifted.from, lifted.to) : null;
-  const crossLabel = crossingInto ? (
-    <View style={styles.crossLabel} testID="collection-lifted-category">
-      <Text variant="caption" style={styles.crossLabelText} numberOfLines={1}>
-        {`Move to ${BUCKET_LABEL[crossingInto]}`}
-      </Text>
-    </View>
-  ) : null;
+  /**
+   * **The drop has landed in the list** (Android QA, 2026-11-20). After a release the copy
+   * sits in its new slot over the gap the others made. The moment this list is drawn in
+   * the new order (the moved title at `to`), the copy, the gap and the shifts go in this
+   * same render: the copy becomes the cell where it already is, with no frame of the old
+   * order between. The query cache notifies on a later task than the drop, so this is read
+   * from what is drawn rather than assumed from the drop.
+   */
+  const landed =
+    lifted?.phase === 'dropped' &&
+    lifted.id !== null &&
+    visible[lifted.to]?.mediaItemId === lifted.id;
+  const shiftAt = (index: number) => (landed ? null : drag.shiftOf(index));
+  const { settle } = drag;
+  useEffect(() => {
+    if (landed) settle();
+  }, [landed, settle]);
 
   /**
    * What stands in for the titles, when something does: the section's own placeholder
@@ -336,9 +344,11 @@ export function CollectionView({
     if (item.score == null || item.position == null) return explain('unranked');
     if (block) return explain(block);
     if (!ladder || index >= rungCount) return explain('ambiguous');
-    if (rerank.controller.busy) return;
+    // Not refused while the last move is still saving (Android QA, 2026-11-20): a second
+    // drag is queued behind it by the controller, rather than a long-press that does
+    // nothing at all.
     liftedId.current = item.mediaItemId;
-    drag.lift(index, node);
+    drag.lift(index, node, item.mediaItemId);
   };
 
   /** The same moves as a drag, as VoiceOver and TalkBack actions on each rung. */
@@ -526,14 +536,14 @@ export function CollectionView({
         <View style={styles.body} ref={containerRef} {...drag.containerProps}>
         <PosterGridList
           listRef={listRef as RefObject<FlashListRef<PosterTile>>}
-          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${rungCount}:${rerank?.controller.busy}`}
+          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${lifted?.phase}:${landed}:${rungCount}:${rerank?.controller.busy}`}
           scrollEnabled={lifted === null}
           onScroll={drag.onScroll}
           tileExtras={
             rerank
               ? (_tile, index) => {
                   const item = shown[index];
-                  const shift = drag.shiftOf(index);
+                  const shift = shiftAt(index);
                   return {
                     onLongPress: item
                       ? (node) => onLongPressItem(item, index, node)
@@ -560,13 +570,13 @@ export function CollectionView({
           }
           paddingBottom={styles.wall.paddingBottom}
         />
-        {lifted?.frame && shown[lifted.from] ? (
+        {lifted?.frame && !landed && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
               styles.lifted,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
+              { transform: [...drag.travel.getTranslateTransform(), { scale: drag.scale }] },
             ]}
             testID="collection-lifted"
           >
@@ -575,7 +585,6 @@ export function CollectionView({
               width={lifted.frame.width}
               badge={rankLabel(lifted.from)}
             />
-            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -584,7 +593,7 @@ export function CollectionView({
         <FlashList
           ref={listRef as RefObject<FlashListRef<CollectionItem>>}
           data={shown}
-          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${rungCount}:${rerank?.controller.busy}`}
+          extraData={`${lifted?.from ?? -1}:${lifted?.to ?? -1}:${lifted?.phase}:${landed}:${rungCount}:${rerank?.controller.busy}`}
           scrollEnabled={lifted === null}
           onScroll={drag.onScroll}
           scrollEventThrottle={16}
@@ -595,7 +604,7 @@ export function CollectionView({
           ListHeaderComponent={header}
           contentContainerStyle={styles.list}
           renderItem={({ item, index }) => {
-            const shift = rerank ? drag.shiftOf(index) : null;
+            const shift = rerank ? shiftAt(index) : null;
             const label = rankLabel(index);
             const row: TitleRowProps = {
               title: label ? `${label}  ${nameOf(item)}` : nameOf(item),
@@ -652,14 +661,14 @@ export function CollectionView({
             );
           }}
         />
-        {lifted?.frame && shown[lifted.from] ? (
+        {lifted?.frame && !landed && shown[lifted.from] ? (
           <Animated.View
             pointerEvents="none"
             style={[
               styles.lifted,
               styles.liftedRow,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
+              { transform: [...drag.travel.getTranslateTransform(), { scale: drag.scale }] },
             ]}
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
@@ -671,7 +680,6 @@ export function CollectionView({
               posterUri={posterUri((shown[lifted.from] as CollectionItem).posterPath)}
               onPress={() => {}}
             />
-            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -716,9 +724,6 @@ export function CollectionView({
 }
 
 const LIST_POSITION = { disabled: true } as const;
-
-/** How much a lifted title grows, so it reads as picked up. */
-const LIFT_SCALE = 1.04;
 
 /** One Collection title as a wall tile. The lifted copy draws the same tile. */
 const tileOf = (item: CollectionItem): PosterTile => ({
@@ -851,21 +856,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     ...theme.elevation.e2,
   },
-  /**
-   * Over another category: the drop recategorises the title (founder, 2026-11-19), so the
-   * lifted copy names where it is going, on the copy itself, so the label travels with the
-   * finger and never covers the place being dropped on.
-   */
-  crossLabel: {
-    position: 'absolute',
-    top: theme.space[2],
-    alignSelf: 'center',
-    paddingHorizontal: theme.space[2],
-    paddingVertical: theme.space[1],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.semantic.action,
-  },
-  crossLabelText: { color: theme.semantic.actionText },
   hiddenRow: { opacity: 0 },
   fill: { justifyContent: 'center' },
 });
