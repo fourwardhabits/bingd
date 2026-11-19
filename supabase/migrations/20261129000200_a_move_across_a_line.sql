@@ -32,6 +32,11 @@
 --      its new score and bucket (the trigger 20261129000100 installed). No post, comparison,
 --      watch, session or notification is created, and `rankings.created_at` is kept.
 --
+--   5. A third guard, `p_expected_bucket`: the category the client saw the title in (Codex,
+--      PR 319). The position guard cannot see a change of category that kept the position,
+--      so without it a stale Undo could overwrite another device's newer rating. A mismatch
+--      refuses with 55000, like the other two.
+--
 -- Undo is an ordinary move back with the original category passed explicitly. It carries
 -- the same guards, so it is refused rather than misapplied if anything moved in between.
 --
@@ -45,6 +50,7 @@
 -- ===========================================================================
 
 drop function if exists rank_reorder(uuid, integer, uuid, integer, uuid);
+drop function if exists rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket);
 
 create or replace function rank_reorder(
   p_media_item_id        uuid,
@@ -52,7 +58,8 @@ create or replace function rank_reorder(
   p_operation_id         uuid    default null,
   p_expected_position    integer default null,
   p_anchor_media_item_id uuid    default null,
-  p_new_bucket           taste_bucket default null
+  p_new_bucket           taste_bucket default null,
+  p_expected_bucket      taste_bucket default null
 )
 returns jsonb
 language plpgsql security definer
@@ -108,6 +115,13 @@ begin
   if p_expected_position is not null and v_r.position <> p_expected_position then
     raise exception 'the ranking changed: this title is at % now, not %',
       v_r.position, p_expected_position
+      using errcode = '55000';
+  end if;
+
+  -- The category the client saw, which the position guard cannot see change on its own.
+  if p_expected_bucket is not null and v_r.bucket <> p_expected_bucket then
+    raise exception 'the ranking changed: this title is % now, not %',
+      v_r.bucket, p_expected_bucket
       using errcode = '55000';
   end if;
 
@@ -216,16 +230,17 @@ begin
 end;
 $$;
 
-comment on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket) is
+comment on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket, taste_bucket) is
   'Moves a ranked title to another place in its own ranking (Collection drag-to-rerank, #318). '
   'p_new_bucket (default: its own) is the rating category of the place it is dropped in; the '
   'position must be a place in that category once the title has left its own, else 22023. '
   'A change of category writes rankings.bucket and user_media.bucket together. Optional '
-  'guards refuse a move computed from a stale list (55000). Every move writes one manual '
+  'guards refuse a move computed from a stale list (55000): position, target title and '
+  'category. Every move writes one manual '
   'ranking_placements row; a no-op or a refusal writes nothing. Never writes a comparison, '
   'watch, feed post or notification. Cross-category since 20261129000200.';
 
-revoke execute on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket)
+revoke execute on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket, taste_bucket)
   from public, anon;
-grant  execute on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket)
+grant  execute on function rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket, taste_bucket)
   to authenticated;

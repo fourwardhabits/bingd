@@ -463,7 +463,9 @@ const toNumber = (value: unknown): number | null =>
  * so a ranking changed by another device is never moved by a stale index.
  *
  * `toBucket` is sent only for a move that changes the title's rating category
- * (20261129000200). A move inside one category sends exactly the call it always did.
+ * (20261129000200). `expectedBucket` is where the screen drew the title: a change of category
+ * that kept its position is invisible to the position guard, so without it a stale Undo could
+ * overwrite another device's newer rating.
  */
 export async function reorderRanking(input: {
   operationId: string;
@@ -472,6 +474,8 @@ export async function reorderRanking(input: {
   expectedPosition: number;
   anchorId: string;
   toBucket?: string;
+  /** The category the screen drew the title in: the third stale-list guard (Codex, PR 319). */
+  expectedBucket?: string;
 }): Promise<ReorderResult> {
   const { data, error } = await supabase.rpc('rank_reorder', {
     p_media_item_id: input.mediaItemId,
@@ -480,6 +484,7 @@ export async function reorderRanking(input: {
     p_expected_position: input.expectedPosition,
     p_anchor_media_item_id: input.anchorId,
     ...(input.toBucket ? { p_new_bucket: input.toBucket } : {}),
+    ...(input.expectedBucket ? { p_expected_bucket: input.expectedBucket } : {}),
   });
 
   if (error) {

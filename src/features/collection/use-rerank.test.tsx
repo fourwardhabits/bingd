@@ -130,6 +130,7 @@ describe('a move', () => {
       expectedPosition: 3,
       anchorId: 'a',
       toBucket: undefined,
+      expectedBucket: 'loved',
     });
 
     await act(async () => answer.resolve(await lands()({ mediaItemId: 'c', toPosition: 1 })));
@@ -184,6 +185,7 @@ describe('a move', () => {
       expectedPosition: 3,
       anchorId: 'd',
       toBucket: 'fine',
+      expectedBucket: 'loved',
     });
     await act(async () =>
       answer.resolve(await lands(4.6)({ mediaItemId: 'c', toPosition: 4, toBucket: 'fine' })),
@@ -201,6 +203,7 @@ describe('a move', () => {
       expectedPosition: 4,
       anchorId: 'd',
       toBucket: 'loved',
+      expectedBucket: 'fine',
     });
     const restored = client.getQueryData<RankedEntry[]>(KEY);
     expect(order(restored)).toEqual(['a', 'b', 'c', 'd']);
@@ -303,6 +306,8 @@ describe('Undo', () => {
       expectedPosition: 1,
       // After the move, b holds #3: c is put back directly below it.
       anchorId: 'b',
+      toBucket: undefined,
+      expectedBucket: 'loved',
     });
     expect(order(client.getQueryData(KEY))).toEqual(['a', 'b', 'c', 'd']);
     expect(result.current.notice?.message).toBe('Moved “Title c” back to #3');

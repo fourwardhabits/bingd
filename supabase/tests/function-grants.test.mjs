@@ -152,7 +152,7 @@ const ALLOWED = {
   // supersedes the epic's §Q non-goal) taught it to write a `manual` placement first, as
   // §E.1 required, added two stale-list guards, and granted it back. The old three-argument
   // form is dropped, so every installed call resolves to this one.
-  'rank_reorder(uuid,integer,uuid,integer,uuid,taste_bucket)': ['authenticated'],
+  'rank_reorder(uuid,integer,uuid,integer,uuid,taste_bucket,taste_bucket)': ['authenticated'],
   //
   // 20261114000300 added a trailing `p_linked_placement_id` (default null) to both
   // correction RPCs, for Update Show, and dropped the old forms rather than overloading

@@ -10,7 +10,7 @@
 begin;
 
 -- The 20261129000100 body, verbatim except for the signature it drops.
-drop function if exists rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket);
+drop function if exists rank_reorder(uuid, integer, uuid, integer, uuid, taste_bucket, taste_bucket);
 
 create or replace function rank_reorder(
   p_media_item_id        uuid,

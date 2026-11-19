@@ -103,6 +103,7 @@ export function useRerank(userId: string) {
       expectedPosition: move.fromPosition,
       anchorId: move.anchorId,
       toBucket: crosses(move) ? move.toBucket : undefined,
+      expectedBucket: move.bucket,
     });
 
     const rollBack = () => {

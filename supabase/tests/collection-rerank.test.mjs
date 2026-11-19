@@ -757,6 +757,19 @@ describe('a move across a rating category', () => {
     assert.equal((await manual()).length, 0);
   });
 
+  it('a stale category is refused (55000): a newer rating from another device is not overwritten', async () => {
+    // Codex, PR 319: only A ranked. Device 1 moves A loved -> fine at #1; device 2 moves it
+    // fine -> not_for_me at #1; device 1's Undo (fine -> loved, expected fine) must not land.
+    const [a] = await band(1, 'loved');
+    await cross(a, 1, 'fine', { id: await op(), expected: 1 });
+    await t.sql(`select rank_reorder($1, 1, $2, 1, null, 'not_for_me', 'fine')`, [a, await op()]);
+    const err = await t.errorFrom(`select rank_reorder($1, 1, $2, 1, null, 'loved', 'fine')`, [a, await op()]);
+    assert.equal(err?.code, '55000');
+    assert.equal(await bucketOf(a), 'not_for_me', "device 2's rating stands");
+    assert.equal(await collectionBucket(a), 'not_for_me');
+    await valid();
+  });
+
   it('a replayed operation id crosses once (I5)', async () => {
     const loved = await band(3, 'loved');
     const fine = await band(2, 'fine');
