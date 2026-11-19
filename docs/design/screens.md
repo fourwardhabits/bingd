@@ -1319,6 +1319,44 @@ Follow stories are Feed-only. A profile's Recent activity is what somebody watch
 "followed Ravi and 4 others" between two rankings there is the audit entry this section
 refuses to build.
 
+### One engagement row on every post, and links that open the list — 2026-11-19
+
+Founder decision. Every Feed post now draws the cinematic card's labelled row, as
+`EngagementRow`: **Like · Comment** on everything, plus **Save · Share** on an individual
+title's post, in equal-width columns with 44pt targets. Before this an award or a goal (drawn
+through `ActivityRow`) showed two tiny glyphs beside its timestamp, and a grouped post put its
+Like and Comment at opposite edges of the card. Like keeps the reaction grammar (tap for the
+heart, hold for the six, the summary line opens who reacted); Comment opens the sheet and
+shows the count once there is one. The profile and the conversation page keep the compact row.
+
+| Post | Like | Comment | Save | Share |
+| --- | --- | --- | --- | --- |
+| A title (ranked, logged, season, watchlist add) | ✓ | ✓ | ✓, not on the reader's own | ✓, the Recommend sheet |
+| A group (ranking sitting, grouped watchlist), rail or fallback card | ✓ | ✓ | — | — |
+| An award, a goal | ✓ | ✓ | — | — |
+
+A group used to keep its representative title's Save and Share whenever its preview failed
+and it fell back to the card. Both act on one member of the group, so a group has neither.
+
+**Share is missing on awards and groups on purpose, and needs backend work to add.** The
+only share behaviour a post has is the title's: Recommend, which ends in "Share off bingd"
+with `https://bingd.app/title/<id>`. An award or a group has no address anyone outside the
+app could open. `bingd://activity/<id>` is in-app only, and the universal links
+(`app.config.ts`) cover `/u/`, `/lists/`, `/title/` and `/i/`. Sharing either needs a public
+`bingd.app/activity/<id>` page (or an award or group page) with the routing, the
+association-file and intent-filter entries, and a read that respects the post's visibility
+for a signed-out or non-following viewer. Until that exists the row offers no Share rather
+than a dead one.
+
+**"and others" is a link.** "and **3 others**", "and **1 other**", "and **2 more**",
+"ranked **6 titles**" and "watched with Anna and **2 others**" are set in the entity
+treatment (semibold, primary ink), which is how a sentence here marks what can be touched.
+Each opens the complete list: the watchlist group, the ranking sitting, or the people they
+watched with. The press is the link's alone, and never opens the representative title. The
+companions sheet reads nothing: it lists the post's own names, which are exactly the set the
+count was taken from. They are names and not profiles, because the post carries no usernames
+for its companions.
+
 ---
 
 ## 8. Recommendations — reworked 2026-08-15
