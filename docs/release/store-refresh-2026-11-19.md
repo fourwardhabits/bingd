@@ -2,16 +2,16 @@
 
 **Goal:** one App Store submission that carries both the plain-text name change (`bingd.` → `bingd`) and the refreshed six-screenshot set. Never two review cycles. Bundle identifier (`app.bingd`), Apple team (`98729PG8GD`), app record (`6803954532`) and the brand stay as they are. The graphic wordmark inside the app and the screenshots keeps its period.
 
-**Status on 2026-11-19: prepared, not submitted.** Nothing has been uploaded to App Store Connect or Google Play, and no production binary has been built. Assets: `store-assets/listings/2026-11-19-refresh/` (branch `claude/launch-a-store-refresh`). Binary config: branch `claude/launch-a-store-binary-1.2.0`.
+**Status on 2026-11-19, 23:30 UTC: release candidate gated, not built, not submitted.** The founder approved building 1.2.0 for iOS and Android from one release commit. `release/2026-11-19-store-1.2.0` (`5821cb36`) passed the release gate, but the production build **cannot run from the cloud session** (§10). It has to run on the founder's machine. Nothing has been uploaded to App Store Connect or Google Play. Assets: `store-assets/listings/2026-11-19-refresh/` (branch `claude/launch-a-store-refresh`).
 
-|                      | State                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------- |
-| Six cards, all slots | Done, except card 03's new feed capture                                                         |
-| Card 03 feed swap    | **Waiting for one input:** `Screenshot_20261119_160109_bingd.jpg` (not in the repo or on Drive) |
-| Card 06              | Unchanged by decision (no stronger capture exists)                                              |
-| Metadata             | Name, version and What's New drafted; live text not readable from here                          |
-| New binary           | Prepared (1.2.0 on `a3300bf`), **not built**: needs the coordinator's go                        |
-| App Store Connect    | No direct access from this environment                                                          |
+|                      | State                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| Six cards, all slots | Done, except card 03's new feed capture                                                            |
+| Card 03 feed swap    | **Waiting for one input:** `Screenshot_20261119_160109_bingd.jpg` (not in the repo or on Drive)    |
+| Card 06              | Unchanged by decision (no stronger capture exists)                                                 |
+| Metadata             | Name, version and What's New drafted; live text not readable from here                             |
+| New binary           | Approved; `release/2026-11-19-store-1.2.0` gate **passed**; **not built** (§10: founder's machine) |
+| App Store Connect    | No direct access from this environment                                                             |
 
 ---
 
@@ -137,31 +137,81 @@ Recommendation: build iOS and Android 1.2.0 from the same release commit, and me
 
 ## 8. Exact submission plan
 
-Steps 2–4 are the coordinator's call to escalate. They are not started.
+The founder approved 1.2.0 for **both** iOS and Android from the same release commit (relayed by the coordinator, 2026-11-19).
 
-1. **Card 03** (whoever has the file): run the swap (§4), sign off the redaction, commit and push to `claude/launch-a-store-refresh`. Founder/coordinator glances at `review/contact-sheet.png`.
-2. **Release branch:** `git push origin 5821cb36:refs/heads/release/2026-11-19-store-1.2.0`. `release-gate.yml` runs on its own for `release/**`; wait for it to pass.
-3. **Build** (on that branch, clean tree): `node scripts/release.mjs build production --platform ios --non-interactive --wait`. EAS assigns build number **16** (remote auto-increment; last `app.bingd` build was 15). Optionally the same with `--platform android` (vc16) for a hand upload to Play. A dry run on the prepared branch refuses, as it should: the branch name is not `main`/`release/*` and no gate has run.
-4. **Upload to App Store Connect:** `eas submit --platform ios --profile production --id <build id> --non-interactive` (the stored ADMIN key does this; no review is requested).
-5. **Metadata, in the same version** (founder in App Store Connect, or `eas metadata:pull` → `apply-refresh.mjs store.config.json --version 1.2.0` → read the diff → `eas metadata:push` if `api.appstoreconnect.apple.com` is allowed):
-   - create version **1.2.0** (or use one already in Prepare for Submission and match the binary to it);
-   - App Information → Name **`bingd`**; subtitle unchanged;
-   - 1.2.0 → en-US → iPhone screenshots: upload `apple-1206x2622/` to _iPhone with Dynamic Island (medium display)_ and `apple-1320x2868/` to the large display, six each, in file-name order; in Media Manager, delete any other iPhone sets (6.5", 5.5") so nothing old remains;
-   - description: change `bingd.` only where it is the name; What's New: confirm the draft;
-   - select build 1.2.0 (16); export compliance answers itself (`ITSAppUsesNonExemptEncryption: false`); release option: manual.
-6. **Before submitting:** sign in to the App Review demo account on a production install via _More sign-in options → Sign in with password_ (`store-review-access.md`). The 2026-11-15 auth change (H-2, `357bb126`) touched password handling.
-7. **Submit for Review: founder, in App Store Connect.** Name and screenshots go in this one submission.
-8. **After approval:** release manually; update `production-state.md`, `config/live-runtimes.json`, the `SHIPPED` table in `supabase/tests/legacy-client-compat.test.mjs`, and `next-binary-checklist.md`; decide when the bump reaches `main` (§7).
+1. **Card 03** (whoever has the file): run the swap (§4), sign off the redaction, commit and push to `claude/launch-a-store-refresh`. Then the founder or coordinator glances at `review/contact-sheet.png`.
+2. **Release branch: DONE.** `release/2026-11-19-store-1.2.0` = `5821cb36`. Its diff from `a3300bf0` is `app.config.ts` only (version, photo-permission text). The release gate passed: <https://github.com/fourwardhabits/bingd/actions/runs/44632916599> (2026-11-19 23:07 UTC).
+3. **Build: on the founder's machine** (§10 explains why not here), from a clean checkout of that branch with `./google-services.json` in the project root, as for 1.1.0:
+   ```sh
+   git fetch origin && git checkout release/2026-11-19-store-1.2.0   # HEAD must be 5821cb36
+   node scripts/release.mjs build production --platform ios --non-interactive --wait
+   node scripts/release.mjs build production --platform android --non-interactive --wait
+   ```
+   Expected: iOS **1.2.0 (16)** and Android **1.2.0, versionCode 16**. `appVersionSource: remote` auto-increments, and the last production `app.bingd` builds are 15 on both. Read the real numbers off the build pages.
+4. **Upload iOS to App Store Connect:** `eas submit --platform ios --profile production --id <iOS build id> --non-interactive`. It needs no machine-local secret (EAS signs with its stored ADMIN key), so an agent here can run it once the build exists. It requests no review.
+5. **Android:** no Play service account, so no `eas submit`. Download the `.aab` from the build page on expo.dev, signed in to the `fourward` account, and upload it by hand in Play Console. The artifact link is not recorded here.
+6. **Metadata, in the same version**: the founder's checklist, §12.
+7. **Submit for Review: the founder, in App Store Connect.** The name and the screenshots go in this one submission.
+8. **After approval:** release manually, then do §11.
 
-**Google Play** (lower priority, never blocks Apple): no API upload path. In Play Console, founder: store listing → app name **`bingd`**; phone screenshots from `play-1080x1920/` in order; feature graphic: keep the live one unless `play-feature-graphic-1024x500.png` is wanted. A Play listing change needs no new binary.
+**Google Play listing** (lower priority, never blocks Apple; no API upload path). In Play Console, the founder sets the app name to **`bingd`** and uploads the phone screenshots from `play-1080x1920/` in order. Keep the live feature graphic unless `play-feature-graphic-1024x500.png` is wanted. A listing change needs no binary, so it can go with or before the 1.2.0 rollout.
 
 ## 9. Outstanding actions
 
-|   # | Action                                                                                                                                           | Who                              | Blocks                         |
-| --: | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------------------------------ |
-|   1 | Provide `Screenshot_20261119_160109_bingd.jpg`, then run the card 03 swap and sign off the redaction                                             | Founder (file); any agent (swap) | Screenshot upload              |
-|   2 | Approve building the 1.2.0 production binary from `5821cb36`, and the runtime plan in §7                                                         | Coordinator → founder            | Steps 2–4                      |
-|   3 | Optional: allow `api.appstoreconnect.apple.com` in this environment's network settings, so metadata can be pulled and pushed with `eas metadata` | Founder (environment settings)   | Nothing: the manual path works |
-|   4 | Confirm What's New text and the 1.2.0 version number                                                                                             | Founder                          | Step 5                         |
-|   5 | Enter name and screenshots, select the build, Submit for Review                                                                                  | Founder in App Store Connect     | Submission                     |
-|   6 | Play listing name and screenshots                                                                                                                | Founder in Play Console          | Nothing on Apple               |
+|   # | Action                                                                                               | Who                                                       | Blocks                            |
+| --: | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------- |
+|   1 | Provide `Screenshot_20261119_160109_bingd.jpg`, then run the card 03 swap and sign off the redaction | Founder (file); any agent (swap)                          | Screenshot upload                 |
+|   2 | Run the two production builds (§8 step 3)                                                            | **Founder, on their machine** (or decide option B in §10) | iOS submit, Android upload        |
+|   3 | `eas submit` the iOS build                                                                           | Any agent, or the founder                                 | App Store Connect build selection |
+|   4 | Confirm What's New text                                                                              | Founder                                                   | §12                               |
+|   5 | §12 in App Store Connect, then Submit for Review                                                     | Founder                                                   | Submission                        |
+|   6 | Upload the Android `.aab`; Play listing name and screenshots                                         | Founder in Play Console                                   | Nothing on Apple                  |
+|   7 | Optional: allow `api.appstoreconnect.apple.com` in this environment, to use `eas metadata`           | Founder (environment settings)                            | Nothing: the manual path works    |
+|   8 | After both 1.2.0 binaries are live: §11                                                              | Coordinator                                               | OTAs to 1.2.0 installs            |
+
+## 10. Build attempt from the cloud session, 2026-11-19
+
+- `node scripts/release.mjs build production --platform ios --non-interactive --wait` on `release/2026-11-19-store-1.2.0`: the script's own guards **passed** (clean tree, `release/*` branch, release gate run 44632916599). Then `eas build` stopped **before uploading anything**. Resolving `app.config.ts` threw: _"A production build needs Android push configuration and there is none"_ (`config/push.cjs`). EAS lists no new build.
+- **Cause.** The production lane needs `google-services.json` while the config is evaluated, and that happens on the machine that runs `eas build`. On EAS the file is `GOOGLE_SERVICES_JSON`, a FILE variable with visibility **SECRET**. eas-cli loads only _Plain text_ and _Sensitive_ variables into a local run, so a cloud session cannot see it. The 1.1.0 binaries were built from the founder's CLI (user `fourward`, eas-cli 21.8.0), which has the git-ignored local file.
+- **Not worked around.** A placeholder `google-services.json` would get past a guard written to stop a production binary from shipping without working Android push. It was not tried.
+- **Options:**
+  - **A (recommended).** The founder runs §8 step 3 on their machine. It is two commands, and the same path 1.1.0 took.
+  - **B.** The founder changes `GOOGLE_SERVICES_JSON` (production) to visibility _Sensitive_. It is a Firebase client config that ships inside every APK anyway. A cloud agent could then run the builds. It is a credential-policy change, so it is the founder's decision.
+  - **C.** A server-side EAS build workflow. This is a new, unreviewed release path; not recommended for today.
+
+## 11. After both 1.2.0 binaries are live: the version bump and `config/live-runtimes.json`
+
+> **Reminder: do not merge the 1.2.0 bump (`5821cb36`, `app.config.ts`) into `main` until iOS 1.2.0 and Android 1.2.0 are both live in their stores.**
+
+**`config/live-runtimes.json` needs no change on `main` now, and could not usefully take one.**
+
+- **What the gate checks.** `.eas/workflows/ota-production.yml` publishes only from `main`. `scripts/ota-gate.mjs runtimes` requires the cloud fingerprint of that commit to _equal_ the single `production.{ios,android}.runtime` listed in `config/live-runtimes.json`.
+- **While `main` is at 1.1.0,** its fingerprints are `8ea562b7` / `ec79e181`. The file must keep listing those, or OTAs to the 1.1.0 installs stop.
+- **No OTA can reach the 1.2.0 runtimes yet.** Getting one there takes a commit on `main` that carries 1.2.0 and a file that lists the 1.2.0 runtimes. Until then, 1.2.0 installs run their embedded `a3300bf0`, which is today's production code.
+
+**When both are live, one change to `main`:**
+
+1. Merge `5821cb36` (the bump).
+2. In the same change, set `config/live-runtimes.json` → `production.ios` = `{ runtime: <iOS 1.2.0 runtime from the build page>, build: <iOS build id>, version: "1.2.0 (16)" }`, and the same for `production.android` with its runtime, build id and `"1.2.0 (16)"`.
+3. Update `production-state.md`, the `SHIPPED` table in `supabase/tests/legacy-client-compat.test.mjs`, and `next-binary-checklist.md` (§1 and §3 delivered by this binary).
+
+From then on, OTAs from `main` reach 1.2.0 and **no longer reach 1.1.0 installs**. Those keep the last OTA they got (`a3300bf0` or later) and are prompted by the store to update. The file holds one runtime per platform, so serving both trains would need a second publish from a 1.1.0 tree, as in 1.0.1's time.
+
+## 12. Founder's App Store Connect checklist
+
+Do this when the iOS build shows in App Store Connect (after §8 steps 3–4), and after card 03 is swapped. **Build: 1.2.0 (16)**: expected, so confirm the number on the EAS build page before selecting it.
+
+1. **Apps → bingd → (+) iOS App version: `1.2.0`.** If a version is already in _Prepare for Submission_, rename it to 1.2.0 instead.
+2. **App Information → Name: `bingd`** (5 characters, no period). Leave the subtitle, category and privacy policy URL as they are. Save.
+3. **1.2.0 → English (U.S.) → Previews and Screenshots → View All Sizes in Media Manager:**
+   - **iPhone 6.9" Display** (large, Dynamic Island): delete the current images, then upload the six files in `store-assets/listings/2026-11-19-refresh/apple-1320x2868/` in file-name order (01 … 06).
+   - **iPhone 6.3" Display** (medium, Dynamic Island): delete the current images, then upload the six in `apple-1206x2622/` in the same order.
+   - **Any other iPhone size** that still holds its own images (6.5", 6.1", 5.5"): delete them, so it scales from the new sets.
+   - Check the order on the product-page preview: 1 collection, 2 head-to-head, 3 friends, 4 for you, 5 watchlist, 6 goals and Awards.
+4. **Description:** change `bingd.` to `bingd` only where it is the app's name (for example, the first line `bingd. is a home for what you watch.`). Leave `bingd.app` links alone, and leave a period that ends a sentence. Keywords and promotional text: no change.
+5. **What's New in This Version:** paste the confirmed text (draft in §5).
+6. **Build → (+) → 1.2.0 (16).** Export compliance should not be asked (`ITSAppUsesNonExemptEncryption: false`).
+7. **App Review Information:** the demo account and notes are unchanged. **Before submitting**, sign in with it once on a production install (_More sign-in options → Sign in with password_): the 2026-11-15 password change (H-2) touched that path.
+8. **Version Release: Manually release this version.**
+9. **Add for Review → Submit to App Review.** Check that the submission lists both the App Information change (the name) and version 1.2.0 (the screenshots). One submission, one review.
+10. After approval: **Release This Version**, then tell the coordinator, so §11 can run once Android 1.2.0 is live as well.
