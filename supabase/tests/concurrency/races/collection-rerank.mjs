@@ -37,6 +37,11 @@ import { fire, newOp, raceContext } from './_shared.mjs';
  * racing a move of the promoted show waits on the media lock and is refused once the move
  * lands (CR9); and a promotion rolled back leaves no collection row, ranking, placement,
  * record or watch, while the promotion behind it lands (CR10). W1 holds after each.
+ *
+ * **CR11–CR12 (Codex, PR 319).** Two devices removing a promoted show's last two seasons
+ * serialise their commit-time evidence check on the series, so the second backfills the
+ * show's undated event and W1 holds (CR11). A promotion waiting behind its last season's
+ * unranking re-checks inside the seasons' category lock and is refused (CR12).
  */
 export default function suite() {
   const rc = raceContext();
@@ -630,6 +635,93 @@ export default function suite() {
       const [{ n }] = await db.rows(`select count(*)::int as n from show_promotions where user_id = $1`, [user]);
       assert.equal(n, 1);
       assert.equal(await ownWatches(user, avg), 0, 'no watch at commit either');
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR11: two devices removing the last two seasons of a promoted show serialise, and W1 holds', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg, season } = await tvWall(user, 1, 'CR11');
+      const setup = await db.session('setup');
+      await setup.actAs(user);
+      const second = await fx.createSeason(avg, 2);
+      let step = (await setup.one(`select rank_start($1, 'loved') as r`, [second])).r;
+      while (!step.done) step = (await setup.one(`select rank_answer($1, $2) as r`, [step.session_id, step.pivot])).r;
+      await setup.q(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [avg, await newOp(db), shows[0]]);
+      // Unranked but still logged: their watches are the show's evidence.
+      await setup.q(`select rank_unrank($1, $2)`, [season, await newOp(db)]);
+      await setup.q(`select rank_unrank($1, $2)`, [second, await newOp(db)]);
+      await setup.end();
+      assert.equal(await ownWatches(user, avg), 0);
+
+      const key = (
+        await db.rows(`select hashtextextended('series-evidence:' || $1 || ':' || $2, 0)::text as k`, [user, avg])
+      )[0].k;
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      // A removes one season and holds the show's evidence key, as its own commit-time
+      // check would; B removes the other and commits.
+      await a.begin();
+      await a.q(`select unlog($1, $2)`, [await newOp(db), season]);
+      await a.q(`select pg_advisory_xact_lock($1::bigint)`, [key]);
+      await b.begin();
+      await b.q(`select unlog($1, $2)`, [await newOp(db), second]);
+      const committing = b.start('commit');
+      const waiting = await b.awaitBlocked({ on: 'advisory', advisoryKey: key });
+      assert.equal(waiting.wait_event, 'advisory', "B's commit-time check waits for the show's key");
+
+      await a.commit();
+      await committing;
+
+      const events = await db.rows(
+        `select basis from watch_events where user_id = $1 and media_item_id = $2`,
+        [user, avg],
+      );
+      assert.deepEqual(events.map((e) => e.basis), ['none'], 'the second to commit backfilled the show');
+      await tvValid(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR12: a promotion waiting behind its last season being unranked re-checks, and is refused', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const { shows, avg, season } = await tvWall(user, 1, 'CR12');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_unrank($1, $2)`, [season, await newOp(db)]);
+
+      await b.begin();
+      const promoting = b.errorFrom(`select rank_promote_show($1, 1, 'loved', $2, $3)`, [
+        avg,
+        await newOp(db),
+        shows[0],
+      ]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.categoryKey(user, 'tv_seasons') });
+
+      await a.commit();
+      const refusal = await promoting;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'no ranked season by the time it ran');
+      assert.deepEqual(await showOrder(user), [shows[0]]);
+      const [{ n }] = await db.rows(
+        `select count(*)::int as n from user_media where user_id = $1 and media_item_id = $2`,
+        [user, avg],
+      );
+      assert.equal(n, 0);
       await tvValid(user);
 
       await a.end();

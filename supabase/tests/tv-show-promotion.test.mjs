@@ -264,24 +264,22 @@ describe('rank_unpromote_show', () => {
     await valid();
   });
 
-  it('puts back the watchlist entry the rating consumed, with its own date', async () => {
+  it('leaves the watchlist as it is, through the promotion and its Undo', async () => {
+    // A placement is not a watch signal (Codex, PR 319): a series stays on the watchlist
+    // until its released seasons are seen, and a drag does not change that. So no watchlist
+    // award can be revoked by a promotion, and Undo has nothing to put back.
     const { shows, avg } = await wall();
     await ctx.t.sql(
       `insert into watchlist (user_id, media_item_id, created_at) values ($1, $2, '2026-01-02T03:04:05Z')`,
       [ctx.user, avg],
     );
+    const entry = () =>
+      rows(`select created_at from watchlist where user_id = $1 and media_item_id = $2`, [ctx.user, avg]);
+    const before = await entry();
     const r = await promote(avg, 1, 'loved', shows[0]);
-    assert.equal(
-      (await rows(`select 1 from watchlist where user_id = $1 and media_item_id = $2`, [ctx.user, avg])).length,
-      0,
-      'a rated show leaves the watchlist',
-    );
+    assert.deepEqual(await entry(), before, 'still on the watchlist after the promotion');
     await unpromote(avg, r.placement_id, 1);
-    const [w] = await rows(`select created_at from watchlist where user_id = $1 and media_item_id = $2`, [
-      ctx.user,
-      avg,
-    ]);
-    assert.equal(new Date(w.created_at).toISOString(), '2026-01-02T03:04:05.000Z');
+    assert.deepEqual(await entry(), before, 'and after its Undo');
     await valid();
   });
 

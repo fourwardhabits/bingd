@@ -464,10 +464,11 @@ revoke execute on function _correction_follows_latest_watch() from public, anon,
 -- **What it is not.** It is not a watch, a log or a post. A ranking needs a collection
 -- row (I3 and `ranking_placements_collection_fk`), and creating one would ordinarily set
 -- off the watch backstop (an undated "watched, time unknown" event), the rankings award
--- (an award post) and the provenance flip. Each of those listens for `_show_promoting`,
--- which is true only inside the promotion's own transaction and only for its own title.
--- The watchlist rule is NOT suspended: a show the reader has just rated leaves the
--- watchlist as it would for any rating, and Undo puts the entry back.
+-- (an award post), the watchlist rule and the provenance flip. Each of those listens for
+-- `_show_promoting`, which is true only inside the promotion's own transaction and only for
+-- its own title. A placement is not a watch signal, so a show still on the watchlist (a
+-- series stays there until its released seasons are seen) stays on it; nothing about it
+-- has to be restored by Undo, and no watchlist award can be revoked by a promotion.
 --
 -- **Evidence.** The series row has no watch event of its own. W1 now accepts a series'
 -- seasons' events as its evidence (`_show_seen_through_seasons`, the same rule
@@ -511,6 +512,22 @@ comment on function _show_seen_through_seasons(uuid, uuid) is
   'with none of its own (20261129000300).';
 revoke execute on function _show_seen_through_seasons(uuid, uuid) from public, anon, authenticated;
 
+/**
+ * One promoted show's evidence, checked and backfilled by one transaction at a time (Codex,
+ * PR 319): the promotion's commit-time backstop and a season removal's commit-time check
+ * must each see what the other committed, or both can pass and leave a ranked show with no
+ * evidence at all. A transaction-scoped key, released at commit.
+ */
+create or replace function _lock_series_evidence(p_user uuid, p_series uuid)
+returns void
+language sql
+set search_path = public
+as $$
+  select pg_advisory_xact_lock(
+    hashtextextended('series-evidence:' || p_user::text || ':' || p_series::text, 0));
+$$;
+revoke execute on function _lock_series_evidence(uuid, uuid) from public, anon, authenticated;
+
 create table show_promotions (
   id               uuid primary key default gen_random_uuid(),
   user_id          uuid not null references profiles(id) on delete cascade,
@@ -521,15 +538,12 @@ create table show_promotions (
   -- The collection row before the promotion: whether there was one, and its category.
   had_row          boolean not null,
   prior_bucket     taste_bucket,
-  -- The watchlist entry the rating consumed, if there was one, so Undo can put it back
-  -- with its own date.
-  watchlist_since  timestamptz,
   created_at       timestamptz not null default now(),
   undone_at        timestamptz
 );
 comment on table show_promotions is
-  'One row per TV wall promotion (rank_promote_show): what the collection row and the '
-  'watchlist were before, so rank_unpromote_show can restore them. Server-only.';
+  'One row per TV wall promotion (rank_promote_show): what the collection row was before, so '
+  'rank_unpromote_show can restore it. Server-only.';
 
 create index show_promotions_user_item on show_promotions (user_id, media_item_id);
 create unique index show_promotions_placement on show_promotions (placement_id)
@@ -571,8 +585,14 @@ begin
   -- series' evidence (`assert_watch_history_valid` below), so the backstop has nothing to
   -- add. Scoped to the promotion's own transaction and title by the marker, and to a
   -- series that has that evidence; every other writer still gets the backstop verbatim.
-  if _show_promoting(new.media_item_id) and _show_seen_through_seasons(new.user_id, new.media_item_id) then
-    return null;
+  if _show_promoting(new.media_item_id) then
+    -- Serialised with a season removal's own check (Codex, PR 319): whichever commits
+    -- second sees the other. If the seasons' evidence went first, the show gets its
+    -- ordinary backstop event below; W1 holds either way.
+    perform _lock_series_evidence(new.user_id, new.media_item_id);
+    if _show_seen_through_seasons(new.user_id, new.media_item_id) then
+      return null;
+    end if;
   end if;
 
   if exists (
@@ -765,7 +785,7 @@ comment on function assert_watch_history_valid(uuid) is
 revoke execute on function assert_watch_history_valid(uuid) from public, anon, authenticated;
 
 -- ===========================================================================
--- 6. What a promotion does not set off: an award post, a provenance flip
+-- 6. What a promotion does not set off: an award post, a watchlist removal, a provenance flip
 -- ===========================================================================
 
 create or replace function _award_touch_ranking()
@@ -784,21 +804,120 @@ end;
 $$;
 revoke execute on function _award_touch_ranking() from public, anon, authenticated;
 
-create or replace function _award_touch_watchlist()
+create or replace function _leave_watchlist()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
+declare
+  -- ===========================================================================
+  -- WHY THE ROW IS READ AS JSON AND NOT AS FIELDS
+  --
+  -- One trigger function is now attached to three tables with three different shapes.
+  -- **plpgsql resolves `new.<field>` when it PARSES the statement, not when it
+  -- evaluates it**, so a `case` whose `rankings` branch names `new.created_at` fails
+  -- with `record "new" has no field "created_at"` the first time a `watch_events`
+  -- insert reaches it -- the branch is never taken and it fails anyway. Caught by
+  -- watch-events.test.mjs on the first run, which is the point of running it.
+  --
+  -- `to_jsonb(new)` works on any record shape, and an absent key is a null rather than
+  -- an error. The branch that is not taken reads a null it never looks at.
+  -- ===========================================================================
+  v_new jsonb := to_jsonb(new);
+  -- Whether this event is the title's FIRST viewing. See the note on the chronology
+  -- guard below; only the `watch_events` branch reads it.
+  v_first boolean;
 begin
-  -- 20261129000300: undoing a promotion puts back the watchlist entry it consumed. That
-  -- is a restoration, not a new entry.
-  if _show_promoting(new.media_item_id) then return null; end if;
-  perform _maybe_award_unlocks(new.user_id, array['queue-dragon']);
+  -- ===========================================================================
+  -- A BULK WRITE OF HISTORY IS NOT A READER WATCHING SOMETHING
+  --
+  -- Only for `watch_events`, and only inside an import or the T1 backfill. Replaying
+  -- fifteen months of diary entries through this rule would empty every reader's
+  -- watchlist, because a historical viewing is older than a watchlist entry only by
+  -- accident and the chronology guard below admits the ones that are not. The importer
+  -- decides the watchlist for itself -- `_import_apply_batch` writes those rows
+  -- explicitly, and "watched beats wanting to watch" is already its rule.
+  --
+  -- Scoped to `watch_events` rather than applied to the whole function, because the
+  -- `user_media` insert path DOES clear the watchlist during an import and has since
+  -- 20260815040000. Widening this guard would change that behaviour silently.
+  --
+  -- **And the backstop event is not a watch signal either** (`_watch_backstopping`).
+  -- A note written on a title nobody has watched creates a collection row, which gets
+  -- an undated event from `_seen_implies_a_watch` -- and §D.2's rule reads an undated
+  -- event as contemporaneous, so without this the note would clear the watchlist entry.
+  -- A note has never been a watch signal. The full reasoning is on that function.
+  -- ===========================================================================
+  if tg_table_name = 'watch_events' and (_importing() or _watch_backstopping()) then
+    return null;
+  end if;
+
+  -- 20261129000300: a promotion is a placement, not a watch signal (Codex, PR 319). A show
+  -- still on the watchlist stays on it, so Undo has nothing to put back and no watchlist
+  -- award can be revoked by a drag.
+  if tg_table_name <> 'watch_events' and _show_promoting(new.media_item_id) then
+    return null;
+  end if;
+
+  -- ===========================================================================
+  -- THE CHRONOLOGY GUARD APPLIES TO A LATER VIEWING, NOT TO THE FIRST ONE
+  --
+  -- §D.2 states the rule as "a new event clears the watchlist row only if
+  -- `coalesce(watched_on, current_date) >= watchlist.created_at::date`", and its
+  -- rationale is one sentence long: *a backdated entry doesn't consume a fresh "watch
+  -- again" intention*. That rationale is about a title the reader has ALREADY watched,
+  -- put back on the watchlist to see again, and then back-filled with an old viewing.
+  --
+  -- Applied to a title's first viewing it says something the rationale does not:
+  -- `watchlist-invariant.test.mjs` adds Solaris to the watchlist and immediately logs
+  -- it as watched on 1 August, and the bare rule leaves it on the watchlist -- so a
+  -- reader who taps *watched it* from the watchlist and picks a past date is told
+  -- nothing happened. "Watched beats wanting to watch" has been the invariant since
+  -- 20260815040000 and nothing in the epic proposes changing it.
+  --
+  -- So the guard is applied where its own reasoning applies: **when the title already
+  -- had a viewing before this one.** A first viewing clears the entry whatever its date,
+  -- which is exactly what `user_media_insert_leaves_watchlist` did before T1 moved the
+  -- job here. A second or later viewing is compared on its own day.
+  --
+  -- **This is a narrowing of §D.2 as written, and it is deliberate.** It is recorded
+  -- here rather than applied quietly because it is the one place in T1 where the letter
+  -- of the PRD and a pinned invariant disagreed, and the founder may prefer the letter.
+  -- Reverting to it is deleting the `v_first` disjunct.
+  -- ===========================================================================
+  if tg_table_name = 'watch_events' then
+    v_first := not exists (
+      select 1 from public.watch_events we
+       where we.user_id = new.user_id
+         and we.media_item_id = new.media_item_id
+         and we.id <> new.id
+    );
+  end if;
+
+  delete from public.watchlist w
+   where w.user_id = new.user_id
+     and w.media_item_id = new.media_item_id
+     and case tg_table_name
+           -- 20261001000100, transcribed. An entry the reader put on the watchlist
+           -- AFTER this ranking's instant is a newer, deliberate "I want to see this
+           -- again" and outlives it.
+           when 'rankings'     then w.created_at <= (v_new ->> 'created_at')::timestamptz
+           -- 20261003000100, §D.2. An undated event is contemporaneous by construction:
+           -- it was recorded now, and `current_date` is the honest stand-in for a
+           -- viewing whose timing nobody knows. A dated one is compared on its own day.
+           when 'watch_events'
+             then v_first
+               or coalesce((v_new ->> 'watched_on')::date, current_date) >= w.created_at::date
+           -- `user_media`: the rule as it was.
+           else true
+         end;
+
+  -- An AFTER ... FOR EACH ROW trigger's return value is ignored.
   return null;
 end;
 $$;
-revoke execute on function _award_touch_watchlist() from public, anon, authenticated;
+revoke execute on function _leave_watchlist() from public, anon, authenticated;
 
 create or replace function _ranking_is_a_native_action()
 returns trigger
@@ -905,6 +1024,12 @@ begin
     return null;
   end if;
 
+  -- One check-and-backfill per reader and series at a time (Codex, PR 319): two devices
+  -- removing the last two seasons each see the other's season still there unless the
+  -- second waits for the first to commit. Every read below is a new statement, so it sees
+  -- what the first committed.
+  perform _lock_series_evidence(old.user_id, v_series);
+
   if not exists (
        select 1 from user_media um
         where um.user_id = old.user_id and um.media_item_id = v_series
@@ -950,7 +1075,8 @@ create constraint trigger user_media_placed_show_keeps_its_evidence
 -- ===========================================================================
 -- 8. rank_promote_show: the SN AVG poster, placed where it was dropped
 --
--- Guards, in the §9 order (media lock, then the category lock):
+-- Guards, in the §9 order (media lock, then the category locks: the seasons', so no
+-- season of this show can be unranked under it, then the shows'):
 --   * a series, not already ranked as a show (55000: the client's wall is stale);
 --   * with at least one ranked season, which is what drew it at an average (55000);
 --   * a target inside the chosen category's run, with one more place: lo .. lo + size
@@ -960,8 +1086,9 @@ create constraint trigger user_media_placed_show_keeps_its_evidence
 -- Writes, and nothing else: the ranking (positions at and below the target shift down
 -- by one, as an insertion), the collection row's bucket (I3), one `manual` placement with
 -- outcome `placed` (P4: no prior), and the `show_promotions` record. No comparison,
--- watch, session, post, notification or award. Season rankings are not read for scoring
--- and not written.
+-- watch, session, post, notification or award, and the watchlist is left as it is (a
+-- placement is not a watch signal). Season rankings are not read for scoring and not
+-- written.
 -- ===========================================================================
 
 create or replace function rank_promote_show(
@@ -986,7 +1113,6 @@ declare
   v_score     numeric;
   v_had_row   boolean;
   v_prior     taste_bucket;
-  v_since     timestamptz;
   v_placement uuid;
   v_reply     jsonb;
 begin
@@ -1016,6 +1142,12 @@ begin
     raise exception 'the ranking changed: this show is already ranked' using errcode = '55000';
   end if;
 
+  -- The seasons' category lock, then the shows' (Codex, PR 319). A season of this show
+  -- can be unranked only under the first, so the check below, made inside it, still holds
+  -- at commit. No other writer holds two category locks, so the order cannot deadlock.
+  perform pg_advisory_xact_lock(hashtextextended(v_user::text || 'tv_seasons', 0));
+  perform pg_advisory_xact_lock(hashtextextended(v_user::text || 'tv_shows', 0));
+
   if not exists (
     select 1 from rankings r join media_items s on s.id = r.media_item_id
      where r.user_id = v_user and r.category = 'tv_seasons'
@@ -1023,8 +1155,6 @@ begin
   ) then
     raise exception 'the ranking changed: this show has no ranked season' using errcode = '55000';
   end if;
-
-  perform pg_advisory_xact_lock(hashtextextended(v_user::text || 'tv_shows', 0));
 
   select * into v_band from band_bounds(v_user, 'tv_shows', p_new_bucket);
   if p_new_position < v_band.lo or p_new_position > v_band.lo + v_band.size then
@@ -1043,8 +1173,6 @@ begin
   select true, um.bucket into v_had_row, v_prior
     from user_media um where um.user_id = v_user and um.media_item_id = p_media_item_id;
   v_had_row := coalesce(v_had_row, false);
-  select w.created_at into v_since
-    from watchlist w where w.user_id = v_user and w.media_item_id = p_media_item_id;
 
   perform set_config('bingd.show_promotion', txid_current()::text || ':' || p_media_item_id::text, true);
 
@@ -1082,8 +1210,8 @@ begin
   )
   returning id into v_placement;
 
-  insert into show_promotions (user_id, media_item_id, placement_id, had_row, prior_bucket, watchlist_since)
-  values (v_user, p_media_item_id, v_placement, v_had_row, v_prior, v_since);
+  insert into show_promotions (user_id, media_item_id, placement_id, had_row, prior_bucket)
+  values (v_user, p_media_item_id, v_placement, v_had_row, v_prior);
 
   -- The marker stays set until commit on purpose: the backstop it excuses is deferred.
 
@@ -1120,8 +1248,7 @@ grant  execute on function rank_promote_show(uuid, integer, taste_bucket, uuid, 
 -- The show's ranking is removed and the shows below close up. The collection row goes
 -- back to what it was: removed if the promotion created it and it still carries nothing
 -- of its own (no note, no progress, no watch), else its category is set back. The
--- watchlist entry the rating consumed comes back with its own date. Seasons, their
--- rankings and every watch are untouched.
+-- watchlist was never touched. Seasons, their rankings and every watch are untouched.
 -- ===========================================================================
 
 create or replace function rank_unpromote_show(
@@ -1206,12 +1333,6 @@ begin
        and bucket is distinct from v_promo.prior_bucket;
   end if;
 
-  if v_promo.watchlist_since is not null then
-    insert into watchlist (user_id, media_item_id, created_at)
-    values (v_user, p_media_item_id, v_promo.watchlist_since)
-    on conflict (user_id, media_item_id) do nothing;
-  end if;
-
   v_reply := jsonb_build_object(
     'done', true, 'unpromoted', true,
     'from_position', v_r.position, 'category', 'tv_shows', 'from_bucket', v_r.bucket
@@ -1223,8 +1344,8 @@ $$;
 comment on function rank_unpromote_show(uuid, uuid, uuid, integer) is
   'Undo of rank_promote_show (#319, 20261129000300). Only while that promotion is the show''s '
   'latest placement, not undone, and the show is at p_expected_position (55000 otherwise). '
-  'Removes the show ranking, closes up the shows below, restores the collection row and the '
-  'watchlist entry as they were. Seasons and watches are untouched; nothing is posted.';
+  'Removes the show ranking, closes up the shows below and restores the collection row as it '
+  'was. Seasons, watches and the watchlist are untouched; nothing is posted.';
 
 revoke execute on function rank_unpromote_show(uuid, uuid, uuid, integer) from public, anon;
 grant  execute on function rank_unpromote_show(uuid, uuid, uuid, integer) to authenticated;

@@ -626,19 +626,114 @@ $$;
 
 revoke execute on function _award_touch_ranking() from public, anon, authenticated;
 
-create or replace function _award_touch_watchlist()
+create or replace function _leave_watchlist()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
+declare
+  -- ===========================================================================
+  -- WHY THE ROW IS READ AS JSON AND NOT AS FIELDS
+  --
+  -- One trigger function is now attached to three tables with three different shapes.
+  -- **plpgsql resolves `new.<field>` when it PARSES the statement, not when it
+  -- evaluates it**, so a `case` whose `rankings` branch names `new.created_at` fails
+  -- with `record "new" has no field "created_at"` the first time a `watch_events`
+  -- insert reaches it -- the branch is never taken and it fails anyway. Caught by
+  -- watch-events.test.mjs on the first run, which is the point of running it.
+  --
+  -- `to_jsonb(new)` works on any record shape, and an absent key is a null rather than
+  -- an error. The branch that is not taken reads a null it never looks at.
+  -- ===========================================================================
+  v_new jsonb := to_jsonb(new);
+  -- Whether this event is the title's FIRST viewing. See the note on the chronology
+  -- guard below; only the `watch_events` branch reads it.
+  v_first boolean;
 begin
-  perform _maybe_award_unlocks(new.user_id, array['queue-dragon']);
+  -- ===========================================================================
+  -- A BULK WRITE OF HISTORY IS NOT A READER WATCHING SOMETHING
+  --
+  -- Only for `watch_events`, and only inside an import or the T1 backfill. Replaying
+  -- fifteen months of diary entries through this rule would empty every reader's
+  -- watchlist, because a historical viewing is older than a watchlist entry only by
+  -- accident and the chronology guard below admits the ones that are not. The importer
+  -- decides the watchlist for itself -- `_import_apply_batch` writes those rows
+  -- explicitly, and "watched beats wanting to watch" is already its rule.
+  --
+  -- Scoped to `watch_events` rather than applied to the whole function, because the
+  -- `user_media` insert path DOES clear the watchlist during an import and has since
+  -- 20260815040000. Widening this guard would change that behaviour silently.
+  --
+  -- **And the backstop event is not a watch signal either** (`_watch_backstopping`).
+  -- A note written on a title nobody has watched creates a collection row, which gets
+  -- an undated event from `_seen_implies_a_watch` -- and §D.2's rule reads an undated
+  -- event as contemporaneous, so without this the note would clear the watchlist entry.
+  -- A note has never been a watch signal. The full reasoning is on that function.
+  -- ===========================================================================
+  if tg_table_name = 'watch_events' and (_importing() or _watch_backstopping()) then
+    return null;
+  end if;
+
+  -- ===========================================================================
+  -- THE CHRONOLOGY GUARD APPLIES TO A LATER VIEWING, NOT TO THE FIRST ONE
+  --
+  -- §D.2 states the rule as "a new event clears the watchlist row only if
+  -- `coalesce(watched_on, current_date) >= watchlist.created_at::date`", and its
+  -- rationale is one sentence long: *a backdated entry doesn't consume a fresh "watch
+  -- again" intention*. That rationale is about a title the reader has ALREADY watched,
+  -- put back on the watchlist to see again, and then back-filled with an old viewing.
+  --
+  -- Applied to a title's first viewing it says something the rationale does not:
+  -- `watchlist-invariant.test.mjs` adds Solaris to the watchlist and immediately logs
+  -- it as watched on 1 August, and the bare rule leaves it on the watchlist -- so a
+  -- reader who taps *watched it* from the watchlist and picks a past date is told
+  -- nothing happened. "Watched beats wanting to watch" has been the invariant since
+  -- 20260815040000 and nothing in the epic proposes changing it.
+  --
+  -- So the guard is applied where its own reasoning applies: **when the title already
+  -- had a viewing before this one.** A first viewing clears the entry whatever its date,
+  -- which is exactly what `user_media_insert_leaves_watchlist` did before T1 moved the
+  -- job here. A second or later viewing is compared on its own day.
+  --
+  -- **This is a narrowing of §D.2 as written, and it is deliberate.** It is recorded
+  -- here rather than applied quietly because it is the one place in T1 where the letter
+  -- of the PRD and a pinned invariant disagreed, and the founder may prefer the letter.
+  -- Reverting to it is deleting the `v_first` disjunct.
+  -- ===========================================================================
+  if tg_table_name = 'watch_events' then
+    v_first := not exists (
+      select 1 from public.watch_events we
+       where we.user_id = new.user_id
+         and we.media_item_id = new.media_item_id
+         and we.id <> new.id
+    );
+  end if;
+
+  delete from public.watchlist w
+   where w.user_id = new.user_id
+     and w.media_item_id = new.media_item_id
+     and case tg_table_name
+           -- 20261001000100, transcribed. An entry the reader put on the watchlist
+           -- AFTER this ranking's instant is a newer, deliberate "I want to see this
+           -- again" and outlives it.
+           when 'rankings'     then w.created_at <= (v_new ->> 'created_at')::timestamptz
+           -- 20261003000100, §D.2. An undated event is contemporaneous by construction:
+           -- it was recorded now, and `current_date` is the honest stand-in for a
+           -- viewing whose timing nobody knows. A dated one is compared on its own day.
+           when 'watch_events'
+             then v_first
+               or coalesce((v_new ->> 'watched_on')::date, current_date) >= w.created_at::date
+           -- `user_media`: the rule as it was.
+           else true
+         end;
+
+  -- An AFTER ... FOR EACH ROW trigger's return value is ignored.
   return null;
 end;
 $$;
 
-revoke execute on function _award_touch_watchlist() from public, anon, authenticated;
+revoke execute on function _leave_watchlist() from public, anon, authenticated;
 
 create or replace function _ranking_is_a_native_action()
 returns trigger
@@ -780,6 +875,7 @@ revoke execute on function assert_watch_history_valid(uuid) from public, anon, a
 drop table if exists show_promotions;
 drop function if exists _show_promoting(uuid);
 drop function if exists _show_seen_through_seasons(uuid, uuid);
+drop function if exists _lock_series_evidence(uuid, uuid);
 
 select assert_watch_history_valid();
 

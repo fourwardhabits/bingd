@@ -212,22 +212,26 @@ the drop cell, so it becomes the cell in place.
 **What a promotion writes** (`20261129000300`): the ranking (an insertion: the shows at and
 below shift down one), the collection row's category (I3), one `manual` placement with
 outcome `placed` (P4: no prior), and a server-only `show_promotions` record of the
-collection row and watchlist entry before it. It takes the media lock, then the `tv_shows`
-category lock; it is idempotent on its operation id; it refuses a non-series (22023), a show
+collection row before it. It takes the media lock, then the `tv_seasons` category lock (so
+no season of the show can be unranked under it, and the "has a ranked season" check is made
+inside it), then the `tv_shows` one; it is idempotent on its operation id; it refuses a non-series (22023), a show
 already ranked or with no ranked season (55000), a place outside the category's run (22023)
 and a stale anchor (55000). **No watch event, comparison, post, notification or award.** The
-watch backstop, the rankings and watchlist awards and the provenance flip stand aside for
-the promotion's own transaction and title (`_show_promoting`). W1 accepts a series' seasons'
+watch backstop, the rankings award, the watchlist rule and the provenance flip stand aside
+for the promotion's own transaction and title (`_show_promoting`). A placement is not a
+watch signal, so a show still on the watchlist stays on it (a series stays there until its
+released seasons are seen). W1 accepts a series' seasons'
 watches as its evidence (`_show_seen_through_seasons`, the rule `_viewer_has_seen` already
 reads). If those seasons later leave the collection while the show stays ranked, the show gets
-the ordinary undated backstop event then.
+the ordinary undated backstop event then. The promotion's commit-time backstop and a season
+removal's commit-time check take one lock per reader and series (`_lock_series_evidence`),
+so two devices removing the last two seasons cannot both pass it (Codex, PR 319; race CR11).
 
 **Undo** is `rank_unpromote_show`. It applies only while that promotion is still the show's
 latest placement, not undone, and the show is where the client last saw it (55000 otherwise,
 and the bar says the ranking changed). It removes the show ranking, closes up the shows
 below, removes the collection row if the promotion created it and it carries nothing of its
-own (else restores its category), and puts back the watchlist entry the rating consumed, with
-its own date. Seasons and watches are untouched.
+own (else restores its category). Seasons, watches and the watchlist are untouched.
 
 **Accessibility.** An explicit show: **Move up** and **Move down**, one explicit show at a
 time. An average poster: **Rank as a show here**, **Rank as a show, higher** and
