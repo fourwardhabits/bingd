@@ -807,7 +807,7 @@ not `follow_added`, so ordinary posts are unchanged. For a follow story it is tr
 least one member is still followed by the actor (an `approved` edge), is active, is not the
 reader, and passes `can_identify_profile(reader, member)`. That is the same member set
 `follow_activity_people` now returns, so "the row shows somebody" and "you may engage" cannot
-disagree. `_follow_story_open_to_me(event)` is the caller-relative form for policies. It is
+disagree. `follow_story_open_to_me(event)` is the caller-relative form for policies. It is
 the only one granted to `authenticated`; the two-argument form is server-only.
 
 It is applied on every path:

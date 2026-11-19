@@ -34,7 +34,7 @@ const ALLOWED = {
   'watch_tag_visible(uuid)': ['authenticated'],
   // 20261130000100: the follow-story clause of the engagement predicate, for the caller
   // only (reactions_read, comments_read). Like can_i_view, it takes no identity to check.
-  '_follow_story_open_to_me(uuid)': ['authenticated'],
+  'follow_story_open_to_me(uuid)': ['authenticated'],
 
   // Security invoker over tables only a signed-in reader may hold. The public list page
   // uses list_view and list_items_page.

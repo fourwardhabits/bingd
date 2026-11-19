@@ -72,22 +72,37 @@ revoke execute on function _follow_story_open_to(uuid, uuid) from public, anon, 
 
 -- The same clause for the CALLER only, for the table policies, which run as the caller and
 -- so cannot call the internal form above. It answers only about the caller's own view, as
--- `can_i_view` does, so granting it reveals nothing the caller could not already read.
-create or replace function _follow_story_open_to_me(p_event_id uuid)
+-- `can_i_view` does.
+--
+-- **It says nothing about a story whose actor the caller may not view.** Every policy that
+-- calls it already requires `can_i_view(actor)`, so for such a story it answers TRUE and the
+-- policy is decided by that clause, exactly as before. Otherwise a direct call would be an
+-- oracle on a private or blocking actor's follow graph: "does this actor still follow
+-- somebody I can identify?". Where the caller may view the actor, the answer is what
+-- `follow_activity_people` already shows them.
+create or replace function follow_story_open_to_me(p_event_id uuid)
 returns boolean
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select _follow_story_open_to(auth.uid(), p_event_id);
+  select case
+    when exists (
+      select 1 from feed_events e
+       where e.id = p_event_id
+         and e.type = 'follow_added'
+         and not can_view_profile(auth.uid(), e.actor_id)
+    ) then true
+    else _follow_story_open_to(auth.uid(), p_event_id)
+  end;
 $$;
 
-comment on function _follow_story_open_to_me(uuid) is
+comment on function follow_story_open_to_me(uuid) is
   '_follow_story_open_to for auth.uid(), for the reactions_read and comments_read policies (20261130000100). Caller-relative, like can_i_view.';
 
-revoke execute on function _follow_story_open_to_me(uuid) from public, anon;
-grant  execute on function _follow_story_open_to_me(uuid) to authenticated;
+revoke execute on function follow_story_open_to_me(uuid) from public, anon;
+grant  execute on function follow_story_open_to_me(uuid) to authenticated;
 
 
 -- 1. Follow stories name only who is still followed
@@ -879,7 +894,7 @@ create policy reactions_read on reactions for select
       select 1 from feed_events e
        where e.id = feed_event_id
          and can_i_view(e.actor_id)
-         and _follow_story_open_to_me(e.id)  -- 20261130000100
+         and follow_story_open_to_me(e.id)  -- 20261130000100
     )
   );
 
@@ -891,7 +906,7 @@ create policy comments_read on comments for select
       select 1 from feed_events e
        where e.id = feed_event_id
          and can_i_view(e.actor_id)
-         and _follow_story_open_to_me(e.id)  -- 20261130000100
+         and follow_story_open_to_me(e.id)  -- 20261130000100
     )
   );
 

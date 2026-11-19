@@ -412,3 +412,24 @@ describe('push copy facts', () => {
     );
   });
 });
+
+describe('the caller-relative predicate is no oracle', () => {
+  it('answers nothing about a story whose actor the caller may not view', async () => {
+    const a = await user('private_author', 'private');
+    const b = await user('private_member');
+    const stranger = await user('stranger');
+    await follow(a, b);
+    const story = await latestStory(a);
+    assert.ok(story);
+    const ask = async () =>
+      (await as(stranger, `select follow_story_open_to_me($1) as ok`, [story])).rows[0].ok;
+    // The stranger cannot see A, so the answer is the same whether or not A still follows B.
+    const before = await ask();
+    await unfollow(a, b);
+    const after = await ask();
+    assert.equal(before, true);
+    assert.equal(after, true);
+    // And the policies still hide everything from them: can_i_view decides.
+    assert.deepEqual(await view(stranger, story), { reactions: 0, comments: 0, thread: 0, counted: 0 });
+  });
+});
