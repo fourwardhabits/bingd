@@ -105,6 +105,31 @@ revoke execute on function follow_story_open_to_me(uuid) from public, anon;
 grant  execute on function follow_story_open_to_me(uuid) to authenticated;
 
 
+-- 0. Q1's freeze, recorded rather than inferred (Codex, PR 322)
+--
+-- A story is frozen by its FIRST reaction or comment, and stays frozen if that reaction is
+-- later removed: otherwise the next follow could append to a story somebody had already been
+-- notified about, and change what the notification was about. One row per engaged follow
+-- story, written by set_reaction and _add_comment, read by _post_follow_activity. No client
+-- reads it: row security on, no policy, and no grant to either client role.
+create table if not exists follow_story_engaged (
+  event_id   uuid primary key references feed_events(id) on delete cascade,
+  engaged_at timestamptz not null default now()
+);
+alter table follow_story_engaged enable row level security;
+revoke all on follow_story_engaged from anon, authenticated;
+
+-- Stories engaged before this migration: any reaction or comment, deleted comments included.
+insert into follow_story_engaged (event_id)
+select e.id from feed_events e
+ where e.type = 'follow_added'
+   and (exists (select 1 from reactions r where r.feed_event_id = e.id)
+        or exists (select 1 from comments c where c.feed_event_id = e.id))
+on conflict do nothing;
+
+comment on table follow_story_engaged is
+  'Follow stories that have had a reaction or comment (20261130000100, Q1). Once a row exists the story is frozen: the next follow opens a new one. Server-only.';
+
 -- 1. Follow stories name only who is still followed
 
 create or replace function follow_activity_people(p_event_ids uuid[])
@@ -204,6 +229,13 @@ begin
   -- 20261130000100: a follow story with no member open to this reader is no activity.
   if not _follow_story_open_to(auth.uid(), p_feed_event_id) then
     raise exception 'no such activity' using errcode = 'P0002';
+  end if;
+
+  -- 20261130000100 (Q1): a reaction freezes a follow story, for good.
+  if p_kind is not null then
+    insert into follow_story_engaged (event_id)
+    select e.id from feed_events e where e.id = p_feed_event_id and e.type = 'follow_added'
+    on conflict do nothing;
   end if;
 
   if v_kind is null then
@@ -318,6 +350,11 @@ begin
   if not _follow_story_open_to(auth.uid(), p_feed_event_id) then
     raise exception 'no such activity' using errcode = 'P0002';
   end if;
+
+  -- 20261130000100 (Q1): a comment freezes a follow story, for good.
+  insert into follow_story_engaged (event_id)
+  select e.id from feed_events e where e.id = p_feed_event_id and e.type = 'follow_added'
+  on conflict do nothing;
 
   if p_parent_id is not null then
     perform 1 from comments c where c.id = p_parent_id for share;
@@ -1053,11 +1090,11 @@ begin
    where e.type = 'follow_added'
      and e.actor_id = p_actor
      and e.causal_at > now() - v_window
-     -- 20261130000100 (Q1): a story somebody has reacted to or commented on is frozen.
-     -- The next follow opens a new story, so a conversation is always about what its
-     -- participants saw. Deleted comments count: the conversation existed.
-     and not exists (select 1 from reactions r where r.feed_event_id = e.id)
-     and not exists (select 1 from comments c where c.feed_event_id = e.id)
+     -- 20261130000100 (Q1): a story somebody has reacted to or commented on is frozen,
+     -- recorded at first engagement so removing the reaction does not thaw it (Codex,
+     -- PR 322). The next follow opens a new story, so a conversation is always about what
+     -- its participants saw.
+     and not exists (select 1 from follow_story_engaged x where x.event_id = e.id)
    order by e.causal_at desc
    limit 1
      for update;
@@ -1536,8 +1573,17 @@ begin
        -- 20261130000100 (Codex, PR 322): eligibility at delivery, not only at filing. A
        -- notification about a follow story that has since closed to its recipient is not
        -- pushed (and, unclaimed, is reaped below). TRUE for every other subject.
-       and (n.subject_type is distinct from 'feed_event'
-            or _follow_story_open_to(n.recipient_id, n.subject_id))
+       -- Only where the recipient may view the story's owner (Codex, PR 322): for anyone
+       -- else the answer would track the owner's follow graph. Their rows keep today's
+       -- rules, which already withhold what they may not see.
+       and not exists (
+         select 1 from feed_events sfe
+          where n.subject_type = 'feed_event'
+            and sfe.id = n.subject_id
+            and sfe.type = 'follow_added'
+            and can_view_profile(n.recipient_id, sfe.actor_id)
+            and not _follow_story_open_to(n.recipient_id, sfe.id)
+       )
        -- **Restored 2026-08-30 (20260904000100).** An actorless notification has nobody
        -- to have gone, and this predicate was the actorless filter by accident until
        -- 20260828000100 wrote the escape. The 20260830000100 rebuild -- which added the
@@ -1766,8 +1812,16 @@ as $$
      and (n.type <> 'season_premiere' or sea.available_on is not null)
      -- 20261130000100 (Codex, PR 322): and a row about a follow story that has since closed
      -- to this reader is not drawn. Read-time, so it returns if the story opens again.
-     and (n.subject_type is distinct from 'feed_event'
-          or _follow_story_open_to(auth.uid(), n.subject_id))
+     -- Only where the reader may view the story's owner (Codex, PR 322), for the reason
+     -- given in claim_push_batch.
+     and not exists (
+       select 1 from feed_events sfe
+        where n.subject_type = 'feed_event'
+          and sfe.id = n.subject_id
+          and sfe.type = 'follow_added'
+          and can_view_profile(auth.uid(), sfe.actor_id)
+          and not _follow_story_open_to(auth.uid(), sfe.id)
+     )
    order by n.created_at desc
    limit least(greatest(coalesce(p_limit, 50), 1), 200);
 $$;

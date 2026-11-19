@@ -486,3 +486,41 @@ describe('the caller-relative predicate is no oracle', () => {
     assert.deepEqual(await view(stranger, story), { reactions: 0, comments: 0, thread: 0, counted: 0 });
   });
 });
+
+describe('Codex, PR 322, second review', () => {
+  it('Q1: a reaction removed again does not thaw the story', async () => {
+    const { a, f, story } = await scene();
+    await react(f, story);
+    await as(f, `select set_reaction($1, $2, null)`, [await uuid(), story]);
+    const c = await user('unreact');
+    await follow(a, c);
+    assert.notEqual(await latestStory(a), story, 'the next follow opened a new story');
+    assert.equal(await members(story).then((m) => m.length), 1, 'the frozen story did not grow');
+  });
+
+  it('the inbox filter says nothing about a story whose owner the reader may not view', async () => {
+    // F commented on A's story; C replied to F. Then A goes private, so F may not view A.
+    const a = await user('own_priv');
+    const b = await user('own_mem');
+    const f = await user('rep_to');
+    const c = await user('replier');
+    await follow(f, a);
+    await follow(c, a);
+    await follow(a, b);
+    const story = await latestStory(a);
+    const mine = await comment(f, story, 'first');
+    await as(c, `select add_comment($1, $2, 'reply', false, $3, '{}'::uuid[])`, [await uuid(), story, mine.comment_id ?? mine.id]);
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [a]);
+    await unfollow(f, a);
+    const inbox = async () =>
+      (await as(f, `select id from my_notifications(50) where subject_id = $1`, [story])).rows.length;
+    const before = await inbox();
+    assert.ok(before >= 1, 'the reply reached F');
+    await unfollow(a, b);
+    const closed = await inbox();
+    await follow(a, b);
+    const reopened = await inbox();
+    assert.equal(closed, before, "A's follow graph does not move F's inbox");
+    assert.equal(reopened, before);
+  });
+});

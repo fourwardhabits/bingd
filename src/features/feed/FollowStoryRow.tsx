@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, EngagementRow, Text, type ActivityReaction } from '@/ui/components';
+import { Avatar, EngagementRow, ReactionControl, Text, type ActivityReaction } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { followTail, relativeTime, verbFor } from './activity';
@@ -162,6 +162,27 @@ export function FollowStoryRow({
         </Pressable>
       </View>
 
+      {/**
+       * How many reacted, and the way to who (Codex, PR 322). `EngagementRow` draws the Like
+       * action but no count, which `FeedCard` puts on its summary line; a follow story has
+       * no summary line, so the count sits here, compact, for every reader, the author
+       * included. It opens the same "who reacted" sheet.
+       */}
+      {reaction && reaction.count > 0 ? (
+        <View style={styles.summary} testID="follow-story-reactions">
+          <ReactionControl
+            label=""
+            active={Boolean(reaction.mineGlyph)}
+            mineGlyph={reaction.mineGlyph}
+            glyphs={reaction.summaryGlyphs ?? reaction.glyphs ?? []}
+            count={reaction.count}
+            onToggle={() => {}}
+            onOpenDetail={reaction.onPressSummary}
+            canReact={false}
+          />
+        </View>
+      ) : null}
+
       {/* The picker under the sentence, above the actions — `FeedCard`'s placement. */}
       {reaction?.picker && reacts ? <View style={styles.picker}>{reaction.picker}</View> : null}
 
@@ -211,6 +232,7 @@ const styles = StyleSheet.create({
   /** The labelled row sits under the sentence, aligned with its text column. */
   actions: { marginTop: theme.space[1] },
   picker: { paddingTop: theme.space[2] },
+  summary: { flexDirection: 'row', paddingTop: theme.space[1] },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
   // name reads the same weight here as it does two rows up.
   entity: { color: theme.text.primary, fontFamily: fontFamily.sansSemibold },

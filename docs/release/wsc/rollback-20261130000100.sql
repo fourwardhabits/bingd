@@ -1615,6 +1615,7 @@ as $$
 $$;
 
 drop function if exists follow_story_open_to_me(uuid);
+drop table if exists follow_story_engaged;
 drop function if exists _follow_story_open_to(uuid, uuid);
 
 delete from supabase_migrations.schema_migrations where version = '20261130000100';

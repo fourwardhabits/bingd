@@ -373,6 +373,7 @@ describe('reacting and commenting', () => {
 
     expect(view.getByText('Liked')).toBeTruthy();
     expect(view.getByText('2')).toBeTruthy();
+    expect(view.getByLabelText('3 reactions. See who reacted.')).toBeTruthy();
     expect(
       view.getByLabelText("2 comments on Abi's activity about following Ravi and 1 other. Open them."),
     ).toBeTruthy();
@@ -424,5 +425,35 @@ describe('reacting and commenting', () => {
       expect(style.minWidth ?? theme.layout.minTapTarget).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
       expect([style.flexGrow, style.flexBasis]).toEqual([1, 0]);
     }
+  });
+
+  it('keeps the count and the way to who reacted, for a reader who may not react too', async () => {
+    const r = reaction({ count: 2, canReact: false });
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={r}
+        onPressComments={() => {}}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-like')).toBeNull();
+    await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
+    expect(r.onPressSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no count when nobody has reacted', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-reactions')).toBeNull();
   });
 });
