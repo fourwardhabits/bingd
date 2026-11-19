@@ -5,8 +5,7 @@ import {
   displacement,
   hitIndex,
   slotOf,
-  type Rect,
-} from './drag-geometry';
+  type Rect, itemTopInViewport, layoutYAtViewport } from './drag-geometry';
 
 /** A three-across grid of 100×150 cells, as FlashList lays the poster wall out. */
 const grid = (count: number) => {
@@ -126,5 +125,24 @@ describe('autoScrollSpeed', () => {
 
   it('never scrolls a viewport too short to have a middle', () => {
     expect(autoScrollSpeed(10, AUTO_SCROLL_EDGE * 2)).toBe(0);
+  });
+});
+
+describe('itemTopInViewport and layoutYAtViewport (Android QA, 2026-11-20)', () => {
+  it('places an item below the header, scrolled', () => {
+    expect(itemTopInViewport(0, 220, 0)).toBe(220);
+    expect(itemTopInViewport(600, 220, 500)).toBe(320);
+    // Scrolled past it: above the viewport, negative.
+    expect(itemTopInViewport(100, 220, 600)).toBe(-280);
+  });
+
+  it('reads a viewport y back into the same layout coordinates, whatever the scroll', () => {
+    for (const scroll of [0, 17, 240, 3_900]) {
+      for (const header of [0, 220, 292]) {
+        for (const y of [0, 72, 4_104]) {
+          expect(layoutYAtViewport(itemTopInViewport(y, header, scroll), header, scroll)).toBe(y);
+        }
+      }
+    }
   });
 });

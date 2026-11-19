@@ -19,6 +19,7 @@ import {
 import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { hapticSelection } from '../haptics';
+import { useMakeRoom } from '../use-make-room';
 import { usePressScale, usePulse } from '../press';
 import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
@@ -447,13 +448,14 @@ function LiftableTile({
   extras: PosterTileExtras | undefined;
 }) {
   const node = useRef<View>(null);
-  const shift = extras?.shift;
+  // Eased to its place while another title is held over it, rather than jumped there.
+  const offset = useMakeRoom(extras?.shift, tile.id);
   return (
-    <View
+    <Animated.View
       ref={node}
       collapsable={false}
       style={[
-        shift ? { transform: [{ translateX: shift.x }, { translateY: shift.y }] } : null,
+        { transform: offset.getTranslateTransform() },
         extras?.hidden ? styles.hiddenTile : null,
       ]}
     >
@@ -468,7 +470,7 @@ function LiftableTile({
         accessibilityHint={extras?.accessibilityHint}
         badge={extras?.badge}
       />
-    </View>
+    </Animated.View>
   );
 }
 

@@ -85,14 +85,20 @@ export function useRerank(userId: string) {
     retryable.current = null;
 
     const key = keyOf(move);
-    // A refetch landing mid-move would draw the old order over the prediction.
-    await queryClient.cancelQueries({ queryKey: key });
     const before = queryClient.getQueryData<RankedEntry[]>(key);
     // Across a category the cached row takes its new category too, so every score in both
     // categories reflows from the recounted band sizes before the server answers.
     const predicted = before
       ? applyMove(before, move.mediaItemId, move.toPosition, move.toBucket)
       : null;
+    /**
+     * **Synchronously, in the drop's own event** (Android QA, 2026-11-20). The drag clears
+     * its shifts in that event too, so React draws the new order and the settled cells in
+     * one commit. Awaiting the cancel first left a frame of the old order with no shifts,
+     * the titles snapping back before they moved. The cancel still stops a refetch from
+     * drawing the old order over the prediction; `revert: false` keeps the prediction.
+     */
+    void queryClient.cancelQueries({ queryKey: key }, { revert: false });
     if (predicted) queryClient.setQueryData<RankedEntry[]>(key, predicted);
     hapticDecision();
 

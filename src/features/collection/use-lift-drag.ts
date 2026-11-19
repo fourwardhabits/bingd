@@ -2,6 +2,7 @@ import type { FlashListRef } from '@shopify/flash-list';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   Animated,
+  BackHandler,
   type GestureResponderEvent,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -12,7 +13,14 @@ import {
 
 import { hapticSelection } from '@/ui/haptics';
 
-import { autoScrollSpeed, displacement, hitIndex, type Rect } from './drag-geometry';
+import {
+  autoScrollSpeed,
+  displacement,
+  hitIndex,
+  itemTopInViewport,
+  layoutYAtViewport,
+  type Rect,
+} from './drag-geometry';
 
 /** Every displacement while `from` is held over `to`, keyed by index. */
 const shiftsFor = (
@@ -34,7 +42,12 @@ export type LiftFrame = { x: number; y: number; width: number; height: number };
 export type LiftState = {
   from: number;
   to: number;
-  frame: LiftFrame;
+  /**
+   * Where the floating copy is drawn, or null for the one frame before its horizontal
+   * position is known (the first lift on a screen). The copy, and the hiding of the
+   * original, wait for it; scrolling is off from the lift itself.
+   */
+  frame: LiftFrame | null;
   /** Over another rating category: the drop recategorises the title, and the lifted tile says so. */
   outside: boolean;
   /**
@@ -48,10 +61,11 @@ export type LiftState = {
 type Live = {
   from: number;
   to: number;
-  /** Null until the measure lands, a frame after the lift; the floating copy waits for it. */
-  frame: LiftFrame | null;
-  origin: Rect | undefined;
-  scroll0: number;
+  /** The copy's top, in the container, from the list's numbers at the lift. Never measured. */
+  y: number;
+  /** Its left edge, null until known (see `LiftState.frame`). */
+  x: number | null;
+  origin: Rect;
   start: { x: number; y: number } | null;
   dx: number;
   dy: number;
@@ -73,9 +87,19 @@ type Live = {
  *   · The lifted title is drawn as a floating copy over the list (the caller's `ghost`), at
  *     the frame it was measured at plus the finger's travel. The original slot is hidden,
  *     and the titles between make room (`shiftOf`).
- *   · Where it is over comes from the list's own item layouts, displaced by the finger's
- *     travel and by any auto-scroll since the lift. No window or page coordinate is read,
- *     so the status bar and edge-to-edge insets cannot shift the arithmetic.
+ *   · **Where the copy is drawn comes from the list's own numbers, never a measurement of
+ *     the scrolled view** (Android QA, 2026-11-20). Its top is the item's layout, below the
+ *     header, minus the scroll offset (`itemTopInViewport`). `measureLayout` supplied it
+ *     until then, and on Android's new architecture that value can lag the real scroll
+ *     position, which drew the copy away from the finger after a scroll. It now supplies
+ *     only the left edge, which no vertical scroll changes, once per screen.
+ *   · Where it is over is read back from the copy under the finger (`layoutYAtViewport`),
+ *     so an auto-scroll, a header that changes height or an item re-measured mid-gesture
+ *     cannot separate the target from what the reader sees. No window or page coordinate is
+ *     read, so the status bar and edge-to-edge insets cannot shift the arithmetic.
+ *   · Scrolling is off from the moment of the lift, not from a measurement a frame later,
+ *     so Android's scroll view cannot take the first move away from the drag.
+ *   · Android Back while holding a title puts it back, and consumes the press.
  *   · Near the top or bottom edge the list scrolls on its own, faster the deeper in.
  *   · Release: a drop elsewhere calls `onDrop(from, to)`. A lift released without moving,
  *     or a gesture the system takes away, drops nothing.
@@ -105,6 +129,9 @@ export function useLiftDrag<T>({
   });
   const live = useRef<Live | null>(null);
 
+  /** The left edge of an item's cell inside the container, minus its layout `x`: learned once. */
+  const insetX = useRef<number | null>(null);
+
   const layoutOf = (index: number): Rect | undefined => {
     try {
       return listRef.current?.getLayout(index) ?? undefined;
@@ -112,6 +139,38 @@ export function useLiftDrag<T>({
       return undefined;
     }
   };
+
+  const firstItemOffset = () => {
+    try {
+      return listRef.current?.getFirstItemOffset() ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  /** The list's own record of its offset, else the last one this hook was told. */
+  const listScrollTop = () => {
+    try {
+      const offset = listRef.current?.getAbsoluteLastScrollOffset();
+      return typeof offset === 'number' && Number.isFinite(offset) ? offset : scrollY.current;
+    } catch {
+      return scrollY.current;
+    }
+  };
+
+  const frameOf = (current: Live): LiftFrame | null =>
+    current.x === null
+      ? null
+      : { x: current.x, y: current.y, width: current.origin.width, height: current.origin.height };
+
+  const publish = (current: Live, shifts = shiftsFor(current.from, current.to, layoutOf)) =>
+    setState({
+      from: current.from,
+      to: current.to,
+      frame: frameOf(current),
+      outside: current.outside,
+      shifts,
+    });
 
   const stopAuto = () => {
     if (auto.current.timer) clearInterval(auto.current.timer);
@@ -122,10 +181,16 @@ export function useLiftDrag<T>({
 
   const retarget = () => {
     const current = live.current;
-    if (!current?.origin) return;
+    if (!current) return;
+    // The centre of the copy under the finger, in the viewport, read back into the list's
+    // layout coordinates at the list's current scroll and header.
     const point = {
       x: current.origin.x + current.origin.width / 2 + current.dx,
-      y: current.origin.y + current.origin.height / 2 + current.dy + (scrollY.current - current.scroll0),
+      y: layoutYAtViewport(
+        current.y + current.origin.height / 2 + current.dy,
+        firstItemOffset(),
+        scrollY.current,
+      ),
     };
     const hit = hitIndex(point, count, layoutOf);
     if (hit < 0) return;
@@ -136,14 +201,7 @@ export function useLiftDrag<T>({
     if (outside && !current.outside) hapticSelection();
     current.to = to;
     current.outside = outside;
-    if (!current.frame) return;
-    setState({
-      from: current.from,
-      to,
-      frame: current.frame,
-      outside,
-      shifts: shiftsFor(current.from, to, layoutOf),
-    });
+    publish(current);
   };
 
   const tick = () => {
@@ -167,8 +225,7 @@ export function useLiftDrag<T>({
   const steer = () => {
     const current = live.current;
     if (!current) return;
-    if (!current.frame) return;
-    const centre = current.frame.y + current.frame.height / 2 + current.dy;
+    const centre = current.y + current.origin.height / 2 + current.dy;
     const speed = autoScrollSpeed(centre, viewport.current);
     auto.current.speed = speed;
     if (speed !== 0 && !auto.current.timer) auto.current.timer = setInterval(tick, 16);
@@ -187,47 +244,64 @@ export function useLiftDrag<T>({
   };
 
   /**
-   * Lifts the item at `index`, whose own view is `node`. Measured against the container, so
-   * the floating copy starts exactly over the original.
+   * Lifts the item at `index`, whose own view is `node`.
+   *
+   * The copy's top is computed here, synchronously, from the list (see the header). Only its
+   * left edge is measured, and only the first time on a screen: every later lift reuses it.
    */
   const lift = (index: number, node: View | null) => {
     const container = containerRef.current;
     if (live.current || !node || !container || index < 0 || index >= count) return;
-    // Claimed at once, so the very next move is the container's rather than the scroller's,
-    // even if it comes before the measure below lands.
+    const origin = layoutOf(index);
+    // Not laid out (never expected for a title the reader is touching): nothing to lift.
+    if (!origin) return;
+    scrollY.current = listScrollTop();
     const lifted: Live = {
       from: index,
       to: index,
-      frame: null,
-      origin: layoutOf(index),
-      scroll0: scrollY.current,
+      y: itemTopInViewport(origin.y, firstItemOffset(), scrollY.current),
+      x: insetX.current === null ? null : insetX.current + origin.x,
+      origin,
       start: null,
       dx: 0,
       dy: 0,
       outside: false,
     };
+    // Claimed at once, and published at once: the very next move is the container's, and
+    // the list stops scrolling now rather than a frame from now.
     live.current = lifted;
     travel.setValue({ x: 0, y: 0 });
     hapticSelection();
+    publish(lifted);
+    if (lifted.x !== null) return;
     node.measureLayout(
       container,
-      (x, y, width, height) => {
-        // Released, or another lift, in the meantime.
+      (x) => {
+        insetX.current = x - origin.x;
+        // Released, or another lift, in the meantime: the inset is still worth keeping.
         if (live.current !== lifted) return;
-        lifted.frame = { x, y, width, height };
-        setState({
-          from: index,
-          to: lifted.to,
-          frame: lifted.frame,
-          outside: lifted.outside,
-          shifts: shiftsFor(index, lifted.to, layoutOf),
-        });
+        lifted.x = x;
+        publish(lifted);
       },
       () => {
         if (live.current === lifted) end(false);
       },
     );
   };
+
+  /** Android Back while a title is held puts it back, and is not also a navigation. */
+  const holding = state !== null;
+  useEffect(() => {
+    if (!holding) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!live.current) return false;
+      end(false);
+      return true;
+    });
+    return () => subscription.remove();
+    // `end` reads refs only; re-subscribing on every render would add nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holding]);
 
   /** A lift released before the finger moved is not a drop: the press ended it. */
   const releaseWithoutMoving = () => {
@@ -261,10 +335,13 @@ export function useLiftDrag<T>({
     scrollY.current = event.nativeEvent.contentOffset.y;
   };
 
-  /** Where the item at `index` is drawn while something is lifted: hidden, moved, or put. */
+  /**
+   * Where the item at `index` is drawn while something is lifted: hidden, moved, or put.
+   * The original is hidden only once its copy is drawn, so the slot is never blank alone.
+   */
   const shiftOf = (index: number): { hidden: boolean; x: number; y: number } | null => {
     if (!state) return null;
-    if (index === state.from) return { hidden: true, x: 0, y: 0 };
+    if (index === state.from) return state.frame ? { hidden: true, x: 0, y: 0 } : null;
     const moved = state.shifts[index];
     return moved ? { hidden: false, ...moved } : null;
   };
