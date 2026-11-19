@@ -35,7 +35,7 @@ export type LiftState = {
   from: number;
   to: number;
   frame: LiftFrame;
-  /** Over another band: the drop will be refused, and the lifted tile says so. */
+  /** Over another rating category: the drop recategorises the title, and the lifted tile says so. */
   outside: boolean;
   /**
    * Where each title between `from` and `to` is moved to make room, by index. Computed when
@@ -132,7 +132,7 @@ export function useLiftDrag<T>({
     const to = Math.max(0, Math.min(hit, count - 1));
     if (to === current.to) return;
     const outside = isOutside(current.from, to);
-    // One light tick on crossing into another band, which is a drop that will be refused.
+    // One light tick on crossing into another category, where the drop changes the rating.
     if (outside && !current.outside) hapticSelection();
     current.to = to;
     current.outside = outside;

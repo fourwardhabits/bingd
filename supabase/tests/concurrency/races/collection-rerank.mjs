@@ -24,6 +24,12 @@ import { fire, newOp, raceContext } from './_shared.mjs';
  *
  * **CR3. One operation id sent twice at once applies once**: the replay waits on the
  * ledger claim and returns the first reply, and there is one placement row.
+ *
+ * **CR4–CR6. Across a category** (20261129000200). Two devices dragging different titles
+ * across categories queue on the category lock and the stale one is refused (CR4); two
+ * dragging the same title queue on its media lock (CR5); and a move rolled back leaves no
+ * category change, collection change or placement, while the move behind it lands (CR6).
+ * I1–I4, P1–P4 and I3 (user_media agrees) hold after each.
  */
 export default function suite() {
   const rc = raceContext();
@@ -252,6 +258,172 @@ export default function suite() {
       await first.end();
       await retry.end();
     });
+
+    // -----------------------------------------------------------------------
+    // Across a category (20261129000200, founder 2026-11-19)
+    // -----------------------------------------------------------------------
+
+    /** `n` films ranked into `bucket`, each new one landing at the bottom of it. */
+    const bandIn = async (user, n, label, bucket) => {
+      const solo = await ctx.db.session('setup');
+      await solo.actAs(user);
+      const ids = [];
+      for (let i = 0; i < n; i += 1) {
+        const film = await ctx.fx.createMovie(`${label} ${i}`);
+        let step = (await solo.one(`select rank_start($1, $2::taste_bucket) as r`, [film, bucket])).r;
+        let guard = 0;
+        while (!step.done) {
+          step = (await solo.one(`select rank_answer($1, $2) as r`, [step.session_id, step.pivot])).r;
+          guard += 1;
+          if (guard > 32) throw new Error('did not converge');
+        }
+        ids.push(film);
+      }
+      await solo.end();
+      return ids;
+    };
+
+    /** I3 on every title: the collection row's category is the ranking's. */
+    const agrees = async (user) => {
+      const rows = await ctx.db.rows(
+        `select r.media_item_id from rankings r
+           join user_media m on m.user_id = r.user_id and m.media_item_id = r.media_item_id
+          where r.user_id = $1 and m.bucket is distinct from r.bucket`,
+        [user],
+      );
+      assert.deepEqual(rows, [], 'user_media.bucket agrees with rankings.bucket');
+    };
+
+    const bucketOf = async (user, item) =>
+      (
+        await ctx.db.rows(`select bucket from rankings where user_id = $1 and media_item_id = $2`, [
+          user,
+          item,
+        ])
+      )[0]?.bucket;
+
+    it('CR4: two cross-category moves from two devices: the second waits, then is refused as stale', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const loved = await bandIn(user, 3, 'CR4 loved', 'loved');
+      const fine = await bandIn(user, 3, 'CR4 fine', 'fine');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      // Device A drags the best film down among It was fine (onto fine[1], #5).
+      await a.begin();
+      await a.q(`select rank_reorder($1, 5, $2, 1, $3, 'fine')`, [loved[0], await newOp(db), fine[1]]);
+
+      // Device B, drawn from the same list, drags fine[0] (#4) up onto loved[0] (#1).
+      await b.begin();
+      const moving = b.errorFrom(`select rank_reorder($1, 1, $2, 4, $3, 'loved')`, [
+        fine[0],
+        await newOp(db),
+        loved[0],
+      ]);
+      const waiting = await b.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.categoryKey(user, 'movies'),
+      });
+      assert.equal(waiting.wait_event, 'advisory');
+
+      await a.commit();
+      const refusal = await moving;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000', 'computed from a list that is gone, so refused');
+      assert.deepEqual(await order(user), [loved[1], loved[2], fine[0], fine[1], loved[0], fine[2]]);
+      assert.equal(await bucketOf(user, loved[0]), 'fine');
+      assert.equal(await bucketOf(user, fine[0]), 'fine', "B's move did not land");
+      assert.equal(await manualCount(user), 1);
+      await valid(user);
+      await agrees(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR5: two devices moving the same title across categories serialise on its media lock', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const loved = await bandIn(user, 2, 'CR5 loved', 'loved');
+      const nfm = await bandIn(user, 2, 'CR5 nfm', 'not_for_me');
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_reorder($1, 4, $2, 1, $3, 'not_for_me')`, [loved[0], await newOp(db), nfm[1]]);
+
+      // B saw the same title at #1 and sends it to the bottom of I liked it.
+      await b.begin();
+      const moving = b.errorFrom(`select rank_reorder($1, 2, $2, 1, $3, 'loved')`, [
+        loved[0],
+        await newOp(db),
+        loved[1],
+      ]);
+      const waiting = await b.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.mediaKey(user, loved[0]),
+      });
+      assert.equal(waiting.wait_event, 'advisory');
+
+      await a.commit();
+      const refusal = await moving;
+      await b.rollback();
+
+      assert.equal(refusal?.code, '55000');
+      assert.equal(await bucketOf(user, loved[0]), 'not_for_me');
+      assert.deepEqual(await order(user), [loved[1], nfm[0], nfm[1], loved[0]]);
+      await valid(user);
+      await agrees(user);
+
+      await a.end();
+      await b.end();
+    });
+
+    it('CR6: a cross-category move rolled back leaves nothing, and the move waiting on it lands', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const loved = await bandIn(user, 3, 'CR6 loved', 'loved');
+      const fine = await bandIn(user, 2, 'CR6 fine', 'fine');
+      const before = await order(user);
+
+      const a = await db.session('device-a');
+      const b = await db.session('device-b');
+      await a.actAs(user);
+      await b.actAs(user);
+
+      await a.begin();
+      await a.q(`select rank_reorder($1, 4, $2, 2, $3, 'fine')`, [loved[1], await newOp(db), fine[0]]);
+
+      await b.begin();
+      const moving = fire(b, `rank_reorder($1, 1, $2, 5, $3, 'loved')`, [fine[1], await newOp(db), loved[0]]);
+      await b.awaitBlocked({ on: 'advisory', advisoryKey: await db.categoryKey(user, 'movies') });
+
+      await a.rollback();
+      const landed = (await moving).rows[0].r;
+      await b.commit();
+
+      assert.equal(landed.moved, true);
+      assert.equal(landed.bucket, 'loved');
+      assert.deepEqual(await order(user), [fine[1], ...before.filter((id) => id !== fine[1])]);
+      assert.equal(await bucketOf(user, loved[1]), 'loved', "A's rolled-back move left nothing");
+      const placements = await ctx.db.rows(
+        `select media_item_id from ranking_placements where user_id = $1 and kind = 'manual'`,
+        [user],
+      );
+      assert.deepEqual(placements.map((p) => p.media_item_id), [fine[1]]);
+      await valid(user);
+      await agrees(user);
+
+      await a.end();
+      await b.end();
+    });
   });
 }
-

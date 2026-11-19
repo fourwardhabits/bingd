@@ -66,10 +66,24 @@ let server: RankedEntry[] = [];
 /** The server applies the move it was sent, and says so. */
 const lands = (score = 10) => async (input: Record<string, unknown>): Promise<ReorderResult> => {
   const from = server.find((e) => e.mediaItemId === input.mediaItemId)?.position ?? 0;
-  server = applyMove(server, String(input.mediaItemId), Number(input.toPosition)) ?? server;
+  server =
+    applyMove(
+      server,
+      String(input.mediaItemId),
+      Number(input.toPosition),
+      input.toBucket ? (String(input.toBucket) as RankedEntry['bucket']) : undefined,
+    ) ?? server;
   return {
     outcome: 'moved',
-    reply: { moved: true, position: Number(input.toPosition), fromPosition: from, score, fromScore: 7 },
+    reply: {
+      moved: true,
+      position: Number(input.toPosition),
+      fromPosition: from,
+      bucket: input.toBucket ? String(input.toBucket) : null,
+      fromBucket: null,
+      score,
+      fromScore: 7,
+    },
   };
 };
 
@@ -115,6 +129,7 @@ describe('a move', () => {
       toPosition: 1,
       expectedPosition: 3,
       anchorId: 'a',
+      toBucket: undefined,
     });
 
     await act(async () => answer.resolve(await lands()({ mediaItemId: 'c', toPosition: 1 })));
@@ -138,17 +153,59 @@ describe('a move', () => {
     expect(keys).toContain(JSON.stringify(['feed', USER]));
   });
 
-  it('a no-op and a crossing send nothing; a crossing says which band', async () => {
+  it('a no-op sends nothing', async () => {
     const { result, client } = await setup();
     await act(async () => {
       expect(result.current.move(ladderFrom(pool()), 1, 1)).toEqual({ kind: 'noop' });
     });
-    await act(async () => {
-      expect(result.current.move(ladderFrom(pool()), 2, 3)?.kind).toBe('outside');
-    });
     expect(mockReorder).not.toHaveBeenCalled();
     expect(order(client.getQueryData(KEY))).toEqual(['a', 'b', 'c', 'd']);
-    expect(result.current.notice?.message).toContain('I liked it');
+  });
+
+  /**
+   * **Across a category** (founder, 2026-11-19): c (I liked it) dropped onto d (It was
+   * fine) is It was fine at 4. The cache takes the new category at once, so both
+   * categories' scores reflow before the server answers, and Undo names the old category.
+   */
+  it('a drop across a category is sent with its category, predicted, and undone back', async () => {
+    const { result, client } = await setup();
+    const answer = deferred();
+    mockReorder.mockReturnValueOnce(answer.promise);
+    await act(async () => {
+      result.current.move(ladderFrom(pool()), 2, 3);
+    });
+    const predicted = client.getQueryData<RankedEntry[]>(KEY);
+    expect(order(predicted)).toEqual(['a', 'b', 'd', 'c']);
+    expect(predicted?.find((e) => e.mediaItemId === 'c')?.bucket).toBe('fine');
+    expect(mockReorder).toHaveBeenCalledWith({
+      operationId: 'op-1',
+      mediaItemId: 'c',
+      toPosition: 4,
+      expectedPosition: 3,
+      anchorId: 'd',
+      toBucket: 'fine',
+    });
+    await act(async () =>
+      answer.resolve(await lands(4.6)({ mediaItemId: 'c', toPosition: 4, toBucket: 'fine' })),
+    );
+    expect(result.current.notice?.message).toBe('Moved “Title c” to It was fine · #4 · 4.6');
+
+    mockReorder.mockImplementationOnce(lands(7));
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(mockReorder).toHaveBeenLastCalledWith({
+      operationId: 'op-2',
+      mediaItemId: 'c',
+      toPosition: 3,
+      expectedPosition: 4,
+      anchorId: 'd',
+      toBucket: 'loved',
+    });
+    const restored = client.getQueryData<RankedEntry[]>(KEY);
+    expect(order(restored)).toEqual(['a', 'b', 'c', 'd']);
+    expect(restored?.find((e) => e.mediaItemId === 'c')?.bucket).toBe('loved');
+    expect(result.current.notice?.message).toBe('Moved “Title c” back to I liked it · #3');
   });
 
   it('one move at a time: a second drop while the first is in flight is not sent', async () => {
@@ -180,14 +237,19 @@ describe('when the server says no', () => {
     expect(result.current.notice?.message).toContain('changed on another device');
   });
 
-  it('outside (the server backstop): rolls back and names the band', async () => {
+  it('outside (the server backstop): rolls back, refetches and says so', async () => {
     const { result, client } = await setup();
+    const spy = jest.spyOn(client, 'invalidateQueries');
     mockReorder.mockResolvedValueOnce({ outcome: 'outside' });
     await act(async () => {
-      result.current.move(ladderFrom(pool()), 2, 0);
+      result.current.move(ladderFrom(pool()), 2, 3);
     });
-    expect(order(client.getQueryData(KEY))).toEqual(['a', 'b', 'c', 'd']);
-    expect(result.current.notice?.message).toContain('I liked it');
+    const after = client.getQueryData<RankedEntry[]>(KEY);
+    expect(order(after)).toEqual(['a', 'b', 'c', 'd']);
+    expect(after?.find((e) => e.mediaItemId === 'c')?.bucket).toBe('loved');
+    expect(spy).toHaveBeenCalled();
+    expect(result.current.notice).toMatchObject({ tone: 'error' });
+    expect(result.current.notice?.message).toContain('refreshed');
   });
 
   it('a lost reply: rolls back, reconciles, and Retry resends the SAME operation id', async () => {

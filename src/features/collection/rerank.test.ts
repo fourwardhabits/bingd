@@ -2,7 +2,9 @@ import { emptyFilters, type CollectionItem } from './filters';
 import {
   applyMove,
   bandRange,
+  crosses,
   ladderOf,
+  landingBucket,
   moveActions,
   notices,
   planMove,
@@ -146,6 +148,7 @@ describe('planMove', () => {
       mediaItemId: 'c',
       title: 'Title c',
       bucket: 'loved',
+      toBucket: 'loved',
       fromPosition: 3,
       toPosition: 1,
       anchorId: 'a',
@@ -164,10 +167,68 @@ describe('planMove', () => {
     expect(planMove(ladder, 1, 1)).toEqual({ kind: 'noop' });
   });
 
-  it('a drop across a band boundary is outside, either way, and never a move', () => {
-    expect(planMove(ladder, 3, 2)).toMatchObject({ kind: 'outside', direction: 'up' });
-    expect(planMove(ladder, 2, 3)).toMatchObject({ kind: 'outside', direction: 'down' });
-    expect(planMove(ladder, 0, 6)).toMatchObject({ kind: 'outside', rung: { mediaItemId: 'a', bucket: 'loved' } });
+  /**
+   * **Across a category** (founder, 2026-11-19). A drop takes the place of the title it
+   * displaces and joins that title's category, either way and at any distance.
+   */
+  it('a drop among another category joins it, either way, at any distance', () => {
+    // c (I liked it) onto d, the first It was fine: it is It was fine, at 4.
+    expect(planMove(ladder, 2, 3)).toMatchObject({
+      kind: 'move',
+      bucket: 'loved',
+      toBucket: 'fine',
+      fromPosition: 3,
+      toPosition: 4,
+      anchorId: 'd',
+    });
+    // d (It was fine) onto c, the last I liked it: it is I liked it, at 3.
+    expect(planMove(ladder, 3, 2)).toMatchObject({ toBucket: 'loved', toPosition: 3, anchorId: 'c' });
+    // a, the best title, onto g, the worst: I didn't like it, last.
+    expect(planMove(ladder, 0, 6)).toMatchObject({ toBucket: 'not_for_me', toPosition: 7, anchorId: 'g' });
+    // g, the worst, onto a: I liked it, first.
+    expect(planMove(ladder, 6, 0)).toMatchObject({ toBucket: 'loved', toPosition: 1, anchorId: 'a' });
+    const move = planMove(ladder, 2, 3);
+    if (move?.kind !== 'move') throw new Error('expected a move');
+    expect(crosses(move)).toBe(true);
+    expect(crosses(planMove(ladder, 0, 2) as Extract<typeof move, { kind: 'move' }>)).toBe(false);
+  });
+
+  it('landingBucket is the displaced title’s category, and its own where it started', () => {
+    expect(landingBucket(ladder, 0, 0)).toBe('loved');
+    expect(landingBucket(ladder, 0, 2)).toBe('loved');
+    expect(landingBucket(ladder, 0, 3)).toBe('fine');
+    expect(landingBucket(ladder, 6, 4)).toBe('fine');
+    expect(landingBucket(ladder, 6, 99)).toBe('not_for_me');
+  });
+
+  it('a named category at the line moves the category without moving the title', () => {
+    // c is the last I liked it; naming It was fine at its own place makes it the first.
+    expect(planMove(ladder, 2, 2, 'fine')).toMatchObject({
+      kind: 'move',
+      bucket: 'loved',
+      toBucket: 'fine',
+      fromPosition: 3,
+      toPosition: 3,
+      anchorId: 'c',
+    });
+    // Its own category at its own place is still nothing.
+    expect(planMove(ladder, 2, 2, 'loved')).toEqual({ kind: 'noop' });
+  });
+
+  it('a named category that is not a place there plans nothing', () => {
+    // b is in the middle of I liked it: It was fine is not a place between a and c.
+    expect(planMove(ladder, 1, 1, 'fine')).toBeNull();
+    // A jump of two categories in place, past It was fine's titles, is not a place either.
+    expect(planMove(ladder, 2, 2, 'not_for_me')).toBeNull();
+    // Onto e (It was fine) but naming I liked it: d is above it, so not a place.
+    expect(planMove(ladder, 0, 4, 'loved')).toBeNull();
+  });
+
+  it('the planned score across a category is the projection of the new place', () => {
+    const move = planMove(ladder, 0, 4);
+    if (move?.kind !== 'move') throw new Error('expected a move');
+    // It was fine becomes three titles (d, e, a), with a at 5 = third of them.
+    expect(scoreAfter(ladder, move)).toBe(scoreFor('fine', 5, { loved: 2, fine: 3, not_for_me: 2 }));
   });
 
   it('a drop past the end of the ladder clamps to its last rung, never onto an unranked title', () => {
@@ -240,28 +301,99 @@ describe('undoOf: the reverse move, as an ordinary guarded move', () => {
       'd',
     ]);
   });
+
+  it('across a category, goes back to the category it came from, not the anchor’s', () => {
+    // a b c | d e : c down onto d is It was fine at 4; undo is I liked it at 3.
+    const pool = entries(['a', 'b', 'c', 'd', 'e'], ['loved', 'loved', 'loved', 'fine', 'fine']);
+    const lad = ladderOf(pool.map((e) => item(e.mediaItemId, e.position, e.bucket)), 'movies') as Ladder;
+    const move = planMove(lad, 2, 3);
+    if (move?.kind !== 'move') throw new Error('expected a move');
+    const after = applyMove(pool, move.mediaItemId, move.toPosition, move.toBucket) as RankedEntry[];
+    expect(after.find((e) => e.mediaItemId === 'c')).toMatchObject({ position: 4, bucket: 'fine' });
+    const back = undoOf(after, move);
+    // d is at 3 now, and it is It was fine: the undo still names I liked it.
+    expect(back).toMatchObject({
+      mediaItemId: 'c',
+      bucket: 'fine',
+      toBucket: 'loved',
+      fromPosition: 4,
+      toPosition: 3,
+      anchorId: 'd',
+    });
+    const restored = applyMove(after, 'c', 3, 'loved') as RankedEntry[];
+    expect(
+      restored.sort((x, y) => x.position - y.position).map((e) => [e.mediaItemId, e.bucket]),
+    ).toEqual(pool.map((e) => [e.mediaItemId, e.bucket]));
+  });
+});
+
+describe('applyMove across a category', () => {
+  it('changes the moved title’s category only, and keeps positions 1..n', () => {
+    const pool = entries(['a', 'b', 'c', 'd'], ['loved', 'loved', 'fine', 'fine']);
+    const after = applyMove(pool, 'a', 3, 'fine') as RankedEntry[];
+    const sorted = [...after].sort((x, y) => x.position - y.position);
+    expect(sorted.map((e) => [e.mediaItemId, e.bucket])).toEqual([
+      ['b', 'loved'],
+      ['c', 'fine'],
+      ['a', 'fine'],
+      ['d', 'fine'],
+    ]);
+    expect(bandSizes(after)).toEqual({ loved: 1, fine: 3, not_for_me: 0 });
+  });
+
+  it('a change of category at the same place keeps every position', () => {
+    const pool = entries(['a', 'b', 'c'], ['loved', 'loved', 'fine']);
+    const after = applyMove(pool, 'b', 2, 'fine') as RankedEntry[];
+    expect(after.map((e) => [e.mediaItemId, e.position, e.bucket])).toEqual([
+      ['a', 1, 'loved'],
+      ['b', 2, 'fine'],
+      ['c', 3, 'fine'],
+    ]);
+  });
 });
 
 describe('moveActions: the accessible equivalent of a drag', () => {
-  it('offers one step and the band ends, and never crosses a band', () => {
-    expect(moveActions(ladder, 1).map((a) => [a.name, a.to])).toEqual([
-      ['moveUp', 0],
-      ['moveDown', 2],
+  const spoken = (index: number, lad: Ladder = ladder) =>
+    moveActions(lad, index).map((a) => [a.name, a.label, a.to, a.toBucket]);
+
+  it('offers one step and the group ends inside a group', () => {
+    expect(spoken(1)).toEqual([
+      ['moveUp', 'Move up', 0, 'loved'],
+      ['moveDown', 'Move down', 2, 'loved'],
     ]);
-    expect(moveActions(ladder, 0).map((a) => [a.name, a.to])).toEqual([
-      ['moveDown', 1],
-      ['moveToBottom', 2],
+    expect(spoken(0)).toEqual([
+      ['moveDown', 'Move down', 1, 'loved'],
+      ['moveToBottom', 'Move to bottom of its group', 2, 'loved'],
     ]);
-    expect(moveActions(ladder, 2).map((a) => [a.name, a.to])).toEqual([
-      ['moveUp', 1],
-      ['moveToTop', 0],
-    ]);
-    expect(moveActions(ladder, 3).map((a) => [a.name, a.to])).toEqual([['moveDown', 4]]);
   });
 
-  it('offers nothing for a band of one or a row that is not a rung', () => {
-    const single = ladderOf([item('a', 1, 'loved'), item('b', 2, 'fine')], 'movies') as Ladder;
-    expect(moveActions(single, 0)).toEqual([]);
+  it('at a group’s edge, one step is the line into the next category', () => {
+    expect(spoken(2)).toEqual([
+      ['moveUp', 'Move up', 1, 'loved'],
+      ['moveDown', 'Move down into It was fine', 2, 'fine'],
+      ['moveToTop', 'Move to top of its group', 0, 'loved'],
+    ]);
+    expect(spoken(3)).toEqual([
+      ['moveUp', 'Move up into I liked it', 3, 'loved'],
+      ['moveDown', 'Move down', 4, 'fine'],
+    ]);
+    // The best title cannot go up and the worst cannot go down.
+    expect(spoken(6)).toEqual([['moveUp', 'Move up', 5, 'not_for_me']]);
+    // Every action is a move the planner accepts.
+    for (let i = 0; i < 7; i += 1) {
+      for (const action of moveActions(ladder, i)) {
+        expect(planMove(ladder, i, action.to, action.toBucket)).toMatchObject({ kind: 'move' });
+      }
+    }
+  });
+
+  it('crosses an empty category one step at a time', () => {
+    const gap = ladderOf([item('a', 1, 'loved'), item('b', 2, 'not_for_me')], 'movies') as Ladder;
+    expect(spoken(1, gap)).toEqual([['moveUp', 'Move up into It was fine', 1, 'fine']]);
+    expect(spoken(0, gap)).toEqual([['moveDown', 'Move down into It was fine', 0, 'fine']]);
+  });
+
+  it('offers nothing for a row that is not a rung', () => {
     expect(moveActions(ladder, 7)).toEqual([]);
   });
 });
@@ -296,12 +428,21 @@ describe('what the reader is told', () => {
     });
   });
 
-  it('a refused crossing names the band and points at Rerank', () => {
-    const notice = notices.outside({ mediaItemId: 'x', title: 'Heat', bucket: 'loved', position: 1 });
-    expect(notice.message).toContain('I liked it');
-    expect(notice.message).toContain('Rerank');
-    expect(notice.action?.kind).toBe('openTitle');
-    expect(notice.mediaItemId).toBe('x');
+  it('a move across a category names the new category, the rank and the score, with Undo', () => {
+    expect(notices.moved('Heat', 14, 4.6, 'fine')).toEqual({
+      message: 'Moved “Heat” to It was fine · #14 · 4.6',
+      action: { kind: 'undo', label: 'Undo' },
+      tone: 'info',
+    });
+    expect(notices.undone('Heat', 3, 'loved').message).toBe('Moved “Heat” back to I liked it · #3');
+  });
+
+  it('a place the server refused says the list was refreshed, and never points at Rerank', () => {
+    const notice = notices.outside('Heat');
+    expect(notice.message).toContain('Heat');
+    expect(notice.message).not.toContain('Rerank');
+    expect(notice.message).not.toContain('within that group');
+    expect(notice.tone).toBe('error');
   });
 
   it('a blocked long-press offers the way to an eligible view', () => {

@@ -108,15 +108,33 @@ const actionsOf = (node: { props: { accessibilityActions?: { name: string }[] } 
   (node?.props.accessibilityActions ?? []).map((a) => a.name);
 
 describe.each(['poster', 'list'] as const)('Movies in %s view, Rating highest first', (mode) => {
-  it('offers the in-band moves on each ranked title, and nothing on an unranked one', async () => {
+  it('offers the moves on each ranked title, across a category too, and nothing on an unranked one', async () => {
     const rerank = { controller: controller(), pool: 'movies' as const };
     const { titleButton } = await draw({ mode, rerank });
     expect(actionsOf(titleButton('Alpha'))).toEqual(['moveDown', 'moveToBottom']);
     expect(actionsOf(titleButton('Bravo'))).toEqual(['moveUp', 'moveDown']);
-    expect(actionsOf(titleButton('Charlie'))).toEqual(['moveUp', 'moveToTop']);
-    // Delta is alone in its band: there is nowhere to move it without a new rating.
-    expect(actionsOf(titleButton('Delta'))).toEqual([]);
+    // Charlie is the last I liked it: one step down is into It was fine (founder, 2026-11-19).
+    expect(actionsOf(titleButton('Charlie'))).toEqual(['moveUp', 'moveDown', 'moveToTop']);
+    // Delta is alone in It was fine: up into I liked it, down into I didn't like it.
+    expect(actionsOf(titleButton('Delta'))).toEqual(['moveUp', 'moveDown']);
     expect(actionsOf(titleButton('Unranked one'))).toEqual([]);
+  });
+
+  it('an accessibility step across the line names the category it moves into', async () => {
+    const rerank = { controller: controller(), pool: 'movies' as const };
+    const { titleButton } = await draw({ mode, rerank });
+    const delta = titleButton('Delta') as unknown as {
+      props: { accessibilityActions: { name: string; label: string }[] };
+    };
+    expect(delta.props.accessibilityActions.map((a) => a.label)).toEqual([
+      'Move up into I liked it',
+      'Move down into I didn’t like it',
+    ]);
+    await fireEvent(titleButton('Delta') as never, 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveUp' },
+    });
+    const [, from, to, toBucket] = (rerank.controller.move as jest.Mock).mock.calls[0];
+    expect([from, to, toBucket]).toEqual([3, 3, 'loved']);
   });
 
   it('an accessibility move is the same move as a drag', async () => {

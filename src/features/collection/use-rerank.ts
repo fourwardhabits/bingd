@@ -8,6 +8,7 @@ import { hapticDecision } from '@/ui/haptics';
 import { invalidateAfterCollectionChange } from './invalidate';
 import {
   applyMove,
+  crosses,
   notices,
   planMove,
   undoOf,
@@ -15,7 +16,7 @@ import {
   type PlannedMove,
   type RerankNotice,
 } from './rerank';
-import { bandSizes, scoreFor } from './score';
+import { bandSizes, scoreFor, type Bucket } from './score';
 import type { RankedEntry } from './use-collection';
 import { newOperationId, reorderRanking } from './writes';
 
@@ -33,7 +34,8 @@ export const NOTICE_MS = 6000;
  *
  *   moved    keep the prediction, reconcile every cache a ranking touches, offer Undo;
  *   stale    roll back, refetch, say the ranking changed elsewhere;
- *   outside  roll back (the client should never have sent it), say which band;
+ *   outside  roll back, refetch: the server refused the place (the client checks the same
+ *            rule first, so the list it checked had changed);
  *   failed   roll back, reconcile if the outcome is unknown, offer Retry with the SAME
  *            operation id, so a move that did land is answered from the ledger.
  *
@@ -86,7 +88,11 @@ export function useRerank(userId: string) {
     // A refetch landing mid-move would draw the old order over the prediction.
     await queryClient.cancelQueries({ queryKey: key });
     const before = queryClient.getQueryData<RankedEntry[]>(key);
-    const predicted = before ? applyMove(before, move.mediaItemId, move.toPosition) : null;
+    // Across a category the cached row takes its new category too, so every score in both
+    // categories reflows from the recounted band sizes before the server answers.
+    const predicted = before
+      ? applyMove(before, move.mediaItemId, move.toPosition, move.toBucket)
+      : null;
     if (predicted) queryClient.setQueryData<RankedEntry[]>(key, predicted);
     hapticDecision();
 
@@ -96,6 +102,7 @@ export function useRerank(userId: string) {
       toPosition: move.toPosition,
       expectedPosition: move.fromPosition,
       anchorId: move.anchorId,
+      toBucket: crosses(move) ? move.toBucket : undefined,
     });
 
     const rollBack = () => {
@@ -105,12 +112,14 @@ export function useRerank(userId: string) {
     switch (result.outcome) {
       case 'moved': {
         const after = predicted ?? before ?? [];
-        const score = result.reply.score ?? scoreFor(move.bucket, move.toPosition, bandSizes(after));
+        const score =
+          result.reply.score ?? scoreFor(move.toBucket, move.toPosition, bandSizes(after));
+        const into = crosses(move) ? move.toBucket : undefined;
         if (isUndo) {
-          show(notices.undone(move.title, move.toPosition));
+          show(notices.undone(move.title, move.toPosition, into));
         } else {
           undoable.current = undoOf(after, move);
-          show(notices.moved(move.title, move.toPosition, score));
+          show(notices.moved(move.title, move.toPosition, score, into));
         }
         invalidateAfterCollectionChange(queryClient, userId, move.mediaItemId, {
           category: move.category,
@@ -125,14 +134,7 @@ export function useRerank(userId: string) {
       case 'outside':
         rollBack();
         void queryClient.invalidateQueries({ queryKey: key });
-        show(
-          notices.outside({
-            mediaItemId: move.mediaItemId,
-            title: move.title,
-            bucket: move.bucket,
-            position: move.fromPosition,
-          }),
-        );
+        show(notices.outside(move.title));
         break;
       case 'failed':
       default:
@@ -153,17 +155,19 @@ export function useRerank(userId: string) {
   };
 
   /**
-   * A drop or an accessibility action: `from` and `to` are indices on `ladder`. Returns
-   * what was planned, so the gesture can spring back from a refused drop.
+   * A drop or an accessibility action: `from` and `to` are indices on `ladder`, and
+   * `toBucket` the category an accessibility action names (a drag lands in the category of
+   * the title it displaces). Returns what was planned, so the gesture can spring back from
+   * a drop that is not a place.
    */
-  const move = (ladder: Ladder, from: number, to: number): PlannedMove | null => {
-    const plan = planMove(ladder, from, to);
+  const move = (
+    ladder: Ladder,
+    from: number,
+    to: number,
+    toBucket?: Bucket,
+  ): PlannedMove | null => {
+    const plan = planMove(ladder, from, to, toBucket);
     if (!plan || plan.kind === 'noop') return plan;
-    if (plan.kind === 'outside') {
-      undoable.current = null;
-      show(notices.outside(plan.rung));
-      return plan;
-    }
     if (inFlight.current) return null;
     void send(plan, newOperationId(), false);
     return plan;

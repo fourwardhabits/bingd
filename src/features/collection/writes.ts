@@ -427,6 +427,9 @@ export type ReorderReply = {
   moved: boolean;
   position: number;
   fromPosition: number;
+  /** The category it is in now, and was in (20261129000200). Null from an older server. */
+  bucket: string | null;
+  fromBucket: string | null;
   score: number | null;
   fromScore: number | null;
 };
@@ -437,8 +440,8 @@ export type ReorderReply = {
  *   moved    applied, or answered from the ledger for a replayed operation id;
  *   stale    55000: the list the drop was computed from is not the list any more. Nothing
  *            moved. Refetch and say so;
- *   outside  22023: the target is in another band. Nothing moved. The client refuses this
- *            itself before sending, so this is the server's backstop;
+ *   outside  22023: the target is not a place in the named category. Nothing moved. The
+ *            client checks the same rule before sending, so this is the server's backstop;
  *   failed   anything else. `changed` is true when the outcome is unknown (a lost reply),
  *            which is when a retry must reuse the same operation id.
  */
@@ -452,11 +455,15 @@ const toNumber = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
 
 /**
- * Moves a ranked title inside its own band: `rank_reorder`, with both stale-list guards.
+ * Moves a ranked title to another place in its own ranking: `rank_reorder`, with both
+ * stale-list guards.
  *
  * `expectedPosition` is where the screen drew the title, and `anchorId` is the title the
  * screen drew at the target. The server refuses with 55000 when either is no longer true,
  * so a ranking changed by another device is never moved by a stale index.
+ *
+ * `toBucket` is sent only for a move that changes the title's rating category
+ * (20261129000200). A move inside one category sends exactly the call it always did.
  */
 export async function reorderRanking(input: {
   operationId: string;
@@ -464,6 +471,7 @@ export async function reorderRanking(input: {
   toPosition: number;
   expectedPosition: number;
   anchorId: string;
+  toBucket?: string;
 }): Promise<ReorderResult> {
   const { data, error } = await supabase.rpc('rank_reorder', {
     p_media_item_id: input.mediaItemId,
@@ -471,6 +479,7 @@ export async function reorderRanking(input: {
     p_operation_id: input.operationId,
     p_expected_position: input.expectedPosition,
     p_anchor_media_item_id: input.anchorId,
+    ...(input.toBucket ? { p_new_bucket: input.toBucket } : {}),
   });
 
   if (error) {
@@ -490,6 +499,8 @@ export async function reorderRanking(input: {
       moved: reply.moved !== false,
       position: Number(reply.position ?? input.toPosition),
       fromPosition: Number(reply.from_position ?? input.expectedPosition),
+      bucket: typeof reply.bucket === 'string' ? reply.bucket : null,
+      fromBucket: typeof reply.from_bucket === 'string' ? reply.from_bucket : null,
       score: toNumber(reply.score),
       fromScore: toNumber(reply.from_score),
     },

@@ -469,3 +469,353 @@ describe('custom Lists keep their own order (#318 §7)', () => {
     assert.deepEqual(side.createdAt, before.side.createdAt);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Across a category (20261129000200, founder 2026-11-19)
+// ---------------------------------------------------------------------------
+
+describe('a move across a rating category', () => {
+  const cross = (item, to, bucket, { id = null, expected = null, anchor = null } = {}) =>
+    one(t.db, `select rank_reorder($1, $2, $3, $4, $5, $6::taste_bucket) as r`, [
+      item,
+      to,
+      id,
+      expected,
+      anchor,
+      bucket,
+    ]);
+
+  const bucketOf = async (item) =>
+    (
+      await t.sql(`select bucket from rankings where user_id = $1 and media_item_id = $2`, [
+        ctx.user,
+        item,
+      ])
+    ).rows[0]?.bucket;
+
+  const collectionBucket = async (item) =>
+    (
+      await t.sql(`select bucket from user_media where user_id = $1 and media_item_id = $2`, [
+        ctx.user,
+        item,
+      ])
+    ).rows[0]?.bucket;
+
+  const ledger = async (item) =>
+    (
+      await t.sql(
+        `select bucket, from_bucket, position, from_position, band_rank, band_size, score,
+                from_score, comparisons, session_id, watch_event_id
+           from ranking_placements
+          where user_id = $1 and media_item_id = $2 and kind = 'manual'
+          order by created_at, id`,
+        [ctx.user, item],
+      )
+    ).rows;
+
+  const latestPost = async (item) =>
+    (
+      await t.sql(
+        `select id, payload from feed_events
+          where actor_id = $1 and media_item_id = $2 and type = 'title_ranked'`,
+        [ctx.user, item],
+      )
+    ).rows;
+
+  it('down: an I liked it title dropped among It was fine becomes It was fine, rescored', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(3, 'fine');
+    const postBefore = await latestPost(loved[0]);
+    const before = await sideEffects();
+
+    const r = await cross(loved[0], 5, 'fine', { id: await op(), expected: 1, anchor: fine[1] });
+
+    assert.equal(r.moved, true);
+    assert.equal(r.bucket, 'fine');
+    assert.equal(r.from_bucket, 'loved');
+    assert.deepEqual(await order(), [loved[1], loved[2], fine[0], fine[1], loved[0], fine[2]]);
+    assert.equal(await bucketOf(loved[0]), 'fine');
+    assert.equal(await collectionBucket(loved[0]), 'fine', 'I3: the collection row agrees');
+    // Band of four, third in it: the score is the place's, from the model, not a guess.
+    assert.equal(num(r.score), await scoreFor('fine', 3, 4));
+    assert.equal(num(r.from_score), await scoreFor('loved', 1, 3));
+    assert.ok(num(r.score) < 7 && num(r.score) >= 3.5, 'an It was fine score');
+
+    const [row] = await ledger(loved[0]);
+    assert.equal(row.from_bucket, 'loved');
+    assert.equal(row.bucket, 'fine');
+    assert.equal(row.from_position, 1);
+    assert.equal(row.position, 5);
+    assert.equal(row.band_rank, 3);
+    assert.equal(row.band_size, 4);
+    assert.equal(row.comparisons, 0);
+    assert.equal(row.session_id, null);
+    assert.equal(row.watch_event_id, null);
+
+    // The latest watch's existing post follows, and nothing new is posted.
+    const postAfter = await latestPost(loved[0]);
+    assert.equal(postAfter.length, 1);
+    assert.equal(postAfter[0].id, postBefore[0].id);
+    assert.equal(postAfter[0].payload.bucket, 'fine');
+    assert.equal(num(postAfter[0].payload.score), num(r.score));
+
+    // Nothing but the subject's category changed in the collection; no ranking act.
+    const after = await sideEffects();
+    assert.equal(after.comparisons, before.comparisons);
+    assert.equal(after.watches, before.watches);
+    assert.equal(after.feed, before.feed);
+    assert.equal(after.notifications, before.notifications);
+    assert.equal(after.sessions, before.sessions);
+    assert.deepEqual(after.createdAt, before.createdAt);
+    const changed = after.collection.filter(
+      (row, i) => row.bucket !== before.collection[i].bucket,
+    );
+    assert.deepEqual(changed.map((c) => c.media_item_id), [loved[0]]);
+    await valid();
+  });
+
+  it('up: an I didn’t like it title dropped among I liked it becomes I liked it', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(2, 'fine');
+    const nfm = await band(2, 'not_for_me');
+
+    const r = await cross(nfm[1], 2, 'loved', { id: await op(), expected: 7, anchor: loved[1] });
+
+    assert.deepEqual(await order(), [loved[0], nfm[1], loved[1], loved[2], fine[0], fine[1], nfm[0]]);
+    assert.equal(r.bucket, 'loved');
+    assert.equal(await collectionBucket(nfm[1]), 'loved');
+    assert.equal(num(r.score), await scoreFor('loved', 2, 4));
+    assert.ok(num(r.score) >= 7);
+    await valid();
+  });
+
+  it('a long move from the top of one category to the bottom of the last', async () => {
+    const loved = await band(4, 'loved');
+    const fine = await band(2, 'fine');
+    const nfm = await band(3, 'not_for_me');
+    const r = await cross(loved[0], 9, 'not_for_me', { id: await op(), expected: 1, anchor: nfm[2] });
+    assert.deepEqual(await order(), [...loved.slice(1), ...fine, ...nfm, loved[0]]);
+    assert.equal(num(r.score), await scoreFor('not_for_me', 4, 4));
+    await valid();
+  });
+
+  it('at the line: the last of one category becomes the first of the next without moving', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(2, 'fine');
+    const r = await cross(loved[2], 3, 'fine', { id: await op(), expected: 3 });
+    assert.equal(r.moved, true, 'a change of category is a move');
+    assert.equal(r.position, 3);
+    assert.deepEqual(await order(), [...loved, ...fine]);
+    assert.equal(await bucketOf(loved[2]), 'fine');
+    assert.equal(num(r.score), await scoreFor('fine', 1, 3));
+    await valid();
+    // Fourth in It was fine cannot become I liked it: there is an It was fine title above it.
+    const gap = await t.errorFrom(`select rank_reorder($1, $2, $3, null, null, 'loved')`, [
+      fine[0],
+      4,
+      await op(),
+    ]);
+    assert.equal(gap?.code, '22023');
+    // And the first It was fine title becomes the last I liked it again the same way.
+    const back = await cross(loved[2], 3, 'loved', { id: await op(), expected: 3 });
+    assert.equal(back.bucket, 'loved');
+    assert.equal(await bucketOf(loved[2]), 'loved');
+    assert.equal(num(back.score), await scoreFor('loved', 3, 3));
+    assert.equal((await ledger(loved[2])).length, 2);
+    await valid();
+  });
+
+  it('into an empty category, and out of a category it was alone in', async () => {
+    const loved = await band(3, 'loved');
+    // No It was fine and no I didn't like it titles yet: the only place in each is the end.
+    const r = await cross(loved[1], 3, 'not_for_me', { id: await op(), expected: 2, anchor: loved[2] });
+    assert.deepEqual(await order(), [loved[0], loved[2], loved[1]]);
+    assert.equal(r.bucket, 'not_for_me');
+    assert.equal(num(r.score), await scoreFor('not_for_me', 1, 1));
+    await valid();
+
+    const wrong = await t.errorFrom(`select rank_reorder($1, $2, $3, null, null, 'fine')`, [
+      loved[0],
+      1,
+      await op(),
+    ]);
+    assert.equal(wrong?.code, '22023', 'an empty category has exactly one place, at its line');
+
+    // The not_for_me title was alone; moving it back up empties that category again.
+    await cross(loved[1], 1, 'loved', { id: await op(), expected: 3, anchor: loved[0] });
+    assert.deepEqual(await order(), [loved[1], loved[0], loved[2]]);
+    const sizes = (
+      await t.sql(`select count(*) filter (where bucket = 'not_for_me') as n from rankings where user_id = $1`, [
+        ctx.user,
+      ])
+    ).rows[0];
+    assert.equal(Number(sizes.n), 0);
+    await valid();
+  });
+
+  it('refuses a position that is not a place in the named category (22023), changing nothing', async () => {
+    const loved = await band(2, 'loved');
+    const fine = await band(2, 'fine');
+    const nfm = await band(2, 'not_for_me');
+    const before = await order();
+    for (const [item, to, bucket] of [
+      [loved[0], 2, 'not_for_me'],
+      [loved[0], 6, 'fine'],
+      [nfm[0], 1, 'fine'],
+      [fine[0], 0, 'loved'],
+      [fine[0], 7, 'not_for_me'],
+    ]) {
+      const err = await t.errorFrom(`select rank_reorder($1, $2, $3, null, null, $4::taste_bucket)`, [
+        item,
+        to,
+        await op(),
+        bucket,
+      ]);
+      assert.equal(err?.code, '22023', `${bucket} @ ${to}`);
+    }
+    assert.deepEqual(await order(), before);
+    assert.equal((await manual()).length, 0);
+    await valid();
+  });
+
+  it('undo puts it back in its own category and place, with the original scores', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(3, 'fine');
+    const before = await order();
+    const scoreOf = async (item) => {
+      const rows = await t.sql(`select position, bucket from rankings where user_id = $1 and media_item_id = $2`, [
+        ctx.user,
+        item,
+      ]);
+      return rows.rows[0];
+    };
+    const original = await scoreOf(loved[2]);
+
+    await cross(loved[2], 5, 'fine', { id: await op(), expected: 3, anchor: fine[1] });
+    // The undo the client builds: back to 3 in loved, anchored on whoever is at 3 now.
+    const anchorNow = (await order())[2];
+    const back = await cross(loved[2], 3, 'loved', { id: await op(), expected: 5, anchor: anchorNow });
+
+    assert.equal(back.moved, true);
+    assert.deepEqual(await order(), before);
+    assert.deepEqual(await scoreOf(loved[2]), original);
+    assert.equal(await collectionBucket(loved[2]), 'loved');
+    assert.equal(num(back.score), await scoreFor('loved', 3, 3));
+    const rows = await ledger(loved[2]);
+    assert.deepEqual(
+      rows.map((r) => [r.from_bucket, r.bucket]),
+      [
+        ['loved', 'fine'],
+        ['fine', 'loved'],
+      ],
+      'both moves are in the history',
+    );
+    await valid();
+  });
+
+  it('undo after another device moved something is refused, not misapplied (55000)', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(3, 'fine');
+    await cross(loved[2], 5, 'fine', { id: await op(), expected: 3, anchor: fine[1] });
+    const anchorNow = (await order())[2];
+    // Another device moves the title at 3 meanwhile.
+    await reorder(anchorNow, 4, { id: await op() });
+    const err = await t.errorFrom(`select rank_reorder($1, $2, $3, $4, $5, 'loved')`, [
+      loved[2],
+      3,
+      await op(),
+      5,
+      anchorNow,
+    ]);
+    assert.equal(err?.code, '55000');
+    assert.equal(await bucketOf(loved[2]), 'fine', 'nothing moved back');
+    await valid();
+  });
+
+  it('a stale position or anchor refuses a cross-category move (55000)', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(3, 'fine');
+    const before = await order();
+    const stalePos = await t.errorFrom(`select rank_reorder($1, $2, $3, $4, $5, 'fine')`, [
+      loved[0],
+      5,
+      await op(),
+      2,
+      fine[1],
+    ]);
+    assert.equal(stalePos?.code, '55000');
+    const staleAnchor = await t.errorFrom(`select rank_reorder($1, $2, $3, $4, $5, 'fine')`, [
+      loved[0],
+      5,
+      await op(),
+      1,
+      fine[0],
+    ]);
+    assert.equal(staleAnchor?.code, '55000');
+    assert.deepEqual(await order(), before);
+    assert.equal(await bucketOf(loved[0]), 'loved');
+    assert.equal((await manual()).length, 0);
+  });
+
+  it('a replayed operation id crosses once (I5)', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(2, 'fine');
+    const id = await op();
+    const first = await cross(loved[0], 4, 'fine', { id, expected: 1, anchor: fine[0] });
+    const replay = await cross(loved[0], 4, 'fine', { id, expected: 1, anchor: fine[0] });
+    assert.deepEqual(replay, first);
+    assert.equal((await ledger(loved[0])).length, 1);
+    assert.deepEqual(await order(), [loved[1], loved[2], fine[0], loved[0], fine[1]]);
+    await valid();
+  });
+
+  it('a same-category call with no category named behaves exactly as before', async () => {
+    const loved = await band(3, 'loved');
+    const fine = await band(2, 'fine');
+    const r = await reorder(loved[2], 1, { id: await op(), expected: 3, anchor: loved[0] });
+    assert.equal(r.bucket, 'loved');
+    assert.equal(r.from_bucket, 'loved');
+    const err = await t.errorFrom(`select rank_reorder($1, $2, $3)`, [loved[0], 4, await op()]);
+    assert.equal(err?.code, '22023', 'no category named means its own category');
+    assert.deepEqual(await order(), [loved[2], loved[0], loved[1], ...fine]);
+    await valid();
+  });
+
+  it('TV seasons cross categories among seasons only; shows and films are untouched', async () => {
+    const parent = await ctx.t.createSeries('Cross parent', (ctx.seq += 1) * 10 + 870000);
+    const seasons = [];
+    for (const [n, bucket, score] of [
+      [1, 'loved', 80],
+      [2, 'loved', 70],
+      [3, 'fine', 50],
+      [4, 'fine', 40],
+    ]) {
+      const id = await ctx.t.createSeason(parent, n, `Season ${n}`);
+      await tv.rank(id, bucket, score);
+      seasons.push(id);
+    }
+    const show = await ctx.t.createSeries('Cross show', (ctx.seq += 1) * 10 + 870000);
+    await tv.rank(show, 'loved', 90);
+    const films = await band(2);
+    const showsBefore = await order('tv_shows');
+    const filmsBefore = await order('movies');
+    const seasonsBefore = await order('tv_seasons');
+    const s0 = seasonsBefore.indexOf(seasons[0]) + 1;
+    const anchorPos = seasonsBefore.length;
+
+    const r = await cross(seasons[0], anchorPos, 'fine', {
+      id: await op(),
+      expected: s0,
+      anchor: seasonsBefore[anchorPos - 1],
+    });
+    assert.equal(r.category, 'tv_seasons');
+    assert.equal(r.bucket, 'fine');
+    assert.equal(await bucketOf(seasons[0]), 'fine');
+    assert.deepEqual(await order('tv_shows'), showsBefore);
+    assert.deepEqual(await order('movies'), filmsBefore);
+    assert.equal(films.length, 2);
+    await valid('tv_seasons');
+    await valid('tv_shows');
+    await valid('movies');
+  });
+});

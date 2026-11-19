@@ -45,7 +45,8 @@ import {
   type CollectionSegment,
   type CollectionSortState,
 } from './filters';
-import { ladderOf, moveActions, notices, planMove, screenBlock, type Ladder } from './rerank';
+import { landingBucket, ladderOf, moveActions, notices, screenBlock, type Ladder } from './rerank';
+import { BUCKET_LABEL, type Bucket } from './score';
 import type { RankingCategory } from './use-collection';
 import { useLiftDrag } from './use-lift-drag';
 import type { RerankController } from './use-rerank';
@@ -237,7 +238,10 @@ export function CollectionView({
     listRef,
     containerRef,
     count: rungCount,
-    isOutside: (from, to) => (ladder ? planMove(ladder, from, to)?.kind === 'outside' : false),
+    // "Outside" is now "lands in another category" (founder, 2026-11-19): a drop there is
+    // applied, and recategorises the title. The tick and the label say it is happening.
+    isOutside: (from, to) =>
+      ladder ? landingBucket(ladder, from, to) !== ladder.rungs[from]?.bucket : false,
     onDrop: (from, to) => {
       if (!ladder || !rerank) return;
       // A refetch can land mid-drag and renumber the screen. If the index no longer names
@@ -250,6 +254,16 @@ export function CollectionView({
     },
   });
   const lifted = drag.state;
+  /** The category the lifted title would land in, when that is not its own. */
+  const crossingInto: Bucket | null =
+    lifted && ladder && lifted.outside ? landingBucket(ladder, lifted.from, lifted.to) : null;
+  const crossLabel = crossingInto ? (
+    <View style={styles.crossLabel} testID="collection-lifted-category">
+      <Text variant="caption" style={styles.crossLabelText} numberOfLines={1}>
+        {`Move to ${BUCKET_LABEL[crossingInto]}`}
+      </Text>
+    </View>
+  ) : null;
 
   /**
    * What stands in for the titles, when something does: the section's own placeholder
@@ -332,9 +346,9 @@ export function CollectionView({
       accessibilityActions: actions.map(({ name, label }) => ({ name, label })),
       onAccessibilityAction: (event: AccessibilityActionEvent) => {
         const action = actions.find((a) => a.name === event.nativeEvent.actionName);
-        if (action) rerank.controller.move(ladder, index, action.to);
+        if (action) rerank.controller.move(ladder, index, action.to, action.toBucket);
       },
-      accessibilityHint: 'Touch and hold to move it within its group',
+      accessibilityHint: 'Touch and hold to move it',
     };
   };
 
@@ -548,7 +562,6 @@ export function CollectionView({
             style={[
               styles.lifted,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              lifted.outside && styles.liftedOutside,
               { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
             ]}
             testID="collection-lifted"
@@ -558,6 +571,7 @@ export function CollectionView({
               width={lifted.frame.width}
               badge={rankLabel(lifted.from)}
             />
+            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -640,7 +654,6 @@ export function CollectionView({
               styles.lifted,
               styles.liftedRow,
               { left: lifted.frame.x, top: lifted.frame.y, width: lifted.frame.width },
-              lifted.outside && styles.liftedOutside,
               { transform: [...drag.travel.getTranslateTransform(), { scale: LIFT_SCALE }] },
             ]}
             accessibilityElementsHidden
@@ -653,6 +666,7 @@ export function CollectionView({
               posterUri={posterUri((shown[lifted.from] as CollectionItem).posterPath)}
               onPress={() => {}}
             />
+            {crossLabel}
           </Animated.View>
         ) : null}
         </View>
@@ -830,8 +844,21 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     ...theme.elevation.e2,
   },
-  /** Over another band: the drop will be refused, and the copy fades to say so. */
-  liftedOutside: { opacity: 0.55 },
+  /**
+   * Over another category: the drop recategorises the title (founder, 2026-11-19), so the
+   * lifted copy names where it is going, on the copy itself, so the label travels with the
+   * finger and never covers the place being dropped on.
+   */
+  crossLabel: {
+    position: 'absolute',
+    top: theme.space[2],
+    alignSelf: 'center',
+    paddingHorizontal: theme.space[2],
+    paddingVertical: theme.space[1],
+    borderRadius: theme.radius.control,
+    backgroundColor: theme.semantic.action,
+  },
+  crossLabelText: { color: theme.semantic.actionText },
   hiddenRow: { opacity: 0 },
   fill: { justifyContent: 'center' },
 });

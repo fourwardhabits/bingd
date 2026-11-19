@@ -111,38 +111,83 @@ export function bandRange(ladder: Ladder, index: number): { lo: number; hi: numb
   return { lo, hi };
 }
 
+/** The three categories, best first: the order their runs take in every ranking. */
+const BUCKET_ORDER: readonly Bucket[] = ['loved', 'fine', 'not_for_me'];
+const rankOf = (bucket: Bucket) => BUCKET_ORDER.indexOf(bucket);
+
 /**
  * What a drop from `from` to `to` asks the server to do.
  *
- *   noop     The title is back where it was. Nothing is sent, nothing is said.
- *   outside  Another band. Not applied: crossing a band is a change of rating, which goes
- *            through Rerank's comparisons, never through a drag.
- *   move     `rank_reorder(mediaItemId, toPosition, op, fromPosition, anchorId)`, where the
- *            anchor is the title on screen at the target, so a list gone stale is refused.
+ *   noop  The title is back where it was, in the category it was in. Nothing is sent.
+ *   move  `rank_reorder(mediaItemId, toPosition, op, fromPosition, anchorId, toBucket)`.
+ *         The anchor is the title on screen at the target, so a list gone stale is refused.
+ *         `bucket` is where the title is now and `toBucket` where it lands: they differ for
+ *         a drop among another category's titles (founder, 2026-11-19), which recategorises
+ *         it and rescores it from its new place.
  */
 export type PlannedMove =
   | { kind: 'noop' }
-  | { kind: 'outside'; rung: Rung; direction: 'up' | 'down' }
   | {
       kind: 'move';
       category: RankingCategory;
       mediaItemId: string;
       title: string;
       bucket: Bucket;
+      toBucket: Bucket;
       fromPosition: number;
       toPosition: number;
       anchorId: string;
     };
 
-export function planMove(ladder: Ladder, from: number, to: number): PlannedMove | null {
+/**
+ * **The category a drop lands in** (founder decision, 2026-11-19, replacing v1's same-group
+ * rule). A dropped title takes the place of the title it displaces and joins that title's
+ * category: drag *Heat* onto the third It was fine title and it is It was fine, third.
+ *
+ * One rule, with no geometry. It means a drag inside one category is exactly the move it
+ * always was, and that the first place of the next category down is reached from above by
+ * dropping onto its second title and then nudging, or with the accessibility action. That
+ * place, the line between two categories, is the one spot two categories share.
+ */
+export function landingBucket(ladder: Ladder, from: number, to: number): Bucket | null {
   const rung = ladder.rungs[from];
   if (!rung) return null;
   const target = Math.max(0, Math.min(to, ladder.rungs.length - 1));
-  if (target === from) return { kind: 'noop' };
-  const band = bandRange(ladder, from);
-  if (target < band.lo || target > band.hi) {
-    return { kind: 'outside', rung, direction: target < band.lo ? 'up' : 'down' };
-  }
+  return target === from ? rung.bucket : (ladder.rungs[target]?.bucket ?? null);
+}
+
+/**
+ * Whether `toBucket` at index `target` is a place the server accepts: once the title has left
+ * its own place, every title above the landing is in an equal or better category and every
+ * title below in an equal or worse one. That is `rank_reorder`'s 22023 check, said here so
+ * the client never sends a move the server must refuse.
+ */
+function fits(ladder: Ladder, from: number, target: number, toBucket: Bucket): boolean {
+  const rest = ladder.rungs.filter((_, i) => i !== from);
+  const above = rest.slice(0, target);
+  const below = rest.slice(target);
+  const r = rankOf(toBucket);
+  return above.every((x) => rankOf(x.bucket) <= r) && below.every((x) => rankOf(x.bucket) >= r);
+}
+
+/**
+ * `toBucket` is the drag's landing category when absent ({@link landingBucket}). The
+ * accessibility actions pass it, because "Move down" from the bottom of a category is the
+ * line between two categories, where the category is a choice and not a consequence.
+ */
+export function planMove(
+  ladder: Ladder,
+  from: number,
+  to: number,
+  toBucket?: Bucket,
+): PlannedMove | null {
+  const rung = ladder.rungs[from];
+  if (!rung) return null;
+  const target = Math.max(0, Math.min(to, ladder.rungs.length - 1));
+  const landing = toBucket ?? landingBucket(ladder, from, target);
+  if (!landing) return null;
+  if (target === from && landing === rung.bucket) return { kind: 'noop' };
+  if (!fits(ladder, from, target, landing)) return null;
   const anchor = ladder.rungs[target] as Rung;
   return {
     kind: 'move',
@@ -150,6 +195,7 @@ export function planMove(ladder: Ladder, from: number, to: number): PlannedMove 
     mediaItemId: rung.mediaItemId,
     title: rung.title,
     bucket: rung.bucket,
+    toBucket: landing,
     fromPosition: rung.position,
     toPosition: anchor.position,
     anchorId: anchor.mediaItemId,
@@ -158,21 +204,27 @@ export function planMove(ladder: Ladder, from: number, to: number): PlannedMove 
 
 /**
  * `rankings`' own shift, applied to a cached copy of one pool: the moved title takes
- * `toPosition` and the titles between close up. Every other row is untouched, and band
- * sizes cannot change, so every score the screen derives reflows exactly as the server's
- * will. Null when the title is not in the list (the caller then has nothing to predict).
+ * `toPosition` (and `toBucket`, across a category) and the titles between close up. Every
+ * other row keeps its category. Band sizes are recounted by whoever scores the list, so
+ * every score the screen derives reflows exactly as the server's will. Null when the title
+ * is not in the list (the caller then has nothing to predict).
  */
-export function applyMove<T extends { mediaItemId: string; position: number }>(
+export function applyMove<T extends { mediaItemId: string; position: number; bucket?: Bucket }>(
   entries: readonly T[],
   mediaItemId: string,
   toPosition: number,
+  toBucket?: Bucket,
 ): T[] | null {
   const subject = entries.find((entry) => entry.mediaItemId === mediaItemId);
   if (!subject) return null;
   const from = subject.position;
-  if (from === toPosition) return [...entries];
+  const moved = (entry: T): T =>
+    toBucket ? { ...entry, position: toPosition, bucket: toBucket } : { ...entry, position: toPosition };
+  if (from === toPosition) {
+    return entries.map((entry) => (entry.mediaItemId === mediaItemId ? moved(entry) : entry));
+  }
   return entries.map((entry) => {
-    if (entry.mediaItemId === mediaItemId) return { ...entry, position: toPosition };
+    if (entry.mediaItemId === mediaItemId) return moved(entry);
     if (toPosition < from && entry.position >= toPosition && entry.position < from) {
       return { ...entry, position: entry.position + 1 };
     }
@@ -185,9 +237,11 @@ export function applyMove<T extends { mediaItemId: string; position: number }>(
 
 /**
  * The move that puts a just-moved title back, in the coordinates of the list it left
- * behind: from where it is now to where it was, anchored on whichever title now holds that
- * position. Undo is an ordinary guarded move, so if anything else moved in between it is
- * refused as stale instead of undoing the wrong thing.
+ * behind: from where it is now to where it was, in the category it was in, anchored on
+ * whichever title now holds that position. The category is named explicitly rather than
+ * read from the anchor: the title now at the old place may be from the next category.
+ * Undo is an ordinary guarded move, so if anything else moved in between it is refused as
+ * stale instead of undoing the wrong thing.
  */
 export function undoOf(
   entriesAfter: readonly RankedEntry[],
@@ -197,33 +251,81 @@ export function undoOf(
   if (!anchor) return null;
   return {
     ...move,
+    bucket: move.toBucket,
+    toBucket: move.bucket,
     fromPosition: move.toPosition,
     toPosition: move.fromPosition,
     anchorId: anchor.mediaItemId,
   };
 }
 
+/** Whether a planned move changes the title's rating category. */
+export const crosses = (move: Extract<PlannedMove, { kind: 'move' }>) =>
+  move.toBucket !== move.bucket;
+
 /** The score a planned move lands on, from the same projection every screen draws. */
 export function scoreAfter(ladder: Ladder, move: Extract<PlannedMove, { kind: 'move' }>) {
-  return scoreFor(move.bucket, move.toPosition, bandSizes(ladder.rungs));
+  const after =
+    applyMove(
+      ladder.rungs.map((rung) => ({ ...rung })),
+      move.mediaItemId,
+      move.toPosition,
+      move.toBucket,
+    ) ?? ladder.rungs;
+  return scoreFor(move.toBucket, move.toPosition, bandSizes(after));
 }
 
-/** One VoiceOver / TalkBack action on a rung: its name, its spoken label, and its target. */
-export type MoveAction = { name: string; label: string; to: number };
+/**
+ * One VoiceOver / TalkBack action on a rung: its name, its spoken label, its target index,
+ * and the category it lands in when that is not the drag's landing rule.
+ */
+export type MoveAction = { name: string; label: string; to: number; toBucket?: Bucket };
 
 /**
- * The accessibility moves a rung offers: one step either way, and to either end of its band.
- * Never across a band, for the reason {@link planMove} refuses one. Empty for a band of one.
+ * The accessibility moves a rung offers: one step either way, and to either end of its group.
+ *
+ * At a group's edge, one step is the line into the neighbouring category (founder,
+ * 2026-11-19): "Move up into I liked it" from the top of It was fine makes it the last I liked
+ * it title without moving it, and the next step moves it among them. So every place a drag
+ * can reach, a screen reader can reach one step at a time.
  */
 export function moveActions(ladder: Ladder, index: number): MoveAction[] {
-  if (!ladder.rungs[index]) return [];
+  const rung = ladder.rungs[index];
+  if (!rung) return [];
   const { lo, hi } = bandRange(ladder, index);
   const actions: MoveAction[] = [];
-  if (index > lo) actions.push({ name: 'moveUp', label: 'Move up', to: index - 1 });
-  if (index < hi) actions.push({ name: 'moveDown', label: 'Move down', to: index + 1 });
-  if (index - 1 > lo) actions.push({ name: 'moveToTop', label: 'Move to top of its group', to: lo });
+  const prev = BUCKET_ORDER[rankOf(rung.bucket) - 1];
+  const next = BUCKET_ORDER[rankOf(rung.bucket) + 1];
+  if (index > lo) {
+    actions.push({ name: 'moveUp', label: 'Move up', to: index - 1, toBucket: rung.bucket });
+  } else if (prev) {
+    actions.push({
+      name: 'moveUp',
+      label: `Move up into ${BUCKET_LABEL[prev]}`,
+      to: index,
+      toBucket: prev,
+    });
+  }
+  if (index < hi) {
+    actions.push({ name: 'moveDown', label: 'Move down', to: index + 1, toBucket: rung.bucket });
+  } else if (next) {
+    actions.push({
+      name: 'moveDown',
+      label: `Move down into ${BUCKET_LABEL[next]}`,
+      to: index,
+      toBucket: next,
+    });
+  }
+  if (index - 1 > lo) {
+    actions.push({ name: 'moveToTop', label: 'Move to top of its group', to: lo, toBucket: rung.bucket });
+  }
   if (index + 1 < hi) {
-    actions.push({ name: 'moveToBottom', label: 'Move to bottom of its group', to: hi });
+    actions.push({
+      name: 'moveToBottom',
+      label: 'Move to bottom of its group',
+      to: hi,
+      toBucket: rung.bucket,
+    });
   }
   return actions;
 }
@@ -246,20 +348,27 @@ export type RerankNotice = {
 const quoted = (title: string) => `“${title}”`;
 
 export const notices = {
-  moved: (title: string, position: number, score: number): RerankNotice => ({
-    message: `Moved ${quoted(title)} to #${position} · ${formatScore(score)}`,
+  /** `into` is the new category, named only when the move changed it. */
+  moved: (title: string, position: number, score: number, into?: Bucket): RerankNotice => ({
+    message: into
+      ? `Moved ${quoted(title)} to ${BUCKET_LABEL[into]} · #${position} · ${formatScore(score)}`
+      : `Moved ${quoted(title)} to #${position} · ${formatScore(score)}`,
     action: { kind: 'undo', label: 'Undo' },
     tone: 'info',
   }),
-  undone: (title: string, position: number): RerankNotice => ({
-    message: `Moved ${quoted(title)} back to #${position}`,
+  undone: (title: string, position: number, into?: Bucket): RerankNotice => ({
+    message: into
+      ? `Moved ${quoted(title)} back to ${BUCKET_LABEL[into]} · #${position}`
+      : `Moved ${quoted(title)} back to #${position}`,
     tone: 'info',
   }),
-  outside: (rung: Rung): RerankNotice => ({
-    message: `${quoted(rung.title)} is in ${BUCKET_LABEL[rung.bucket]}. Drag it within that group, or use Rerank on its page to change your rating.`,
-    action: { kind: 'openTitle', label: 'Open title' },
-    mediaItemId: rung.mediaItemId,
-    tone: 'info',
+  /**
+   * The server refused the place (22023). The client checks the same rule before sending,
+   * so this means the list it checked against had changed: it has been refreshed.
+   */
+  outside: (title: string): RerankNotice => ({
+    message: `Couldn’t place ${quoted(title)} there. Your list has been refreshed, so try the move again.`,
+    tone: 'error',
   }),
   stale: (): RerankNotice => ({
     message: 'Your ranking changed on another device. It has been refreshed, so try the move again.',

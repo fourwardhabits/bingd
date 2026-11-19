@@ -515,8 +515,17 @@ describe('reorderRanking', () => {
     });
     await expect(reorderRanking(input)).resolves.toEqual({
       outcome: 'moved',
-      reply: { moved: true, position: 1, fromPosition: 4, score: 10, fromScore: 7 },
+      reply: {
+        moved: true,
+        position: 1,
+        fromPosition: 4,
+        bucket: null,
+        fromBucket: null,
+        score: 10,
+        fromScore: 7,
+      },
     });
+    // A move inside one category sends exactly the call it always did: no p_new_bucket.
     expect(mockRpc).toHaveBeenCalledWith('rank_reorder', {
       p_media_item_id: mediaItemId,
       p_new_position: 1,
@@ -524,6 +533,30 @@ describe('reorderRanking', () => {
       p_expected_position: 4,
       p_anchor_media_item_id: input.anchorId,
     });
+  });
+
+  it('a move across a category names the category it lands in (20261129000200)', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        done: true,
+        moved: true,
+        position: 5,
+        from_position: 1,
+        bucket: 'fine',
+        from_bucket: 'loved',
+        score: '4.6',
+        from_score: '10.0',
+      },
+      error: null,
+    });
+    await expect(reorderRanking({ ...input, toPosition: 5, toBucket: 'fine' })).resolves.toMatchObject({
+      outcome: 'moved',
+      reply: { bucket: 'fine', fromBucket: 'loved', score: 4.6 },
+    });
+    expect(mockRpc).toHaveBeenLastCalledWith(
+      'rank_reorder',
+      expect.objectContaining({ p_new_position: 5, p_new_bucket: 'fine' }),
+    );
   });
 
   it('55000 is stale, 22023 is outside the band', async () => {
