@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, EngagementRow, ReactionControl, Text, type ActivityReaction } from '@/ui/components';
+import { Avatar, EngagementRow, ReactionSummary, Text, type ActivityReaction } from '@/ui/components';
+import { ENGAGEMENT_EDGE } from '@/ui/components/EngagementRow';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { followTail, relativeTime, verbFor } from './activity';
@@ -163,34 +164,34 @@ export function FollowStoryRow({
       </View>
 
       {/**
-       * How many reacted, and the way to who (Codex, PR 322). `EngagementRow` draws the Like
-       * action but no count, which `FeedCard` puts on its summary line; a follow story has
-       * no summary line, so the count sits here, compact, for every reader, the author
-       * included. It opens the same "who reacted" sheet.
+       * **The Feed's engagement, exactly as award, goal and grouped rows draw it**
+       * (founder, 2026-11-19). The same three pieces in the same order as `ActivityRow`'s
+       * `labelledActions`: who reacted as a sentence on its own line ("Priya and 3 others
+       * like this", opening the same "who reacted" sheet, for every reader, the author
+       * included), the picker above the heart it belongs to, then `EngagementRow`'s
+       * labelled Like · Comment at the card's edge. No Save and no Share: there is no title
+       * to save and no public link for a follow story.
        */}
       {reaction && reaction.count > 0 ? (
-        <View style={styles.summary} testID="follow-story-reactions">
-          <ReactionControl
-            label=""
-            active={Boolean(reaction.mineGlyph)}
-            mineGlyph={reaction.mineGlyph}
-            glyphs={reaction.summaryGlyphs ?? reaction.glyphs ?? []}
-            count={reaction.count}
-            onToggle={() => {}}
-            onOpenDetail={reaction.onPressSummary}
-            canReact={false}
-          />
-        </View>
+        <ReactionSummary
+          glyphs={reaction.summaryGlyphs ?? reaction.glyphs ?? []}
+          forms={
+            reaction.summaryForms?.length
+              ? reaction.summaryForms
+              : [`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}`]
+          }
+          onPress={reaction.onPressSummary}
+          testID="follow-story-reactions"
+        />
       ) : null}
 
-      {/* The picker under the sentence, above the actions — `FeedCard`'s placement. */}
-      {reaction?.picker && reacts ? <View style={styles.picker}>{reaction.picker}</View> : null}
+      {reaction?.picker && reacts ? <View>{reaction.picker}</View> : null}
 
       {engages ? (
         <EngagementRow
           actorName={event.actorName}
           subject={subject}
-          reaction={reacts ? reaction : null}
+          reaction={reaction}
           onPressComments={onPressComments}
           commentCount={commentCount}
           style={styles.actions}
@@ -229,10 +230,11 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   copy: { flex: 1, gap: 1 },
-  /** The labelled row sits under the sentence, aligned with its text column. */
-  actions: { marginTop: theme.space[1] },
-  picker: { paddingTop: theme.space[2] },
-  summary: { flexDirection: 'row', paddingTop: theme.space[1] },
+  /**
+   * The labelled row reaches past the row's gutter to the card's, as `ActivityRow`'s
+   * `labelledActions` does, so its columns line up with every other post's.
+   */
+  actions: { marginTop: theme.space[1], marginHorizontal: ENGAGEMENT_EDGE - theme.layout.gutter },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
   // name reads the same weight here as it does two rows up.
   entity: { color: theme.text.primary, fontFamily: fontFamily.sansSemibold },

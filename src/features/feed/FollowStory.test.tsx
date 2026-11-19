@@ -1,7 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { ActivityRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { followTail } from './activity';
@@ -455,5 +456,63 @@ describe('reacting and commenting', () => {
     );
 
     expect(view.queryByTestId('follow-story-reactions')).toBeNull();
+  });
+
+  /**
+   * **The same controls as every other supported Feed post** (founder, 2026-11-19): the
+   * follow row and an award row (`ActivityRow` `labelledActions`) draw the same summary
+   * sentence and the same labelled row, at the same edge, with the same columns.
+   */
+  it('matches an award row: summary sentence, labelled row, same edge and columns', async () => {
+    const shared = reaction({
+      count: 3,
+      summaryForms: ['Priya and 2 others like this', '3 reactions'],
+      summaryGlyphs: ['❤️'],
+    });
+    const follow = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={shared}
+        onPressComments={() => {}}
+      />,
+    );
+    const award = await renderWithProviders(
+      <ActivityRow
+        actorName="Abi"
+        verb="earned"
+        title="Tourist"
+        tail="award"
+        year={null}
+        timeLabel="1h"
+        onPressTitle={() => {}}
+        labelledActions
+        reaction={shared}
+        onPressComments={() => {}}
+      />,
+    );
+
+    // The summary sentence, worded the same on both.
+    expect(follow.getByLabelText('Priya and 2 others like this. See who reacted.')).toBeTruthy();
+    expect(award.getByLabelText('Priya and 2 others like this. See who reacted.')).toBeTruthy();
+
+    const flat = (node: { props: { style?: unknown } }): ViewStyle =>
+      StyleSheet.flatten(
+        (typeof node.props.style === 'function'
+          ? (node.props.style as (s: { pressed: boolean }) => unknown)({ pressed: false })
+          : node.props.style) as StyleProp<ViewStyle>,
+      );
+    // The row sits at the same edge.
+    const followRow = flat(follow.getByTestId('follow-story-actions'));
+    const awardRow = flat(award.getByTestId('activity-actions'));
+    expect(followRow.marginHorizontal).toBe(awardRow.marginHorizontal);
+    // And every column is the same column.
+    expect(flat(follow.getByTestId('follow-story-like'))).toEqual(flat(award.getByTestId('activity-like')));
+    expect(flat(follow.getByTestId('follow-story-comment'))).toEqual(
+      flat(award.getByTestId('activity-comment')),
+    );
+    expect(follow.getByText('Like')).toBeTruthy();
+    expect(follow.getByText('Comment')).toBeTruthy();
   });
 });

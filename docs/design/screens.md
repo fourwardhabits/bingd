@@ -1288,22 +1288,29 @@ follow story cannot dominate a screenful of rankings because it is a third of th
 one.
 
 **Reactions and comments since 2026-11-19 (Workstream C).** The founder reversed the
-original "no reactions and no comments" rule. The row now ends in a heart and a comment
-control, each a real 44pt box outside the text column, so neither can open the list of
-people and each is its own accessibility element:
+original "no reactions and no comments" rule, and then asked that follow stories use **the
+same labelled engagement controls as every other supported Feed post** (2026-11-19, the Feed
+consistency decision, #323). The sentence stays compact, and under it come the same three
+pieces award, goal and grouped rows draw (`ActivityRow` `labelledActions`):
 
 ```
- (A)  Abi followed Ravi and 4 others          ♥ 3   💬 2
+ (A)  Abi followed Ravi and 4 others
       12m ago
+ ❤️ Priya and 2 others like this
+   ♡ Like            💬 Comment
 ```
 
-- The heart shows a count only, never the glyph cluster, and there is no "who reacted"
-  sentence line. That is what keeps the row compact.
-- One shared conversation per story, grouped or not. The comment control opens the Feed's
-  comment sheet. A follow story's notification opens the activity page, which draws this
-  same row above the thread, without a comment control because the thread is below it.
-- Labels: "React to Abi's follow activity. Long press for more reactions.", "2 comments on
-  Abi's follow activity. Open them." and "Comment on Abi's follow activity".
+- The summary sentence (`ReactionSummary`) opens "who reacted", for every reader, the
+  author included. Absent with no reactions.
+- `EngagementRow`'s labelled Like · Comment: equal 44pt columns at the card's edge, outside
+  the text column, so neither can open the list of people. Like: tap for the default
+  reaction, long press for the picker. No Save and no Share: there is no title to save and
+  no public link for a follow story.
+- One shared conversation per story, grouped or not. Comment opens the Feed's comment sheet.
+  A follow story's notification opens the activity page, which draws this same row above the
+  thread, without Comment because the thread is below it.
+- Labels: "React to Abi's activity about following Ravi. Long press for more reactions." and
+  "Comment on Abi's activity about following Ravi", in `EngagementRow`'s own grammar.
 - The composer has no "Contains spoilers" toggle here: there is no title to spoil.
 - Notifications read "reacted to your follow activity" and "commented on your follow
   activity", in the inbox and in a push.
