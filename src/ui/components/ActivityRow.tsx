@@ -1,10 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { Bucket } from '@/features/collection/score';
 
 import { fontFamily, theme } from '../tokens';
 import { Avatar } from './Avatar';
+import { IconAction } from './IconAction';
 import { Poster } from './Poster';
 import { ReactionControl } from './ReactionControl';
 import { ReactionSummary } from './ReactionSummary';
@@ -577,52 +577,6 @@ function companionNames(names: string[]) {
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   const rest = names.length - 1;
   return `${names[0]} and ${rest} others`;
-}
-
-/**
- * An action as an icon.
- *
- * The label is what a screen reader gets, and it names the thing being acted on
- * rather than the glyph — "Add Sinners to your watchlist", not "Bookmark". An icon
- * row is only denser than a text row if the meaning moves into the label rather than
- * being dropped.
- */
-function IconAction({
-  icon,
-  label,
-  onPress,
-  active = false,
-  selected,
-  badge,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  onPress: () => void;
-  active?: boolean;
-  selected?: boolean;
-  badge?: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={selected === undefined ? undefined : { selected }}
-      onPress={onPress}
-      hitSlop={theme.space[2]}
-      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.sm}
-        color={active ? theme.semantic.action : theme.text.secondary}
-      />
-      {badge ? (
-        <Text variant="caption" tone={active ? 'action' : 'secondary'}>
-          {badge}
-        </Text>
-      ) : null}
-    </Pressable>
-  );
 }
 
 /**

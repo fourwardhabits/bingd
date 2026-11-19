@@ -60,6 +60,13 @@ export type PushJob = {
    * commenter, for whom it yields null.
    */
   feed_event_id: string | null;
+  /**
+   * The activity's own type (20261130000100), read through the same join as the title, so
+   * it is set only when the activity is the recipient's own. A follow story's comment and
+   * reaction pushes say "your follow activity" from it; absent (an older database), they
+   * keep the generic sentence.
+   */
+  feed_event_type?: string | null;
   media_kind: 'movie' | 'series' | 'season' | null;
   media_title: string | null;
   series_title: string | null;
@@ -206,6 +213,8 @@ export function subjectName(job: PushJob): string | null {
  * copy: there is no third place.
  */
 function sentence(job: PushJob, name: string, subject: string | null): { title: string; body: string } {
+  // A follow story has no title, so its noun is the activity itself (Workstream C).
+  const noun = job.feed_event_type === 'follow_added' ? 'your follow activity' : 'your activity';
   switch (job.type) {
     case 'follow':
       return { title: name, body: 'started following you' };
@@ -228,7 +237,7 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
       }
       return {
         title: name,
-        body: subject ? `commented on your activity — ${subject}` : 'commented on your activity',
+        body: subject ? `commented on ${noun} — ${subject}` : `commented on ${noun}`,
       };
     }
     /**
@@ -259,7 +268,7 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
     case 'reaction':
       return {
         title: name,
-        body: subject ? `reacted to your activity — ${subject}` : 'reacted to your activity',
+        body: subject ? `reacted to ${noun} — ${subject}` : `reacted to ${noun}`,
       };
     case 'watch_tag':
       return {

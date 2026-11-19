@@ -1283,9 +1283,37 @@ content rather than an audit log**, which decides everything about how the row i
 ```
 
 A lighter row than an activity row — avatar, one sentence, one time label — with no poster,
-no score, no note, **no reactions and no comments**. That lightness is the frequency rule
-expressed as composition: a follow story cannot dominate a screenful of rankings because it
-is a third of the height of one. Aggregation does the rest: one story per actor per hour,
+no score and no note. That lightness is the frequency rule expressed as composition: a
+follow story cannot dominate a screenful of rankings because it is a third of the height of
+one.
+
+**Reactions and comments since 2026-11-19 (Workstream C).** The founder reversed the
+original "no reactions and no comments" rule. The row now ends in a heart and a comment
+control, each a real 44pt box outside the text column, so neither can open the list of
+people and each is its own accessibility element:
+
+```
+ (A)  Abi followed Ravi and 4 others          ♥ 3   💬 2
+      12m ago
+```
+
+- The heart shows a count only, never the glyph cluster, and there is no "who reacted"
+  sentence line. That is what keeps the row compact.
+- One shared conversation per story, grouped or not. The comment control opens the Feed's
+  comment sheet. A follow story's notification opens the activity page, which draws this
+  same row above the thread, without a comment control because the thread is below it.
+- Labels: "React to Abi's follow activity. Long press for more reactions.", "2 comments on
+  Abi's follow activity. Open them." and "Comment on Abi's follow activity".
+- The composer has no "Contains spoilers" toggle here: there is no title to spoil.
+- Notifications read "reacted to your follow activity" and "commented on your follow
+  activity", in the inbox and in a push.
+- Who may engage is the server's single predicate, `_follow_story_open_to`
+  (`20261130000100`, see `docs/architecture/data-model.md`). A story with no member the
+  reader may still identify is hidden from them, including from its author, and returns
+  when that changes. Nothing is deleted. People named in a story get no special access and
+  no notifications for being named.
+- A story freezes at its first reaction or comment. The next follow starts a new story, so
+  a conversation is always about the people its participants saw. Aggregation does the rest: one story per actor per hour,
 appended to, so a session spent following ten suggestions is one row and not ten.
 
 **The count is the reader's, not the actor's.** The people a story names are resolved per

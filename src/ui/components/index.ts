@@ -22,6 +22,7 @@ export {
   type DetailHeaderState,
 } from './DetailHeader';
 export { Divider } from './Divider';
+export { IconAction, type IconActionProps } from './IconAction';
 export { ContentToolbar, FiltersAction } from './ContentToolbar';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { EpisodeRow, type EpisodeRowProps } from './EpisodeRow';

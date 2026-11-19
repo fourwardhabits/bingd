@@ -2,7 +2,7 @@ import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { feedItems, FEED_PAGE_SIZE, useActorActivity, useFeed } from './use-feed';
+import { feedItems, FEED_PAGE_SIZE, useActivityEvent, useActorActivity, useFeed } from './use-feed';
 
 let mockFeedRows: unknown[] = [];
 let mockNoteRows: unknown[] = [];
@@ -1291,6 +1291,29 @@ describe('follow stories', () => {
     // follow story between two rankings would be the audit log §A9 refuses to build.
     expect(mockFeedReads[0]?.in.type).not.toContain('follow_added');
     expect(mockFeedReads[0]?.in.type).toContain('title_ranked');
+  });
+
+  /**
+   * **A follow story's conversation page** (Workstream C, 2026-11-19). Its notifications
+   * open the activity page, so the single-activity read asks for follow stories too, and
+   * believes the server about who is in them: a story with nobody this reader may see is
+   * closed to them (20261130000100) and reads as unavailable, exactly like a deleted one.
+   */
+  it('opens a follow story on its conversation page, and nothing of a closed one', async () => {
+    mockFeedRows = [followRow()];
+    mockFollowPeopleRows = [named('follow-1', 'ravi')];
+    const open = await renderHookWithProviders(() => useActivityEvent('follow-1', 'viewer'));
+    await waitFor(() => expect(open.result.current.isPending).toBe(false));
+
+    expect(mockFeedReads[0]?.in.type).toContain('follow_added');
+    expect(mockFeedReads[0]?.in.type).toContain('title_ranked');
+    expect(open.result.current.data?.type).toBe('follow_added');
+    expect(open.result.current.data?.followed.map((person) => person.username)).toEqual(['ravi']);
+
+    mockFollowPeopleRows = [];
+    const closed = await renderHookWithProviders(() => useActivityEvent('follow-1', 'other'));
+    await waitFor(() => expect(closed.result.current.isPending).toBe(false));
+    expect(closed.result.current.data).toBeNull();
   });
 
   /**

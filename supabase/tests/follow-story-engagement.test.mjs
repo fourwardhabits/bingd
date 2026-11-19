@@ -388,3 +388,27 @@ describe('Heart Magnet and ordinary posts', () => {
     assert.deepEqual(await view(f, post), { reactions: 1, comments: 1, thread: 1, counted: 1 });
   });
 });
+
+describe('push copy facts', () => {
+  const giveDevice = (who) =>
+    t.sql(`insert into device_tokens (user_id, token, platform) values ($1, $2, 'ios')`, [
+      who,
+      `ExponentPushToken[${String(who).replaceAll('-', '').slice(0, 20)}]`,
+    ]);
+  const claim = () =>
+    t.asRole('service_role', null, async () => (await t.sql(`select claim_push_batch(50) as j`)).rows[0].j);
+
+  it('a follow story’s push says what the activity was, and only to its author', async () => {
+    const { a, f, story } = await scene();
+    await giveDevice(a);
+    await t.sql(`delete from push_outbox where notification_id not in (
+      select id from notifications where recipient_id = $1)`, [a]);
+    await react(f, story);
+    await comment(f, story, 'nice');
+    const jobs = (await claim()).filter((job) => job.feed_event_id === story);
+    assert.deepEqual(
+      jobs.map((job) => [job.type, job.feed_event_type]).sort(),
+      [['comment', 'follow_added'], ['reaction', 'follow_added']],
+    );
+  });
+});

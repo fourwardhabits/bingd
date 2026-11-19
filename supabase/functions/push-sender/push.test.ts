@@ -357,6 +357,28 @@ Deno.test('no excerpt falls back to the metadata sentence, never an empty quote'
   }
 });
 
+Deno.test('a follow story says "your follow activity", and only a follow story', () => {
+  // Workstream C (20261130000100). A follow story has no title, so the noun carries it.
+  for (const [type, body] of [
+    ['reaction', 'reacted to your follow activity'],
+    ['comment', 'commented on your follow activity'],
+  ] as const) {
+    const content = contentFor(job({ type, feed_event_id: 'event-1', feed_event_type: 'follow_added' }));
+    assertEquals(content?.title, 'Ada Lovelace');
+    assertEquals(content?.body, body);
+  }
+  // A comment with words still leads with them.
+  const quoted = contentFor(
+    job({ type: 'comment', feed_event_type: 'follow_added', comment_excerpt: 'good pick' }),
+  );
+  assertEquals(quoted?.body, '“good pick”');
+  // Any other type, or a server that does not send the field, keeps the generic noun.
+  for (const feed_event_type of ['title_ranked', null, undefined]) {
+    const content = contentFor(job({ type: 'reaction', feed_event_type }));
+    assertEquals(content?.body, 'reacted to your activity');
+  }
+});
+
 Deno.test("a season carries its show's name, because its own is Season 2", () => {
   assertEquals(
     subjectName(

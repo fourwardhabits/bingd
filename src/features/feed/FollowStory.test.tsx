@@ -310,3 +310,154 @@ describe('where the row ends', () => {
     expect(row.paddingVertical).toBe(theme.space[3]);
   });
 });
+
+/**
+ * **Reactions and comments** (Workstream C, founder 2026-11-19).
+ *
+ * Who may engage is the server's (`_follow_story_open_to`, asserted against real policies in
+ * `supabase/tests/follow-story-engagement.test.mjs`). What only the client can get wrong is
+ * here: the controls exist when asked for, they say whose activity they are about, each is a
+ * real 44pt target, and pressing one never opens the list underneath it.
+ */
+describe('reacting and commenting', () => {
+  const reaction = (over: Record<string, unknown> = {}) => ({
+    count: 0,
+    mineGlyph: null,
+    onPress: jest.fn(),
+    onLongPress: jest.fn(),
+    onPressSummary: jest.fn(),
+    ...over,
+  });
+
+  it('draws no controls for a caller that asks for none', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-actions')).toBeNull();
+  });
+
+  it('says whose activity the heart and the comments are about', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+        onPressComments={() => {}}
+      />,
+    );
+
+    expect(
+      view.getByLabelText("React to Abi's follow activity. Long press for more reactions."),
+    ).toBeTruthy();
+    expect(view.getByLabelText("Comment on Abi's follow activity")).toBeTruthy();
+  });
+
+  it('counts the conversation and the reactions', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction({ count: 3, mineGlyph: '❤️', mineLabel: 'Liked' })}
+        onPressComments={() => {}}
+        commentCount={2}
+      />,
+    );
+
+    expect(
+      view.getByLabelText(
+        "Liked. You reacted to Abi's follow activity. Tap to remove, long press to change.",
+      ),
+    ).toBeTruthy();
+    expect(view.getByLabelText('3 reactions. See who reacted.')).toBeTruthy();
+    expect(view.getByLabelText("2 comments on Abi's follow activity. Open them.")).toBeTruthy();
+  });
+
+  it('never opens the list from a control, on a story that has one', async () => {
+    const onOpenList = jest.fn();
+    const onPressComments = jest.fn();
+    const r = reaction();
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi'), person('Ben')])}
+        onPressPerson={() => {}}
+        onOpenList={onOpenList}
+        reaction={r}
+        onPressComments={onPressComments}
+      />,
+    );
+
+    await fireEvent.press(view.getByLabelText(/^React to Abi's follow activity/));
+    await fireEvent(view.getByLabelText(/^React to Abi's follow activity/), 'longPress');
+    await fireEvent.press(view.getByLabelText("Comment on Abi's follow activity"));
+
+    expect(r.onPress).toHaveBeenCalledTimes(1);
+    expect(r.onLongPress).toHaveBeenCalledTimes(1);
+    expect(onPressComments).toHaveBeenCalledTimes(1);
+    expect(onOpenList).not.toHaveBeenCalled();
+    // The list is still the sentence's, beside them.
+    await fireEvent.press(view.getByLabelText('Abi followed Ravi and 1 other'));
+    expect(onOpenList).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives each control a real 44pt box', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+        onPressComments={() => {}}
+      />,
+    );
+
+    const actions = StyleSheet.flatten(view.getByTestId('follow-story-actions').props.style);
+    const heartBox = StyleSheet.flatten(view.getByTestId('follow-story-reaction').props.style);
+    const comments = view.getByTestId('follow-story-comments');
+    const commentBox = StyleSheet.flatten(
+      typeof comments.props.style === 'function'
+        ? comments.props.style({ pressed: false })
+        : comments.props.style,
+    );
+
+    expect(actions.minHeight).toBe(theme.layout.minTapTarget);
+    expect(heartBox.minWidth).toBe(theme.layout.minTapTarget);
+    expect(heartBox.minHeight).toBe(theme.layout.minTapTarget);
+    expect(commentBox.minWidth).toBe(theme.layout.minTapTarget);
+  });
+
+  it('shows the count without a heart where the reader may not react', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction({ canReact: false, count: 2 })}
+        onPressComments={() => {}}
+      />,
+    );
+
+    expect(view.queryByTestId('reaction-action')).toBeNull();
+    expect(view.getByLabelText('2 reactions. See who reacted.')).toBeTruthy();
+    expect(view.getByLabelText("Comment on Abi's follow activity")).toBeTruthy();
+  });
+
+  it('draws nothing for reactions nobody may add and nobody has', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction({ canReact: false })}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-actions')).toBeNull();
+  });
+});
