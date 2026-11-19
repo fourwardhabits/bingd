@@ -23,6 +23,7 @@ Out of scope for every lane: #319 (owned by its own session), #321 (release-pend
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-19 23:07Z: Lane A pushed `release/2026-11-19-store-1.2.0` (`5821cb36`); release gate passed (actions run 44632916599). The production build stops before upload: EAS stores `GOOGLE_SERVICES_JSON` as a SECRET file variable, which the CLI here can't read. Nothing was built or submitted. Founder decision needed: run the two build commands locally, or make that variable Sensitive.
 - 2026-11-19 ~22:55Z: founder decisions. (1) Build 1.2.0 for iOS and Android from one release commit: lane A building. (2) Welcome email approved: lane B merging #324 after the 23:23Z run, then deploy check and canary. (3) Agent may run the real-history benchmark, but there is still no way to give it a read-only DB credential (the secure form can't carry DB passwords) and the Management-API workaround was refused by the session's permission checks, so lane C is waiting on the founder.
 - 2026-11-19: Lane C opened #327. No user rows were read; the production queries covered catalogue/config totals and an `EXPLAIN` only. Benchmark tooling now separates titles that never entered the pool from titles that were in it but ranked low.
 - 2026-11-19: Lane A opened #326. Live iOS is 1.1.0 (15), last submitted 2026-09-26. Live code is OTA `a3300bf0`. Play has no upload service account, so the Play upload is manual.
