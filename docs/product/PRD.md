@@ -1,6 +1,6 @@
 # bingd — Product Requirements Document
 
-**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19**
+**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19** and a **current-state block of 2026-11-19** (below)
 **Status:** Build-ready for public-alpha architecture. **Product scope re-frozen 2026-08-19.**
 **Date:** 2026-08-12, corrected 2026-08-13 after independent review — see [`change-log-v0.6.md`](./change-log-v0.6.md) §7
 **Supersedes:** `Bingd_PRD_v0.5_Finalization_Draft_20260812.pdf`
@@ -19,7 +19,7 @@
 >
 > A section with no As-built block is either unchanged from the specification or **not built at all**. The one document that says which is [`deferred-roadmap.md`](./deferred-roadmap.md), and the release-blocking half of that list lives in `.agent-workflow/continuation.md` rather than in any roadmap.
 >
-> **Product scope is re-frozen as of 2026-08-19.** No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
+> **Product scope is re-frozen as of 2026-08-19.** *(Historical: the freezes of 2026-08-19 and 2026-09-26 have both been lifted by founder-authorised releases; see the 2026-11-19 current-state block.)* No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
 
 > ### As built 2026-09-23 — the stopping point
 >
@@ -53,7 +53,7 @@
 > [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)); predicted score;
 > unmatched-import repair; *add what I've already seen* bulk entry; stats / Wrapped; real
 > release notifications; Watch Next; post-ranking share cards; further Awards. **Still out of scope:**
-> episode-level tracking and whole-series ranking.
+> episode-level tracking and whole-series ranking. *(Whole-series ranking has since shipped, 2026-11-12: see the 2026-11-19 block.)*
 
 > ### Current state — 2026-09-26, `9d9683a` (the frozen production source)
 >
@@ -76,6 +76,57 @@
 >   cached, and the first comparison of a ranking session no longer waits on a second read.
 >
 > The deferred list above is unchanged, and none of it is planned next.
+
+> ### Current state — 2026-11-19 (production `a3300bf0`)
+>
+> **This block supersedes the two above wherever they disagree.** The freeze of 2026-09-26 was
+> lifted by founder-authorised releases from 2026-11-07 on; seven production OTAs between
+> 2026-11-12 and 2026-11-19 changed behaviour. The release-by-release record, flags and
+> rollback targets are in [`../release/production-state.md`](../release/production-state.md),
+> which is the authority on what is live. Labels: **Live in production**, **Shipped dark**
+> (in production, switched off), **Staging or unreleased**, **Proposed**.
+>
+> **Live in production, changed since 2026-09-26:**
+>
+> - **A whole TV show is rankable** (since 2026-11-12). Movies, TV shows and TV seasons are
+>   three independent pools; ranking a season offers *Update Show* or *Keep Show* for its
+>   parent. The TV Collection shows one poster per show, with the explicit show score or the
+>   season average. This **supersedes** every statement below that a whole series is never
+>   rankable (§1, §8, §10, §14, §26.2), each marked where it stands. Episodes are still never
+>   logged or ranked. [`../architecture/ranking.md`](../architecture/ranking.md) §14.
+> - **Import from Letterboxd and IMDb** (IMDb since 2026-11-12), from Settings → *Import from*
+>   and from onboarding. IMDb adds movies; whole TV shows are matched and reported, not added.
+>   A star or an IMDb rating is never a bucket, position or score.
+>   [`imdb-import.md`](./imdb-import.md), [`letterboxd-import.md`](./letterboxd-import.md).
+> - **Onboarding 2.0** (2026-11-15): profile, picks, head-to-head, *Your First Five*, People
+>   search and invite, notifications, with new step events
+>   ([`onboarding-observability.md`](./onboarding-observability.md)).
+> - **Sent to You**: recommendations to you have a read state, list unread first, follow the
+>   Movies/TV switch, and the sender cannot read when you opened one.
+> - **Reviews**: review cards, sort and **Helpful**. Watch History has a per-watch note; *Share
+>   as a review* in Edit watch publishes a copy as the title's review (2026-11-16). A first-ever
+>   review opens **private** (2026-11-04).
+> - **Feed grouping** (2026-11-16/17): a watchlist session and a backlog half hour are one
+>   post each; historical first-time rankings made from title pages group too; grouped posts
+>   draw a poster rail and keep one Like and one Comment; 702 earlier posts were consolidated
+>   into 115 groups, reversibly. Every post has labelled Like · Comment (2026-11-19). §14's
+>   "no historical backfill" and "one durable watchlist event per person and title" are
+>   superseded by this: members are hidden through the group, never deleted.
+>   [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md).
+> - **Community score**: a person's voice counts once they have ten rankings; a show's
+>   community score is one effective score per person (explicit show, else their season mean).
+> - **Security**: H-2 (pre-registration takeover) is fixed in production (`20261124000100`).
+>
+> **Shipped dark:** Recommendation Engine V2 (switch `"v1"`, 0%), Refine (flag off),
+> proactive notifications (generation and push off), release pushes (shadow only).
+>
+> **Staging or unreleased:** Collection drag-to-rerank across categories (#319) and the
+> searchable *Who I watched with* picker (#321) are in the 2026-11-19 Preview, awaiting founder
+> QA; reactions and comments on follow stories (#322) and username sign-in (#300) are drafts.
+>
+> **Still deferred** (unchanged): Letterboxd Lists import, predicted score, unmatched-import
+> repair, Stats/Wrapped, Watch Next, further share cards and Awards, episode-level tracking,
+> and the offline outbox (§18 is specification; every write is online).
 
 ---
 
@@ -125,7 +176,7 @@
 
 | Status | Statement |
 |---|---|
-| **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. |
+| **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. *As built 2026-11-14: a whole TV show is also rankable, in its own pool beside seasons (live since 2026-11-12, [`../architecture/ranking.md`](../architecture/ranking.md) §14). Episodes are still never ranked.* |
 | **Decided 2026-09-03 (narrows the wording, not the rule)** | **No episode tracking or ranking.** An episode is never a unit: no episode logging, ranking, rating, watched state, progress, notes or feed activity, and no `media_items` row. Episode **metadata** is in scope as reference material — the Episodes tab on a season page shows names, air dates, runtimes, stills and synopses so a reader can recognise which season they watched. Nothing about it commits the product to episode tracking later. |
 | **Decided** | Rating happens in two steps: a three-bucket reaction (**I liked it / It was fine / I didn’t like it**), then pairwise comparison within that bucket. |
 | **Decided 2026-08-15 (supersedes the ordinal-only rule)** | The ranking output shown to users is a **0–10 score with one decimal**, derived from the title's position inside its bucket band. The exact ordinal remains the stored ground truth and is shown as secondary detail on a title page. There is still no 0–100 score and no percentile. |
@@ -722,14 +773,14 @@ Final pricing and localization. Staged store rollouts. Destination-specific shar
 
 ### Deferred
 
-Comments, DMs, discussion boards, and long-form reviews. Destination-specific social SDKs and inbound share extensions. Contact-book and social-network importing. Full offline-first sync and offline ranking replay. Full catalog mirror or image rehosting. LLM-generated recommendations or explanations. Algorithmic feed ranking, collaborative lists, episode-level ratings, whole-series ranking. Lifetime access, multiple tiers, family plans, gifting, web checkout. Dark mode. Invite rewards. Tagging users who are not on Bingd.
+Comments, DMs, discussion boards, and long-form reviews. Destination-specific social SDKs and inbound share extensions. Contact-book and social-network importing. Full offline-first sync and offline ranking replay. Full catalog mirror or image rehosting. LLM-generated recommendations or explanations. Algorithmic feed ranking, collaborative lists, episode-level ratings, whole-series ranking *(shipped 2026-11-12; see the current-state block)*. Lifetime access, multiple tiers, family plans, gifting, web checkout. Dark mode. Invite rewards. Tagging users who are not on Bingd.
 
 > ### As built — 2026-08-19: three corrections to the staging above
 >
 > - **Comments shipped.** They are on feed activity, rate-limited, with their own notification type and category. The Deferred line is stale on that one word; DMs, discussion boards and long-form reviews remain deferred.
 > - **Achievements shipped as Bingd Awards** (2026-08-18) and are no longer a backlog item. See §14's As-built block.
 > - **An invite is referral and attribution, never permission to create an account.** Recorded here 2026-08-25 because the opposite is a natural thing to assume from a beta whose whole shape is invitations, and assuming it produces engineering work that should not exist. There is **no app-level invite-admission gate today** — `create_profile` requires no token, and nothing in the schema conditions account creation on an invitation. What limits who can sign up during the beta is entirely **distribution**: TestFlight and a Play closed test. Public store availability therefore opens ordinary account creation on its own, with no "remove the invite gate" task to do, because there is no gate to remove. What an invite carries is the connection: who brought you, and the follow that follows from it.
-> - **Letterboxd import was listed as a v1 must-have, has not been built, and is no longer a release gate.** No import screen, no CSV parser, no matching pipeline. **Deprioritized 2026-08-23**: it gates neither the friend beta nor either initial store release. The cohort is building collections by hand, which is the behaviour the beta exists to observe and which an importer would erase. §12 keeps the full specification; `deferred-roadmap.md` §20 holds the staging decision.
+> - *(Superseded: the Letterboxd importer was built and has been in production since 2026-09-14, and IMDb import since 2026-11-12; see the 2026-11-19 current-state block. The bullet is kept as the 2026-08-19 record.)* **Letterboxd import was listed as a v1 must-have, has not been built, and is no longer a release gate.** No import screen, no CSV parser, no matching pipeline. **Deprioritized 2026-08-23**: it gates neither the friend beta nor either initial store release. The cohort is building collections by hand, which is the behaviour the beta exists to observe and which an importer would erase. §12 keeps the full specification; `deferred-roadmap.md` §20 holds the staging decision.
 >
 > Everything else this document calls Deferred is still deferred. The canonical register, with the reasoning and the revisit trigger for each, is [`deferred-roadmap.md`](./deferred-roadmap.md).
 
@@ -1348,7 +1399,7 @@ list (ranked out of Unranked, taken off the Watchlist) moves nobody else.
 
 The settled rules stand and are restated first, because this block refines one of them rather than replacing any:
 
-- TV seasons are rankable; a whole series never is.
+- TV seasons are rankable; a whole series never is. *(Superseded 2026-11-14: a whole show is rankable in its own `tv_shows` pool. The watchlist rule in this block is unchanged.)*
 - A series is a grouping and watchlist object. It is the one thing `set_watchlist` accepts that can never be logged.
 - Watched or ranked content leaves the watchlist, because a watchlist entry is an intention to watch and watching ends it (`20260815040000`).
 - Unlogging or unranking never re-adds a watchlist entry. The user re-adds by hand.
@@ -1367,6 +1418,8 @@ The words in that sentence carry the decisions:
 **What this does not change.** A specific season's own watchlist entry is still governed by the exact-object rule. Unranking or unlogging a season does not re-add the series. A finished series deliberately re-added for a rewatch stays put until a season transitions to watched again. There is no Settings toggle: this is the canonical behavior, not a preference.
 
 **Existing stuck rows were corrected.** The migration backfills away series entries whose released normal seasons were all already met, per account, and reports the count as it runs. Because the whole rule lives in database triggers, every installed binary inherits it the moment the migration deploys, with no client change and no OTA.
+
+## 12. Letterboxd import
 
 > **Stage changed 2026-08-23 — deprioritized.** Import is **not** a requirement for the
 > friend beta, for the initial App Store release, or for the initial Google Play production
@@ -2184,14 +2237,14 @@ The vocabulary is shared by the Feed tab, your own profile and somebody else's. 
 
 #### Adding to a watchlist is activity — founder decision, 2026-08-20
 
-This is the active half of the [§22](#22-privacy-and-data-handling) decision that made the watchlist profile content. A shelf somebody has to go looking for is passive; **"Suraj added Dune to their watchlist" arriving in a follower's feed is an opening for "I want to watch that too"**, which is the product's core virality metric ([§28](#28-analytics-and-instrumentation)).
+This is the active half of the [§22](#22-privacy-safety-and-moderation) decision that made the watchlist profile content. A shelf somebody has to go looking for is passive; **"Suraj added Dune to their watchlist" arriving in a follower's feed is an opening for "I want to watch that too"**, which is the product's core virality metric ([§28](#28-success-metrics)).
 
 - **Server-owned, in the same transaction as the watchlist row.** The event is written inside `set_watchlist`, not by the client. `feed_events` has no insert policy and never has; every event in the schema is written by a `security definer` function that has already authorised the caller. Migration `20260820000300`.
 - **One durable event per person and title**, enforced by a partial unique index rather than by convention. A retry of the same operation is absorbed by the operation ledger; a *second genuine call* — a double tap on two devices, a reconciliation that re-issues — is refused by the index.
 - **The event outlives the row.** Removing the title from the watchlist, watching it, ranking it, or unlogging it all leave the activity in place. "Added" is a past-tense fact and stays true; deleting it would take other people's reactions and comments with it through the cascade, destroying a conversation because its subject changed their mind. This is deliberately the opposite rule from `title_ranked`, which *is* a claim about current collection state and is deleted on removal (`20260818000100`).
 - **A re-add after a remove restores the row and inherits the original activity.** One event per pair for beta.
 - **Privacy is inherited, not restated.** Nothing was added to the read path: `feed_events_read` is `can_view_profile(auth.uid(), actor_id)`, which resolves the same visibility as the `watchlist` table's own `can_i_view(user_id)`. A blocked, private-and-unapproved, suspended or deleted actor discloses nothing new. *The one asymmetry:* after a remove or a watch the event outlives the row, so a viewer may learn somebody once added a title whose entry is now gone — a past-tense fact about an act, disclosed only to the audience already entitled to that person's activity.
-- **Reactions and comments work on it generically.** Neither `add_comment` nor `set_reaction` reads `feed_events.type`; both resolve existence and visibility from the event id alone. Recommend is offered except on a whole series, which cannot be ranked ([§10](#10-ranking-system)) — a guard that used to be theoretical and is now load-bearing, because `set_watchlist` is the one collection write that accepts a series.
+- **Reactions and comments work on it generically.** Neither `add_comment` nor `set_reaction` reads `feed_events.type`; both resolve existence and visibility from the event id alone. Recommend is offered except on a whole series, which cannot be ranked ([§10](#10-ranking-system)) *(superseded 2026-11-14: a show is rankable, and `recommend_title` resolves it through `rankable_category`)* — a guard that used to be theoretical and is now load-bearing, because `set_watchlist` is the one collection write that accepts a series.
 - **A watchlist add carries no note and no companions.** Both are matched on (actor, title) rather than on the event, so without an explicit gate a watchlist row for a film its actor later watched would render "added Dune to their watchlist with Anna" under a verdict on the film. An intention is not a viewing.
 
 #### The metadata line is standardised
@@ -2260,7 +2313,7 @@ series   TV-MA · Drama · Thriller
 >     its current position and score.
 > - **Refine, reranks and the ordinary single-title flow never create one.** They keep the feed
 >   rules they always had (Refine and corrections post nothing).
-> - **No historical backfill.** Sittings from before this shipped were silent and stay silent.
+> - **No historical backfill.** Sittings from before this shipped were silent and stay silent. *(Superseded 2026-11-17: grouping extends to backlog half hours, cross-ladder groups and historical title-page rankings, and a one-time reversible consolidation grouped earlier posts. See the 2026-11-19 current-state block.)*
 >   Older grouped posts keep their first title as representative. An old event renders in the same
 >   row as a new one.
 >
@@ -4900,7 +4953,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 
 1. A signed-in user can search movies and TV series online and open a detail page with poster, year, and summary.
 2. A series page lists seasons, marked *Ranked* or *Not ranked yet*.
-3. A season can be bucketed and ranked with no prior step: ranking it is the watch claim (decided 2026-08-24). A whole series still cannot be ranked.
+3. A season can be bucketed and ranked with no prior step: ranking it is the watch claim (decided 2026-08-24). A whole series still cannot be ranked. *(Superseded 2026-11-14: a whole show can be ranked in its own pool; acceptance for it is [`../architecture/ranking.md`](../architecture/ranking.md) §14.)*
 4. Episodes are not rankable anywhere in the product, and nothing about an episode is logged, rated, tracked or stored.
 4a. A season page has an **Episodes** tab, first in its row, listing the episodes TMDB publishes for that season: number and title, air date and runtime, still, and a short synopsis. Unaired episodes are shown with their published dates. Specials are treated as any other season. No row is pressable and nothing on it can be acted on — it exists so a reader can recognise which season they watched before ranking it.
 5. With no connectivity, global search is disabled with an explanation, and the user's own collection remains searchable.
@@ -4933,6 +4986,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 6. A dismissible "Rank 5 more" card appears on Rankings when unranked titles exist, draws from the highest bucket first, and stops appearing once the user has ~50 ranked titles.
 
 ### 26.5 Letterboxd import
+
+> **As built (2026-11-19).** The importer is live (since 2026-09-14) and its behaviour is [`letterboxd-import.md`](./letterboxd-import.md), which wins over this list where they differ. Two criteria below were reversed by founder decision: **a star never maps to a bucket** (item 6; 2026-09-21), and **lists do not import** (item 11; Letterboxd Lists import is deferred, [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)). There is no separate anchor session: imported titles are ranked in the Unified Backlog.
 
 1. A user can upload a Letterboxd export ZIP from onboarding and from Settings.
 2. Files above 5,000 titles or 25 MB are refused with a clear message.

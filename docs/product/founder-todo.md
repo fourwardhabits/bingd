@@ -13,6 +13,13 @@ this register only decides what is next.
 
 ## The freeze rule
 
+> **Lifted in practice (2026-11-19).** The founder has authorised production releases since
+> 2026-11-07; seven production OTAs between 2026-11-12 and 2026-11-19 shipped TV show rankings,
+> imports, Onboarding 2.0 and Feed grouping ([`production-state.md`](../release/production-state.md)).
+> Releases now follow the founder's risk-based QA tiers (#309). Whether a written freeze rule
+> still applies, and what replaces it, is an open founder question. The rule below is the
+> 2026-09-26 record.
+
 **Application development is frozen as of 2026-09-26.** It reopens only for:
 
 - a crash
@@ -70,7 +77,8 @@ Each of these waits for user evidence. None is scheduled.
   the log sheet, so there is no note entry point there. Decide only if people ask for it.
 - **Header Done vs summary Done.** Header Done opens the summary, and *Keep ranking* continues
   the same sitting. Confirm that is the intended model.
-- **Frozen UX idea: TV seasons list polish.**
+- **Frozen UX idea: TV seasons list polish.** *(Written before whole shows became rankable on
+  2026-11-12; re-check against the show page as built before acting on it.)*
   - For a ranked season: the secondary line under the season title shows `#N in TV`, and the
     right side shows the normal maroon score badge.
   - For an unranked season: no "Not ranked yet"; leave the secondary line and score area
@@ -115,6 +123,6 @@ Specified in [`deferred-roadmap.md`](./deferred-roadmap.md); none is planned nex
 - further share cards
 - further Awards
 - episode-level tracking
-- whole-series ranking
+- ~~whole-series ranking~~ shipped 2026-11-12 (TV shows ranked in their own pool)
 - the push kill switch (#119, a founder decision about its initial value)
 - proactive release pushes (the shadow runs; sending is off)

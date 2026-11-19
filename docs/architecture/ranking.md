@@ -1,6 +1,6 @@
 # Bingd — Ranking Mechanics
 
-**Version:** v1 (public alpha)
+**Version:** v1 design, reconciled with production on 2026-11-19
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §10, §11 · [`data-model.md`](./data-model.md) §5
 
 > **Stopping point, 2026-09-23.** Everything below still holds, and §13 adds what #196 and
@@ -10,7 +10,15 @@
 > queue in §10 (now the backlog), and the feed score in §11 (a card keeps the score of its
 > own watch again).
 >
-> **Current state (2026-09-26, `9d9683a`).** #208–#210 changed only what sits around the
+> **Current state (2026-11-19, production `a3300bf0`).** There are **three** ranking pools:
+> Movies, TV shows and TV seasons (§14, live since 2026-11-12). Everything that says a series
+> cannot be ranked describes v1 and is marked where it stands (§3). The TV Collection shows one
+> poster per show (§14.3). Refine is still flag-off in production (§13.4). Feed grouping of
+> sittings changed what a sitting *posts*, not how it ranks (§7, and
+> [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). **Staging only:**
+> drag-to-rerank in the Collection, across categories (#319, `20261129000200`).
+>
+> **Earlier state (2026-09-26, `9d9683a`).** #208–#210 changed only what sits around the
 > engine. An Unranked sitting now ends in a summary and posts **one** grouped feed activity
 > (§7, *The feed activity a completion earns*; §13.3). The first comparison of a session is
 > seeded from the cached band (§13.5). Nothing in I1–I7 or the session engine changed.
@@ -126,7 +134,7 @@ The unique constraint on `(user_id, media_item_id)` means starting a session for
 rank_start(media_item_id, bucket) -> { session_id, pivot } | { position }
 ```
 
-1. Resolve `category` from the media item's `kind`. Reject `series` — PRD §10 forbids ranking a whole series.
+1. Resolve `category` from the media item's `kind` through `rankable_category`. *(v1 rejected `series` here; since `20261114000100` a series resolves to `tv_shows` and is ranked in its own pool, §14.1.)*
 2. Upsert the `user_media` row with the chosen bucket. **The title is now Logged**, whatever happens next. If the user abandons the session, the bucket survives and the recommendation engine can use it.
 3. Compute `band_bounds`.
 4. If the band is empty, insert directly at `band.lo` and return the position. No comparison is asked, because there is nothing to compare against.
@@ -707,10 +715,19 @@ trigger leaves the earlier post its original score, so the two posts show what c
 
 ### 14.3 Presentation (client)
 
-- **Candidate A** (`watched-rows.ts`, `standsAloneBeside`): the Collection and profile
-  walls draw a show only while none of its seasons is ranked. Presentation only; it is not
-  applied to watchlists, custom lists, the feed or ranking data. `profile_title_counts.tv`
-  applies the same rule to the profile's count.
+- **One poster per show** (WS-TVC, live since 2026-11-15; it replaced Candidate A's
+  `standsAloneBeside`). The TV Collection draws each series once, whether the reader ranked
+  the show, a season of it, or both, carrying its effective score: the explicit show score,
+  else the mean of the ranked seasons, shown as `SN AVG x.x` (`watched-rows.ts`
+  `seriesItems` / `projectShows`). A tap opens the show page. Seasons are never posters there,
+  and neither ladder is reordered. Presentation only; it is not applied to watchlists, custom
+  lists, the feed or ranking data. `profile_title_counts.tv` counts one per series to match
+  (`20261120000100`).
+- **Update Show / Keep Show** (`20261120000100`, live since 2026-11-15). After a season is
+  ranked and its show is ranked, the reader either re-places the show (*Update Show*, §14.2)
+  or keeps it where it is. *Keep Show* (`keep_show`) records one owner-only
+  `show_reaffirmations` row and writes no ranking, placement, watch or Feed row; one season
+  placement resolves to Update or Keep, never both.
 - Mixed TV lists sort by score; an equal score between pools falls to a fixed pool order,
   then the id. Ordinals are never compared across pools.
 - Pills: a show keeps the filled Maroon number; a season reads `S4 9.1` on Parchment with a

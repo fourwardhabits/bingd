@@ -3,6 +3,12 @@
 **Status:** current as of 2026-08-19. Implemented in [`src/lib/analytics.ts`](../../src/lib/analytics.ts),
 [`src/lib/release.ts`](../../src/lib/release.ts) and [`src/lib/monitoring.ts`](../../src/lib/monitoring.ts).
 
+> **Dates in the event tables are build dates, not release dates (2026-11-19).** The import
+> `provider` property (2026-11-11) reached production with the 2026-11-12 OTA; the Onboarding 2.0
+> events (OB-1, 2026-11-14) and the recommendation `engine` / `wall_languages` properties with
+> release 1115 on 2026-11-15. `engine` reads `v1` for every production reader while Engine V2
+> is shipped dark. What is live: [`../release/production-state.md`](../release/production-state.md).
+
 **Companion documents:** [`growth-instrumentation.md`](./growth-instrumentation.md) ·
 [`deferred-roadmap.md`](./deferred-roadmap.md) · [`PRD.md`](./PRD.md) §28
 

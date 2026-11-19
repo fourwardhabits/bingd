@@ -2,6 +2,13 @@
 
 **Status:** built, not deployed, not credentialed. Added 2026-08-24 on `public/push-v1`.
 
+> **Current state (2026-11-19): live in production.** `push-sender` is deployed (v6, read
+> 2026-11-15) and push delivers; `pg_cron` drains `push_outbox` (`bingd-push-drain`). The
+> status line above is the 2026-08-24 tranche, kept as written. `push.delivery_enabled` is
+> still read by nothing (#119), and proactive and release pushes are migrated with their
+> switches off. Operations: [`../release/push-operations.md`](../release/push-operations.md);
+> what is live: [`../release/production-state.md`](../release/production-state.md).
+
 Specification: [PRD §15](../product/PRD.md) · AD-10 ·
 [`deferred-roadmap.md` §4](../product/deferred-roadmap.md)
 

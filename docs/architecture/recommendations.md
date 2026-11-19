@@ -7,6 +7,12 @@ No language model. Recommendations are derived from human ranking behavior, cont
 
 ---
 
+> **Status (2026-11-19).** For You **V1** (§0) is what every production reader gets. Engine V2
+> is in production **dark** (switch `"v1"`, 0%): [`recommendations-v2.md`](./recommendations-v2.md).
+> Since 2026-11-12 For You scores TV shows and seasons as distinct signals, each in its own
+> pool ([`ranking.md`](./ranking.md) §14.4). Taste Match is computed live per pair by
+> `taste_match` ([`README.md`](./README.md) AD-7).
+
 ## 0. What actually shipped — For You V1, 2026-08-16
 
 **Everything from §1 down describes `recs-builder`, which does not exist.** It is the design this converges on and it is still the design. What ships now is a smaller, on-device subset, and the difference matters enough to state before anything else.

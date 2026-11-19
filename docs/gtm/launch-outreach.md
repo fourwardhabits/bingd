@@ -6,6 +6,14 @@ can and cannot be measured once they arrive.
 
 It is an operating plan, not a pitch. Where a claim cannot be verified it says so.
 
+> **Product facts reconciled with production on 2026-11-19.** The strategy, audiences and
+> channels are unchanged. What changed is what bingd. does: **Lists** (live since 2026-09-23),
+> **Letterboxd import** (since 2026-09-14) and **IMDb import** (since 2026-11-12) exist, and a
+> **whole TV show can be ranked** as well as each season (since 2026-11-12). §2, §3.6, §3.8,
+> the message templates in §8 and §9 are corrected to match. Before quoting any capability
+> outward, check [`../release/production-state.md`](../release/production-state.md): a feature
+> on staging or in a draft PR is not something bingd. does.
+
 **Canonical identity.** Everything outward-facing uses these and nothing else.
 
 | | |
@@ -74,17 +82,23 @@ exists and what it feels like, because that is the thing being marketed.
 
 ## 2. What bingd. is, stated honestly
 
-**It does.** Movies and TV seasons in one app. Ordinal ranking by pairwise comparison
-rather than star ratings, producing a personally ranked Collection. Taste Match against
-other members. Following, reactions, comments and mentions. Recommendations sent to a
-person. Group Picks. Invite links.
+**It does.** Movies and TV in one app. Ordinal ranking by pairwise comparison rather than
+star ratings, producing a personally ranked Collection. TV can be ranked as a **whole show**
+and **season by season**, each in its own list. Taste Match against other members.
+Following, reactions, comments and mentions. Recommendations sent to a person. Group Picks.
+Lists, public or private, with share links. Invite links. **Import** of a Letterboxd export
+(films, diary dates, watchlist) or an IMDb ratings export (movies), arriving as unranked history:
+an imported star rating never becomes a bingd. ranking.
 
 **It does not.** Episode-by-episode progress tracking. There is no next-episode calendar,
-no per-episode check-in, no per-episode comment thread. TV is ranked at the season.
+no per-episode check-in, no per-episode comment thread. Nothing about an individual episode
+is logged or ranked.
 
-**It does not, yet.** Import from any external service. Lists.
+**It does not, yet.** Import from TV Time or any service other than Letterboxd and IMDb.
+Import of Letterboxd **lists**. Whole TV shows from an IMDb export (they are matched and
+reported, not added).
 
-That second block is not a gap to be talked around. It is the single most important
+The second block is not a gap to be talked around. It is the single most important
 qualifier in every TV-audience conversation below, and stating it early is what keeps
 the rest credible.
 
@@ -158,7 +172,8 @@ scope.
 - Anyone whose core need is episode-by-episode progress, a next-episode calendar, or a
   per-episode discussion thread. That is most of the r/TVTime population and it should
   be conceded immediately rather than argued with.
-- Anyone who wants their TV Time archive back. bingd. has no import.
+- Anyone who wants their TV Time archive back. bingd. has no TV Time import (it imports
+  from Letterboxd and IMDb only).
 
 ### 3.7 Bingers, stated plainly
 
@@ -185,8 +200,8 @@ Not a TV Time replacement. The line to work from, adapted per channel:
 > If what you miss is having a record of what you watch and somewhere social to put it,
 > bingd. is a different shape of that. You rank movies and TV seasons against each other
 > instead of rating them, so you end up with an actual ordered list, and you can see
-> where your taste overlaps with your friends'. It ranks TV by season and does not track
-> individual episodes, so if per-episode progress is the part you need, it is not this.
+> where your taste overlaps with your friends'. It ranks whole shows and individual seasons
+> and does not track episodes, so if per-episode progress is the part you need, it is not this.
 
 The disclosure is not a footnote. It goes in the same breath as the pitch, every time.
 
@@ -467,8 +482,9 @@ Verify every factual claim against the product on the day it goes out. No em das
 > much your taste overlaps with a friend's, send someone a recommendation, and get a pick
 > for a group.
 >
-> Where it differs from Beli: TV is ranked by season, and there is no import yet, so the
-> first stretch is you rebuilding your own list. That is the honest catch.
+> Where it differs from Beli: TV can be ranked as a whole show or season by season. You can
+> import a Letterboxd or IMDb history, but an imported rating is not a ranking, so the first
+> stretch is you ranking what came across. That is the honest catch.
 >
 > https://bingd.app
 >
@@ -523,8 +539,9 @@ Verify every factual claim against the product on the day it goes out. No em das
 > get an ordered list instead of a star distribution. It covers TV seasons as well. It is
 > free, there is no ads or subscription, and it is not a Letterboxd client or scraper.
 >
-> There is no Letterboxd import, and I would rather say that here than have someone find
-> out after signing up.
+> It can import a Letterboxd export, but only as history: your star ratings do not become
+> rankings, and your Letterboxd lists do not come across. I would rather say that here than
+> have someone find out after signing up.
 >
 > Is there a form of post that would be acceptable, or would you prefer I did not? Happy
 > either way.
@@ -540,8 +557,8 @@ Verify every factual claim against the product on the day it goes out. No em das
 >
 > I built an app called bingd. It is not a TV Time replacement and I would not present it
 > as one. It ranks movies and TV seasons against each other to build a personal ordered
-> list, and it has following, comments and taste comparison. It does not track episodes
-> and it has no TV Time import. For anyone who wants TV Time back, Bingers is the
+> list, and it has following, comments and taste comparison. It can rank a whole show as well
+> as each season. It does not track episodes and it has no TV Time import. For anyone who wants TV Time back, Bingers is the
 > honest answer and I would say so in the thread.
 >
 > I think it fits a narrow slice of this community: people who used TV Time to keep a
@@ -575,7 +592,7 @@ Only if the rules permit, and only as a comment in an existing thread.
 ### 8.10 Short message to a former TV Time user
 
 > bingd. is not a TV Time replacement, so I will say what it is not first. No episode
-> tracking, no calendar, no import. TV is ranked by season.
+> tracking, no calendar, no TV Time import. TV is ranked by show and by season.
 >
 > What it is: you rank films and shows against each other and end up with an ordered list
 > of everything you have watched, and there are people on it whose taste you can compare
@@ -613,9 +630,20 @@ Only if the rules permit, and only as a comment in an existing thread.
 
 ---
 
-## 9. Import strategy: audit only
+## 9. Import strategy
 
-No import is being built. This records where each stands and what would change that.
+> **Status (2026-11-19).** Written 2026-09-05 as an audit, when nothing was being built.
+> Since then **Letterboxd import shipped** (production since 2026-09-14, built to the pattern
+> below: unranked history, no star as a bucket, files read on the phone) and **IMDb import
+> shipped** (2026-11-12, movies; whole shows matched and reported, not added). Letterboxd
+> **Lists** import is deferred until acquisition evidence asks for it. **TV Time import is not
+> built**, and §9.2's recommendation stands. Specifications:
+> [`../product/letterboxd-import.md`](../product/letterboxd-import.md),
+> [`../product/imdb-import.md`](../product/imdb-import.md),
+> [`../product/letterboxd-lists-import.md`](../product/letterboxd-lists-import.md).
+
+The original audit follows, kept for its reasoning. §9.1's trigger was overtaken by the
+founder's decision to build.
 
 External history must never silently become bingd. community scores. The pattern to
 work from, if either is ever built:
@@ -640,7 +668,7 @@ community mean.
 | External ratings | Import as provisional signal at most. Never as a bingd. score, never into a community mean. |
 | Reviews | Present. Out of scope for a first pass. |
 | Episode incompatibility | None. Letterboxd is films. |
-| Mobile vs web | File upload is a web job. A mobile-only import is the harder half and should not gate the feature. |
+| Mobile vs web | File upload is a web job. A mobile-only import is the harder half and should not gate the feature. *(As built: the import runs in the app, on the phone, from Settings and onboarding.)* |
 
 **Trigger.** Build it when early Letterboxd-heavy users repeatedly say, unprompted, that
 rebuilding their history is what stopped them. Question 11 in section 11 exists to detect

@@ -1,7 +1,8 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-09** (OTA from 2026-11-07 recorded; store table from public listings 2026-11-08).
+**2026-11-19** (production OTA from `main` `a3300bf0` recorded; store table unchanged since the
+public listings of 2026-11-08).
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -12,13 +13,24 @@ behind. A runbook ages into history the moment it runs; this does not.
 is changed. This is what came out the other side. **Old `release/*`, `integration/*` and
 `preview/*` branches are history, not production truth.** This page and `main` are.
 
-What is left to do is one list: [`../product/founder-todo.md`](../product/founder-todo.md),
-which also holds the freeze rule.
+What is left to do is one list: [`../product/founder-todo.md`](../product/founder-todo.md).
 
-> **Coordination note (2026-11-09):** PR #224 (`docs/release-record-219`) also edits this
-> file, recording the 2026-11-03 security OTA. This update supersedes it by going further:
-> it records all OTAs through 2026-11-07. If #224 is merged first, this file will conflict;
-> rebase this branch on the merged result or let this branch merge first and close #224.
+**Labels used on this page and in the living docs that point here.** **Live in production**:
+on `main`, published to the production OTA channel and, where it has a switch, switched on.
+**Shipped dark**: on `main` and in production, switch off, so no reader sees it. **Staging or
+unreleased**: on staging or a Preview build, or merged without a production release. **Proposed**:
+a design or a draft PR. A PR's open/draft state on GitHub is not the test: #305 and #301 are
+still open drafts, but their heads were integrated into release 1115 (#307) and are on `main`.
+
+> **Where the 2026-11-11 to 2026-11-19 records live.** Each release below was recorded by its
+> operator in `docs/release/manifests/production-*.json` and the handoff notes on the branch
+> `ops/preview-1115-records`, which is **not merged to `main`**. The facts on this page are
+> copied from those records and from the release comments on the PRs named. Merging that
+> branch, or moving its manifests to `main`, is a separate step.
+
+> **Coordination note (2026-11-09, still open):** PR #224 (`docs/release-record-219`) also
+> edits this file, recording the 2026-11-03 security OTA. This page supersedes it. If #224 is
+> merged first, this file will conflict; resolve in favour of this page and close #224.
 
 ---
 
@@ -26,11 +38,29 @@ which also holds the freeze rule.
 
 | | |
 |---|---|
-| **Live application source** | `main` `3757656` (merge of #238, 2026-11-07). Includes PR #237 (compact TV episode rail, episode detail sheet, season metadata order, personal scores in For You → Top Rated) and PR #238 (trailer-privacy inventory language). |
-| **DB migrations** | **177 applied**, head `20261024000500`; staging identical |
-| **Production OTA, 1.1.0** | Android update `01a1b812-7bdb-7cc6-a4eb-a4dbe8f29a01`, group `d5e7f3f3-368d-41a1-8db1-24ed60bf211f`, runtime `ec79e181`; iOS update `01a1b812-7bdb-7a29-98f0-351ad279ef8b`, group `5a561da1-6ea1-477d-b741-17f2643fd8a8`, runtime `8ea562b7`. Published 2026-11-07 from source commit `f0f6d26`, EAS workflow run. |
-| **Production OTA, 1.0.1** | from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
-| **Preview OTA** | Android group `2c4aca0c` on runtime `2503ffaa`, staging backend. No iOS binary on the current preview runtime. |
+| **Live application source** | `main` `a3300bf0` (merge of #323, 2026-11-19): #320 Feed spacing and #323 labelled engagement on every post, on top of everything below. |
+| **Production OTA, 1.1.0** | Published 2026-11-19 from `a3300bf0`. Android update `01a1f30d-2913-7baa-8ac8-1148dc047899`, group `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, runtime `ec79e181`; iOS update `01a1f30d-2913-7f2a-9dbb-dd49880a5a8f`, group `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, runtime `8ea562b7`. Rollback: the `0170506e` pair, Android `80f10846-a79e-4eb5-bf19-4cef3fad544f`, iOS `7d2f3828-30e3-4a77-90c6-1aa9c0dc410d`. Source: `handoff-2026-11-20-morning.md` §1 on `ops/preview-1115-records`. |
+| **DB migrations** | **203 applied**, head `20261128000100` (2026-11-17). Equal to `main`'s 203 files. |
+| **Edge Functions** | `letterboxd-import` v4 (2026-11-15, `verify_jwt` on), `tmdb-adapter` v16, `push-sender` v6 (both 2026-11-12). Read 2026-11-15 (#307 release comment). |
+| **Production OTA, 1.0.1** | Unchanged: from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
+| **Preview OTA (staging backend)** | `integration/preview-1120` `bf721a9a` and later (`main` + #319 + #321), published 2026-11-19 on the `preview` channel: Android runtime `2503ffaa`, iOS runtime `ef07f4b8`. Staging migrations: 205, head `20261129000200` (#319's). **Staging only.** |
+
+### Production releases since the last update of this page
+
+Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`). None needed a new binary.
+
+| Date | `main` | What it shipped | Migrations after | OTA groups (Android / iOS) |
+|---|---|---|---|---|
+| 2026-11-12 | `a228c6a5` (#267, OTA from `ace7c3fa`) | Founder RC #266: TV show and season rankings, IMDb + Letterboxd import entry, Watch History cards, Discover People, My Lists, proactive-notification plumbing (switches off) | 189, head `20261115000100` | `f97b8534` / `4eded7f4` |
+| 2026-11-15 | `b92a3764` (#307, OTA from `357bb126`) | Release 1115: Collection one poster per show, Keep/Update Show, Sent to You read state and paging, review cards and Helpful, import UX and IMDb matching, Onboarding 2.0 (the #305 head), community-score eligibility, the H-2 fix; Rec V2 **dark** | 199, head `20261124000100` | `4de6fcdc` / `f247fd5e` |
+| 2026-11-15 | `44f25f9c` (#309, OTA from `979e3c21`) | Polish A: copy, labels and dates | 199 | `46fd8420` / `4c6412a8` |
+| 2026-11-16 | `fb44d469` (#308) | Post-QA refinements: Edit watch → Note with *Share as a review*, 85% sheets | 199 | `30bf8eef` / `cacbef1e` |
+| 2026-11-16 | `9d11a797` (#310 + #311) | Feed grouping: a watchlist session and a backlog half hour are one post. Flags on 08:26Z | 201, head `20261126000100` | `b82a0376` / `0c141d10` |
+| 2026-11-17 | `0170506e` (#312 + #313) | Poster rails on grouped posts; title-page backfill grouping, cross-ladder groups; historical consolidation run (115 groups, 587 fewer visible cards) | 203, head `20261128000100` | `80f10846` / `7d2f3828` |
+| 2026-11-19 | `a3300bf0` (#320 + #323) | Feed card spacing; labelled Like · Comment on every post, visible "and others" links | 203 | `e9ea7c27` / `78bc77db` |
+
+Merged to `main` with no app release needed: #314 (Welcome canary workflow), #315
+(security register), #316 (recommendation benchmark, `eval/` only).
 
 ### Store distribution
 
@@ -46,17 +76,19 @@ deliver to a first launch.
 
 Read from the public App Store lookup and Play listing on 2026-11-08. Both show 1.1.0 (15).
 The Play listing shows the current version, not rollout percentage. `config/live-runtimes.json`
-holds the same two runtimes for the OTA gate, and changes with this table.
+holds the same two runtimes for the OTA gate, and changes with this table. A store refresh is
+being prepared separately; until a new binary is public, this table stands.
 
 ### OTA and binary roles
 
 - **1.0.1 binaries** (runtimes `61efbf17` / `da3c7f47`) reach the frozen app through OTA
   `01a0db04`. A fresh install of one launches its old embedded bundle, downloads `01a0db04` in
   the background, and runs it after the next reload. That older embedded bundle predates #198,
-  so its first foreground return can reload mid-sign-in.
-- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and now receive the
-  1.1.0 OTA above (source `f0f6d26`, published 2026-11-07), which delivers the cinematic episode
-  rail (PR #237) and trailer-privacy inventory language (PR #238).
+  so its first foreground return can reload mid-sign-in. **Nothing since 2026-09-26 reaches
+  them**, including TV show rankings and Feed grouping. The `presented_in` read policy hides a group's
+  members from every client, and an old bundle reads a group as one single-title post.
+- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and receive the
+  production OTA above (`a3300bf0`, 2026-11-19).
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return
@@ -64,49 +96,102 @@ holds the same two runtimes for the OTA gate, and changes with this table.
   launch. iOS and Android behave the same.
 - **A future OTA from `main` targets the 1.1.0 runtimes only.** Reaching 1.0.1 installs as well
   means publishing a second time from a 1.0.1 tree (`release/2026-09-25-prod` is `9d9683a` at
-  1.0.1). While the freeze holds, no OTA is planned.
+  1.0.1). None is planned.
 
 ---
 
-## Feature flags (production, read 2026-09-26)
+## Feature flags (production)
 
-| Flag | Production | Staging |
-|---|---|---|
-| `ranking.backlog_enabled` | **true** | true |
-| `ranking.refine_enabled` | **false**, a founder decision still open | true |
-| `goals.count_watch_events` | true | true |
-| `leaderboard.monthly_from_events` | true | true |
-| `welcome.delivery_enabled` | true | false |
-| `release.shadow_enabled` / `release.push_enabled` | true / **false** | true / false |
-| `push.delivery_enabled` | `false`, **but inert**: nothing reads this row, and push delivery runs. #119 would make it a real switch; that is a founder decision | false |
+Each value carries the date it was last read from production. A row with an old date has not
+been re-read since; it is not known to have changed.
+
+| Flag | Production | Last read | Staging |
+|---|---|---|---|
+| `ranking.backlog_enabled` | **true** | 2026-09-26 | true |
+| `ranking.refine_enabled` | **false**, a founder decision still open | 2026-09-26 | true |
+| `goals.count_watch_events` | true | 2026-09-26 | true |
+| `leaderboard.monthly_from_events` | true | 2026-09-26 | true |
+| `welcome.delivery_enabled` | **true** (13 sent, 0 failed) | 2026-11-17 ([`welcome-email-diagnosis-2026-11-17.md`](./welcome-email-diagnosis-2026-11-17.md)) | false |
+| `release.shadow_enabled` / `release.push_enabled` | true / **false** | 2026-09-26 | true / false |
+| `push.delivery_enabled` | `false`, **but inert**: nothing reads this row, and push delivery runs. #119 would make it a real switch; that is a founder decision | 2026-11-15 | false |
+| `proactive.generation_enabled` / `proactive.push_enabled` | false / false, as the migrations seed them | not re-read | — |
+| `recommendations.v2_engine` / `v2_rollout_percent` / `v2_allowlist` | **`"v1"`** / 0 / `[]`: Rec V2 is shipped dark | 2026-11-15 | `"v1"` / 0 / `[]` |
+| `score.contributor_min_rankings` | 10 | 2026-11-15 | 10 |
+| `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | 2026-11-16 | per QA round |
+| `feed.ranking_backfill_grouping_enabled` / `feed.ranking_backfill_days` | **true** / 7 | 2026-11-17 | true |
+
+**Security (2026-11-19).** H-2 is fixed in production (`20261124000100`, trigger
+`retire_unproven_password`). H-1 is **closed** (2026-11-18): the privileged Actions secrets
+live only in the `production` and `nonprod` Environments, restricted to `main`; evidence in
+[#317](https://github.com/fourwardhabits/bingd/pull/317) on
+[`../security/security-closeout-2026-11-17.md`](../security/security-closeout-2026-11-17.md).
+Still open and founder-only: M-5's Sentry dashboard rule (unverified) and m-3's nine historical
+log deletions.
+
+Username-or-email sign-in (#300) is **not in production**: its migration slot
+`20261123000100` is unused and none of its functions exist (read 2026-11-15).
 
 ---
 
 ## What is live
 
-- **Ranking.** Ordinal ranking is canonical: position within Movies or TV is the truth, and
-  the score is derived. Unranked (backlog) sittings deal seen-but-unranked titles one at a
-  time; a placement left mid-comparison resumes. Header **Done** shows a summary of only what
-  the sitting completed; *Keep ranking* continues it. Ranking an already-seen title never
-  creates a watch.
+- **Ranking.** Ordinal ranking is canonical: position within its pool is the truth, and the
+  score is derived. **Three independent pools: Movies, TV shows and TV seasons** (since
+  2026-11-12, `20261114000100`–`000400`). A whole show is ranked in its own pool; ranking a
+  season offers *Update Show* / *Keep Show* for the parent (`20261120000100`). Unranked
+  (backlog) sittings deal seen-but-unranked titles one at a time; a placement left
+  mid-comparison resumes. Header **Done** shows a summary of only what the sitting completed;
+  *Keep ranking* continues it. Ranking an already-seen title never creates a watch.
+  Mechanics: [`../architecture/ranking.md`](../architecture/ranking.md) §14.
+- **Collection.** Movies / TV / Lists. The TV Collection shows **one poster per show**,
+  carrying the explicit show score or else the season average (`SN AVG`).
 - **Watch history.** Multiple watches per title, undated watches as first-class, Watch History,
-  companions, and *Recently watched* sorted by the latest real watch date.
-- **Notes and reviews.** One title-level note (`user_media.note`), shared or private, with a
-  spoiler flag.
-- **Feed and social.** Follows, ordinary activity, one grouped post per Unranked sitting,
-  comments with author follow-up notifications, reactions, recommendations, invites, the
-  leaderboard, goals and Awards.
-- **Lists v1.** Native lists of movies, seasons and series, public/private, custom order,
-  Add to List, share links.
-- **Import.** Letterboxd CSV import into the collection.
-- **Discovery.** Search, title pages, For You, Top Rated, Trending, Similar, Cast.
-- **Web.** bingd.app: install page, public title and profile previews, invite links.
+  companions, per-watch notes (Edit watch → Note, private unless *Share as a review* is on),
+  and *Recently watched* sorted by the latest real watch date.
+- **Notes and reviews.** One title-level review (`user_media.note`), shared or private, with a
+  spoiler flag; review cards, review sort and **Helpful**.
+- **Feed and social.** Follows, ordinary activity, **grouped posts** (a watchlist session, a
+  backlog half hour, and historical first-time rankings from title pages, each one post with a
+  poster rail; see the semantics below), labelled Like · Comment on every post, comments with
+  author follow-up notifications, reactions, recommendations and **Sent to You** (read state,
+  unread first, Movies/TV filter), invites, the leaderboard, goals and Awards.
+- **Lists v1.** Native lists of movies, seasons and series, public/private/link, custom order,
+  Add to List, share links, public web page.
+- **Import.** **Letterboxd** (ZIP/CSV, films and diary dates) and **IMDb** (CSV; movies are
+  added; whole TV shows are matched and reported but not added) into the collection, from
+  Settings → *Import from* and from onboarding. An imported rating is never a ranking.
+- **Onboarding 2.0.** Profile, picks, head-to-head, *Your First Five*, People search and invite,
+  notification step, with the OB-1 analytics events
+  ([`../product/onboarding-observability.md`](../product/onboarding-observability.md)).
+- **Discovery.** Search (the Search tab), title pages, For You (engine V1), Top Rated,
+  Trending, Similar, Cast, person pages, Discover People, Taste Match (computed live per pair).
+- **Email.** The Welcome email, 48–168 hours after sign-up, for accounts created after
+  2026-09-18.
+- **Web.** bingd.app: install page, public title, profile and list previews, invite links.
+
+### Shipped dark (in production, switched off)
+
+Recommendation Engine V2 (`v2_engine "v1"`, 0%;
+[`../architecture/recommendations-v2.md`](../architecture/recommendations-v2.md)), Refine
+(flag off), proactive notifications (generation and push off), proactive release pushes (shadow
+only), the push kill switch (#119, row inert).
+
+### Staging or unreleased (not in production)
+
+| What | Where |
+|---|---|
+| Collection drag-to-rerank across categories, TV pool editors (#319) | Draft PR; on staging (migration `20261129000200`) and the 2026-11-19 Preview; awaiting founder device QA |
+| *Who I watched with* searchable picker (#321) | Draft PR; in the 2026-11-19 Preview; awaiting founder device QA |
+| Reactions and comments on follow stories, Workstream C (#322) | Draft PR; **not on staging**, not in any Preview |
+| Username-or-email sign-in (#300) | Draft PR; migration not applied anywhere |
+| Design System v3 (#295) | Draft PR |
 
 ### Intentionally not live
 
-Refine (built, flag off), Letterboxd **Lists** import, predicted score, unmatched-import
-repair, Stats/Wrapped, Watch Next (#183/#184, parked), further share cards and Awards,
-episode-level tracking, whole-series ranking, and proactive release pushes (shadow only).
+Letterboxd **Lists** import, IMDb whole-show import, TV Time import, predicted score,
+unmatched-import repair, Stats/Wrapped, Watch Next (#183/#184, parked), further share cards
+and Awards, a share link for grouped posts and Awards, and episode-level tracking (episode
+**metadata** is shown; nothing about an episode is logged or ranked).
 
 ---
 
@@ -121,15 +206,33 @@ A sitting in the Unranked flow posts **one** `ranking_batch` event, not one per 
   Close. A post that grew while you ranked would re-sort the feed under the reader.
 - The representative title is the **last one placed** (`do update set media_item_id =
   excluded.media_item_id`). A sitting that placed nothing deletes its draft.
-- It renders through the ordinary `ActivityRow`: poster, actor avatar over it, and
-  `<Name> ranked <Title> and N more`, where *N more* opens the sitting's list.
+- It renders as `<Name> ranked <Title> and N more`, where *N more* opens the sitting's list.
+  Since 2026-11-17 a post of two or more titles is drawn as a poster rail (below).
 - **A sitting of exactly one title is an ordinary ranking post**, badge included. It
   borrows the live score, because a batch payload carries none. Above one title there is no
   badge: the representative stands in for a set.
 - A force-quit leaves an unfinalised draft, which every reader is blind to. So does leaving
   by iOS swipe-back or Android hardware back: that exit is in the TODO register.
-- Refine creates no grouped activity. There is no historical backfill: sittings before
-  `20261020000100` stay as the individual posts they were.
+- Refine creates no grouped activity.
+
+**Since 2026-11-16/17 a sitting can share its post** (`20261126000100`, `20261128000100`;
+design in [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)):
+
+- Backlog sittings that begin within **30 minutes** of an open group join it, and the group
+  keeps its id, place and conversation (`feed.ranking_grouping_enabled`).
+- Movies, shows and seasons share one social group (cross-ladder); each title keeps its own
+  ladder and score.
+- A **first-time** ranking from a title page joins a group only when its watch evidence is
+  historical: the newest watch's basis is `none` or `diary`, or a reader-entered date at least
+  `feed.ranking_backfill_days` (7) old. A ranking logged with the default *Today* date, a
+  recent date or no watch at all is after-watch and stays standalone.
+- A grouped post draws its members as a poster rail with the author's scores, and keeps one
+  Like and one Comment; Save and Share are not drawn on it.
+- Members are hidden by `feed_events.presented_in` under the read policy, never deleted.
+  The one-time historical consolidation of 2026-11-17 grouped 702 earlier posts into 115
+  groups and is reversible per batch (`revert_feed_consolidation`).
+- A watchlist session (saves within 30 minutes) is likewise one `watchlist_added` post
+  (`20261125000100`).
 
 **It creates no watch.** No `watch_event`, no watch date set to today, no imported
 Letterboxd date replaced, no change to the latest-watch date, and nothing counted for the
@@ -137,14 +240,20 @@ monthly leaderboard.
 
 ### Review visibility and the remembered default
 
-One model on all three surfaces: Log/Rank, Another watch, and Watch History → edit. The
-object is always `user_media.note` with `note_visibility` and `note_has_spoilers`.
-`watch_events.note` is a private diary line, owner-only by schema (`20261014000100`), and
-the composer does not write it.
+The review is always `user_media.note` with `note_visibility` and `note_has_spoilers`,
+written by Log/Rank, Another watch and Title → Write a review. `watch_events.note` is the
+**per-watch** note, owner-only by schema (`20261014000100`).
 
-- A reader's **first-ever** new note opens with *Share as a review* **on**.
-- After they save a new note with an explicit choice, that choice is the default for the next
+- **Watch History → Edit watch → Note** (since 2026-11-16, #308) writes the watch's own note
+  (`set_watch_details`). *Contains spoilers* and *Share as a review* sit in that editor, both
+  off when it opens. With Share on, Save then publishes a copy as the title's review
+  (`save_note`), asking first before replacing a different stored review. The two notes are
+  never linked afterwards.
+- A reader's **first-ever** new review opens **private** (founder, 2026-11-04; live since the
+  2026-11-07 OTA). An earlier version of this page said it opened shared.
+- Only an explicit tap on *Share as a review* is remembered as the default for the next
   **new** note (`note-visibility-pref`: per account, **stored on the device**, not synced).
+  Saving or ranking never changes it.
 - **A note that already exists always opens on its stored visibility and spoiler flag.** No
   default and no habit may move it.
 - Title → **Write a review** opens shared whatever the habit is. That is an act, not a
@@ -192,8 +301,9 @@ preview lane. **Preview never points at production data.**
 3. the staging backend and data,
 4. only the explicitly unreleased fix being tested.
 
-Preview never accumulates its own history that later has to be reconciled. Today it carries
-nothing unreleased: `01a0db08` is `9d9683a`. Staging QA accounts and the states they cover are
+Preview never accumulates its own history that later has to be reconciled. On 2026-11-19 it
+carries `main` `a3300bf0` plus two unreleased drafts under founder QA, #319 and #321 (see
+*Staging or unreleased* above). Staging QA accounts and the states they cover are
 in [`staging-qa-inventory.md`](./staging-qa-inventory.md).
 
 ---
