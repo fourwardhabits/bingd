@@ -60,3 +60,25 @@ Then confirm `release-manifest live preview` shows runtimes `2503ffaa…` / `ef0
   - **Otherwise,** publish to both platforms with `--platform all` and the same message.
 - **Verify:** `release-manifest live preview` shows `gitSha 2b50825b…` on the published platforms.
 - **Rollback:** republish #319's corrected groups, recorded when step 5 is redone.
+
+## Step 5 redone after founder approval (2026-11-19 07:01Z)
+
+**Pre-checks**, all passing:
+- clean checkout `f010b51f` with a real `node_modules`;
+- `eas env:exec preview` fingerprints are Android `2503ffaa…` and iOS `ef07f4b8…`, matching the installed builds;
+- staging has `20261129000100` applied and as its head, with `rank_reorder` granted to authenticated.
+
+**Published** with `npm run update:preview -- --platform all`:
+
+| | Android | iOS |
+| --- | --- | --- |
+| Update | `01a1f29c-069c-744b-bb73-1adebe465914` | `01a1f29c-069c-7d84-b542-b29473b574fd` |
+| Group | `28ff2ad6-63cd-4457-bea4-3baa25b633c8` | `34da676e-c3a9-4c75-9e08-f29cef90f732` |
+| Commit | `f010b51f` | `f010b51f` |
+| Runtime | `2503ffaa…` (installed) | `ef07f4b8…` (installed build 9) |
+
+**Verified:** `release-manifest live preview` shows channel `preview`, gitSha `f010b51f…` on both platforms, and backend `fjxhcbowoxuzulwirzyr` (staging). Its only flag is the existing gap that `config/live-runtimes.json` has no iOS Preview entry.
+
+**Rollback:** republish `d2c7190b…` (Android) and `d09bbb7e…` (iOS) for `e94589b6`.
+
+The earlier misfired groups (`85913f1c…`, `eb08e1db…`) are on runtimes no build has. They are inert and superseded.
