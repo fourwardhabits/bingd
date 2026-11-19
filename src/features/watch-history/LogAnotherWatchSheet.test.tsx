@@ -24,9 +24,11 @@ jest.mock('@/features/auth/session', () => ({
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 
+/** The reader's mutuals, as `useTaggablePeople` answers. Empty unless a test sets it. */
+let mockPeople: { id: string; username: string; name: string; avatarUri: null }[] = [];
 jest.mock('@/features/collection/use-companions', () => ({
   ...jest.requireActual('@/features/collection/use-companions'),
-  useTaggablePeople: () => ({ data: [], isPending: false }),
+  useTaggablePeople: () => ({ data: mockPeople, isPending: false }),
 }));
 
 const mockRewatch = jest.fn((_input: unknown) =>
@@ -68,6 +70,7 @@ jest.mock('@/lib/prefs', () => ({
 }));
 
 beforeEach(() => {
+  mockPeople = [];
   mockPrefs.clear();
   mockRewatch.mockClear();
   mockSaveNote.mockClear();
@@ -212,4 +215,77 @@ it('flushes the note before the watch is logged, so a bucket press cannot lose i
   await fireEvent.press(view.getByLabelText('It was fine'));
 
   await waitFor(() => expect(order).toEqual(['note', 'rewatch']));
+});
+
+/**
+ * **Who I watched with, in the draft this sheet saves on a bucket press** (founder QA,
+ * 2026-11-19). The searchable picker is the log sheet's; what is this sheet's own is that a
+ * tag is a draft until the watch is saved, so a failed save must keep the people chosen.
+ */
+describe('who I watched with, as a draft', () => {
+  const person = (id: string, name: string, username = name.toLowerCase()) => ({
+    id,
+    username,
+    name,
+    avatarUri: null,
+  });
+
+  it('searches, keeps several chosen in view, and saves them with the watch', async () => {
+    mockPeople = [person('u1', 'Anna'), person('u2', 'Raj', 'rajk'), person('u3', 'Zoë')];
+    const view = await draw();
+    await fireEvent.press(view.getByLabelText(/Who I watched with/));
+
+    await fireEvent.press(view.getByLabelText('Anna'));
+    await fireEvent.changeText(view.getByTestId('companion-search'), '@RAJK');
+    expect(view.queryByLabelText('Anna')).toBeNull();
+    await fireEvent.press(view.getByLabelText('Raj'));
+
+    // Both stay visible as chips while the list is filtered to one name.
+    expect(view.getByLabelText('Remove Anna')).toBeTruthy();
+    expect(view.getByLabelText('Remove Raj')).toBeTruthy();
+    expect(view.getByTestId('companion-count').props.children).toBe('2 of 10 selected');
+
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() => expect(mockRewatch).toHaveBeenCalledTimes(1));
+    expect(mockRewatch.mock.calls[0]![0]).toMatchObject({ companionIds: ['u1', 'u2'] });
+  });
+
+  it('keeps the chosen people when the save fails, and sends them again on retry', async () => {
+    mockPeople = [person('u1', 'Anna'), person('u2', 'Raj')];
+    mockRewatch.mockImplementationOnce(
+      () =>
+        Promise.resolve({
+          outcome: 'failed',
+          message: 'You can only tag people who follow you back.',
+        }) as never,
+    );
+    const view = await draw();
+    await fireEvent.press(view.getByLabelText(/Who I watched with/));
+    await fireEvent.press(view.getByLabelText('Anna'));
+    await fireEvent.press(view.getByLabelText('Raj'));
+
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() =>
+      expect(view.getByText('You can only tag people who follow you back.')).toBeTruthy(),
+    );
+    expect(view.getByLabelText('Remove Anna')).toBeTruthy();
+    expect(view.getByLabelText('Remove Raj')).toBeTruthy();
+
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() => expect(mockRewatch).toHaveBeenCalledTimes(2));
+    expect(mockRewatch.mock.calls[1]![0]).toMatchObject({ companionIds: ['u1', 'u2'] });
+  });
+
+  it('removes a person from the chip as well as from the row', async () => {
+    mockPeople = [person('u1', 'Anna'), person('u2', 'Raj')];
+    const view = await draw();
+    await fireEvent.press(view.getByLabelText(/Who I watched with/));
+    await fireEvent.press(view.getByLabelText('Anna'));
+    await fireEvent.press(view.getByLabelText('Remove Anna'));
+
+    expect(view.queryByLabelText('Remove Anna')).toBeNull();
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() => expect(mockRewatch).toHaveBeenCalledTimes(1));
+    expect(mockRewatch.mock.calls[0]![0]).toMatchObject({ companionIds: [] });
+  });
 });
