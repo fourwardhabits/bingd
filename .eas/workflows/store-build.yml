@@ -1,0 +1,57 @@
+name: Store build (production)
+
+# The App Store / Play binaries, built on EAS rather than on a laptop or a cloud session.
+#
+# Why: the production lane needs `google-services.json` while `app.config.ts` is evaluated, and
+# EAS holds it as GOOGLE_SERVICES_JSON, a SECRET file variable. eas-cli never loads a SECRET
+# variable into a local run, so `eas build` from a cloud session stops before uploading
+# (docs/release/store-refresh-2026-11-19.md §10). A `type: build` job runs on EAS, where the
+# variable already lives: nothing is downloaded, copied into git or printed. It is the same
+# reason `ota-production.yml` publishes from EAS.
+#
+# It is started by `eas workflow:run` only, with --ref and -F sha= set to one release commit:
+#
+#   SHA=<full commit hash of a release/* commit>
+#   eas workflow:run .eas/workflows/store-build.yml --ref $SHA -F sha=$SHA --non-interactive --wait
+#
+# `preflight` refuses unless the checkout is exactly that commit, clean, and CI and the release
+# gate both passed on it (`ota-gate.mjs`, the `production-check` lane: release checks, no
+# requirement to be on main, because the version bump must not reach main until the binaries
+# are live). Nothing builds until it passes. Neither build submits anything: uploading to App
+# Store Connect is a separate `eas submit`, and review is the founder's step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The release commit to build. Must equal the --ref this run was started from.
+        type: string
+        required: true
+
+concurrency:
+  group: store-build
+  cancel_in_progress: false
+
+jobs:
+  preflight:
+    environment: development
+    env:
+      OTA_LANE: production-check
+      OTA_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs preflight
+
+  build_ios:
+    type: build
+    needs: [preflight]
+    params:
+      platform: ios
+      profile: production
+
+  build_android:
+    type: build
+    needs: [preflight]
+    params:
+      platform: android
+      profile: production
