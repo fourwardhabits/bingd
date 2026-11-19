@@ -179,34 +179,87 @@ describe('Q2: being named grants nothing', () => {
     assert.equal(r.rows[0].r.status, 'ok');
   });
 
-  it('a mention cannot name somebody into a story closed to them', async () => {
+  it('a mention never notifies somebody the story is closed to, and refuses nobody for it', async () => {
     const { a, b, f, story } = await scene();
     await follow(b, a);
     await follow(f, b); // F may otherwise mention B anywhere
     const handle = (await t.sql(`select username from profiles where id = $1`, [b])).rows[0].username;
 
-    // Picked explicitly: refused outright, the strict rule every ineligible pick meets.
-    const picked = await refusal(
+    // Picked explicitly: the comment posts (Codex, PR 322: a refusal here would tell F about
+    // relationships F is not part of), and B, the story's only member, is told nothing.
+    const picked = await as(
       f,
-      `select add_comment($1, $2, $3, false, null, $4::uuid[])`,
+      `select add_comment($1, $2, $3, false, null, $4::uuid[]) as r`,
       [await uuid(), story, `hey @${handle}`, [b]],
     );
-    assert.equal(picked?.code, '42501');
-
-    // Typed but not picked: the comment posts and the name is simply not resolved.
-    const typed = await comment(f, story, `hey @${handle}`);
-    assert.equal(typed.status, 'ok');
-    const active = Number(
-      (await t.sql(`select count(*) from comment_mentions where mentioned_id = $1 and active`, [b])).rows[0].count,
-    );
-    assert.equal(active, 0);
+    assert.equal(picked.rows[0].r.status, 'ok');
     assert.equal(await notified(b, story, 'mention'), 0, 'the sole member is not mentioned in');
 
-    // And the composer never offers them.
+    // The composer's candidates are the ordinary mention rule's, unchanged.
     const offered = (
       await as(f, `select id from mention_candidates($1, $2)`, [story, handle.slice(0, 4)])
     ).rows.map((r) => r.id);
-    assert.equal(offered.includes(b), false);
+    assert.equal(offered.includes(b), true);
+  });
+
+  it('a mention candidate never depends on a block between two other people (Codex, PR 322)', async () => {
+    // X follows the attacker, so the attacker may mention X anywhere. The attacker makes a
+    // story whose only member is B, then asks whether X is offered before and after X and B
+    // block each other. The answer must not change: that relationship is not the attacker's.
+    const attacker = await user('attacker');
+    const b = await user('probe_member');
+    const x = await user('probe_target');
+    await follow(x, attacker);
+    await follow(attacker, x);
+    await follow(attacker, b);
+    const story = (
+      await t.sql(
+        `select id from feed_events where actor_id = $1 and type = 'follow_added' order by created_at desc limit 1`,
+        [attacker],
+      )
+    ).rows[0].id;
+    const handle = (await t.sql(`select username from profiles where id = $1`, [x])).rows[0].username;
+    const offered = async () =>
+      (await as(attacker, `select id from mention_candidates($1, $2)`, [story, handle.slice(0, 5)])).rows
+        .map((r) => r.id)
+        .includes(x);
+    const pick = async () =>
+      (
+        await t.errorFrom(`select add_comment($1, $2, 'hi', false, null, $3::uuid[])`, [
+          await uuid(),
+          story,
+          [x],
+        ])
+      )?.code ?? 'ok';
+    await t.actAs(attacker);
+    const before = [await offered(), await t.asUser(attacker, pick)];
+    await block(x, b);
+    const after = [await offered(), await t.asUser(attacker, pick)];
+    assert.deepEqual(after, before);
+  });
+
+  it('a notification about a story that has since closed is not drawn, and returns when it reopens', async () => {
+    const { a, b, f, story } = await scene();
+    await react(f, story);
+    const inbox = async () =>
+      (await as(a, `select id from my_notifications(50) where subject_id = $1`, [story])).rows.length;
+    assert.equal(await inbox(), 1);
+    await unfollow(a, b); // the only member: the story closes for everyone, A included
+    assert.equal(await inbox(), 0);
+    await follow(a, b);
+    assert.equal(await inbox(), 1, 'nothing was deleted');
+  });
+
+  it('a push about a story that closed before delivery is not sent', async () => {
+    const { a, b, f, story } = await scene();
+    await t.sql(`insert into device_tokens (user_id, token, platform) values ($1, $2, 'ios')`, [
+      a,
+      `ExponentPushToken[${String(a).replaceAll('-', '').slice(0, 20)}]`,
+    ]);
+    await react(f, story);
+    await unfollow(a, b);
+    const jobs = await t.asRole('service_role', null, async () => (await t.sql(`select claim_push_batch(50) as j`)).rows[0].j);
+    assert.equal(jobs.filter((j) => j.feed_event_id === story).length, 0);
   });
 });
 

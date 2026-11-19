@@ -1337,6 +1337,283 @@ begin
 end;
 $$;
 
+-- _apply_comment_mentions, verbatim from 20260830000100_a_name_you_can_say_in_a_comment.sql
+create or replace function _apply_comment_mentions(
+  p_comment_id    uuid,
+  p_feed_event_id uuid,
+  p_mention_ids   uuid[],
+  -- Whether the comment is a reply, for the copy alone. The notification type is
+  -- the same either way: a mention is a mention, and splitting it into two types
+  -- would give it two preference categories to be silenced through.
+  p_is_reply      boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_max    integer;
+  v_wanted uuid[];
+  v_bad    uuid;
+begin
+  -- Aliased `w(uid)`, and the alias is not decoration: written as `unnest(...) as
+  -- id`, an inner reference inside a correlated subquery over a table with its own
+  -- `id` silently binds to the wrong one. `set_watch_tags` shipped that bug and
+  -- filed three notifications for one save.
+  select coalesce(array_agg(distinct w.uid), '{}') into v_wanted
+    from unnest(coalesce(p_mention_ids, '{}'::uuid[])) as w(uid)
+   where w.uid is not null;
+
+  select coalesce((select (value)::integer from app_config where key = 'mentions.max_per_comment'), 10)
+    into v_max;
+
+  if coalesce(array_length(v_wanted, 1), 0) > v_max then
+    raise exception 'you can mention up to % people in one comment', v_max using errcode = '22023';
+  end if;
+
+  -- Refused as a whole rather than partially applied, which is `set_watch_tags`'
+  -- rule and for its reason: silently dropping the one person who is no longer
+  -- eligible leaves the author believing they said something they did not.
+  --
+  -- A person already carrying an *active* mention on this comment is exempt, so
+  -- an edit does not fail because somebody went private after the original
+  -- comment was posted. Their stamp is already spent, so the exemption cannot
+  -- produce a notification. A block is not exempted this way -- `_can_mention`
+  -- fails for the blocked pair, and the exemption only reaches somebody the
+  -- author is already, actively, naming.
+  select w.uid into v_bad
+    from unnest(v_wanted) as w(uid)
+   where not _can_mention(p_feed_event_id, w.uid)
+     and not exists (
+       select 1 from comment_mentions m
+        where m.comment_id = p_comment_id and m.mentioned_id = w.uid and m.active
+     )
+   limit 1;
+
+  if v_bad is not null then
+    raise exception 'you can only mention people you follow or who are in this conversation'
+      using errcode = '42501';
+  end if;
+
+  -- The handle is read here rather than trusted from the client: it has to be what the
+  -- *body* spells, and the body was written from this same list a moment ago.
+  insert into comment_mentions (comment_id, mentioned_id, active, handle)
+  select p_comment_id, w.uid, true, p.username::text
+    from unnest(v_wanted) as w(uid)
+    join profiles p on p.id = w.uid
+  -- `notified_at` is deliberately absent from this SET list, and its absence is
+  -- the whole feature. A row that survives keeps its stamp.
+  --
+  -- `handle` is deliberately absent too, and for the opposite reason: the stored
+  -- spelling must stay the one the *body* uses, so re-saving a comment after the person
+  -- renamed does not overwrite the only record of what the text says.
+  on conflict (comment_id, mentioned_id) do update set active = true;
+
+  update comment_mentions
+     set active = false
+   where comment_id = p_comment_id
+     and mentioned_id <> all (v_wanted)
+     and active;
+
+  with claimed as (
+    update comment_mentions m
+       set notified_at = now()
+     where m.comment_id = p_comment_id
+       and m.mentioned_id = any (v_wanted)
+       and m.notified_at is null
+    returning m.mentioned_id
+  )
+  insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+  select c.mentioned_id,
+         'mention',
+         auth.uid(),
+         'feed_event',
+         p_feed_event_id,
+         jsonb_build_object('comment_id', p_comment_id, 'reply', coalesce(p_is_reply, false))
+    from claimed c;
+end;
+$$;
+
+-- my_notifications, verbatim from 20261101000100_the_excerpt_rule_on_this_branch.sql
+create or replace function my_notifications(p_limit integer default 50)
+returns table (
+  id                 uuid,
+  kind               text,
+  created_at         timestamptz,
+  read_at            timestamptz,
+  actor_id           uuid,
+  actor_username     text,
+  actor_display_name text,
+  actor_avatar_path  text,
+  subject_type       text,
+  subject_id         uuid,
+  media_item_id      uuid,
+  media_kind         media_kind,
+  media_title        text,
+  series_title       text,
+  payload            jsonb,
+  -- One line of what was written, or null. See the header for the three
+  -- conditions and for why the server rather than the client withholds it.
+  comment_excerpt    text,
+  -- True when the live comment this row is about is spoiler-marked. The reason
+  -- there is no excerpt, said out loud, so the row can draw "Contains spoilers"
+  -- rather than an empty second line that reads as a rendering bug.
+  comment_spoilers   boolean,
+  -- `watch_tag` only: whether this reader has already ranked the title. Decides
+  -- whether the row offers Rank, and goes true on the next refetch after they do.
+  viewer_ranked      boolean,
+  -- The subject feed event's own type, for the row's sentence (20260901000100).
+  subject_activity_type text,
+  -- watchlist_social only (20261028000100): up to three members, as
+  -- [{username, display_name, avatar_path}], and how many there are in all. Strongest
+  -- first by affinity, then earliest, since 20261031000100.
+  cluster_actors     jsonb,
+  cluster_count      integer
+)
+language sql stable security definer
+set search_path = public
+as $$
+  select n.id,
+         n.type,
+         n.created_at,
+         n.read_at,
+         n.actor_id,
+         p.username::text,
+         p.display_name,
+         p.avatar_path,
+         n.subject_type,
+         n.subject_id,
+         m.id,
+         m.kind,
+         m.title,
+         parent.title,
+         -- A theatrical row states the release's date as it stands NOW, not the date it
+         -- was written with (Codex re-review): see the filter below.
+         case when n.type = 'theatrical_release'
+              then n.payload || jsonb_build_object('opens_on', rel.opens_on)
+              -- 20261031000100. A season row states the verified date as it is now.
+              when n.type = 'season_premiere'
+              then n.payload || jsonb_build_object('available_on', sea.available_on)
+              else n.payload end,
+         case
+           when n.type in ('comment', 'mention') then (
+             select left(c.body, 140)
+               from comments c
+              where c.id = (n.payload ->> 'comment_id')::uuid
+                and c.deleted_at is null
+                and not c.has_spoilers
+                and _can_read_comment(auth.uid(), c.id)
+           )
+         end,
+         coalesce(
+           case
+             when n.type in ('comment', 'mention') then (
+               select c.has_spoilers
+                 from comments c
+                where c.id = (n.payload ->> 'comment_id')::uuid
+                  and c.deleted_at is null
+                  and _can_read_comment(auth.uid(), c.id)
+             )
+           end,
+           false
+         ),
+         case
+           when n.type = 'watch_tag' then exists (
+             select 1 from rankings r
+              where r.user_id = auth.uid()
+                and r.media_item_id = case
+                                        when n.subject_type = 'media_item' then n.subject_id
+                                        else null
+                                      end
+           )
+           else false
+         end,
+         fe.type,
+         cl.actors,
+         cl.n
+    from notifications n
+    left join profiles p
+           on p.id = n.actor_id
+          and p.status = 'active'
+    /**
+     * Whose feed event this type means, as three rules rather than one. See
+     * 20260901000100 for the full reasoning; carried across unchanged.
+     */
+    left join feed_events fe
+           on n.subject_type = 'feed_event'
+          and fe.id = n.subject_id
+          and case
+                when n.type = 'recommendation_ranked' then fe.actor_id = n.actor_id
+                when n.type = 'mention' then can_view_profile(auth.uid(), fe.actor_id)
+                else fe.actor_id = auth.uid()
+              end
+    left join media_items m
+           on m.id = case
+                       when n.subject_type = 'media_item' then n.subject_id
+                       else fe.media_item_id
+                     end
+    left join media_items parent
+           on parent.id = m.parent_id
+    left join proactive_candidates pc
+           on n.type in ('watchlist_social', 'theatrical_release', 'season_premiere')
+          and pc.notification_id = n.id
+    /**
+     * theatrical_release: the date the release event holds now. A film still scheduled
+     * opens on its current scheduled date; one that has opened, on the day it did. One
+     * that was withdrawn, lost its date, or is gone has none, and its row is not drawn
+     * (Codex re-review): a postponed film must not keep saying the old date, and a
+     * cancelled one must not keep saying it opens at all. Read-time, so it is true
+     * whenever the inbox is read, before or after the push, with one row throughout.
+     */
+    left join lateral (
+      select case
+               when re.state = 'scheduled' then re.scheduled_date
+               when re.state = 'released'  then coalesce(re.released_on, re.scheduled_date)
+             end as opens_on
+        from release_events re
+       where re.id = (pc.metadata ->> 'release_event_id')::uuid
+    ) rel on pc.type = 'theatrical_release'
+    /**
+     * season_premiere (20261031000100): the verified date, while the verification row
+     * still exists and still agrees with a release event that is still released on that
+     * date. Removed, moved or retracted: no date, and the row is not drawn. Expiry of the
+     * verification does not hide it (it is a dated fact); it only stops delivery.
+     */
+    left join lateral (
+      select v.available_on
+        from release_events re
+        join proactive_season_availability v
+          on v.release_event_id = re.id
+         and v.region = coalesce(pc.metadata ->> 'region', 'US')
+       where re.id = (pc.metadata ->> 'release_event_id')::uuid
+         and re.state = 'released'
+         and re.scheduled_date = re.released_on
+         and v.available_on = re.released_on
+    ) sea on pc.type = 'season_premiere'
+    left join lateral (
+      select count(*)::integer as n,
+             jsonb_agg(jsonb_build_object('username', s.username,
+                                          'display_name', s.display_name,
+                                          'avatar_path', s.avatar_path)
+                       order by s.rn) filter (where s.rn <= 3) as actors
+        from _proactive_ranked_social_actors(pc.id, auth.uid(), now()) s
+    ) cl on pc.type = 'watchlist_social'
+   where n.recipient_id = auth.uid()
+     and (n.actor_id is null
+          or (p.id is not null and can_discover_profile(auth.uid(), n.actor_id)))
+     -- 20261028000100. The push-only type's carrier row is never part of the inbox.
+     and n.type <> 'watchlist_resurface'
+     -- And a social row nobody is left in says nothing true.
+     and (n.type <> 'watchlist_social' or coalesce(cl.n, 0) > 0)
+     -- And a theatrical row whose release no longer has a date says nothing true.
+     and (n.type <> 'theatrical_release' or rel.opens_on is not null)
+     -- And a season row whose availability is no longer on record says nothing true.
+     and (n.type <> 'season_premiere' or sea.available_on is not null)
+   order by n.created_at desc
+   limit least(greatest(coalesce(p_limit, 50), 1), 200);
+$$;
+
 drop function if exists follow_story_open_to_me(uuid);
 drop function if exists _follow_story_open_to(uuid, uuid);
 
