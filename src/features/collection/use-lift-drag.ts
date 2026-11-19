@@ -110,6 +110,7 @@ export function useLiftDrag<T>({
   count,
   isOutside,
   onDrop,
+  layoutKey = '',
 }: {
   listRef: RefObject<FlashListRef<T> | null>;
   /** The view the list sits in, which the floating copy is positioned in. */
@@ -118,6 +119,13 @@ export function useLiftDrag<T>({
   count: number;
   isOutside: (from: number, to: number) => boolean;
   onDrop: (from: number, to: number) => void;
+  /**
+   * What the list's horizontal geometry depends on: the view (a poster wall has a gutter, a
+   * list of rows has none) and the width. The left edge learned at a lift is reused only
+   * under the same key (Codex, PR 319): Poster then List must not draw a row at the wall's
+   * inset.
+   */
+  layoutKey?: string;
 }) {
   const [state, setState] = useState<LiftState | null>(null);
   const [travel] = useState(() => new Animated.ValueXY({ x: 0, y: 0 }));
@@ -129,8 +137,12 @@ export function useLiftDrag<T>({
   });
   const live = useRef<Live | null>(null);
 
-  /** The left edge of an item's cell inside the container, minus its layout `x`: learned once. */
-  const insetX = useRef<number | null>(null);
+  /**
+   * The left edge of an item's cell inside the container, minus its layout `x`: learned
+   * once per `layoutKey`, and forgotten when the key changes.
+   */
+  const learned = useRef<{ key: string; inset: number } | null>(null);
+  const insetFor = (key: string) => (learned.current?.key === key ? learned.current.inset : null);
 
   const layoutOf = (index: number): Rect | undefined => {
     try {
@@ -260,7 +272,7 @@ export function useLiftDrag<T>({
       from: index,
       to: index,
       y: itemTopInViewport(origin.y, firstItemOffset(), scrollY.current),
-      x: insetX.current === null ? null : insetX.current + origin.x,
+      x: insetFor(layoutKey) === null ? null : (insetFor(layoutKey) as number) + origin.x,
       origin,
       start: null,
       dx: 0,
@@ -274,10 +286,11 @@ export function useLiftDrag<T>({
     hapticSelection();
     publish(lifted);
     if (lifted.x !== null) return;
+    const key = layoutKey;
     node.measureLayout(
       container,
       (x) => {
-        insetX.current = x - origin.x;
+        learned.current = { key, inset: x - origin.x };
         // Released, or another lift, in the meantime: the inset is still worth keeping.
         if (live.current !== lifted) return;
         lifted.x = x;
