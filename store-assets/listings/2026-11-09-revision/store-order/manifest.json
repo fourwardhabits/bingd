@@ -1,0 +1,70 @@
+{
+  "note": "Upload order for the App Store (iPhone 6.9\", 1206 x 2622). Review only: not uploaded.",
+  "positions": [
+    {
+      "position": 1,
+      "slot": "collection",
+      "card": "01-movies-tv",
+      "file": "store-order/01-collection__01-movies-tv.png",
+      "sameBytesAs": "apple-1206x2622/01-movies-tv.png",
+      "headline": ["Your favorites,", "ranked your way"],
+      "subtitle": "Movies and TV, scored by your taste",
+      "sha256": "dd356e82187b4226c430b7213bebc2b2ced8bc27f224f000dd8b491e182c2b1a"
+    },
+    {
+      "position": 2,
+      "slot": "head-to-head",
+      "card": "02-head-to-head",
+      "file": "store-order/02-head-to-head__02-head-to-head.png",
+      "sameBytesAs": "apple-1206x2622/02-head-to-head.png",
+      "headline": ["Pick a favorite", "Build your ranking"],
+      "subtitle": "Head-to-head picks shape your list",
+      "sha256": "78e9098b848a7bddf81c4b0eb87f0b5c49fca43379a6e3ce13368f92ac1a7084"
+    },
+    {
+      "position": 3,
+      "slot": "friends",
+      "card": "03-friends",
+      "file": "store-order/03-friends__03-friends.png",
+      "sameBytesAs": "apple-1206x2622/03-friends.png",
+      "headline": ["See their picks", "Share your takes"],
+      "subtitle": "Follow friends, react, and send recs",
+      "sha256": "54b1cf6bb4a5654fe01e715817ddf0eacef5535b481fb9c3112dd4ca63babc73"
+    },
+    {
+      "position": 4,
+      "slot": "for-you",
+      "card": "06-for-you",
+      "file": "store-order/04-for-you__06-for-you.png",
+      "sameBytesAs": "apple-1206x2622/06-for-you.png",
+      "headline": ["Less scrolling", "More watching"],
+      "subtitle": "Discover picks shaped by your rankings",
+      "sha256": "bf9a8dd62d43692a590dd8479157522ec21a93312f559c878fed1ef0b5a23238"
+    },
+    {
+      "position": 5,
+      "slot": "watchlist",
+      "card": "04-watchlist",
+      "file": "store-order/05-watchlist__04-watchlist.png",
+      "sameBytesAs": "apple-1206x2622/04-watchlist.png",
+      "headline": ["Save it now", "Watch it later"],
+      "subtitle": "Keep your watchlist and friends’ picks",
+      "sha256": "1b087156477b162abdb3442d8cc0aa15a03127911650d742700741d3e164cec7"
+    },
+    {
+      "position": 6,
+      "slot": "goals-awards",
+      "card": "05-your-year",
+      "file": "store-order/06-goals-awards__05-your-year.png",
+      "sameBytesAs": "apple-1206x2622/05-your-year.png",
+      "headline": ["A little progress", "A lot to celebrate"],
+      "subtitle": "Set watch goals and earn Awards",
+      "sha256": "0b9ab870df9e58f98fe40c307bae8ea92e904e648f53258f289f673c3fa05cdb",
+      "alternative": {
+        "file": "alternatives/05-your-year_ALT-balanced.png",
+        "sha256": "51e6da3532f0e7441f4f5730ba667cf52d98574fc21aa053886893a4739a4e35",
+        "note": "Balanced layout, same copy. Kept for review; not selected."
+      }
+    }
+  ]
+}

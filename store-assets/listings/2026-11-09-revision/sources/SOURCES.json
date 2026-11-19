@@ -1,0 +1,66 @@
+{
+  "handoff": "bingd_recomposition_editable_handoff_2026-11-09.zip",
+  "handoff_sha256": "5ff9aea14deef962f7550befdd54075f724d6bc1f36d4b1730d320c32f3386f0",
+  "files": {
+    "captures/1000087685.jpg": {
+      "from": "legacy-card02-captures/1000087685.jpg",
+      "bytes": 155292,
+      "sha256": "930901801d0367924987f42aac1fa3e0927ff468ce2168681770a909ca8b9be4"
+    },
+    "captures/1000087701.jpg": {
+      "from": "legacy-card02-captures/1000087701.jpg",
+      "bytes": 118482,
+      "sha256": "0a324179034aed46f0830f7354f4483c5046a09d85344902caabe256a16ca792"
+    },
+    "captures/ranked-movies-list.jpg": {
+      "from": "references/new-ranking-list-source.jpg",
+      "bytes": 189886,
+      "sha256": "f01da2127250d0d5a6fdb7612ff1fcce7eca06cb468cf9a6f150cdb290571b42"
+    },
+    "layers/01-movies-tv__main-screen.png": {
+      "from": "approved-final/prepared-screen-layers/01-movies-tv__main-screen.png",
+      "bytes": 2063622,
+      "sha256": "efe34397d3b2cfabe3a2e24cb5084aa33ef10155d64332ac50e0c56e5b80990c"
+    },
+    "layers/01-movies-tv__secondary-screen.png": {
+      "from": "approved-final/prepared-screen-layers/01-movies-tv__secondary-screen.png",
+      "bytes": 1971556,
+      "sha256": "eda4ef5554c34414f47c753446bec6ebbd3b957c533eace4d57c02691aa98fa6"
+    },
+    "layers/03-friends__main-screen.png": {
+      "from": "approved-final/prepared-screen-layers/03-friends__main-screen.png",
+      "bytes": 1367545,
+      "sha256": "31159b0a4d32bbf9b2bd23ed11dccc4affd89ad371c224f35ab639bfb5abe529"
+    },
+    "layers/03-friends__secondary-screen.png": {
+      "from": "approved-final/prepared-screen-layers/03-friends__secondary-screen.png",
+      "bytes": 225193,
+      "sha256": "27be475e5b98dce4d9e3baac852587254d0aaf37775fc724fcbf8d0032420116"
+    },
+    "layers/04-watchlist__main-screen.png": {
+      "from": "approved-final/prepared-screen-layers/04-watchlist__main-screen.png",
+      "bytes": 2060044,
+      "sha256": "55c103d88a3d56b70c1f7f1f1d13d1909703b419a31a1f3ab3d028a0d4057dd8"
+    },
+    "layers/04-watchlist__secondary-screen.png": {
+      "from": "approved-final/prepared-screen-layers/04-watchlist__secondary-screen.png",
+      "bytes": 774472,
+      "sha256": "ca436812e72e62b34662bb6391e88fc74a734b3c9af3a437d42a12a501a2e285"
+    },
+    "layers/05-your-year__main-screen.png": {
+      "from": "approved-final/prepared-screen-layers/05-your-year__main-screen.png",
+      "bytes": 508931,
+      "sha256": "e542ead40d0687467ed12d9247e84efc00563eb8b6365c3d3ab78adfc64fbd0a"
+    },
+    "layers/05-your-year__secondary-screen.png": {
+      "from": "approved-final/prepared-screen-layers/05-your-year__secondary-screen.png",
+      "bytes": 505795,
+      "sha256": "bd2a069b41c1a6ccf1467121b1ee17544d53cfd1e25985b2551a1462ac53574d"
+    },
+    "layers/06-for-you__main-screen.png": {
+      "from": "approved-final/prepared-screen-layers/06-for-you__main-screen.png",
+      "bytes": 2028241,
+      "sha256": "f765b90327d6b3819873aed588fc75cf1be0fbccbae31fad197ab2aa8663192a"
+    }
+  }
+}
