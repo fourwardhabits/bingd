@@ -530,6 +530,10 @@ create index ranking_placements_category
 Owner-only `select`. Written only by `_rank_finalize`, and by `rank_reorder` (granted, no
 caller): it must write `manual` rows or be revoked.
 
+> **Since #318 (`20261129000100`)**, `rank_reorder` writes `manual` rows and is granted again.
+> Collection drag-to-rerank is its caller ([`collection-rerank.md`](../architecture/collection-rerank.md)).
+> That supersedes the drag-to-reorder non-goal in §Q.
+
 Outcomes:
 - `placed`: the title had no prior position.
 - `moved`: the bucket or position differs.

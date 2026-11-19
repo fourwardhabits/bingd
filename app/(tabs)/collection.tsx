@@ -17,8 +17,10 @@ import {
   isCollectionViewMode,
   type CollectionViewState,
 } from '@/features/collection/CollectionView';
+import { useRerank } from '@/features/collection/use-rerank';
 import {
   filterByMedium,
+  rankedPoolItems,
   watchedItems,
   watchlistItems,
 } from '@/features/collection/watched-rows';
@@ -35,6 +37,8 @@ import {
   EmptyState,
   MediumSelector,
   Screen,
+  Sheet,
+  SheetRow,
   SkeletonRow,
   Text,
 } from '@/ui/components';
@@ -713,16 +717,41 @@ function Watched({
   const shows = useRankedCollection(userId, 'tv_shows', { enabled: medium === 'tv_seasons' });
   const logged = useLoggedCollection(userId);
 
+  /**
+   * **Drag-to-rerank** (#318, `docs/architecture/collection-rerank.md`). Movies drag in
+   * place: the wall is the `movies` ranking. The TV wall is one poster per series, so it is
+   * never dragged; **Reorder** opens one pool at a time — the explicit show rankings or the
+   * season rankings — drawn as its own ladder, and nothing is derived between the two.
+   */
+  const rerank = useRerank(userId);
+  const [editingPool, setEditingPool] = useState<'tv_shows' | 'tv_seasons' | null>(null);
+  const [choosingPool, setChoosingPool] = useState(false);
+  // The editors are TV's: switching medium leaves them, adjusted during render (React's
+  // pattern for state that follows a prop) rather than by an effect a frame later.
+  const [editorMedium, setEditorMedium] = useState(medium);
+  if (editorMedium !== medium) {
+    setEditorMedium(medium);
+    setEditingPool(null);
+  }
+  const editing = medium === 'tv_seasons' ? editingPool : null;
+
   const items = useMemo(
     () =>
-      watchedItems(
-        ranked.data ?? [],
-        logged.data?.entries ?? [],
-        medium,
-        medium === 'tv_seasons' ? (shows.data ?? []) : [],
-      ),
-    [ranked.data, logged.data, medium, shows.data],
+      editing
+        ? rankedPoolItems(
+            (editing === 'tv_shows' ? shows.data : ranked.data) ?? [],
+            logged.data?.entries ?? [],
+          )
+        : watchedItems(
+            ranked.data ?? [],
+            logged.data?.entries ?? [],
+            medium,
+            medium === 'tv_seasons' ? (shows.data ?? []) : [],
+          ),
+    [editing, ranked.data, logged.data, medium, shows.data],
   );
+  const rankedShows = shows.data?.length ?? 0;
+  const rankedSeasons = medium === 'tv_seasons' ? (ranked.data?.length ?? 0) : 0;
 
   // The error said what had happened and offered nothing to do about it, on a screen with
   // no pull-to-refresh either — so a collection that failed to load stayed failed until the
@@ -745,6 +774,7 @@ function Watched({
     ) : undefined;
 
   return (
+    <>
     <CollectionView
       items={items}
       segment="watched"
@@ -752,9 +782,27 @@ function Watched({
       onChange={onChange}
       countAccessory={lists}
       title={title}
-      lead={lead}
+      lead={editing ? undefined : lead}
       placeholder={placeholder}
       onPressItem={(id) => router.push(`/title/${id}`)}
+      rerank={{
+        controller: rerank,
+        pool: medium === 'movies' ? 'movies' : editing,
+        editor: editing
+          ? {
+              title: editing === 'tv_shows' ? 'Reorder TV shows' : 'Reorder TV seasons',
+              onDone: () => setEditingPool(null),
+              footnote:
+                editing === 'tv_shows'
+                  ? 'Only shows you ranked as a whole show. A show scored by its seasons’ average is not here; rank the show from its page to add it.'
+                  : 'Seasons only. Moving a season never changes a show’s own ranking.',
+            }
+          : undefined,
+        onReorderTv:
+          medium === 'tv_seasons' && !editing && rankedShows + rankedSeasons > 0
+            ? () => setChoosingPool(true)
+            : undefined,
+      }}
       empty={
         logged.data?.loggedCount === 0 ? (
           <EmptyState
@@ -772,6 +820,33 @@ function Watched({
         )
       }
     />
+    {choosingPool ? (
+      <Sheet visible onClose={() => setChoosingPool(false)} label="Reorder TV">
+        <View style={styles.poolChoices}>
+          <SheetRow
+            icon="tv-outline"
+            label="Reorder TV shows"
+            value={`${rankedShows} ranked`}
+            disabledReason={rankedShows < 2 ? 'Rank two shows to reorder them' : undefined}
+            onPress={() => {
+              setChoosingPool(false);
+              setEditingPool('tv_shows');
+            }}
+          />
+          <SheetRow
+            icon="albums-outline"
+            label="Reorder TV seasons"
+            value={`${rankedSeasons} ranked`}
+            disabledReason={rankedSeasons < 2 ? 'Rank two seasons to reorder them' : undefined}
+            onPress={() => {
+              setChoosingPool(false);
+              setEditingPool('tv_seasons');
+            }}
+          />
+        </View>
+      </Sheet>
+    ) : null}
+    </>
   );
 }
 
@@ -953,6 +1028,8 @@ function CouldNotLoad({ onRetry }: { onRetry: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  /** The TV pool chooser's two rows (#318). */
+  poolChoices: { paddingTop: theme.space[2], paddingBottom: theme.space[4] },
   listsLink: {
     flexDirection: 'row',
     alignItems: 'center',

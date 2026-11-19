@@ -1,6 +1,6 @@
 import type { LoggedEntry, RankedEntry } from './use-collection';
 import { sortItems } from './filters';
-import { filterByMedium, mergeWatched, watchedItems } from './watched-rows';
+import { filterByMedium, mergeWatched, rankedPoolItems, watchedItems } from './watched-rows';
 
 /**
  * "Encountered two children with the same key."
@@ -437,5 +437,39 @@ describe('TV seasons and whole shows in one collection', () => {
   it('keeps Movies to films, and gives Movies no shows even if some are passed', () => {
     const items = watchedItems([ranked()], [], 'movies');
     expect(ids(items)).toEqual(['film-1']);
+  });
+});
+
+/**
+ * #318's TV pool editors draw one pool as its own ladder: explicit rankings only, each scored
+ * against its own pool's bands, with nothing projected from the other TV level.
+ */
+describe('rankedPoolItems: one pool, explicit, for a pool editor', () => {
+  const seasons = [
+    ranked({ mediaItemId: 's1', kind: 'season', category: 'tv_seasons', position: 1, seasonNumber: 1 }),
+    ranked({ mediaItemId: 's2', kind: 'season', category: 'tv_seasons', position: 2, seasonNumber: 2 }),
+    ranked({ mediaItemId: 's3', kind: 'season', category: 'tv_seasons', position: 3, bucket: 'fine' }),
+  ];
+
+  it('keeps every unit as itself, with its own position and its own band score', () => {
+    const items = rankedPoolItems(seasons, []);
+    expect(items.map((i) => [i.mediaItemId, i.kind, i.category, i.position, i.score])).toEqual([
+      ['s1', 'season', 'tv_seasons', 1, 10],
+      ['s2', 'season', 'tv_seasons', 2, 7],
+      ['s3', 'season', 'tv_seasons', 3, 6.9],
+    ]);
+    expect(items.every((i) => i.showScore == null)).toBe(true);
+  });
+
+  it('adds no unranked row, unlike the Watched wall', () => {
+    const items = rankedPoolItems(seasons, [logged({ mediaItemId: 'x', kind: 'season' })]);
+    expect(items.map((i) => i.mediaItemId)).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('is the ranked half of the Movies wall, unchanged', () => {
+    const films = [ranked({ mediaItemId: 'a', position: 1 }), ranked({ mediaItemId: 'b', position: 2 })];
+    const wall = watchedItems(films, [logged({ mediaItemId: 'u' })], 'movies');
+    expect(wall.slice(0, 2)).toEqual(rankedPoolItems(films, [logged({ mediaItemId: 'u' })]));
+    expect(wall[2]?.mediaItemId).toBe('u');
   });
 });
