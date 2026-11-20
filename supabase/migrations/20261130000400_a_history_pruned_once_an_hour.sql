@@ -148,13 +148,13 @@ as $fn$
 $fn$;
 
 comment on function _import_prune_cron_history(timestamptz) is
-  'Trims cron.job_run_details for the import drain and its maintenance job to seven days before p_at, and only when p_at is minute 17 of an hour (UTC); 0 otherwise. Each call is a full scan of a table with no usable index, so once an hour is enough (20261201000400). Never raises. Internal.';
+  'Trims cron.job_run_details for the import drain and its maintenance job to seven days before p_at, and only when p_at is minute 17 of an hour (UTC); 0 otherwise. Each call is a full scan of a table with no usable index, so once an hour is enough (20261130000400). Never raises. Internal.';
 comment on function _import_prune_cron_history() is
-  'The bingd-import-maintenance call: _import_prune_cron_history(now()). Prunes once an hour, returns 0 on the other 59 ticks (20261201000400). Never raises. Internal.';
+  'The bingd-import-maintenance call: _import_prune_cron_history(now()). Prunes once an hour, returns 0 on the other 59 ticks (20261130000400). Never raises. Internal.';
 comment on function _release_prune_cron_history(timestamptz) is
-  'Trims cron.job_run_details for the two release jobs to fourteen days before p_at, and only when p_at is minute 0 of an hour (UTC); 0 otherwise (20261201000400). Never raises. Internal.';
+  'Trims cron.job_run_details for the two release jobs to fourteen days before p_at, and only when p_at is minute 0 of an hour (UTC); 0 otherwise (20261130000400). Never raises. Internal.';
 comment on function _release_prune_cron_history() is
-  'The bingd-release-evaluate call: _release_prune_cron_history(now()). Prunes once an hour, on the :00 evaluation (20261201000400). Never raises. Internal.';
+  'The bingd-release-evaluate call: _release_prune_cron_history(now()). Prunes once an hour, on the :00 evaluation (20261130000400). Never raises. Internal.';
 
 revoke all on function _import_prune_cron_history(timestamptz)  from public, anon, authenticated;
 revoke all on function _import_prune_cron_history()             from public, anon, authenticated;

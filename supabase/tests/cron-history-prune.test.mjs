@@ -4,7 +4,7 @@ import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Cron history pruning, once an hour (20261201000400).
+ * Cron history pruning, once an hour (20261130000400).
  *
  * `cron.job_run_details` has no index a prune can use, so every prune is a full scan. The
  * import prune ran on every one-minute maintenance tick and the release prune on every
