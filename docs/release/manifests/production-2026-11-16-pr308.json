@@ -1,0 +1,51 @@
+{
+  "$comment": "Production after PR 308 (post-QA refinements and the founder QA closure) at d62d476c, merged to main as fb44d469 (tree identical to d62d476c). The release gate (run 43819494841) and main CI (run 43819466605) both passed on fb44d469. ota-production-check 01a1e331 held both runtimes to the store binaries, and ota-production 01a1e333 published both platforms. Read back with `release-manifest live production` (ok). Both u.expo.dev manifests name production Supabase only (0 staging references). Anon remote-smoke against production passed 137/137. App-only: production is still at 199 migrations with head 20261124000100. No physical-device verification was performed.",
+  "lane": "production",
+  "channel": "production",
+  "gitSha": "fb44d4690f62598dc90d42ca08c8c56aa47fc494",
+  "status": "published",
+  "backend": {
+    "ref": "abheeqyjzekiowkztfxv",
+    "name": "bingd-production",
+    "migrationHead": "20261124000100",
+    "migrationsApplied": 199
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1e337-d8de-7991-a692-165f7fdb4c21",
+      "groupId": "30bf8eef-acc3-4946-9126-db55ae9110c9",
+      "runtimeVersion": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+      "gitCommitHash": "fb44d4690f62598dc90d42ca08c8c56aa47fc494",
+      "createdAt": "2026-11-16T07:17:30.462Z",
+      "message": "PR 308: Watch History share in editor, 85% sheets, QA refinements (fb44d46)"
+    },
+    "ios": {
+      "updateId": "01a1e337-d8de-7775-9c0c-885016e982b2",
+      "groupId": "cacbef1e-0ab1-4ed1-bed6-037e17a142a0",
+      "runtimeVersion": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+      "gitCommitHash": "fb44d4690f62598dc90d42ca08c8c56aa47fc494",
+      "createdAt": "2026-11-16T07:17:30.462Z",
+      "message": "PR 308: Watch History share in editor, 85% sheets, QA refinements (fb44d46)"
+    }
+  },
+  "publishedBy": "eas workflow:run .eas/workflows/ota-production.yml --ref fb44d469 -F sha=fb44d469",
+  "verification": {
+    "ci": "passed (main push, run 43819466605)",
+    "releaseGate": "passed (push to release/2026-11-16-pr308, run 43819494841)",
+    "otaPreflight": "ota-production-check 01a1e331-2a5c-7043-b75c-a97644749830: runtimes equal config/live-runtimes.json",
+    "codexReviewedCommit": "d62d476cfcb7748ae2f94a98102205d8363e92a2 (no findings; the merge tree is identical)",
+    "stagingIntegration": "scripts/staging-checks/pr308-staging.mjs 35/35; social fixture verify 330/330",
+    "health": "live manifest ok; u.expo.dev production-only; anon remote-smoke production 137/137",
+    "deviceVerification": "none performed",
+    "qaTier": "founder dispositions 2026-11-16 (see docs/release/qa/2026-11-16-pr308-closure.md)"
+  },
+  "rollback": {
+    "samePair": {
+      "android": "46fd8420-8ac6-4183-86b3-18a19f8af07d",
+      "ios": "4c6412a8-9b40-4b80-8713-75eeba728f11",
+      "gitSha": "979e3c21"
+    },
+    "note": "Republish these groups (Polish A) to the production branch to roll back. The release is app-only, so there is nothing to undo in the database."
+  },
+  "knownProblems": []
+}

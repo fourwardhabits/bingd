@@ -1,0 +1,302 @@
+{
+ "$comment": "Historical Feed consolidation on production, authorized by the founder on 2026-11-17. Re-planned read-only immediately before applying: all 12 windows equal the approved dry run (115 groups, 702 posts). Applied sequentially 01:20:21Z-01:20:37Z, one transaction and one batch per window; every batch's applied groups and hidden posts equal its plan. Protected data hashed before and after (rankings, ranking_placements, watchlist, watch_events, user_media, comments, reactions, comment_reactions, notifications, feed_event_causes, feed_watchlist_titles, feed_ranking_titles, and the identity of all 2170 original feed posts): unchanged. The today_default rule and grouping eligibility were not changed.",
+ "ref": "abheeqyjzekiowkztfxv",
+ "range": [
+  "2026-08-14T00:00:00Z",
+  "2026-11-17T00:00:00Z"
+ ],
+ "window_minutes": 30,
+ "totals": {
+  "groups": 115,
+  "ranking_groups": 74,
+  "watchlist_groups": 41,
+  "original_posts_grouped": 702,
+  "posts_hidden": 661,
+  "new_group_posts": 74,
+  "visible_cards_before": 2170,
+  "visible_cards_after": 1583,
+  "net_cards_removed": 587
+ },
+ "batches": [
+  {
+   "batch": "history-20261117-w01",
+   "created_ranking_groups": 2,
+   "promoted_watchlist_groups": 0,
+   "prior_payloads_kept": 0,
+   "hidden_members": 8,
+   "logged_at": "2026-11-17 01:20:22.031708+00"
+  },
+  {
+   "batch": "history-20261117-w02",
+   "created_ranking_groups": 7,
+   "promoted_watchlist_groups": 3,
+   "prior_payloads_kept": 3,
+   "hidden_members": 36,
+   "logged_at": "2026-11-17 01:20:24.793787+00"
+  },
+  {
+   "batch": "history-20261117-w03",
+   "created_ranking_groups": 5,
+   "promoted_watchlist_groups": 7,
+   "prior_payloads_kept": 7,
+   "hidden_members": 40,
+   "logged_at": "2026-11-17 01:20:27.587165+00"
+  },
+  {
+   "batch": "history-20261117-w04",
+   "created_ranking_groups": 13,
+   "promoted_watchlist_groups": 10,
+   "prior_payloads_kept": 10,
+   "hidden_members": 84,
+   "logged_at": "2026-11-17 01:20:28.803915+00"
+  },
+  {
+   "batch": "history-20261117-w05",
+   "created_ranking_groups": 19,
+   "promoted_watchlist_groups": 1,
+   "prior_payloads_kept": 1,
+   "hidden_members": 244,
+   "logged_at": "2026-11-17 01:20:30.069619+00"
+  },
+  {
+   "batch": "history-20261117-w06",
+   "created_ranking_groups": 7,
+   "promoted_watchlist_groups": 3,
+   "prior_payloads_kept": 3,
+   "hidden_members": 78,
+   "logged_at": "2026-11-17 01:20:31.277095+00"
+  },
+  {
+   "batch": "history-20261117-w07",
+   "created_ranking_groups": 8,
+   "promoted_watchlist_groups": 5,
+   "prior_payloads_kept": 5,
+   "hidden_members": 83,
+   "logged_at": "2026-11-17 01:20:32.338769+00"
+  },
+  {
+   "batch": "history-20261117-w08",
+   "created_ranking_groups": 3,
+   "promoted_watchlist_groups": 1,
+   "prior_payloads_kept": 1,
+   "hidden_members": 20,
+   "logged_at": "2026-11-17 01:20:33.40456+00"
+  },
+  {
+   "batch": "history-20261117-w09",
+   "created_ranking_groups": 1,
+   "promoted_watchlist_groups": 0,
+   "prior_payloads_kept": 0,
+   "hidden_members": 5,
+   "logged_at": "2026-11-17 01:20:34.315541+00"
+  },
+  {
+   "batch": "history-20261117-w10",
+   "created_ranking_groups": 1,
+   "promoted_watchlist_groups": 1,
+   "prior_payloads_kept": 1,
+   "hidden_members": 6,
+   "logged_at": "2026-11-17 01:20:35.329978+00"
+  },
+  {
+   "batch": "history-20261117-w11",
+   "created_ranking_groups": 5,
+   "promoted_watchlist_groups": 6,
+   "prior_payloads_kept": 6,
+   "hidden_members": 35,
+   "logged_at": "2026-11-17 01:20:36.396309+00"
+  },
+  {
+   "batch": "history-20261117-w12",
+   "created_ranking_groups": 3,
+   "promoted_watchlist_groups": 4,
+   "prior_payloads_kept": 4,
+   "hidden_members": 22,
+   "logged_at": "2026-11-17 01:20:37.520802+00"
+  }
+ ],
+ "integrity": {
+  "protected_tables_unchanged": true,
+  "before": {
+   "drafts": 0,
+   "hidden": 0,
+   "visible": 2170,
+   "comments": {
+    "h": "de8088fa5a8423b96b64fa6a528fccce",
+    "n": 47
+   },
+   "log_rows": 0,
+   "rankings": {
+    "h": "81fdb5278aa08a187fbed00621b36d11",
+    "n": 1856
+   },
+   "reactions": {
+    "h": "c998cb03a8da18285ba8df91baa062f4",
+    "n": 47
+   },
+   "watchlist": {
+    "h": "ae4b0ed02e11101264b260ec1328b0c0",
+    "n": 799
+   },
+   "user_media": {
+    "h": "9383d1aaf5f492042ba940f3fd8f93e1",
+    "n": 2088
+   },
+   "watch_events": {
+    "h": "e0b071d3ec2d9941624dfaad2d9119b8",
+    "n": 2107
+   },
+   "notifications": {
+    "h": "65b828f23b1e027fceddf99d84a44c3f",
+    "n": 286
+   },
+   "groups_visible": {
+    "ranking_batch": 4,
+    "watchlist_added": 232
+   },
+   "comment_reactions": {
+    "h": "d18f72a7865a0624b871421b52f2bd92",
+    "n": 8
+   },
+   "feed_event_causes": {
+    "h": "4ef178addd80b6d214e37f513fa46dad",
+    "n": 37
+   },
+   "feed_events_total": 2170,
+   "ranking_placements": {
+    "h": "c972aa6daf963a2648c1dc5e116d4fc3",
+    "n": 1898
+   },
+   "feed_event_identity": {
+    "h": "cfe50fd8bdf7be39859f9c13f53773a8",
+    "n": 2170
+   },
+   "feed_ranking_titles": {
+    "h": "0f47dd647a276f22b57618004478385f",
+    "n": 13
+   },
+   "feed_watchlist_titles": {
+    "h": "aafee884ed115b796469db07a4c90603",
+    "n": 232
+   }
+  },
+  "after": {
+   "drafts": 0,
+   "hidden": 661,
+   "visible": 1583,
+   "comments": {
+    "h": "de8088fa5a8423b96b64fa6a528fccce",
+    "n": 47
+   },
+   "log_rows": 776,
+   "rankings": {
+    "h": "81fdb5278aa08a187fbed00621b36d11",
+    "n": 1856
+   },
+   "reactions": {
+    "h": "c998cb03a8da18285ba8df91baa062f4",
+    "n": 47
+   },
+   "watchlist": {
+    "h": "ae4b0ed02e11101264b260ec1328b0c0",
+    "n": 799
+   },
+   "user_media": {
+    "h": "9383d1aaf5f492042ba940f3fd8f93e1",
+    "n": 2088
+   },
+   "watch_events": {
+    "h": "e0b071d3ec2d9941624dfaad2d9119b8",
+    "n": 2107
+   },
+   "notifications": {
+    "h": "65b828f23b1e027fceddf99d84a44c3f",
+    "n": 286
+   },
+   "groups_visible": {
+    "ranking_batch": 78,
+    "watchlist_added": 133
+   },
+   "comment_reactions": {
+    "h": "d18f72a7865a0624b871421b52f2bd92",
+    "n": 8
+   },
+   "feed_event_causes": {
+    "h": "4ef178addd80b6d214e37f513fa46dad",
+    "n": 37
+   },
+   "feed_events_total": 2244,
+   "ranking_placements": {
+    "h": "c972aa6daf963a2648c1dc5e116d4fc3",
+    "n": 1898
+   },
+   "feed_event_identity": {
+    "h": "cfe50fd8bdf7be39859f9c13f53773a8",
+    "n": 2170
+   },
+   "feed_ranking_titles": {
+    "h": "0f47dd647a276f22b57618004478385f",
+    "n": 13
+   },
+   "feed_watchlist_titles": {
+    "h": "aafee884ed115b796469db07a4c90603",
+    "n": 232
+   }
+  }
+ },
+ "verification": {
+  "drafts": 0,
+  "groups": 115,
+  "batches": {
+   "history-20261117-w01": 2,
+   "history-20261117-w02": 10,
+   "history-20261117-w03": 12,
+   "history-20261117-w04": 23,
+   "history-20261117-w05": 20,
+   "history-20261117-w06": 10,
+   "history-20261117-w07": 13,
+   "history-20261117-w08": 4,
+   "history-20261117-w09": 1,
+   "history-20261117-w10": 2,
+   "history-20261117-w11": 11,
+   "history-20261117-w12": 7
+  },
+  "visible": 1583,
+  "hidden_total": 661,
+  "largest_group": 49,
+  "groups_by_type": {
+   "ranking_batch": 74,
+   "watchlist_added": 41
+  },
+  "groups_over_12": 10,
+  "hidden_reviewed": 0,
+  "groups_under_two": 0,
+  "hidden_not_first": 0,
+  "group_title_total": 702,
+  "groups_referenced": 0,
+  "hidden_bad_target": 0,
+  "hidden_not_logged": 0,
+  "hidden_referenced": 0,
+  "hidden_wrong_type": 0,
+  "groups_not_visible": 0,
+  "visible_null_causal": 0,
+  "group_count_mismatch": 0,
+  "visible_dup_sort_key": 0,
+  "created_groups_tagged": 74,
+  "sitting_joins_orphans": 0,
+  "notifications_since_run": 0,
+  "promoted_with_prior_payload": 41,
+  "created_group_time_matches_first_member": 74
+ },
+ "large_groups": "10 groups exceed the 12-poster preview (14-49 titles). Read as each group's author under RLS in a read-only transaction: the full-list reader returned every title, the rail preview 12, the header the full count.",
+ "rollback": {
+  "per_batch": "select revert_feed_consolidation('history-20261117-wNN');",
+  "all": "python3 scripts/ops/prod-consolidate.py revert --authorized (newest batch first)",
+  "evidence": "feed_consolidation_log: 74 created-group rows, 41 promoted-group rows each with prior_payload, 661 member rows; revert unhides members, deletes untouched created groups and restores promoted payloads (exercised on staging, pr2-staging.mjs)."
+ },
+ "health": {
+  "anon_smoke": "137/137",
+  "live_manifest": "ok, 0170506e",
+  "notifications_since_run": 0
+ }
+}

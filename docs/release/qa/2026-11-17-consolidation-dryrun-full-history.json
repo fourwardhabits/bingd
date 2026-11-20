@@ -1,0 +1,230 @@
+[
+ [
+  "2026-08-14",
+  "2026-08-22",
+  {
+   "ranking": 2,
+   "watchlist": 0
+  },
+  {
+   "ranking": 8,
+   "watchlist": 0
+  },
+  6,
+  1,
+  {
+   "largest_group": 5,
+   "duplicate_first_rankings": 2,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-08-22",
+  "2026-08-30",
+  {
+   "ranking": 7,
+   "watchlist": 3
+  },
+  {
+   "ranking": 28,
+   "watchlist": 11
+  },
+  29,
+  9,
+  {
+   "largest_group": 5,
+   "duplicate_first_rankings": 3,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-08-30",
+  "2026-09-07",
+  {
+   "ranking": 5,
+   "watchlist": 7
+  },
+  {
+   "ranking": 22,
+   "watchlist": 25
+  },
+  35,
+  7,
+  {
+   "largest_group": 8,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-09-07",
+  "2026-09-15",
+  {
+   "ranking": 13,
+   "watchlist": 10
+  },
+  {
+   "ranking": 56,
+   "watchlist": 38
+  },
+  71,
+  15,
+  {
+   "largest_group": 9,
+   "duplicate_first_rankings": 4,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-09-15",
+  "2026-09-23",
+  {
+   "ranking": 19,
+   "watchlist": 1
+  },
+  {
+   "ranking": 242,
+   "watchlist": 3
+  },
+  225,
+  7,
+  {
+   "largest_group": 49,
+   "duplicate_first_rankings": 1,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-09-23",
+  "2026-10-01",
+  {
+   "ranking": 7,
+   "watchlist": 3
+  },
+  {
+   "ranking": 70,
+   "watchlist": 11
+  },
+  71,
+  4,
+  {
+   "largest_group": 29,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-10-01",
+  "2026-10-09",
+  {
+   "ranking": 8,
+   "watchlist": 5
+  },
+  {
+   "ranking": 74,
+   "watchlist": 14
+  },
+  75,
+  2,
+  {
+   "largest_group": 15,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-10-09",
+  "2026-10-17",
+  {
+   "ranking": 3,
+   "watchlist": 1
+  },
+  {
+   "ranking": 17,
+   "watchlist": 4
+  },
+  17,
+  3,
+  {
+   "largest_group": 10,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-10-17",
+  "2026-10-25",
+  {
+   "ranking": 1,
+   "watchlist": 0
+  },
+  {
+   "ranking": 5,
+   "watchlist": 0
+  },
+  4,
+  1,
+  {
+   "largest_group": 5,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-10-25",
+  "2026-11-02",
+  {
+   "ranking": 1,
+   "watchlist": 1
+  },
+  {
+   "ranking": 5,
+   "watchlist": 2
+  },
+  5,
+  2,
+  {
+   "largest_group": 5,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-11-02",
+  "2026-11-10",
+  {
+   "ranking": 5,
+   "watchlist": 6
+  },
+  {
+   "ranking": 23,
+   "watchlist": 18
+  },
+  30,
+  8,
+  {
+   "largest_group": 8,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ],
+ [
+  "2026-11-10",
+  "2026-11-17",
+  {
+   "ranking": 3,
+   "watchlist": 4
+  },
+  {
+   "ranking": 12,
+   "watchlist": 14
+  },
+  19,
+  5,
+  {
+   "largest_group": 7,
+   "duplicate_first_rankings": 0,
+   "watchlist_posts_without_membership": 0
+  }
+ ]
+]

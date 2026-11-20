@@ -1,0 +1,13 @@
+history-20261117-w01 plan matches {'ranking': 2, 'watchlist': 0, 'members': 8}
+history-20261117-w02 plan matches {'ranking': 7, 'watchlist': 3, 'members': 39}
+history-20261117-w03 plan matches {'ranking': 5, 'watchlist': 7, 'members': 47}
+history-20261117-w04 plan matches {'ranking': 13, 'watchlist': 10, 'members': 94}
+history-20261117-w05 plan matches {'ranking': 19, 'watchlist': 1, 'members': 245}
+history-20261117-w06 plan matches {'ranking': 7, 'watchlist': 3, 'members': 81}
+history-20261117-w07 plan matches {'ranking': 8, 'watchlist': 5, 'members': 88}
+history-20261117-w08 plan matches {'ranking': 3, 'watchlist': 1, 'members': 21}
+history-20261117-w09 plan matches {'ranking': 1, 'watchlist': 0, 'members': 5}
+history-20261117-w10 plan matches {'ranking': 1, 'watchlist': 1, 'members': 7}
+history-20261117-w11 plan matches {'ranking': 5, 'watchlist': 6, 'members': 41}
+history-20261117-w12 plan matches {'ranking': 3, 'watchlist': 4, 'members': 26}
+TOTAL {"groups": 115, "members": 702, "hidden": 0} CHECK ONLY: nothing written
