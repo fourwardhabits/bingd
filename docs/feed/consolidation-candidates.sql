@@ -1,19 +1,23 @@
--- Read-only dry run for the one-time historical consolidation (Feed PR 2, 20261128000100).
+-- Read-only dry run for the one-time historical consolidation (Feed PR 2, 20261128000100;
+-- the date rule removed by 20261130000200).
 --
 -- A pure SELECT, safe on production with `read_only`: it creates nothing, writes nothing,
--- and needs none of 20261128000100's functions (their rules are inlined below, and the
--- test `presentation-grouping.test.mjs` holds `consolidate_feed_history` to the same plan).
+-- and needs none of the migrations' functions (their rules are inlined below, and the test
+-- `ranking-grouping-window.test.mjs` runs this file and holds it to the same plan as
+-- `consolidate_feed_history`). A first-time ranking is eligible whatever its watch date.
 --
 -- :since / :until bound the range (at most 8 days). Fixed 30-minute windows from each
 -- window's first eligible post, per actor and family. Returns one JSON report.
 with recursive params as (
-  select (:'since')::timestamptz as since, (:'until')::timestamptz as until, interval '30 minutes' as win, 7 as backfill_days
+  select (:'since')::timestamptz as since, (:'until')::timestamptz as until, interval '30 minutes' as win
 ),
 scope as (
   select e.*
     from feed_events e, params p
    where e.created_at >= p.since and e.created_at < p.until
      and e.type in ('watchlist_added', 'title_ranked')
+     -- Already shown through a group (20261128000100): not a candidate, as in the function.
+     and e.presented_in is null
 ),
 flags as (
   select s.id, s.actor_id, s.type, s.media_item_id, s.created_at,
@@ -31,24 +35,15 @@ flags as (
                and um.note_visibility = 'public' and nullif(btrim(coalesce(um.note, '')), '') is not null)) as reviewed,
          (s.type = 'title_ranked' and (coalesce((s.payload ->> 'update')::boolean, false)
                                        or coalesce((s.payload ->> 'again')::boolean, false))) as not_first,
-         (s.type = 'watchlist_added' and coalesce((s.payload ->> 'count')::integer, 1) > 1) as already_group,
-         case when s.type <> 'title_ranked' then null else coalesce((
-           select case
-                    when we.basis in ('none', 'diary') then true
-                    when we.basis in ('reader', 'unattributed') and we.watched_on is not null
-                      then we.watched_on <= (s.created_at at time zone 'utc')::date - (select backfill_days from params)
-                    else false end
-             from watch_events we
-            where we.user_id = s.actor_id and we.media_item_id = s.media_item_id
-              and we.recorded_at <= s.created_at + interval '1 minute'
-            order by we.recorded_at desc, we.id desc limit 1), false) end as historical
+         ((s.type = 'watchlist_added' and coalesce((s.payload ->> 'count')::integer, 1) > 1)
+          or exists (select 1 from feed_events c where c.presented_in = s.id)) as already_group
     from scope s
 ),
 eligible as (
   select f.*, row_number() over (partition by f.actor_id, f.fam order by f.created_at, f.id) as rn
     from flags f
    where f.media_item_id is not null and not f.referenced and not f.already_group
-     and (f.type = 'watchlist_added' or (not f.reviewed and not f.not_first and f.historical))
+     and (f.type = 'watchlist_added' or (not f.reviewed and not f.not_first))
 ),
 windows as (
   select e.actor_id, e.fam, e.rn, e.id, e.created_at, e.created_at as win_start
@@ -86,7 +81,6 @@ select jsonb_build_object(
      'referenced_any', (select count(*) from flags where referenced),
      'reviewed', (select count(*) from flags where reviewed),
      'rewatch_or_update', (select count(*) from flags where not_first),
-     'after_watch_or_ambiguous', (select count(*) from flags where type = 'title_ranked' and historical is false),
      'already_grouped', (select count(*) from flags where already_group)),
   'integrity', jsonb_build_object(
      'watchlist_posts_without_membership', (select count(*) from scope s where s.type = 'watchlist_added'
