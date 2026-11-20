@@ -582,6 +582,9 @@ export type WallMetrics = {
   poolViaSocial: number | null;
   poolViaTrending: number | null;
   poolViaCatalogue: number | null;
+  /** Held-out liked units not in English: share in the pool, and share in the first 50. */
+  poolRecallNonEnglish: number | null;
+  recall50NonEnglish: number | null;
 };
 
 const top = <T>(xs: readonly T[], n: number) => {
@@ -657,6 +660,24 @@ export function modeTwo(split: Split, w: World, engine: BenchEngine): WallMetric
       const pool = new Set(scored.map((s) => s.mediaItemId));
       const found = [...positives].filter((id) => pool.has(id));
       add('poolRecall', found.length / positives.size);
+      // Candidate generation vs ranking, by language: of the held-out liked units in a
+      // language other than English, the share that reached the pool, and the share that
+      // reached the first 50. Pool minus R@50 is what the ranking lost.
+      const nonEnglish = [...positives].filter((id) => {
+        const lang = w.media.get(id)?.lang;
+        return !!lang && lang !== 'en';
+      });
+      if (nonEnglish.length) {
+        add(
+          'poolRecallNonEnglish',
+          nonEnglish.filter((id) => pool.has(id)).length / nonEnglish.length,
+        );
+        const top50 = new Set(extended.map((s) => s.mediaItemId));
+        add(
+          'recall50NonEnglish',
+          nonEnglish.filter((id) => top50.has(id)).length / nonEnglish.length,
+        );
+      }
       if (via) {
         for (const source of ['anchors', 'social', 'trending', 'catalogue'] as const) {
           const key =
@@ -743,6 +764,8 @@ export const WALL_KEYS: (keyof WallMetrics)[] = [
   'poolViaSocial',
   'poolViaTrending',
   'poolViaCatalogue',
+  'poolRecallNonEnglish',
+  'recall50NonEnglish',
 ];
 export const MODE_ONE_KEYS = [
   'accuracy',
@@ -1135,6 +1158,13 @@ const SOURCES_COLS: [string, string][] = [
   ['m2.poolViaTrending', 'via trending'],
   ['m2.poolViaCatalogue', 'via catalogue fill'],
 ];
+/** Candidate generation (pool) vs ranking (pool reached, first 50 missed), overall and non-English. */
+const SPLIT_COLS: [string, string][] = [
+  ['m2.poolRecall', 'Pool recall'],
+  ['m2.recall50', 'R@50'],
+  ['m2.poolRecallNonEnglish', 'Non-English pool recall'],
+  ['m2.recall50NonEnglish', 'Non-English R@50'],
+];
 
 export function renderBenchmark(
   results: readonly MediumResult[],
@@ -1203,6 +1233,19 @@ export function renderBenchmark(
     for (const [engine, row] of Object.entries(r.table.all?.all ?? {})) {
       if (engine === 'popularity') continue;
       line(`| ${engine} | ${SOURCES_COLS.map(([k]) => f(row[k])).join(' | ')} |`);
+    }
+    line();
+    line(
+      '### Candidate generation vs ranking: a liked title missing from the pool is a retrieval failure; in the pool but not in the first 50 is a ranking failure',
+    );
+    line();
+    line(`| Segment | Engine | ${SPLIT_COLS.map(([, l]) => l).join(' | ')} |`);
+    line(`|---|---|${SPLIT_COLS.map(() => '---').join('|')}|`);
+    for (const segment of ['all', 'non_english_taste']) {
+      for (const [engine, row] of Object.entries(r.table.all?.[segment] ?? {})) {
+        if (engine === 'popularity') continue;
+        line(`| ${segment} | ${engine} | ${SPLIT_COLS.map(([k]) => f(row[k])).join(' | ')} |`);
+      }
     }
     line();
     if (r.suite === 'A') {

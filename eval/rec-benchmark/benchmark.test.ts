@@ -493,6 +493,19 @@ describe('end to end on a small synthetic export', () => {
     const report = renderBenchmark(results, hybridReport(synthetic), 'synthetic (small)');
     expect(report).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
     expect(report).toMatch(/NOT (MEASURABLE|REPLAYED)/);
+    expect(report).toMatch(/Candidate generation vs ranking/);
+    // Retrieval bounds ranking: nothing reaches the first 50 without entering the pool.
+    for (const r of results) {
+      for (const engine of BENCH_ENGINES) {
+        const row = r.table.all!.all![engine]!;
+        const pool = row['m2.poolRecallNonEnglish'];
+        const top = row['m2.recall50NonEnglish'];
+        if (pool && top) {
+          expect(top.mean).toBeLessThanOrEqual(pool.mean + 1e-9);
+          expect(pool.mean).toBeLessThanOrEqual(1);
+        }
+      }
+    }
   });
 
   it('Suite B runs too', () => {

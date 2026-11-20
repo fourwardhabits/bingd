@@ -123,6 +123,20 @@ Exporting real ranking histories needs the founder's explicit approval.
 4. **Share only the printed aggregate tables.** Never print the export into a chat.
 5. **Delete the export, and revoke the credential.**
 
+Steps 2–5 as one command, run by hand by whoever holds the approved credential (`BINGD_RO_URL`
+is the temporary read-only connection string; `~/private` is any folder outside the repository):
+
+```bash
+PGOPTIONS='-c default_transaction_read_only=on' psql "$BINGD_RO_URL" -X -q -A -t -v ON_ERROR_STOP=1 \
+  -f eval/rec-v2-replay/export.sql > ~/private/rec-export.json \
+&& REC_BENCHMARK_EXPORT=~/private/rec-export.json REC_BENCHMARK_OUT=~/private/ node eval/rec-benchmark/run.mjs; \
+rm -f ~/private/rec-export.json
+```
+
+The report's **Candidate generation vs ranking** table splits each failure. A held-out liked
+title that never reached the pool is a retrieval failure. One that reached the pool but not the
+first 50 is a ranking failure. The table covers all titles and non-English titles separately.
+
 A person's ranked-title set can still identify them, so:
 - the export is never committed, attached or pasted;
 - reports print no key, title or id, and the tests check that.
