@@ -232,9 +232,9 @@ The `perf/feed-ordered-index` PR adds:
 
   Two mutants turn the test red: the index with `causal_step` ascending (3 of 7 fail), and no
   migration (6 of 7 fail).
-- **Staging:** applied only after CI and review, with a one-transaction script whose dry run
-  refuses unless the pending set is exactly `20261130000600`. Before and after timings are in
-  §5.
+- **Staging:** applied after CI was green and the Codex review was clean, with a
+  one-transaction script whose dry run refuses unless the pending set is exactly
+  `20261130000600`. Before and after timings are in §5.
 
 Not done: production (the coordinator applies and records it), option B (its own PR), and the
 client.
@@ -243,4 +243,43 @@ client.
 
 ## 5. Staging after the migration
 
-Filled in after the staging apply, below.
+Applied to staging on 2026-11-20, after CI was green and the Codex review on `fca6bf7c` was
+clean.
+
+- **Script:** a one-transaction script adapted from the #334 production script, with `REF` set
+  to staging.
+- **Dry-run refusals:** it refuses unless the pending set is exactly `['20261130000600']`. The
+  only "applied but not in this checkout" versions it tolerates are staging's
+  `20261130000500` (job alerting) and `20261201000100` (#322).
+- **Result:** the migration is recorded in `supabase_migrations.schema_migrations`, and
+  `pg_get_indexdef` reads
+  `CREATE INDEX feed_events_feed_order ON public.feed_events USING btree (causal_at DESC, causal_step DESC, id)`.
+- **Ordering:** staging now holds `20261130000600` after `20261201000100`, which is out of
+  order. That is the same situation `20261130000500` is in.
+
+Then the same seeded, rolled-back benchmark was re-run with nothing added, so "today's schema"
+now includes the real index. Medians, as `authenticated`, PostgREST's statement:
+
+| | before, 1× | after, 1× | before, 10× | after, 10× |
+|---|---|---|---|---|
+| Feed page 1 | 628 ms | **16.7 ms** | 6,263 ms | **19.9 ms** |
+| Feed keyset page 6 | 570 ms | 16.4 ms | 6,254 ms | 19.6 ms |
+| Feed deep keyset page | 317 ms | 17.9 ms | 5,359 ms | 23.7 ms |
+| one actor (profile) | 25.7 ms | 23.8 ms | 52 ms | 46 ms |
+| 3 dormant follows | 17.2 ms | 16.3 ms | 30 ms | 28 ms |
+| 3 sparse follows | 46 ms | 43 ms | 85 ms | 83 ms |
+
+The 10× page-1 plan after the migration:
+
+- `Index Scan using feed_events_feed_order`, 20 rows returned, 17 removed by the filter;
+- execution 17.4 ms, most of it in about 37 `can_i_view` calls and 13 policed profile
+  embeds.
+
+That remainder is what option B removes. The profile and quiet-follow rows are unchanged
+because their plan is unchanged; they are policy-bound.
+
+Expected production effect: the median reader (241 candidates) today pays for about 241 policy
+calls per page. After this index it pays for about 40, so the Feed statement should drop from
+a mean of about 150 to 365 ms to about 15 ms. That is an estimate from the staging cost per
+call. Production `pg_stat_statements` will confirm it after the coordinator applies the
+migration.
