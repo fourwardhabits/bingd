@@ -80,14 +80,14 @@ const visibleTo = (viewer, actor = user) =>
 const notificationCount = async () =>
   Number((await t.sql(`select count(*)::int as n from notifications`)).rows[0].n);
 
-describe('title-page backfill rankings', () => {
-  it('a first backfill ranking stays a single card, marked so the next can pair with it', async () => {
+describe('title-page first rankings', () => {
+  it('a first ranking stays a single card, marked so the next can pair with it', async () => {
     const heat = await ranked('movie', 'Heat');
     const r = await groupNote(heat);
     assert.equal(r.status, 'solo');
     const [post] = await allPosts();
     assert.equal(post.type, 'title_ranked');
-    assert.equal(post.payload.backfill, true);
+    assert.equal(post.payload.groupable, true, '20261130000200 marks it groupable');
     assert.equal(post.presented_in, null);
   });
 
@@ -145,11 +145,13 @@ describe('title-page backfill rankings', () => {
     assert.equal((await groupNote(d)).status, 'solo', 'a closed window takes nothing');
   });
 
-  it('keeps an after-watch ranking, a reviewed one and an undecidable one standalone', async () => {
+  it('the watch date no longer decides (20261130000200); a reviewed ranking stays standalone', async () => {
+    // "Today", a recent date and no watch at all were refused by 20261128000100's
+    // historical test. Under the founder's half-hour rule they group like any other.
     const today = await ranked('movie', 'Today', { basis: 'today_default', daysAgo: 0 });
-    assert.equal((await groupNote(today)).reason, 'after_watch');
+    assert.equal((await groupNote(today)).status, 'solo');
     const recent = await ranked('movie', 'Recent', { basis: 'reader', daysAgo: 2 });
-    assert.equal((await groupNote(recent)).reason, 'after_watch');
+    assert.equal((await groupNote(recent)).status, 'grouped');
 
     const reviewed = await ranked('movie', 'Reviewed');
     await t.sql(
@@ -169,12 +171,15 @@ describe('title-page backfill rankings', () => {
       user,
       noWatch,
     ]);
+    assert.equal((await groupNote(noWatch)).status, 'joined', 'no watch event is no obstacle');
+    const posts = await allPosts();
+    const g = posts.find((p) => p.type === 'ranking_batch');
+    assert.equal(g.payload.count, 3);
     assert.equal(
-      (await groupNote(noWatch)).reason,
-      'after_watch',
-      'no evidence is not historical',
+      posts.find((p) => p.media_item_id === reviewed && p.type === 'title_ranked').presented_in,
+      null,
+      'the review keeps its own card',
     );
-    assert.ok((await allPosts()).every((p) => p.presented_in === null));
   });
 
   it('never hides a ranking somebody has already reacted to', async () => {
