@@ -83,7 +83,8 @@
 > 2026-11-19 and rebuilt on 2026-11-20 from the code on `main` (`ecd03517`), the migrations,
 > and read-only production reads. The freeze of 2026-09-26 was lifted by founder-authorised
 > releases from 2026-11-07 on. Eight production OTAs between 2026-11-12 and 2026-11-20 changed
-> behaviour, and three database-only releases followed: #328, #329 and #331.
+> behaviour. Three releases with no OTA followed: #328 and #331 (database) and #329 (the Welcome
+> email template).
 > [`../release/production-state.md`](../release/production-state.md) is the authority on what is
 > live, with flags, record links and rollback targets.
 >
