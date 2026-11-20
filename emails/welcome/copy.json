@@ -1,11 +1,10 @@
 {
   "$comment": [
-    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND APPROVED ON 2026-09-18, REVISED THE SAME DAY",
-    "AFTER THE FOUNDER READ THE REAL STAGING SEND IN GMAIL.",
+    "THE WELCOME EMAIL'S COPY. THE SHORT FOUNDER NOTE WITH THE CAFE PHOTO, 2026-11-19.",
     "",
-    "This letter replaces the 2026-09-13 one in full. It is the founder's own prose: do not",
-    "rewrite, shorten, reorganise or 'improve' it. The only edits made to what he wrote are",
-    "listed in `$edits`.",
+    "This replaces the long 2026-09-18 letter about Beli. It is assembled from the founder's own",
+    "approved words and nothing else, except the closing line, which the founder asked for. The",
+    "source of every line is in `$sources`. Do not rewrite, reorganise or 'improve' it.",
     "",
     "After any edit run `node emails/welcome/build.mjs` and `node --test emails/welcome/email.test.mjs`,",
     "and update LOCKED_LETTER in email.test.mjs in the same commit.",
@@ -14,6 +13,13 @@
     "emphasis the copy asks for (this letter asks for none), and `{ \"link\": ..., \"target\": ... }`",
     "is an inline link to a destination in targets.json. `{{firstName}}` and the invite token",
     "are filled per recipient at send time."
+  ],
+
+  "$sources": [
+    "Greeting, 'Thanks for giving bingd a shot!', the reply paragraph, the invite sentence and 'Happy binging, / Suraj': the founder's 2026-09-18 letter, verbatim.",
+    "The Beli paragraph, the 'I built bingd' paragraph and 'Hope you enjoy it as much as I do.': the founder note on bingd.app ('A note from me', web/build.mjs founder-section), verbatim; the same words the founder approved for Instagram Story 04 (v5, 2026-11-10).",
+    "'The movie nerd who made bingd.': the founder's requested closing line for this note, 2026-11-19.",
+    "The photo: founder-cafe-tea-square.jpg from the founder's Drive folder, resized to 1120px and stripped of all metadata. Alt text drafted for this email."
   ],
 
   "$edits": [
@@ -25,7 +31,7 @@
     "alternatives": []
   },
 
-  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter. Kept from the 2026-09-13 copy because it still says exactly what the letter says: hit reply, it comes straight to me.",
+  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter. Kept because it still says exactly what the letter says: hit reply, it comes straight to me.",
   "preheader": {
     "chosen": "Hit reply and it comes straight to me.",
     "alternatives": []
@@ -33,13 +39,27 @@
 
   "masthead": "bingd.",
 
+  "$photoComment": [
+    "The one image. Served from bingd.app: web/build.mjs copies web/src/ into the site as-is,",
+    "so `file` is published at `src` by the Cloudflare Pages deploy of main. email.test.mjs",
+    "checks the file exists, is the stated size, is under 200KB and carries no EXIF or GPS.",
+    "`width` and `height` are the display size (the file is 2x for high-density screens)."
+  ],
+  "photo": {
+    "src": "https://bingd.app/email/founder-cafe-tea.jpg",
+    "file": "web/src/email/founder-cafe-tea.jpg",
+    "width": 560,
+    "height": 560,
+    "alt": "Suraj, smiling, pouring a cup of tea at a café table"
+  },
+
   "letter": {
     "status": "APPROVED",
     "greeting": "Hey {{firstName}},",
     "paragraphs": [
       "Thanks for giving bingd a shot!",
-      "The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.",
-      "I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends' latest TV shows, and get stronger recommendations with a better rating system.",
+      "Beli changed the way I experienced restaurants. I went from eating out occasionally to ranking every place, comparing lists with friends, and hunting for the next spot.",
+      "I built bingd because I wanted that same post-watch ritual for movies and TV: rank what you watch, compare taste with friends, and keep the fun going after the credits roll.",
       "If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.",
       [
         "bingd is more fun with friends, so here's your ",
@@ -47,9 +67,11 @@
         ". And if you want to see what I'm watching, ",
         { "link": "follow me on bingd", "target": "founderProfile" },
         "."
-      ]
+      ],
+      "Hope you enjoy it as much as I do."
     ],
-    "signoff": ["Happy binging,", "Suraj"]
+    "signoff": ["Happy binging,", "Suraj"],
+    "closing": "The movie nerd who made bingd."
   },
 
   "$footerComment": [
