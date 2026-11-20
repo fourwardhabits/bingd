@@ -17,6 +17,7 @@ import {
   isCollectionViewMode,
   type CollectionViewState,
 } from '@/features/collection/CollectionView';
+import { useRerank } from '@/features/collection/use-rerank';
 import {
   filterByMedium,
   watchedItems,
@@ -713,6 +714,16 @@ function Watched({
   const shows = useRankedCollection(userId, 'tv_shows', { enabled: medium === 'tv_seasons' });
   const logged = useLoggedCollection(userId);
 
+  /**
+   * **Drag-to-rerank** (#318, `docs/architecture/collection-rerank.md`). Movies drag in
+   * place: the wall is the `movies` ranking. The TV wall is dragged in place too (#319,
+   * `tv-wall.ts`): an explicit show moves among the explicit shows, and a show scored by its
+   * seasons' average becomes an explicit show where it is dropped. There is no separate
+   * Reorder view (founder QA, 2026-11-20): the wall is the one place TV is reordered. The
+   * show and season rankings themselves are unchanged, and nothing is derived between them.
+   */
+  const rerank = useRerank(userId);
+
   const items = useMemo(
     () =>
       watchedItems(
@@ -755,6 +766,10 @@ function Watched({
       lead={lead}
       placeholder={placeholder}
       onPressItem={(id) => router.push(`/title/${id}`)}
+      rerank={{
+        controller: rerank,
+        pool: medium === 'movies' ? 'movies' : null,
+      }}
       empty={
         logged.data?.loggedCount === 0 ? (
           <EmptyState

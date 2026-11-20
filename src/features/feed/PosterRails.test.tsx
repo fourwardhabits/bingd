@@ -363,6 +363,60 @@ describe('a grouped ranking sitting', () => {
     expect(view.queryByTestId('feed-card-score')).toBeNull();
   });
 
+  it('a title-page group of a movie, a show and a season scores every poster on its own ladder (20261130000200)', async () => {
+    // The founder's half-hour rule: first rankings made from title pages, "Today" or not,
+    // across ladders, are one post. Each poster carries the author's current score in the
+    // presentation its kind always has: the Maroon chip for a film and a show, the season
+    // pill for a season.
+    mockRows = [
+      event('t1', 'ranking_batch', OPPENHEIMER, {
+        payload: { count: 3, origin: 'title' },
+        mediaId: 'film-t1',
+      }),
+    ];
+    mockRpc.feed_group_previews = answer(
+      preview('t1', [
+        { media_item_id: 'film-t1', title: 'Oppenheimer', score: 8.7, ranked: true },
+        {
+          media_item_id: 'the-bear',
+          kind: 'series',
+          title: 'The Bear',
+          score: 9.4,
+          ranked: true,
+        },
+        {
+          media_item_id: 'andor-s2',
+          kind: 'season',
+          title: 'Season 2',
+          season_number: 2,
+          parent_title: 'Andor',
+          score: 7.1,
+          ranked: true,
+        },
+      ]),
+    );
+    const view = await renderWithProviders(<FeedScreen />);
+    const rail = await loadedRail(view, /^Oppenheimer/);
+
+    expect(textOf(view.toJSON())).toMatch(/Ada ranked 3 titles/);
+    const hidden = { includeHiddenElements: true };
+    expect(within(rail).getAllByTestId('poster-score-pill', hidden)).toHaveLength(2);
+    expect(within(rail).getByText('8.7', hidden)).toBeTruthy();
+    expect(within(rail).getByText('9.4', hidden)).toBeTruthy();
+    expect(within(rail).getByTestId('poster-season-pill', hidden)).toBeTruthy();
+    expect(within(rail).getByText('S2 - 7.1', hidden)).toBeTruthy();
+    expect(
+      within(rail).getByLabelText(/^Oppenheimer, 2021, scored 8\.7 out of 10$/),
+    ).toBeTruthy();
+    expect(within(rail).getByLabelText(/^The Bear, 2021, scored 9\.4 out of 10$/)).toBeTruthy();
+    expect(
+      within(rail).getByLabelText(/^Andor, season 2, 2021, scored 7\.1 out of 10$/),
+    ).toBeTruthy();
+    // One post: no single card for any member alongside it, and no score on the card itself.
+    expect(view.queryByTestId('feed-card-artwork')).toBeNull();
+    expect(view.queryByTestId('feed-card-score')).toBeNull();
+  });
+
   it('opens a member’s title, and the group’s name opens the sitting', async () => {
     mockRows = [
       event('r1', 'ranking_batch', DUNE, { payload: { count: 3 }, mediaId: 'film-r1' }),

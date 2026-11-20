@@ -38,10 +38,13 @@
  *   - **Inline styles carry everything that matters.** The `<style>` block holds only
  *     the media query and the dark-mode overrides, both of which are enhancements. Any
  *     client that drops the block still gets a correct light email.
- *   - **No images at all.** Not the wordmark, not an icon, not a tracking pixel. Roughly
- *     half of recipients have images off by default, so an image-based header is a
- *     header half of them never see. The wordmark is text in a serif stack, which is
- *     what it is in the product anyway.
+ *   - **One image, and it is the founder.** The cafe photo (`copy.photo`, 2026-11-19), so
+ *     the note reads as coming from a person. Nothing else is an image: not the wordmark,
+ *     not an icon, not a tracking pixel. Some recipients have images off, so the letter
+ *     must lose nothing but the picture without it: the photo carries alt text styled to
+ *     read as a caption, a stated width and height so the layout does not jump, and a
+ *     filled background so a blocked image is a quiet box rather than a hole. The
+ *     wordmark is text in a serif stack, which is what it is in the product anyway.
  *   - **Every background is stated.** A transparent cell inherits whatever a dark-mode
  *     client paints behind it, which is how dark text ends up on a dark ground.
  *   - **Tap targets are at least 44px.**
@@ -89,6 +92,33 @@ const target = (name) => {
   }
   return entry;
 };
+
+/**
+ * The photo, refusing anything that is not a real, absolute, bingd-hosted image.
+ *
+ * The email needs an absolute URL: a mail client has no base to resolve a relative one
+ * against. It must be on bingd.app because that is the only host this project publishes,
+ * and `web/build.mjs` copies `web/src/` into the site as-is, which is how `photo.file`
+ * comes to be served at `photo.src`. email.test.mjs checks the file itself.
+ */
+const photo = (() => {
+  const p = copy.photo;
+  if (!p) {
+    problems.push('copy.json has no photo.');
+    return null;
+  }
+  if (!/^https:\/\/bingd\.app\/[a-z0-9/_-]+\.jpg$/.test(p.src ?? '')) {
+    problems.push(`photo.src "${p.src}" is not an absolute https://bingd.app/... .jpg URL.`);
+  }
+  if (!p.file || !p.file.startsWith('web/src/') || p.src?.slice('https://bingd.app/'.length) !== p.file.slice('web/src/'.length)) {
+    problems.push(`photo.file "${p.file}" is not the web/src/ file that web/build.mjs publishes at ${p.src}.`);
+  }
+  if (!Number.isInteger(p.width) || !Number.isInteger(p.height) || p.width < 1 || p.height < 1) {
+    problems.push('photo.width and photo.height must be positive whole numbers of pixels.');
+  }
+  if (!p.alt || p.alt.trim().length < 10) problems.push('photo.alt must describe the photo.');
+  return p;
+})();
 
 // ---------------------------------------------------------------------------
 // Brand
@@ -359,6 +389,15 @@ const html = `<!DOCTYPE html>
               </td>
             </tr>
 
+            <!-- The founder. Fluid to the text column, with a stated size for Outlook and
+                 for a client that has not loaded it yet. With images off, the alt text
+                 shows in the body face on a parchment box, so it reads as a caption. -->
+            <tr>
+              <td class="gutter" style="padding:24px 36px 0;">
+                <img src="${esc(photo?.src ?? '')}" width="${photo?.width}" height="${photo?.height}" alt="${esc(photo?.alt ?? '')}" style="display:block;width:100%;max-width:${photo?.width}px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:${C.parchment};font-family:${FONT};font-size:14px;line-height:20px;color:${C.secondary};" />
+              </td>
+            </tr>
+
             <!-- The letter. The founder's own words, in his order, and nothing under it but
                  the footer. -->
             <tr>
@@ -369,6 +408,7 @@ const html = `<!DOCTYPE html>
                       <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
                       <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
+                      <p style="margin:6px 0 0;font-family:${SERIF};font-style:italic;font-size:15px;line-height:22px;color:${C.maroon};" class="dk-accent">${esc(copy.letter.closing ?? '')}</p>
                     </td>
                   </tr>
                 </table>
@@ -451,6 +491,7 @@ const text = `${GREETING_TOKEN}
 ${copy.letter.paragraphs.map((p) => wrap(paragraphText(p))).join('\n\n')}
 
 ${copy.letter.signoff.join('\n')}
+${copy.letter.closing ?? ''}
 
 ${'-'.repeat(72)}
 
@@ -672,9 +713,9 @@ const preview = `<!doctype html>
       <div class="draft">
         <p style="margin:0 0 6px"><b>FOUNDER COPY &middot; NOT SENT.</b></p>
         <p style="margin:0">
-          The letter is the founder&rsquo;s own, locked on 2026-09-13. Nothing is sent to anybody
-          until the postal address is set, a test send has been approved, and the automation
-          is switched on. See the list at the bottom.
+          The short note of 2026-11-19, in the founder&rsquo;s own words, with his cafe photo.
+          It reaches new accounts only once this version is merged to main; the automation
+          that sends it is already on. See the list at the bottom.
         </p>
       </div>
 
@@ -1046,7 +1087,7 @@ const artifact = `<title>Welcome Email Review</title>
   <div class="notice">
     <p><b>FOUNDER COPY &middot; NOT SENT</b></p>
     <p>
-      The letter is the founder&rsquo;s own, locked on 2026-09-13.
+      The short note of 2026-11-19, in the founder&rsquo;s own words, with his cafe photo.
     </p>
     <p>
       Nobody is mailed until the postal address is set, a real test send has been approved,

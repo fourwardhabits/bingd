@@ -182,15 +182,18 @@ export async function noteBatchRanking(sitting: string, mediaItemId: string): Pr
 }
 
 /**
- * **A title-page backfill ranking joins its burst** (Feed PR 2, `20261128000100`).
+ * **A first ranking joins its half hour** (Feed PR 2, `20261128000100`; the founder's
+ * half-hour rule, `20261130000200`).
  *
  * Called once after a first-time ranking from any surface but Unranked, whose sitting has
- * its own draft. The server decides everything — whether the watch evidence is historical,
- * whether the post is untouched and unreviewed, whether a group is open — and an after-watch
- * ranking simply keeps its own card. Fire and forget: the ranking is already saved, and a
- * grouping that did not happen is not an error anybody should see.
+ * its own draft. The server decides everything — whether the post is a first ranking,
+ * untouched and unreviewed, and whether a group is open or an earlier first ranking is
+ * still on its own inside the same 30 minutes. The watch date plays no part. A ranking with
+ * nothing to join simply keeps its own card until a second one arrives. Fire and forget:
+ * the ranking is already saved, and a grouping that did not happen is not an error anybody
+ * should see.
  */
-export async function groupBackfillRanking(mediaItemId: string): Promise<void> {
+export async function groupFirstRanking(mediaItemId: string): Promise<void> {
   try {
     await supabase.rpc('rank_group_note', {
       p_operation_id: Crypto.randomUUID(),

@@ -63,6 +63,9 @@ const PEOPLE_KEYS = [
 const KEYS = [
   ['relationships', 'viewer'],
   ['recommend-recipients', 'viewer'],
+  // Who I watched with (founder QA, 2026-11-19, P1): a follow-back is a new mutual, and
+  // the picker held its five-minute answer until the app restarted.
+  ['taggable', 'viewer'],
   ['recommendation-requests', 'viewer'],
   ['sent-to-you', 'viewer'],
   ['feed', 'viewer'],
@@ -155,5 +158,29 @@ describe('a follow', () => {
     for (const key of PEOPLE_KEYS) {
       expect(invalidated(key)).toBe(false);
     }
+  });
+});
+
+/**
+ * The companion picker's list after the other two writers that move a mutual: an unfollow
+ * and a block each take somebody out of "Who I watched with" (founder QA, 2026-11-19).
+ */
+describe('an unfollow or a block', () => {
+  it.each([
+    ['unfollow', (w: ReturnType<typeof useSocialWrites>) => w.unfollow({ userId: 'anna-id' })],
+    ['block', (w: ReturnType<typeof useSocialWrites>) => w.block({ userId: 'anna-id' })],
+  ])('%s makes the taggable list stale', async (_name, act_) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), { wrapper });
+    client.setQueryData(['taggable', 'viewer'], 'seeded');
+    await act(async () => {
+      await act_(result.current);
+    });
+    await waitFor(() =>
+      expect(client.getQueryState(['taggable', 'viewer'])?.isInvalidated).toBe(true),
+    );
   });
 });

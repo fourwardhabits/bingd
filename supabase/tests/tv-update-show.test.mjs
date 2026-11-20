@@ -5,10 +5,12 @@ import { createTestDb, one } from './harness.mjs';
 import { tvRanking } from './tv-ranking-support.mjs';
 
 /**
- * Update Show and the Feed contract for TV (20261114000300; founder brief §5-§6).
+ * Update Show and the Feed contract for TV (20261114000300; founder brief §5-§6; silent
+ * updates since 20261129000300, founder QA 2026-11-20).
  *
  *   Rank a show / a season on its own          one ranking activity
- *   Update a show / a season on its own        one ranking-update activity (`update`)
+ *   Update a show / a season on its own        nothing new: the latest watch's post takes
+ *                                              the new score, as a film's does
  *   Rank a season, then Update Show            the season's activity only
  *   Abandon the linked Update Show             the season's activity remains, nothing else
  *   Movies                                     a correction stays silent
@@ -46,30 +48,29 @@ describe('the Feed contract for TV', () => {
     assert.equal(season.payload.category, 'tv_seasons');
   });
 
-  it('posts a standalone show update that moved it, marked as an update', async () => {
+  it('posts nothing for a standalone show update that moved it; the first post follows', async () => {
     const { main } = await fixture();
     await rank(main, 'loved', 80);
+    const [first] = await posts(main);
     taste.set(main, 10);
-    await correct(main, 'loved');
+    const moved = await correct(main, 'loved');
+    assert.equal(moved.movement.outcome, 'moved');
     const all = await posts(main);
-    assert.equal(all.length, 2);
-    assert.equal(all[1].payload.update, true);
-    assert.equal(all[1].payload.category, 'tv_shows');
-    assert.equal(Number(all[1].payload.score), Number(await scoreOf(main)));
-    // The first ranking's post keeps the score it was written with: the update carries
-    // the new one, so the two posts say what changed rather than repeating one number.
-    assert.notEqual(Number(all[0].payload.score), Number(all[1].payload.score));
+    assert.equal(all.length, 1, 'no update post');
+    assert.equal(all[0].id, first.id);
+    assert.equal(all[0].payload.update, undefined);
+    assert.equal(Number(all[0].payload.score), Number(await scoreOf(main)));
   });
 
-  it('posts a standalone season update the same way', async () => {
+  it('posts nothing for a standalone season update either, even across a category', async () => {
     const { seasons } = await fixture();
     await rank(seasons[0], 'loved', 80);
     await rank(seasons[1], 'loved', 70);
     await correct(seasons[1], 'fine');
     const all = await posts(seasons[1]);
-    assert.equal(all.length, 2);
-    assert.equal(all[1].payload.update, true);
-    assert.equal(all[1].payload.category, 'tv_seasons');
+    assert.equal(all.length, 1);
+    assert.equal(all[0].payload.bucket, 'fine', 'the existing post follows the new category');
+    assert.equal(Number(all[0].payload.score), Number(await scoreOf(seasons[1])));
   });
 
   it('posts nothing for an update that left the show where it was', async () => {
@@ -91,16 +92,27 @@ describe('the Feed contract for TV', () => {
     assert.equal((await posts(b)).length, 1, 'the first ranking only');
   });
 
-  it('keeps an update post at its own score when a later correction lands', async () => {
+  it('leaves a historic update post exactly as it was', async () => {
+    // A post written by 20261114000300's update branch, before it was removed. Nothing
+    // deletes, rewrites or backfills it.
     const { main } = await fixture();
     await rank(main, 'loved', 80);
+    const historic = (
+      await ctx.t.sql(
+        `insert into feed_events (actor_id, type, media_item_id, payload)
+         values ($1, 'title_ranked', $2,
+                 jsonb_build_object('position', 1, 'bucket', 'loved', 'category', 'tv_shows',
+                                    'score', 9.1, 'update', true))
+         returning id, payload`,
+        [ctx.user, main],
+      )
+    ).rows[0];
     taste.set(main, 10);
-    await correct(main, 'loved');
-    const [, update] = await posts(main);
-    taste.set(main, 1000);
-    await correct(main, 'loved');
-    const after = (await posts(main)).find((p) => p.id === update.id);
-    assert.equal(after.payload.score, update.payload.score);
+    await correct(main, 'fine');
+    const after = (await posts(main)).find((p) => p.id === historic.id);
+    assert.ok(after, 'still there');
+    assert.deepEqual(after.payload, historic.payload);
+    assert.equal((await posts(main)).length, 2, 'and nothing new beside it');
   });
 });
 

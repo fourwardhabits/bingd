@@ -321,7 +321,15 @@ update rankings set position = $new
  where user_id = $u and media_item_id = $item;
 ```
 
-`p_new` is clamped to the title's own band. A drag that would cross a band boundary is refused, because crossing means the bucket changed and that path re-runs comparisons.
+`p_new` must lie inside the title's own band. A drag that would cross a band boundary is refused (`22023`), not clamped, because crossing means the bucket changed and that path re-runs comparisons.
+
+> **Current state (#318, `20261129000100`).** Collection drags call this. `20261004000100` revoked it, because a move with no `ranking_placements` row broke P1. It is granted back now that every move writes one `manual` placement.
+>
+> Two optional guards refuse a move computed from a stale list with `55000`:
+> - the position the client saw the title at;
+> - the title the client saw at the target.
+>
+> A move never writes a comparison, a watch, a feed post or a notification, and it keeps `rankings.created_at`. Like a correction, it brings the latest watch's existing post up to date. See [`collection-rerank.md`](./collection-rerank.md).
 
 ### Ranking again, in the same band
 

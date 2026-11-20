@@ -86,6 +86,11 @@
  *      must jump back above them, which `recommendation-unread-first.test.mjs` (a) rejects:
  *      it is the order that strands unread rows past the 200 cap. The honest function is run
  *      first as a control.
+ *  19. `rank_group_note` with its `ranking_story:<actor>` lock deleted (20261130000200), the
+ *      live body otherwise. Two first rankings noted from two devices at once (RGW1 in
+ *      `races/ranking-grouping-window.mjs`) must stop serialising: the second no longer waits
+ *      for the first's mark, so both stay single cards in one half hour, which the founder's
+ *      rule forbids. The honest function is run first as a control and must leave one group.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1697,6 +1702,78 @@ end; $$;
   results.push([
     'page orders by opened only -> a seen row jumps above unread ones (test (a) goes red)',
     (await scenario('mutant')) === false,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 19: rank_group_note without its ranking_story:<actor> lock (20261130000200).
+//     Built from the live body with only the lock line removed, so it tracks the real one.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const scenario = async (label) => {
+    const me = await fx.createUser();
+    const titles = [];
+    for (const n of [1, 2]) {
+      const id = await fx.createMovie(`Mutant 19 ${label} ${n}`);
+      await db.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [me, id]);
+      await db.sql(
+        `insert into rankings (user_id, media_item_id, category, bucket, position)
+         values ($1, $2, 'movies', 'loved', $3)`,
+        [me, id, n],
+      );
+      await db.sql(
+        `insert into feed_events (actor_id, type, media_item_id, payload)
+         values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+        [me, id],
+      );
+      titles.push(id);
+    }
+    const key = (
+      await db.rows(`select hashtextextended('ranking_story:' || $1::text, 0)::text as k`, [me])
+    )[0].k;
+    const t1 = await db.session('phone');
+    const t2 = await db.session('tablet');
+    try {
+      await t1.actAs(me);
+      await t2.actAs(me);
+      await t1.begin();
+      await t1.q(`select rank_group_note($1, $2)`, [crypto.randomUUID(), titles[0]]);
+      const p2 = t2.start(`select rank_group_note($1, $2) as r`, [crypto.randomUUID(), titles[1]]);
+      const blocked = t2.awaitBlocked({ on: 'advisory', advisoryKey: key, timeoutMs: 1500 });
+      blocked.catch(() => {});
+      await Promise.race([p2, blocked]).catch(() => {});
+      await t1.commit();
+      await p2;
+      const [{ n }] = await db.rows(
+        `select count(*)::int as n from feed_events where actor_id = $1 and type = 'ranking_batch'`,
+        [me],
+      );
+      return n;
+    } finally {
+      await t1.rollback().catch(() => {});
+      await t1.end().catch(() => {});
+      await t2.end().catch(() => {});
+    }
+  };
+
+  controls.push([
+    'rank_group_note lock present -> two first rankings noted at once leave one group (RGW1 holds)',
+    (await scenario('honest')) === 1,
+  ]);
+
+  const [{ def }] = await db.rows(
+    `select pg_get_functiondef('rank_group_note(uuid, uuid)'::regprocedure) as def`,
+  );
+  const lockLine = /perform pg_advisory_xact_lock\(hashtextextended\('ranking_story:' \|\| v_me::text, 0\)\);/;
+  if (!lockLine.test(def)) throw new Error('mutant 19: the lock line was not found in rank_group_note');
+  await db.sql(def.replace(lockLine, '-- mutant 19: lock removed'));
+
+  results.push([
+    'rank_group_note lock dropped -> two first rankings in one half hour stay two cards',
+    (await scenario('mutant')) === 0,
   ]);
 
   await db.close();

@@ -611,6 +611,44 @@ describe('the refined card', () => {
     expect(mockDetails).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * **Edit watch uses the same searchable picker, and keeps its own Save** (founder QA,
+   * 2026-11-19). Ticking here edits a draft; nothing is written until Save, and a failed
+   * Save leaves the editor open with the chosen people still chosen.
+   */
+  it('searches, shows the chosen person, and writes the tag only on Save', async () => {
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    const card = within(view.getByTestId('watch-row-w1'));
+    await fireEvent.press(card.getByLabelText(/Who I watched with/));
+    await fireEvent.changeText(card.getByTestId('companion-search'), '@ALE');
+    await fireEvent.press(card.getByLabelText('Alex'));
+    expect(card.getByLabelText('Remove Alex')).toBeTruthy();
+    expect(mockDetails).not.toHaveBeenCalled();
+
+    await fireEvent.press(card.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+    expect(mockDetails.mock.calls[0]![0]).toMatchObject({ companionIds: ['friend-1'] });
+  });
+
+  it('keeps the editor and the chosen person when Save fails', async () => {
+    mockDetails.mockImplementationOnce(
+      () => Promise.resolve({ outcome: 'failed', message: 'Could not save.' }) as never,
+    );
+    history([watch('w1', '2024-03-04')]);
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    const card = within(view.getByTestId('watch-row-w1'));
+    await fireEvent.press(card.getByLabelText(/Who I watched with/));
+    await fireEvent.press(card.getByLabelText('Alex'));
+    await fireEvent.press(card.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(card.getByTestId('watch-editor-w1')).toBeTruthy());
+    expect(card.getByLabelText('Remove Alex')).toBeTruthy();
+  });
+
   it('draws no rule inside a collapsed card', async () => {
     history([watch('w1', '2024-03-04')]);
     const view = await renderWithProviders(<WatchHistoryScreen />);

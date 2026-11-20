@@ -206,6 +206,21 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
          */
         ['recommend-recipients'],
         /**
+         * **Who I watched with, for the same reason** (founder QA, 2026-11-19, P1).
+         *
+         * Following somebody back made them a mutual, and so taggable on the server at
+         * once — but `useTaggablePeople` held the list it had read before, for five
+         * minutes, and nothing here told it otherwise. The reader followed back, opened a
+         * watch's "Who I watched with", and the person was not there until the app
+         * restarted: the `recommend-recipients` defect above, in its sibling picker.
+         *
+         * Every writer earns it: a follow-back adds a mutual, an unfollow or a block
+         * removes one. Unkeyed by account, like the rest of this list. A follow-back made
+         * on the *other* person's phone moves no cache here at all, which is why the
+         * picker also asks again each time it opens (`CompanionPicker`).
+         */
+        ['taggable'],
+        /**
          * **People discovery is deliberately absent from this list**, and it is the one
          * entry where the obvious answer is the wrong one.
          *
