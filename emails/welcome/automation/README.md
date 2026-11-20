@@ -1,9 +1,9 @@
 # Sending the welcome email on a schedule
 
-**Status: WRITTEN, TESTED, NOT ENABLED.** The SQL is not applied to any project, the
-workflow has no schedule, `welcome.delivery_enabled` would be `false` and
-`welcome.start_after` would be 2099. Turning it on is the numbered procedure at the bottom,
-and its last step is a separate decision from every other step.
+**Status: SENDING ON PRODUCTION since 2026-09-18.** The procedure that turned it on is
+"Turning it on" at the bottom. Since `20261130000300` a production pg_cron job is the primary
+trigger and the GitHub schedule is the backup; see "What starts a run". The founder's one-time
+setup for that job is steps 1 to 3 there.
 
 ---
 
@@ -21,16 +21,125 @@ supabase/migrations/20260923000100_a_welcome_note_sent_once.sql
                          the ledger, the suppression list, the switches, the functions
 emails/welcome/automation/
   send-welcome.mjs       the worker: claim, send, record
-.github/workflows/welcome-email.yml   manual only; no schedule
+.github/workflows/welcome-email.yml   the job: hourly schedule (backup) and workflow_dispatch
+supabase/migrations/20261130000300_a_welcome_that_does_not_wait_for_github.sql
+                         the primary trigger: pg_cron dispatches the workflow hourly
 supabase/tests/welcome-email.test.mjs            the SQL against every migration, and the
                                                  worker end to end over it
 supabase/tests/concurrency/races/welcome-email.mjs   two connections, real PostgreSQL
 emails/welcome/email.test.mjs                    the message itself
+supabase/tests/welcome-dispatch.test.mjs         the dispatcher: when it posts, and what
 ```
 
 A GitHub Action rather than an Edge Function because **nothing in the release path deploys
 `supabase/functions/`**: the TMDB adapter once ran thirteen days behind its source. What an
 Action runs is always what is on `main`, template included.
+
+## What starts a run
+
+Two triggers start the same workflow, and either one alone is enough.
+
+- **Primary: production Postgres.** The pg_cron job `bingd-welcome-dispatch` runs
+  `_dispatch_welcome_email()` at :41 every hour
+  (`supabase/migrations/20261130000300_a_welcome_that_does_not_wait_for_github.sql`). It calls
+  GitHub's `workflow_dispatch` API for `welcome-email.yml` on `main` with `target=production`,
+  `mode=send` and no canary, which is the same send a scheduled run makes. GitHub starts a
+  dispatched run promptly.
+- **Backup: the workflow's own `schedule:`.** GitHub starts this repository's scheduled runs
+  only every five to ten hours, which is why the dispatcher exists. The schedule stays as the
+  fallback for when the token has expired or the database is unavailable.
+
+Both together send nobody twice. The claim is a primary-key insert, and production runs
+queue in one concurrency group instead of overlapping.
+
+The dispatcher posts only when all three of these hold, and otherwise returns without making
+a request:
+
+1. the database is production (`environment_name()` is `prod`; staging is `nonprod`);
+2. `welcome.delivery_enabled` is true there;
+3. production Vault holds `welcome_dispatch_github_token`.
+
+**The token is the founder's, it is stored in production only, and it must never be added
+to staging.** Staging would not use it, because of rule 1, but it starts the production send
+and belongs in one database. Never paste it into chat, a pull request, an issue, a commit or
+a log.
+
+### One-time setup (founder)
+
+1. **Create the token.** On GitHub, go to Settings → Developer settings → Personal access
+   tokens → Fine-grained tokens → Generate new token.
+   - Name: `bingd-welcome-dispatch`. Resource owner: `fourwardhabits`.
+   - Expiration: a date, not "No expiration". Ninety days is reasonable. Put the rotation in
+     your calendar a week before it.
+   - Repository access: **Only select repositories** → `fourwardhabits/bingd`.
+   - Permissions → Repository permissions → **Actions: Read and write**. Nothing else;
+     Metadata: Read-only is added automatically.
+   - If the organization requires approval for fine-grained tokens, approve it under the
+     organization's Settings → Personal access tokens → Pending requests.
+2. **Store it in production Vault.** Open the Supabase dashboard for the production project
+   (`abheeqyjzekiowkztfxv`) → SQL Editor. Check first that it is production:
+
+   ```sql
+   select value from app_config where key = 'env.name';   -- must be "prod"
+   ```
+
+   Then paste the token in place of `<token>` and run:
+
+   ```sql
+   select vault.create_secret('<token>', 'welcome_dispatch_github_token');
+   ```
+
+   Do not save that query as a snippet. Clear the editor afterwards.
+3. **Check it works.** In the same SQL editor:
+
+   ```sql
+   select public._dispatch_welcome_email();   -- {"status": "posted", "request_id": N}
+   ```
+
+   A few seconds later, with that N:
+
+   ```sql
+   select status_code, error_msg, timed_out from net._http_response where id = N;
+   ```
+
+   `204` means GitHub accepted it, and Actions → Welcome email shows a new "send on
+   production" run whose event is `workflow_dispatch`. This is a real run, the same as the
+   hourly one, and it sends nobody twice. `401` means the token is wrong or expired. `403`
+   means the token lacks Actions write, or the organization has not approved it yet. `404`
+   means the token does not cover `fourwardhabits/bingd`. If the first query returns
+   `not_production`, `disabled` or `unconfigured` instead of `posted`, the matching rule in
+   the list above does not hold, and no request was made.
+
+From then on, the hourly runs appear in Actions with the event `workflow_dispatch`.
+
+### Rotating the token
+
+Before it expires (GitHub emails a reminder), create a new token exactly as in step 1. Then,
+in the production SQL editor:
+
+```sql
+select vault.update_secret(
+  (select id from vault.secrets where name = 'welcome_dispatch_github_token'),
+  '<new token>'
+);
+```
+
+Run step 3 again to check it. Then delete the old token on GitHub. If a token does expire,
+nothing breaks: dispatches get a `401` and the welcome email falls back to the GitHub
+schedule, which is slower, until the token is replaced.
+
+### Stopping it
+
+- **Stop the email, triggers and all:** `update app_config set value = 'false'::jsonb where
+  key = 'welcome.delivery_enabled';` in production. Runs claim nobody, and the dispatcher
+  stops dispatching.
+- **Stop only the dispatcher, keeping the email on the GitHub schedule:**
+  `select cron.unschedule('bingd-welcome-dispatch');` in production. To resume:
+  `select cron.schedule('bingd-welcome-dispatch', '41 * * * *', 'select public._dispatch_welcome_email()');`
+- **Remove the token:** `delete from vault.secrets where name = 'welcome_dispatch_github_token';`
+  in production, then delete the token on GitHub. The dispatcher then returns `unconfigured`
+  every hour and posts nothing.
+- **Remove the dispatcher entirely:** `docs/release/welcome-dispatch/rollback-20261130000300.sql`.
 
 ## Why this and not a Resend Automation
 
@@ -441,3 +550,4 @@ update app_config set value = 'false'::jsonb where key = 'welcome.delivery_enabl
 
 A disabled run claims nobody, so everybody eligible is still eligible when it is turned
 back on, within the one-week window.
+It also stops the production dispatcher from starting runs (see "What starts a run").

@@ -273,7 +273,7 @@
   <p class="eyebrow">bingd. &middot; lifecycle</p>
   <h1>The welcome email, before anyone gets it</h1>
   <p class="sub">
-    Rendered from <code>emails/welcome/copy.json</code> on 2026-11-19.
+    Rendered from <code>emails/welcome/copy.json</code> on 2026-11-20.
     Nothing has been sent. The automation is written and switched off. Edit the copy file,
     run <code>node emails/welcome/build.mjs</code>, and this page rebuilds with it.
   </p>
@@ -281,7 +281,7 @@
   <div class="notice">
     <p><b>FOUNDER COPY &middot; NOT SENT</b></p>
     <p>
-      The short note of 2026-11-19, in the founder&rsquo;s own words, with his cafe photo.
+      The short note of 2026-11-19, in the founder&rsquo;s own words.
     </p>
     <p>
       Nobody is mailed until the postal address is set, a real test send has been approved,
@@ -330,6 +330,10 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo&#39;s PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -368,27 +372,22 @@
           &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
           &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
-            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail&#39;s forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
-                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;td class=&quot;gutter-logo pad-top&quot; style=&quot;padding:30px 36px 0 30px;&quot;&gt;
+                &lt;img src=&quot;https://bingd.app/email/bingd-logo.png&quot; width=&quot;146&quot; height=&quot;46&quot; alt=&quot;bingd.&quot; style=&quot;display:block;width:146px;height:46px;border:0;outline:none;text-decoration:none;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot; /&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
-            &lt;!-- The founder. Fluid to the text column, with a stated size for Outlook and
-                 for a client that has not loaded it yet. With images off, the alt text
-                 shows in the body face on a parchment box, so it reads as a caption. --&gt;
+            &lt;!-- The letter. The founder&#39;s own words, in his order, straight after the logo,
+                 and nothing under it but the footer. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 0;&quot;&gt;
-                &lt;img src=&quot;https://bingd.app/email/founder-cafe-tea.jpg&quot; width=&quot;560&quot; height=&quot;560&quot; alt=&quot;Suraj, smiling, pouring a cup of tea at a café table&quot; style=&quot;display:block;width:100%;max-width:560px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:#F5EBDD;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:20px;color:#5F5A56;&quot; /&gt;
-              &lt;/td&gt;
-            &lt;/tr&gt;
-
-            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
-                 the footer. --&gt;
-            &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:22px 36px 6px;&quot;&gt;
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
                   &lt;tr&gt;
                     &lt;td&gt;
@@ -399,8 +398,10 @@
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/surajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hope you enjoy it as much as I do.&lt;/p&gt;
-                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
-                      &lt;p style=&quot;margin:6px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-style:italic;font-size:15px;line-height:22px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;The movie nerd who made bingd.&lt;/p&gt;
+                      &lt;!-- The signature (founder, 2026-11-20): the sign-off, then &quot;Suraj&quot; with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. --&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj &lt;span style=&quot;font-size:15px;white-space:nowrap;&quot; class=&quot;sig-closing&quot;&gt;(the movie nerd that made bingd)&lt;/span&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -468,6 +469,10 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo&#39;s PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -506,27 +511,22 @@
           &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
           &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
-            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail&#39;s forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
-                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;td class=&quot;gutter-logo pad-top&quot; style=&quot;padding:30px 36px 0 30px;&quot;&gt;
+                &lt;img src=&quot;https://bingd.app/email/bingd-logo.png&quot; width=&quot;146&quot; height=&quot;46&quot; alt=&quot;bingd.&quot; style=&quot;display:block;width:146px;height:46px;border:0;outline:none;text-decoration:none;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot; /&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
-            &lt;!-- The founder. Fluid to the text column, with a stated size for Outlook and
-                 for a client that has not loaded it yet. With images off, the alt text
-                 shows in the body face on a parchment box, so it reads as a caption. --&gt;
+            &lt;!-- The letter. The founder&#39;s own words, in his order, straight after the logo,
+                 and nothing under it but the footer. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 0;&quot;&gt;
-                &lt;img src=&quot;https://bingd.app/email/founder-cafe-tea.jpg&quot; width=&quot;560&quot; height=&quot;560&quot; alt=&quot;Suraj, smiling, pouring a cup of tea at a café table&quot; style=&quot;display:block;width:100%;max-width:560px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:#F5EBDD;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:20px;color:#5F5A56;&quot; /&gt;
-              &lt;/td&gt;
-            &lt;/tr&gt;
-
-            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
-                 the footer. --&gt;
-            &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:22px 36px 6px;&quot;&gt;
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
                   &lt;tr&gt;
                     &lt;td&gt;
@@ -537,8 +537,10 @@
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/surajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hope you enjoy it as much as I do.&lt;/p&gt;
-                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
-                      &lt;p style=&quot;margin:6px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-style:italic;font-size:15px;line-height:22px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;The movie nerd who made bingd.&lt;/p&gt;
+                      &lt;!-- The signature (founder, 2026-11-20): the sign-off, then &quot;Suraj&quot; with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. --&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj &lt;span style=&quot;font-size:15px;white-space:nowrap;&quot; class=&quot;sig-closing&quot;&gt;(the movie nerd that made bingd)&lt;/span&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -606,6 +608,10 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo&#39;s PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -644,27 +650,22 @@
           &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
           &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
-            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail&#39;s forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
-                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;td class=&quot;gutter-logo pad-top&quot; style=&quot;padding:30px 36px 0 30px;&quot;&gt;
+                &lt;img src=&quot;https://bingd.app/email/bingd-logo.png&quot; width=&quot;146&quot; height=&quot;46&quot; alt=&quot;bingd.&quot; style=&quot;display:block;width:146px;height:46px;border:0;outline:none;text-decoration:none;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot; /&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
-            &lt;!-- The founder. Fluid to the text column, with a stated size for Outlook and
-                 for a client that has not loaded it yet. With images off, the alt text
-                 shows in the body face on a parchment box, so it reads as a caption. --&gt;
+            &lt;!-- The letter. The founder&#39;s own words, in his order, straight after the logo,
+                 and nothing under it but the footer. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 0;&quot;&gt;
-                &lt;img src=&quot;https://bingd.app/email/founder-cafe-tea.jpg&quot; width=&quot;560&quot; height=&quot;560&quot; alt=&quot;Suraj, smiling, pouring a cup of tea at a café table&quot; style=&quot;display:block;width:100%;max-width:560px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:#F5EBDD;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:20px;color:#5F5A56;&quot; /&gt;
-              &lt;/td&gt;
-            &lt;/tr&gt;
-
-            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
-                 the footer. --&gt;
-            &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:22px 36px 6px;&quot;&gt;
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
                   &lt;tr&gt;
                     &lt;td&gt;
@@ -675,8 +676,10 @@
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/surajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hope you enjoy it as much as I do.&lt;/p&gt;
-                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
-                      &lt;p style=&quot;margin:6px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-style:italic;font-size:15px;line-height:22px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;The movie nerd who made bingd.&lt;/p&gt;
+                      &lt;!-- The signature (founder, 2026-11-20): the sign-off, then &quot;Suraj&quot; with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. --&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj &lt;span style=&quot;font-size:15px;white-space:nowrap;&quot; class=&quot;sig-closing&quot;&gt;(the movie nerd that made bingd)&lt;/span&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -745,6 +748,10 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo&#39;s PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -783,27 +790,22 @@
           &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
           &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
-            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail&#39;s forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
-                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;td class=&quot;gutter-logo pad-top&quot; style=&quot;padding:30px 36px 0 30px;&quot;&gt;
+                &lt;img src=&quot;https://bingd.app/email/bingd-logo.png&quot; width=&quot;146&quot; height=&quot;46&quot; alt=&quot;bingd.&quot; style=&quot;display:block;width:146px;height:46px;border:0;outline:none;text-decoration:none;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot; /&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
-            &lt;!-- The founder. Fluid to the text column, with a stated size for Outlook and
-                 for a client that has not loaded it yet. With images off, the alt text
-                 shows in the body face on a parchment box, so it reads as a caption. --&gt;
+            &lt;!-- The letter. The founder&#39;s own words, in his order, straight after the logo,
+                 and nothing under it but the footer. --&gt;
             &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 0;&quot;&gt;
-                &lt;img src=&quot;https://bingd.app/email/founder-cafe-tea.jpg&quot; width=&quot;560&quot; height=&quot;560&quot; alt=&quot;Suraj, smiling, pouring a cup of tea at a café table&quot; style=&quot;display:block;width:100%;max-width:560px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:#F5EBDD;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:20px;color:#5F5A56;&quot; /&gt;
-              &lt;/td&gt;
-            &lt;/tr&gt;
-
-            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
-                 the footer. --&gt;
-            &lt;tr&gt;
-              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:22px 36px 6px;&quot;&gt;
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
                   &lt;tr&gt;
                     &lt;td&gt;
@@ -814,8 +816,10 @@
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/surajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hope you enjoy it as much as I do.&lt;/p&gt;
-                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
-                      &lt;p style=&quot;margin:6px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-style:italic;font-size:15px;line-height:22px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;The movie nerd who made bingd.&lt;/p&gt;
+                      &lt;!-- The signature (founder, 2026-11-20): the sign-off, then &quot;Suraj&quot; with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. --&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj &lt;span style=&quot;font-size:15px;white-space:nowrap;&quot; class=&quot;sig-closing&quot;&gt;(the movie nerd that made bingd)&lt;/span&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -966,8 +970,7 @@ watching, follow me on bingd (https://bingd.app/u/surajkan).
 Hope you enjoy it as much as I do.
 
 Happy binging,
-Suraj
-The movie nerd who made bingd.
+Suraj (the movie nerd that made bingd)
 
 ------------------------------------------------------------------------
 
