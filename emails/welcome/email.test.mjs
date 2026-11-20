@@ -645,11 +645,15 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
    * workflow's own expressions are evaluated here for each kind of trigger rather than
    * compared as text.
    */
-  it('runs hourly at :23, and a scheduled run is a send on production', () => {
+  it('runs six times an hour, never on the hour, and a scheduled run is a send on production', () => {
     const active = workflowLines.filter((l) => /^\s*schedule:/.test(l));
     assert.equal(active.length, 1, 'exactly one active schedule');
     const crons = [...workflow.matchAll(/^\s*-\s*cron:\s*'([^']+)'/gm)].map((m) => m[1]);
-    assert.deepEqual(crons, ['23 * * * *'], 'the cadence changed');
+    // Six offsets an hour since 2026-11-20: GitHub dropped most runs of the single ':23'
+    // entry (about three a day ran). None on the hour, where GitHub's load is worst.
+    assert.deepEqual(crons, ['3,13,23,33,43,53 * * * *'], 'the cadence changed');
+    const minutes = crons[0].split(' ')[0].split(',').map(Number);
+    assert.equal(minutes.includes(0), false, 'nothing on the hour');
     assert.match(workflow, /workflow_dispatch:/, 'the manual path for staging QA is gone');
 
     const expr = (name) => {
