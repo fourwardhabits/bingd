@@ -50,6 +50,14 @@ The founder approved #333, #334 and #336. They are shipped and verified; the rec
 - **#334** (`6a7bfb85`): migration `20261130000400` applied at about 14:32Z. Production is at 209 versions. Each `bingd-import-maintenance` run went from 81–165 ms (with about 2 s spikes) to 8–24 ms. Rollback: `pr334/rollback-20261130000400.sql`, captured from production before the apply.
 - **#336** (`e86596f2`): production OTA run `01a1f95f`. Android `01a1f964-4e35-77e9-a99d-4315a8141d06`, iOS `01a1f964-4e35-7374-af5b-c00ad4919058`. Runtimes equal the 1.1.0 (15) binaries. The live manifest serves `e86596f2`.
 
+### Shipped 2026-11-20: #340, #341, #342 (founder-approved)
+
+The record is `production-2026-11-20-340-341-342.md`.
+
+- **#340:** the OTA migration-order guard. The record has been regenerated from production: head `20261130000600`, 211 versions. The guard refuses `main` with the old record, passes it with the new one, and refuses #322.
+- **#341:** `bingd-ops-health` is live. Ticks run in 445–699 ms. A rolled-back production probe opened exactly one alert and closed it on recovery; nothing was committed. It is still pull-only; delivery is proposed in draft #343, Healthchecks.io, and waits for founder approval.
+- **#342:** the Feed-order index is live. The real Feed plan uses it with no sort. The first real calls ran at 0.1–33.9 ms, against means of 141–366 ms before. The sample is small; re-read before deciding on the `can_i_view` rewrite.
+
 ### Security (register: `docs/security/findings-register-2026-11-20.md`)
 - **No critical or high finding is open, and none was found.**
 - Production checks (read-only):
@@ -96,6 +104,7 @@ The founder approved #333, #334 and #336. They are shipped and verified; the rec
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-20 ~19:20Z: **Shipped.** #340, #341 (`20261130000500`) and #342 (`20261130000600`), with founder approval. Every gate on `d2803274` was green, the migration record was regenerated, the guard was validated, the alert probe passed and was rolled back, and the Feed plan uses the new index. No OTA.
 - 2026-11-20 ~14:40Z: **Shipped.** #333, #334 (`20261130000400`) and #336 (OTA `e86596f2`), all with founder approval. Every gate on `e86596f2` was green. The live manifest is verified, and prune runs measured 8–24 ms after the apply. Next engineering work: job-failure alerting, a migration-order safeguard, then the Feed query long tail.
 - 2026-11-20 ~08:00Z: overnight closeout recorded above. Merged: #325, #332, #317, #335, #337 (all docs). Ready for founder approval: #333, #334 (staging), #336. Production changed only by the approved #331 migration.
 - 2026-11-20 ~05:40Z: **Shipped.** #331 migration `20261130000300` applied to production with founder approval, from a clean checkout of `ecd03517` (CI, races, release gate green). The script differs from the reviewed #328 script only in its expected version, and the dry run showed exactly that version pending. Verified: history, ownership, ACL, one job, and the `unconfigured` probe with no request. No token was created or stored.
