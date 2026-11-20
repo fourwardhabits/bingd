@@ -676,6 +676,9 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
       ['workflow_dispatch', { target: 'nonprod', mode: 'dry-run' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'dry-run'],
       ['workflow_dispatch', { target: 'nonprod', mode: 'send' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'send'],
       ['workflow_dispatch', { target: 'production', mode: 'dry-run' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'dry-run'],
+      // What production's pg_cron dispatcher asks for (20261130000300): the same send a
+      // scheduled run makes.
+      ['workflow_dispatch', { target: 'production', mode: 'send' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'send'],
     ];
     for (const [event, inputs, wantUrl, wantKey, wantMode] of cases) {
       const label = `${event} ${JSON.stringify(inputs)}`;
@@ -683,6 +686,15 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
       assert.equal(evaluate(key, event, inputs), wantKey, `${label}: wrong service key`);
       assert.equal(evaluate(mode, event, inputs), wantMode, `${label}: wrong mode`);
     }
+
+    // A production dispatch runs in the production Environment, and queues behind a scheduled
+    // run in the same concurrency group rather than overlapping it.
+    const environment = expr('environment');
+    const group = workflow.match(/^\s*group:\s*welcome-email-\$\{\{(.+)\}\}\s*$/m)?.[1];
+    assert.ok(group, 'the concurrency group is not one welcome-email-${{ }} expression');
+    const dispatched = { target: 'production', mode: 'send' };
+    assert.equal(evaluate(environment, 'workflow_dispatch', dispatched), 'production');
+    assert.equal(evaluate(group, 'workflow_dispatch', dispatched), evaluate(group, 'schedule', {}));
 
     // The URL and the key must never disagree about which project a run is for.
     assert.equal(url.replace(/SUPABASE_URL_/g, 'X_'), key.replace(/SUPABASE_SERVICE_ROLE_KEY_/g, 'X_'), 'URL and key choose differently');

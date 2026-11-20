@@ -21,8 +21,21 @@ name: Welcome email
 # The schedule was turned on in its own commit, after the founder confirmed Sign in with
 # Apple private email relay for bingd.app (step 5 of emails/welcome/automation/README.md).
 #
+# WHAT STARTS A RUN (since 20261130000300)
+#
+#   Primary: production Postgres. The pg_cron job `bingd-welcome-dispatch` calls GitHub's
+#   workflow_dispatch API at :41 every hour with target=production, mode=send (no canary),
+#   on main. It does so only on the prod database, only while welcome.delivery_enabled is
+#   true, and only once the founder has stored a fine-grained token as the production Vault
+#   secret `welcome_dispatch_github_token`. GitHub starts dispatched runs promptly.
+#   Backup: the `schedule:` below, which GitHub starts only every 5-10 hours for this
+#   repository. Either alone is enough, and both together send nobody twice.
+#   Setup, rotation and stopping: emails/welcome/automation/README.md, "What starts a run".
+#
 # Emergency stop, no deploy: `welcome.delivery_enabled` = false in production app_config.
-# A disabled run claims nobody. Commenting the schedule out again stops the runs too.
+# A disabled run claims nobody, and the dispatcher stops dispatching. Stopping only the
+# triggers takes both: `select cron.unschedule('bingd-welcome-dispatch');` in production,
+# and commenting the schedule out.
 #
 # Why a GitHub Action rather than an Edge Function: nothing in the release path deploys
 # supabase/functions/, and a welcome email running a fortnight-old template is that
