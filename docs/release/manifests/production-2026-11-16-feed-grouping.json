@@ -1,0 +1,59 @@
+{
+  "$comment": "Production Feed Activity Grouping (#310 watchlist sessions, #311 backlog half hours). The combined candidate 80f72210 (main fb44d469 + #310 + #311) was reviewed by Codex with no findings; every earlier finding was fixed with tests. It was merged to main as aa812a8f (#310), then 9d11a797 (#311), whose tree is identical to 80f72210. Order: (1) both feed.*_grouping_enabled flags pre-inserted false at 08:18Z; (2) prod-migrate.py applied exactly 20261125000100, then 20261126000100, one transaction each, with statements byte-identical to staging (c42bf8f1, 2fa81fca); verified 201 migrations, flags false, watchlist backfill 232/232, RLS on and no client grants on both new tables, anon smoke 137/137; (3) ota-production-check 01a1e36f matched the store runtimes, and ota-production 01a1e371 published both platforms; live manifest ok, u.expo.dev production-only, smoke 137/137; (4) both flags enabled at 08:26:36Z; post-release read-only checks passed (no orphaned groups or drafts, new function bodies live) and smoke 137/137. No production test accounts were created. No physical-device verification was performed.",
+  "lane": "production",
+  "channel": "production",
+  "gitSha": "9d11a7977b6af2b987dd6f8b27e26ab4071d67a9",
+  "status": "published",
+  "backend": {
+    "ref": "abheeqyjzekiowkztfxv",
+    "name": "bingd-production",
+    "migrationHead": "20261126000100",
+    "migrationsApplied": 201,
+    "migrationsThisRelease": ["20261125000100", "20261126000100"],
+    "flags": {
+      "feed.watchlist_grouping_enabled": "false before migrations; true at 2026-11-16T08:26:36Z",
+      "feed.ranking_grouping_enabled": "false before migrations; true at 2026-11-16T08:26:36Z",
+      "feed.watchlist_group_minutes": 30,
+      "feed.ranking_group_minutes": 30
+    }
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1e376-1fdc-7873-85d7-6ba77f4d3f94",
+      "groupId": "b82a0376-a21e-44a8-a713-b36dca1a5949",
+      "runtimeVersion": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+      "gitCommitHash": "9d11a7977b6af2b987dd6f8b27e26ab4071d67a9",
+      "createdAt": "2026-11-16T08:25:31.868Z",
+      "message": "Feed grouping: watchlist sessions and backlog half hours are one post (9d11a79)"
+    },
+    "ios": {
+      "updateId": "01a1e376-1fdc-7ca0-a956-b2723764ac0c",
+      "groupId": "0c141d10-c5f0-4901-8922-d3e240b33137",
+      "runtimeVersion": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+      "gitCommitHash": "9d11a7977b6af2b987dd6f8b27e26ab4071d67a9",
+      "createdAt": "2026-11-16T08:25:31.868Z",
+      "message": "Feed grouping: watchlist sessions and backlog half hours are one post (9d11a79)"
+    }
+  },
+  "publishedBy": "eas workflow:run .eas/workflows/ota-production.yml --ref 9d11a797 -F sha=9d11a797",
+  "verification": {
+    "ci": "passed (main push, run 43827355184); Database races passed (run 43827355210)",
+    "releaseGate": "passed (push to release/2026-11-16-feed-grouping, run 43827372048)",
+    "otaPreflight": "ota-production-check 01a1e36f-1357-7961-be2e-e271efa41003",
+    "codexReviewedCommit": "80f7221094d33d53b63bef907c8aff551d06ff55 (no findings; main tree identical)",
+    "staging": "both migrations byte-identical; scripts/staging-checks/feedgroup-staging.mjs --ranking 24/24; Preview 80f72210 (Android 767a4229, iOS db9a6fb3) ok",
+    "local": "tsc 0, lint 0, jest feed 442, test:db 3281/0, races 208/208",
+    "deviceVerification": "none performed"
+  },
+  "rollback": {
+    "featureOff": "set feed.watchlist_grouping_enabled and/or feed.ranking_grouping_enabled to false: each new save or sitting then posts on its own; groups already formed are kept, never split",
+    "app": {
+      "android": "30bf8eef-acc3-4946-9126-db55ae9110c9",
+      "ios": "cacbef1e-0ab1-4ed1-bed6-037e17a142a0",
+      "gitSha": "fb44d469",
+      "note": "PR 308's groups. Turn the flags off first. An older bundle reads a group as the single-title post of its first title."
+    },
+    "database": "The migrations are additive and are NOT reverted by rolling back the app. Leave them applied and use the flags."
+  },
+  "knownProblems": []
+}

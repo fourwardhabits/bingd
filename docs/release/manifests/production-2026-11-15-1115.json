@@ -1,0 +1,58 @@
+{
+  "$comment": "Production after the founder-authorized release of #307 at 357bb126 (merged to main as b92a3764). Paired publish through .eas/workflows/ota-production.yml (EAS run 01a1e0b5-b9bb-793b-b427-af5288a9ca26) after ota-production-check (01a1e0b3-91fe-7d4f-b415-236436949d01) held both runtimes to the live store binaries. Read back with `release-manifest live production` (ok) and from u.expo.dev: each served update names only Supabase abheeqyjzekiowkztfxv.",
+  "lane": "production",
+  "channel": "production",
+  "gitSha": "357bb1267520394a65273b50dbf9090fa383f4a8",
+  "status": "published",
+  "backend": {
+    "ref": "abheeqyjzekiowkztfxv",
+    "name": "bingd-production",
+    "migrationHead": "20261124000100",
+    "migrationsApplied": 199,
+    "functions": {
+      "letterboxd-import": "v4",
+      "tmdb-adapter": "v16",
+      "push-sender": "v6"
+    },
+    "flags": {
+      "recommendations.v2_engine": "v1",
+      "recommendations.v2_rollout_percent": 0,
+      "recommendations.v2_allowlist": [],
+      "push.delivery_enabled": false
+    }
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1e0ba-b3d7-7916-b82a-c4e3487703a3",
+      "groupId": "4de6fcdc-2814-4a06-a71d-1bb5e6c5005d",
+      "runtimeVersion": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+      "gitCommitHash": "357bb1267520394a65273b50dbf9090fa383f4a8",
+      "createdAt": "2026-11-15T19:41:34.551Z",
+      "message": "1115: TV show/season rankings, Keep Show, Sent to You, H-2 fix (357bb12)"
+    },
+    "ios": {
+      "updateId": "01a1e0ba-b3d7-739b-b9d5-d6898991e7e8",
+      "groupId": "f247fd5e-7f0d-4ec8-af5f-e5f377e7af31",
+      "runtimeVersion": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+      "gitCommitHash": "357bb1267520394a65273b50dbf9090fa383f4a8",
+      "createdAt": "2026-11-15T19:41:34.551Z",
+      "message": "1115: TV show/season rankings, Keep Show, Sent to You, H-2 fix (357bb12)"
+    }
+  },
+  "publishedBy": "eas workflow:run .eas/workflows/ota-production.yml --ref 357bb126 -F sha=357bb126",
+  "verification": {
+    "ci": "passed",
+    "releaseGate": "passed (run 43749427422, attempt 2)",
+    "codexReviewedCommit": "357bb1267520394a65273b50dbf9090fa383f4a8",
+    "productionSmoke": "remote-smoke --target production 137/137 (anon only)",
+    "founderQA": "passed on Preview at cd79227d (app code identical)"
+  },
+  "rollback": {
+    "samePair": {
+      "android": "f97b8534-13c9-43b1-9de9-1afe81d9ab68",
+      "ios": "4eded7f4-7b63-435e-8cce-ffaec723bc6e",
+      "gitSha": "ace7c3fa"
+    }
+  },
+  "knownProblems": []
+}

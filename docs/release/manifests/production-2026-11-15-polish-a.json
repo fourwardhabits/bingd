@@ -1,0 +1,46 @@
+{
+  "$comment": "Production after Polish A (#309, Tier A slice of #308) at 979e3c21, merged to main as 44f25f9c. ota-production-check 01a1e0cf held both runtimes to the store binaries; ota-production 01a1e0f6 published both platforms. Read back with `release-manifest live production` (ok) and from u.expo.dev (production Supabase only). App-only: no backend change.",
+  "lane": "production",
+  "channel": "production",
+  "gitSha": "979e3c2123f8a09fa82809df96d066fb8db1020a",
+  "status": "published",
+  "backend": {
+    "ref": "abheeqyjzekiowkztfxv",
+    "name": "bingd-production",
+    "migrationHead": "20261124000100",
+    "migrationsApplied": 199
+  },
+  "platforms": {
+    "android": {
+      "updateId": "01a1e0fb-2e7e-7e2b-a8fd-2978307a3a03",
+      "groupId": "46fd8420-8ac6-4183-86b3-18a19f8af07d",
+      "runtimeVersion": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+      "gitCommitHash": "979e3c2123f8a09fa82809df96d066fb8db1020a",
+      "createdAt": "2026-11-15T20:52:00.254Z",
+      "message": "Polish A: labels, Watch History dates, onboarding copy (979e3c2)"
+    },
+    "ios": {
+      "updateId": "01a1e0fb-2e7e-76d7-8caf-ebfa2ce259ac",
+      "groupId": "4c6412a8-9b40-4b80-8713-75eeba728f11",
+      "runtimeVersion": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+      "gitCommitHash": "979e3c2123f8a09fa82809df96d066fb8db1020a",
+      "createdAt": "2026-11-15T20:52:00.254Z",
+      "message": "Polish A: labels, Watch History dates, onboarding copy (979e3c2)"
+    }
+  },
+  "publishedBy": "eas workflow:run .eas/workflows/ota-production.yml --ref 979e3c21 -F sha=979e3c21",
+  "verification": {
+    "ci": "passed",
+    "releaseGate": "passed (push to release/2026-11-15-polish-a)",
+    "codexReviewedCommit": "979e3c2123f8a09fa82809df96d066fb8db1020a",
+    "qaTier": "A (automated gates only, founder policy 2026-11-15)"
+  },
+  "rollback": {
+    "samePair": {
+      "android": "4de6fcdc-2814-4a06-a71d-1bb5e6c5005d",
+      "ios": "f247fd5e-7f0d-4ec8-af5f-e5f377e7af31",
+      "gitSha": "357bb126"
+    }
+  },
+  "knownProblems": []
+}

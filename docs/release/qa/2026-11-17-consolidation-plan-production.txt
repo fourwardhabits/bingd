@@ -1,0 +1,13 @@
+history-20261117-w01 2026-08-14 2026-08-22 {"planned_groups": {"members": 8, "ranking": 2, "watchlist": 0}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w02 2026-08-22 2026-08-30 {"planned_groups": {"members": 39, "ranking": 7, "watchlist": 3}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w03 2026-08-30 2026-09-07 {"planned_groups": {"members": 47, "ranking": 5, "watchlist": 7}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w04 2026-09-07 2026-09-15 {"planned_groups": {"members": 94, "ranking": 13, "watchlist": 10}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w05 2026-09-15 2026-09-23 {"planned_groups": {"members": 245, "ranking": 19, "watchlist": 1}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w06 2026-09-23 2026-10-01 {"planned_groups": {"members": 81, "ranking": 7, "watchlist": 3}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w07 2026-10-01 2026-10-09 {"planned_groups": {"members": 88, "ranking": 8, "watchlist": 5}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w08 2026-10-09 2026-10-17 {"planned_groups": {"members": 21, "ranking": 3, "watchlist": 1}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w09 2026-10-17 2026-10-25 {"planned_groups": {"members": 5, "ranking": 1, "watchlist": 0}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w10 2026-10-25 2026-11-02 {"planned_groups": {"members": 7, "ranking": 1, "watchlist": 1}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w11 2026-11-02 2026-11-10 {"planned_groups": {"members": 41, "ranking": 5, "watchlist": 6}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+history-20261117-w12 2026-11-10 2026-11-17 {"planned_groups": {"members": 26, "ranking": 3, "watchlist": 4}, "applied_groups": {"ranking": 0, "watchlist": 0}, "hidden_posts": 0}
+TOTAL {"groups": 115, "hidden": 702} DRY RUN: nothing written

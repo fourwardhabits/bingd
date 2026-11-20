@@ -1,0 +1,38 @@
+{
+ "range": {
+  "since": "2026-11-09T22:11:02+00:00",
+  "until": "2026-11-16T22:11:02+00:00"
+ },
+ "groups": {
+  "ranking": 3,
+  "watchlist": 4
+ },
+ "scanned": {
+  "ranking": 203,
+  "watchlist": 22
+ },
+ "eligible": {
+  "ranking": 12,
+  "watchlist": 22
+ },
+ "excluded": {
+  "reviewed": 6,
+  "with_comments": 3,
+  "referenced_any": 5,
+  "with_reactions": 3,
+  "already_grouped": 0,
+  "rewatch_or_update": 4,
+  "after_watch_or_ambiguous": 188
+ },
+ "integrity": {
+  "largest_group": 7,
+  "duplicate_first_rankings": 0,
+  "watchlist_posts_without_membership": 0
+ },
+ "actors_affected": 5,
+ "members_consolidated": {
+  "ranking": 12,
+  "watchlist": 14
+ },
+ "visible_cards_removed": 19
+}
