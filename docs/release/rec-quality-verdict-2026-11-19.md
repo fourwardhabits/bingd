@@ -188,3 +188,17 @@ Checks:
 | `node --test eval/rec-v2-replay/export.test.mjs` | 3 / 3 |
 | `tsc` | 0 errors |
 | eslint | clean |
+
+## 8. Addendum, 2026-11-20: catalogue re-read
+
+The real-history benchmark (§6) **has still not been run**: no grant is recorded. This addendum re-reads only the catalogue and cache tables used in §3. These are `media_items` and `media_cache`, aggregates only, read-only on production, and no user table was read. The point is to check that the backlog in §5 still rests on current numbers.
+
+| Measure | 2026-11-19 (§3) | 2026-11-20 | Reading |
+|---|---|---|---|
+| Telugu film tiles | 35 | 40 | Still about 0.3% of the English film catalogue (13,543). Backlog #1 stands. |
+| Tamil / Hindi / Malayalam / Kannada film tiles | n/a | 53 / 143 / 32 / 29 | Every Indian language is under 1.1% of English. #1 applies beyond Telugu. |
+| Telugu / Tamil series tiles | n/a | 6 / 11 | TV in these languages is effectively absent, so #1 and #2 compound. |
+| Unexpired `similar` lists, films | 71 of 940 (English) | 78 of 1,027 (all languages, 7.6%) | Most anchors still need a provider fill. Backlog #4 stands. |
+| Unexpired `similar` lists, series | 23 of 72 (English) | 33 of 109 (all languages, 30%) | TV pools are still built from few fresh lists. Backlog #2 stands. |
+
+The ranked backlog in §5 is unchanged: #0 (the authorized real run), then #1 (a language-aware `/discover` source), #2 (deeper TV pools), #4 (background refresh of the `similar` lists readers actually use), and #3 (anchor re-weighting) only after #0. V1 stays the production engine, and V2 stays at 0%.
