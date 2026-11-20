@@ -1,8 +1,11 @@
 # Letterboxd import
 
-> **Since 2026-11-11 (branch, unreleased):** Settings ▸ *Import from* offers Letterboxd or
-> IMDb, and the onboarding step asks *Already tracking movies somewhere else?*. The
-> Letterboxd import below is unchanged. See [`imdb-import.md`](./imdb-import.md).
+> **Live in production since 2026-11-12** (written 2026-11-11 as "branch, unreleased"):
+> Settings ▸ *Import from* offers Letterboxd or IMDb, and the onboarding step asks *Already
+> tracking movies somewhere else?*. Release 1115 (2026-11-15) added the redesigned import flow,
+> the IMDb-id matching rules and `letterboxd-import` v4. The Letterboxd
+> import below is otherwise unchanged. See [`imdb-import.md`](./imdb-import.md). Letterboxd
+> **Lists** import is still deferred ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)).
 
 **Current status (2026-09-23, stopping point).** The watched-title importer is **in
 production** (since 2026-09-14, `letterboxd-production-promotion.md`). Since then:

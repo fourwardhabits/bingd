@@ -1,9 +1,26 @@
 # Bingd — Client Architecture
 
-**Version:** v1 (public alpha)
+**Version:** v1 design, reconciled with `main` on 2026-11-19
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §5, §7, §16, §24 · [`api.md`](./api.md)
 
 Expo, React Native, TypeScript. One codebase, three variants.
+
+> **Current state (2026-11-19).** Three things in the design below are not how the app is built:
+>
+> - **No `src/offline/` and no `src/api/`.** There is no SQLite mirror and no outbox (§3); every
+>   write is an online RPC, and reads are cached in memory by TanStack Query. Query keys live
+>   in `src/lib/query.ts`, RPC wrappers beside their feature (for example
+>   `src/features/collection/writes.ts`). `expo-sqlite` is a dependency that nothing imports.
+>   The outbox remains a **proposed** design ([`offline-sync.md`](./offline-sync.md)).
+> - **The centre tab is Search** (`(tabs)/log`, labelled *Search*), and the fourth is
+>   *For you* (§2).
+> - **A series is rankable** (§3a): `+` on a series ranks the show; its seasons are ranked
+>   from the show's page ([`ranking.md`](./ranking.md) §14).
+>
+> What is in production: [`../release/production-state.md`](../release/production-state.md).
+> Screens, feature modules, shared services and the cache strategy are drawn in
+> [`diagrams.md`](./diagrams.md) §2 (2026-11-20). The current defaults are in `src/lib/query.ts`:
+> `staleTime` 60 s, 2 retries for reads, 0 for writes, and no refetch on window focus.
 
 ---
 
@@ -36,6 +53,8 @@ Expo Router is used because deep links are a product requirement, not an afterth
 ## 2. Navigation — Decided 2026-08-13
 
 Five tabs: **Feed · Collection · + · Recommendations · Profile**.
+
+> **As built:** the tabs read **Feed · Collection · Search · For you · Profile**. The centre route is still `(tabs)/log`, and it still opens straight into title search; it is labelled and drawn as Search rather than `+`.
 
 Collection holds Ranked, Logged, Watchlist, and Lists — the user's working surface. Profile is the public identity page and holds stats, match, and the leaderboard. The center **+** is the log-and-rank entry point and opens directly into title search, which is why there is no separate Search tab.
 
@@ -91,6 +110,8 @@ Only for outbox-eligible operations ([`api.md`](./api.md) §1). Every one carrie
 Search is the `+` tab (`app/(tabs)/log.tsx`), which is why there is no Search tab ([`screens.md`](../design/screens.md) §2). It calls `search_titles` through `useTitleSearch`, debounced at 180ms with `keepPreviousData`, which is what makes it read as filtering rather than as querying: without the latter, every keystroke empties the list for a round trip, and a list that blinks between states feels slower than one lagging a beat behind.
 
 Two characters is the floor. Below that every query matches half the catalogue.
+
+> **Superseded 2026-11-14 (live since 2026-11-12).** `_assert_loggable` no longer refuses a series, and `+` on a series in Search ranks the **show** in its own pool. Seasons are ranked from the show's page, where each season row has its own `+`. The paragraph below is the v1 behaviour.
 
 **A series opens its seasons, not the log sheet.** `_assert_loggable` refuses a series outright — the season is the rankable unit (AD-1, PRD §10) — so tapping one has to lead somewhere rather than fail. `SeasonPicker` reads `media_items` directly through PostgREST, since the catalogue is world-readable and needs no RPC, and hands the chosen season to the sheet along with the series title so the header does not read "Season 3" and nothing else.
 

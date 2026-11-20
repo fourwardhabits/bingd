@@ -231,7 +231,7 @@ These already live on GitHub and need nothing from you. For reference:
 | `RESEND_API_KEY_WELCOME`, `WELCOME_POSTAL_ADDRESS` | `production` Environment | welcome email |
 | `BINGD_PRODUCTION_TRENDING` (variable) | repository | enables the production trending run |
 
-Both Environments accept `main` only. Until the move in [security-remediation-2026-11-01.md](../release/security-remediation-2026-11-01.md) is finished, the secrets are still at repository level.
+Both Environments accept `main` only. **The move is finished (H-1 closed, 2026-11-18):** the founder put the six secrets in the two Environments and deleted the repository copies; a presence-only probe found all six absent at repository level, and the scheduled Trending and Welcome runs passed on the Environment copies alone. Evidence: [#317](https://github.com/fourwardhabits/bingd/pull/317) (merged 2026-11-20) and [`security-closeout-2026-11-17.md`](../security/security-closeout-2026-11-17.md#h-1-closure-evidence-2026-11-18). The steps were [security-remediation-2026-11-01.md](../release/security-remediation-2026-11-01.md) §2.
 
 GitHub secrets cannot be read back. If one must be re-entered, regenerate it at the vendor.
 

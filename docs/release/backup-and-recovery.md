@@ -4,6 +4,13 @@
 part most such documents skip — **what is not verified yet and cannot be until the project
 exists.**
 
+> **Historical (marked 2026-11-20).** This page describes the pre-production state of
+> 2026-08-26 and is not maintained. Production has existed since then and is at 208
+> migrations. Read these instead: what is live,
+> [`production-state.md`](./production-state.md); how to recover a working machine and where
+> each secret lives, [`../ops/disaster-recovery.md`](../ops/disaster-recovery.md); the backup
+> actions still open, [`../product/founder-todo.md`](../product/founder-todo.md) § Operations.
+
 > Every capability below is stated as either **VERIFIED** (checked against a real project) or
 > **FOUNDER MUST CONFIRM**. Nothing is marked enabled on the strength of a vendor's marketing
 > page. A backup you believe in and do not have is worse than no backup.

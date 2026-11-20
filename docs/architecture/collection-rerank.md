@@ -1,6 +1,11 @@
 # Collection drag-to-rerank (#318)
 
-**Status:** draft PR. Not merged, not on staging, not in production.
+**Status (2026-11-20): live in production.** Merged as #319 (`main` `1c24b5cd`) and released
+on 2026-11-20: migrations `20261129000100`, `000200` and `000300` applied, then the production
+OTA. Founder approval was an Android functional QA pass. The design, findings, QA passes and
+residual risks below are the record of the build.
+What is live: [`../release/production-state.md`](../release/production-state.md).
+*(Earlier status line: "draft PR. Not merged, not on staging, not in production.")*
 **Builds on:** [`ranking.md`](./ranking.md) §7 (manual reordering), §9 (locks), §11 (displayed score), §14 (TV pools).
 
 The reader long-presses a ranked title in Collection (Poster or List) and drops it anywhere else

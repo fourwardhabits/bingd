@@ -13,6 +13,16 @@ this register only decides what is next.
 
 ## The freeze rule
 
+> **Lifted in practice (2026-11-19; still so on 2026-11-20).** The founder has authorised
+> production releases since 2026-11-07; eight production OTAs between 2026-11-12 and 2026-11-20
+> shipped TV show rankings, imports, Onboarding 2.0, Feed grouping and Collection
+> drag-to-rerank ([`production-state.md`](../release/production-state.md)).
+> Releases now follow the founder's risk-based QA tiers (#309), with founder device QA on
+> Preview and founder authorisation for each production step
+> ([`production-state.md`](../release/production-state.md) § The two lanes). **These docs treat
+> the 2026-09-26 freeze as retired (2026-11-20).** The rule below is kept as the record. The
+> Preview rule at its end still applies. A new written rule would be the founder's to add.
+
 **Application development is frozen as of 2026-09-26.** It reopens only for:
 
 - a crash
@@ -62,22 +72,26 @@ history of its own that would later have to be reconciled.
 Each of these waits for user evidence. None is scheduled.
 
 - **`ranking.refine_enabled` in production.** Refine is built, on in staging, and off in
-  production since 2026-09-23 pending a founder smoke. Turning it on is a flag flip, not a
-  release.
+  production since 2026-09-23 pending a founder smoke (re-read off on 2026-11-20). Turning it
+  on is a flag flip, not a release. Founder decision: on or off for launch.
 - **Letterboxd Lists import**, only if acquisition evidence says importers are blocked by it
   ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)).
 - **A note from the Unranked flow.** The backlog sitting asks the bucket inline and never opens
   the log sheet, so there is no note entry point there. Decide only if people ask for it.
 - **Header Done vs summary Done.** Header Done opens the summary, and *Keep ranking* continues
   the same sitting. Confirm that is the intended model.
-- **Frozen UX idea: TV seasons list polish.**
+- **Frozen UX idea: TV seasons list polish.** *(Written before whole shows became rankable on
+  2026-11-12, and before the TV wall became directly draggable and lost its Reorder control
+  on 2026-11-20 (#319). Neither change touched the seasons list on a show's page, so the idea
+  still applies there. Re-check it against the show page as built before acting on it.)*
   - For a ranked season: the secondary line under the season title shows `#N in TV`, and the
     right side shows the normal maroon score badge.
   - For an unranked season: no "Not ranked yet"; leave the secondary line and score area
     blank.
   - Whole-series ranking semantics do not change.
-- **Frozen UX idea: TV season navigation.** Evaluate later whether users can reach season-level
-  ranking and logging faster from search and series title pages. Do not optimise clicks
+- **Frozen UX idea: TV season navigation.** *(Still open after 2026-11-20. Seasons are still
+  ranked from the show's page; the TV wall ranks shows.)* Evaluate later whether users can
+  reach season-level ranking and logging faster from search and series title pages. Do not optimise clicks
   without first reviewing the overall TV information architecture.
 - A stale code comment: `src/features/collection/filters.ts:149-154` says there is no
   watch-date axis. The behaviour is correct; fix the comment whenever that file is next touched.
@@ -98,7 +112,7 @@ Each of these waits for user evidence. None is scheduled.
 | No off-platform database export. Supabase keeps 8 daily backups with PITR off, and they are deleted with the project | small | Weekly encrypted `supabase db dump` of production to that cloud folder, and before every production migration |
 | PITR is off, so a bad write can cost up to a day | – | Decide whether to buy the add-on |
 | `.git/info/exclude` holds the ignore rules for `02 JSO/` and `store-assets/google-play/`, so a fresh clone lacks them. **Adding lines to `.gitignore` moves every lane's runtime fingerprint** | – | Keep them local and re-create them on a new machine (DR §3), or move them into `.gitignore` only in a window that also cuts new binaries |
-| `backup-and-recovery.md` and `production-environment.md` still describe the pre-production state of 2026-08-26 | – | Point both at `production-state.md` and the DR runbook, or mark them historical |
+| ~~`backup-and-recovery.md` and `production-environment.md` still describe the pre-production state of 2026-08-26~~ | – | **Done 2026-11-20:** both marked historical, pointing at `production-state.md` and the DR runbook |
 | `supabase/functions/README.md` covers only `tmdb-adapter`, not `push-sender` or `letterboxd-import` | – | Add the two sections |
 | eas-cli is 21.8.0; 24.x exists | – | Upgrade only with a fingerprint parity check (DR §12) |
 | About 40 old worktrees and many stale remote branches | – | Prune per [`production-state.md`](../release/production-state.md). Never `git worktree remove` one with a junctioned `node_modules` |
@@ -115,6 +129,6 @@ Specified in [`deferred-roadmap.md`](./deferred-roadmap.md); none is planned nex
 - further share cards
 - further Awards
 - episode-level tracking
-- whole-series ranking
+- ~~whole-series ranking~~ shipped 2026-11-12 (TV shows ranked in their own pool)
 - the push kill switch (#119, a founder decision about its initial value)
 - proactive release pushes (the shadow runs; sending is off)

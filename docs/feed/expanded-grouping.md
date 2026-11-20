@@ -2,6 +2,22 @@
 
 Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `feed/expanded-grouping`.
 
+> **Status (2026-11-20).** **Live in production:** PR 2 itself. Merged as #313 (`0170506e`)
+> with #312 and released on 2026-11-17: migrations `20261127000100` and `20261128000100`
+> applied, `feed.ranking_backfill_grouping_enabled` turned on at 01:10:40Z. The retrospective
+> consolidation **was then run** under founder authorisation (01:20Z): 12 batches
+> `history-20261117-w01`…`w12`, 115 groups from 702 posts, 587 fewer visible cards, each batch
+> reversible. The "Not run in production" line below records the state when this design was
+> written.
+>
+> **Live in production since 2026-11-20:** the half-hour rule for first rankings (#328, `main`
+> `68095e99`, migration `20261130000200`), which the *Forward* section below describes. It is
+> applied on staging and in production: the production head was `20261130000200`, and
+> `_ranking_is_historical` and `feed.ranking_backfill_days` were gone, when read at 03:08Z on
+> 2026-11-20. It needed no OTA. PR 2's historical-date test, under which a ranking logged with
+> the default *Today* stayed standalone, ran until then. No consolidation has been run under
+> the new rule. What is live: [`../release/production-state.md`](../release/production-state.md).
+
 ## One mechanism: a group presents its members
 
 `feed_events.presented_in uuid` (nullable, FK to `feed_events(id)`).

@@ -11,6 +11,10 @@ that will otherwise cost you a wrong number.
 
 Nothing in this document changes the app. It is a reading guide and a dashboard recipe.
 
+> **Live in production since 2026-11-15** (release 1115, #307, which integrated the #305 head;
+> the #305 PR itself is still an open draft). Events from Onboarding 2.0 exist only from that
+> OTA on; earlier production sessions have none of them.
+>
 > **Updated 2026-11-14 for Onboarding 2.0 (OB-1).** That build adds
 > `onboarding_step_viewed`, sends the missing `profile` completion, adds
 > `first_five_index` and `coach_shown` to onboarding's `ranking_completed`, and adds
