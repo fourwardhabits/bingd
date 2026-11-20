@@ -139,9 +139,9 @@ reads are kept in brackets where the value matters to a past decision.
 
 **Security (2026-11-19; unchanged 2026-11-20).** H-2 is fixed in production (`20261124000100`, trigger
 `retire_unproven_password`). H-1 is **closed** (2026-11-18): the privileged Actions secrets
-live only in the `production` and `nonprod` Environments, restricted to `main`; evidence in
-[#317](https://github.com/fourwardhabits/bingd/pull/317) on
-[`../security/security-closeout-2026-11-17.md`](../security/security-closeout-2026-11-17.md).
+live only in the `production` and `nonprod` Environments, restricted to `main`. The evidence is
+[#317](https://github.com/fourwardhabits/bingd/pull/317) (merged to `main` 2026-11-20) and
+[`../security/security-closeout-2026-11-17.md`](../security/security-closeout-2026-11-17.md#h-1-closure-evidence-2026-11-18).
 Still open and founder-only: M-5's Sentry dashboard rule (unverified) and m-3's nine historical
 log deletions.
 
