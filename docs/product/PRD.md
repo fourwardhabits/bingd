@@ -77,11 +77,11 @@
 >
 > The deferred list above is unchanged, and none of it is planned next.
 
-> ### Current state — 2026-11-19 (production `a3300bf0`)
+> ### Current state — 2026-11-19, updated 2026-11-20 (production `1c24b5cd`)
 >
 > **This block supersedes the two above wherever they disagree.** The freeze of 2026-09-26 was
-> lifted by founder-authorised releases from 2026-11-07 on; seven production OTAs between
-> 2026-11-12 and 2026-11-19 changed behaviour. The release-by-release record, flags and
+> lifted by founder-authorised releases from 2026-11-07 on; eight production OTAs between
+> 2026-11-12 and 2026-11-20 changed behaviour. The release-by-release record, flags and
 > rollback targets are in [`../release/production-state.md`](../release/production-state.md),
 > which is the authority on what is live. Labels: **Live in production**, **Shipped dark**
 > (in production, switched off), **Staging or unreleased**, **Proposed**.
@@ -113,6 +113,15 @@
 >   "no historical backfill" and "one durable watchlist event per person and title" are
 >   superseded by this: members are hidden through the group, never deleted.
 >   [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md).
+> - **Collection drag-to-rerank** (2026-11-20, #319): on Watched, sorted by rating, a ranked
+>   title is long-pressed and dropped anywhere in its ranking, across rating categories too,
+>   taking that place's category and score, with Undo. The TV wall is dragged directly; a show
+>   scored by its seasons' average becomes an explicit show ranking where it is dropped. The TV
+>   Reorder control is gone. [`../architecture/collection-rerank.md`](../architecture/collection-rerank.md).
+> - **Silent ranking updates** (2026-11-20): an update, a move, a change of category, a
+>   correction or Refine posts nothing new in the Feed; only a first ranking and a rewatch post.
+> - ***Who I watched with*** (2026-11-20, #321): a searchable picker with removable chips, up to
+>   ten mutual follows; a follow-back is taggable at once.
 > - **Community score**: a person's voice counts once they have ten rankings; a show's
 >   community score is one effective score per person (explicit show, else their season mean).
 > - **Security**: H-2 (pre-registration takeover) is fixed in production (`20261124000100`).
@@ -120,9 +129,11 @@
 > **Shipped dark:** Recommendation Engine V2 (switch `"v1"`, 0%), Refine (flag off),
 > proactive notifications (generation and push off), release pushes (shadow only).
 >
-> **Staging or unreleased:** Collection drag-to-rerank across categories (#319) and the
-> searchable *Who I watched with* picker (#321) are in the 2026-11-19 Preview, awaiting founder
-> QA; reactions and comments on follow stories (#322) and username sign-in (#300) are drafts.
+> **Staging or unreleased:** the half-hour rule for first rankings (#328: any two first rankings
+> within 30 minutes are one post, whatever the watch date) is merged to `main` and applied on
+> staging, and its production migration is pending; until it lands, production groups only
+> historical title-page rankings, as above. Reactions and comments on follow stories (#322) and
+> username sign-in (#300) are drafts.
 >
 > **Still deferred** (unchanged): Letterboxd Lists import, predicted score, unmatched-import
 > repair, Stats/Wrapped, Watch Next, further share cards and Awards, episode-level tracking,

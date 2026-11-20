@@ -13,9 +13,10 @@ this register only decides what is next.
 
 ## The freeze rule
 
-> **Lifted in practice (2026-11-19).** The founder has authorised production releases since
-> 2026-11-07; seven production OTAs between 2026-11-12 and 2026-11-19 shipped TV show rankings,
-> imports, Onboarding 2.0 and Feed grouping ([`production-state.md`](../release/production-state.md)).
+> **Lifted in practice (2026-11-19; still so on 2026-11-20).** The founder has authorised
+> production releases since 2026-11-07; eight production OTAs between 2026-11-12 and 2026-11-20
+> shipped TV show rankings, imports, Onboarding 2.0, Feed grouping and Collection
+> drag-to-rerank ([`production-state.md`](../release/production-state.md)).
 > Releases now follow the founder's risk-based QA tiers (#309). Whether a written freeze rule
 > still applies, and what replaces it, is an open founder question. The rule below is the
 > 2026-09-26 record.

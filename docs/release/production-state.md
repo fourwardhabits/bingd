@@ -1,8 +1,8 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-19** (production OTA from `main` `a3300bf0` recorded; store table unchanged since the
-public listings of 2026-11-08).
+**2026-11-20** (production OTA from `main` `1c24b5cd` and migrations to 206 recorded; store
+table unchanged since the public listings of 2026-11-08).
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -22,7 +22,7 @@ unreleased**: on staging or a Preview build, or merged without a production rele
 a design or a draft PR. A PR's open/draft state on GitHub is not the test: #305 and #301 are
 still open drafts, but their heads were integrated into release 1115 (#307) and are on `main`.
 
-> **Where the 2026-11-11 to 2026-11-19 records live.** Each release below was recorded by its
+> **Where the 2026-11-11 to 2026-11-20 records live.** Each release below was recorded by its
 > operator in `docs/release/manifests/production-*.json` and the handoff notes on the branch
 > `ops/preview-1115-records`, which is **not merged to `main`**. The facts on this page are
 > copied from those records and from the release comments on the PRs named. Merging that
@@ -38,12 +38,12 @@ still open drafts, but their heads were integrated into release 1115 (#307) and 
 
 | | |
 |---|---|
-| **Live application source** | `main` `a3300bf0` (merge of #323, 2026-11-19): #320 Feed spacing and #323 labelled engagement on every post, on top of everything below. |
-| **Production OTA, 1.1.0** | Published 2026-11-19 from `a3300bf0`. Android update `01a1f30d-2913-7baa-8ac8-1148dc047899`, group `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, runtime `ec79e181`; iOS update `01a1f30d-2913-7f2a-9dbb-dd49880a5a8f`, group `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, runtime `8ea562b7`. Rollback: the `0170506e` pair, Android `80f10846-a79e-4eb5-bf19-4cef3fad544f`, iOS `7d2f3828-30e3-4a77-90c6-1aa9c0dc410d`. Source: `handoff-2026-11-20-morning.md` §1 on `ops/preview-1115-records`. |
-| **DB migrations** | **203 applied**, head `20261128000100` (2026-11-17). Equal to `main`'s 203 files. |
+| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` has since moved to `68095e99` (#328, merged, **production pending**: see *Staging or unreleased*). |
+| **Production OTA, 1.1.0** | Published 2026-11-20 from `1c24b5cd` (workflow run `01a1f6ba-87cd-78ec-8fe0-1dafcbddddfc`). Android update `01a1f6bf-421a-7843-b074-8a0ec05cd692`, group `0a3f0fcb-7f8d-438d-901b-a164e53f95bc`, runtime `ec79e181`; iOS update `01a1f6bf-421a-76fa-b92a-19bfb6d8118a`, group `16309eb2-6034-41c2-9ecc-df88f2dc957b`, runtime `8ea562b7`. Rollback: republish the `a3300bf0` pair, Android `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, iOS `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, and leave the database as is (the `a3300bf0` client works against it). Source: `production-2026-11-20-319-321.md` on `ops/preview-1115-records`. |
+| **DB migrations** | **206 applied**, head `20261129000300` (2026-11-20: `20261129000100`, `000200`, `000300`, one at a time, every invariant re-checked after each). Read again 2026-11-20. `main` has 207 files: `20261130000200` (#328) is **not yet applied** in production. |
 | **Edge Functions** | `letterboxd-import` v4 (2026-11-15, `verify_jwt` on), `tmdb-adapter` v16, `push-sender` v6 (both 2026-11-12). Read 2026-11-15 (#307 release comment). |
 | **Production OTA, 1.0.1** | Unchanged: from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
-| **Preview OTA (staging backend)** | `integration/preview-1120` `bf721a9a` and later (`main` + #319 + #321), published 2026-11-19 on the `preview` channel: Android runtime `2503ffaa`, iOS runtime `ef07f4b8`. Staging migrations: 205, head `20261129000200` (#319's). **Staging only.** |
+| **Preview OTA (staging backend)** | Last recorded: `integration/preview-1120` `219e2953` (Preview 2026-11-20b: `a3300bf0` + #319 at `0aabaa18` + #321), on the `preview` channel: Android group `c3b6dcce`, runtime `2503ffaa`; iOS group `420d6710`, runtime `ef07f4b8`. #319 and #321 have since been released; no later Preview is recorded. Staging migrations: head `20261130000200` (#328's, applied on staging per #328). **Staging only.** |
 
 ### Production releases since the last update of this page
 
@@ -58,9 +58,14 @@ Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`). None n
 | 2026-11-16 | `9d11a797` (#310 + #311) | Feed grouping: a watchlist session and a backlog half hour are one post. Flags on 08:26Z | 201, head `20261126000100` | `b82a0376` / `0c141d10` |
 | 2026-11-17 | `0170506e` (#312 + #313) | Poster rails on grouped posts; title-page backfill grouping, cross-ladder groups; historical consolidation run (115 groups, 587 fewer visible cards) | 203, head `20261128000100` | `80f10846` / `7d2f3828` |
 | 2026-11-19 | `a3300bf0` (#320 + #323) | Feed card spacing; labelled Like · Comment on every post, visible "and others" links | 203 | `e9ea7c27` / `78bc77db` |
+| 2026-11-20 | `1c24b5cd` (#321 + #319) | *Who I watched with*: searchable picker, a follow-back taggable at once. Collection drag-to-rerank across rating categories; the TV wall dragged directly (dragging a show scored by its seasons' average ranks it as a show); silent ranking updates in the Feed; the TV Reorder control removed | 206, head `20261129000300` | `0a3f0fcb` / `16309eb2` |
 
 Merged to `main` with no app release needed: #314 (Welcome canary workflow), #315
-(security register), #316 (recommendation benchmark, `eval/` only).
+(security register), #316 (recommendation benchmark, `eval/` only), #324 (Welcome email v2,
+merged 2026-11-19; the hourly Welcome workflow renders whatever `emails/welcome/dist/` is on
+`main`, so merging it is its release; no successful Welcome run on the new template is recorded
+here yet). **Merged, production pending:** #328 (`main` `68095e99`, 2026-11-20), whose migration
+`20261130000200` is not yet applied in production (read 2026-11-20); see *Staging or unreleased*.
 
 ### Store distribution
 
@@ -85,10 +90,11 @@ being prepared separately; until a new binary is public, this table stands.
   `01a0db04`. A fresh install of one launches its old embedded bundle, downloads `01a0db04` in
   the background, and runs it after the next reload. That older embedded bundle predates #198,
   so its first foreground return can reload mid-sign-in. **Nothing since 2026-09-26 reaches
-  them**, including TV show rankings and Feed grouping. The `presented_in` read policy hides a group's
-  members from every client, and an old bundle reads a group as one single-title post.
+  them**, including TV show rankings, Feed grouping and drag-to-rerank. The `presented_in`
+  read policy hides a group's members from every client, and an old bundle reads a group as
+  one single-title post.
 - **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and receive the
-  production OTA above (`a3300bf0`, 2026-11-19).
+  production OTA above (`1c24b5cd`, 2026-11-20).
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return
@@ -117,8 +123,8 @@ been re-read since; it is not known to have changed.
 | `proactive.generation_enabled` / `proactive.push_enabled` | false / false, as the migrations seed them | not re-read | — |
 | `recommendations.v2_engine` / `v2_rollout_percent` / `v2_allowlist` | **`"v1"`** / 0 / `[]`: Rec V2 is shipped dark | 2026-11-15 | `"v1"` / 0 / `[]` |
 | `score.contributor_min_rankings` | 10 | 2026-11-15 | 10 |
-| `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | 2026-11-16 | per QA round |
-| `feed.ranking_backfill_grouping_enabled` / `feed.ranking_backfill_days` | **true** / 7 | 2026-11-17 | true |
+| `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | 2026-11-20 | per QA round |
+| `feed.ranking_backfill_grouping_enabled` / `feed.ranking_backfill_days` | **true** / 7. `20261130000200` (#328, not yet in production) removes `ranking_backfill_days`; the first flag stays as the kill switch | 2026-11-20 | true / removed (#328 applied on staging) |
 
 **Security (2026-11-19).** H-2 is fixed in production (`20261124000100`, trigger
 `retire_unproven_password`). H-1 is **closed** (2026-11-18): the privileged Actions secrets
@@ -142,12 +148,24 @@ Username-or-email sign-in (#300) is **not in production**: its migration slot
   (backlog) sittings deal seen-but-unranked titles one at a time; a placement left
   mid-comparison resumes. Header **Done** shows a summary of only what the sitting completed;
   *Keep ranking* continues it. Ranking an already-seen title never creates a watch.
+  **Ranking updates are silent** (since 2026-11-20, `20261129000300`): an update, a manual
+  move, a change of category, a correction or Refine posts nothing new in the Feed; the latest
+  watch's existing post takes the new score. Only a first ranking and a rewatch post.
   Mechanics: [`../architecture/ranking.md`](../architecture/ranking.md) §14.
 - **Collection.** Movies / TV / Lists. The TV Collection shows **one poster per show**,
   carrying the explicit show score or else the season average (`SN AVG`).
+  **Drag-to-rerank** (since 2026-11-20, #319): on Watched, sorted by rating with no filters, a
+  long-press lifts a ranked title and a drop moves it anywhere in the same ranking, across
+  rating categories too; it takes that place's category and score, with Undo. The TV wall is
+  dragged directly: an explicitly ranked show moves among the ranked shows, and dragging a show
+  scored by its seasons' average gives it an explicit show ranking at that place. The TV
+  Reorder control is gone. A move writes a `manual` placement and never a comparison, watch,
+  post or notification ([`../architecture/collection-rerank.md`](../architecture/collection-rerank.md)).
 - **Watch history.** Multiple watches per title, undated watches as first-class, Watch History,
-  companions, per-watch notes (Edit watch → Note, private unless *Share as a review* is on),
-  and *Recently watched* sorted by the latest real watch date.
+  companions (*Who I watched with*: a searchable picker with removable chips, up to ten mutual
+  follows, and a follow-back is taggable at once; since 2026-11-20, #321), per-watch notes
+  (Edit watch → Note, private unless *Share as a review* is on), and *Recently watched* sorted
+  by the latest real watch date.
 - **Notes and reviews.** One title-level review (`user_media.note`), shared or private, with a
   spoiler flag; review cards, review sort and **Helpful**.
 - **Feed and social.** Follows, ordinary activity, **grouped posts** (a watchlist session, a
@@ -180,8 +198,7 @@ only), the push kill switch (#119, row inert).
 
 | What | Where |
 |---|---|
-| Collection drag-to-rerank across categories, TV pool editors (#319) | Draft PR; on staging (migration `20261129000200`) and the 2026-11-19 Preview; awaiting founder device QA |
-| *Who I watched with* searchable picker (#321) | Draft PR; in the 2026-11-19 Preview; awaiting founder device QA |
+| Feed: a half hour of first rankings is one post, whatever the watch date (#328) | **Merged** to `main` (`68095e99`, 2026-11-20); migration `20261130000200` applied on staging, **not yet in production** (head read 2026-11-20). It needs no OTA: the installed client already asks to group every first ranking outside Unranked, and only the server's rule changes |
 | Reactions and comments on follow stories, Workstream C (#322) | Draft PR; **not on staging**, not in any Preview |
 | Username-or-email sign-in (#300) | Draft PR; migration not applied anywhere |
 | Design System v3 (#295) | Draft PR |
@@ -226,6 +243,10 @@ design in [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)):
   historical: the newest watch's basis is `none` or `diary`, or a reader-entered date at least
   `feed.ranking_backfill_days` (7) old. A ranking logged with the default *Today* date, a
   recent date or no watch at all is after-watch and stays standalone.
+  **Merged, production pending:** #328 (`20261130000200`, founder rule of 2026-11-20) replaces
+  this test. Two or more eligible first rankings by one person inside one fixed 30-minute
+  window become one post, whatever the watch date. Until that migration is applied in
+  production, the rule above is the one that runs.
 - A grouped post draws its members as a poster rail with the author's scores, and keeps one
   Like and one Comment; Save and Share are not drawn on it.
 - Members are hidden by `feed_events.presented_in` under the read policy, never deleted.
@@ -237,6 +258,20 @@ design in [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)):
 **It creates no watch.** No `watch_event`, no watch date set to today, no imported
 Letterboxd date replaced, no change to the latest-watch date, and nothing counted for the
 monthly leaderboard.
+
+### Collection moves and silent updates (`20261129000100`–`000300`, 2026-11-20)
+
+- `rank_reorder` is granted back to `authenticated`, because every move now writes one `manual`
+  placement. It refuses a move computed from a stale list (`55000`) and a position that is
+  not a place in the named category (`22023`).
+- A move across a category line changes `rankings.bucket` and `user_media.bucket` together,
+  and takes the score of its new place. `rankings.created_at` is kept, so a move is not heard
+  as a ranking.
+- On the TV wall, `rank_promote_show` turns a season-average show into an explicit show
+  ranking at the dropped place; `rank_unpromote_show` is its Undo. Its seasons' rankings are
+  not read or written, and a show still on the watchlist stays there.
+- A TV correction that moved its title used to post a `title_ranked` marked `update: true`.
+  It now posts nothing, like a film's. Earlier `update: true` posts are left as they are.
 
 ### Review visibility and the remembered default
 
@@ -301,9 +336,9 @@ preview lane. **Preview never points at production data.**
 3. the staging backend and data,
 4. only the explicitly unreleased fix being tested.
 
-Preview never accumulates its own history that later has to be reconciled. On 2026-11-19 it
-carries `main` `a3300bf0` plus two unreleased drafts under founder QA, #319 and #321 (see
-*Staging or unreleased* above). Staging QA accounts and the states they cover are
+Preview never accumulates its own history that later has to be reconciled. Its last recorded
+candidate (2026-11-20b, `219e2953`) was `main` `a3300bf0` plus #319 and #321, both released to
+production on 2026-11-20. No later Preview is recorded. Staging QA accounts and the states they cover are
 in [`staging-qa-inventory.md`](./staging-qa-inventory.md).
 
 ---

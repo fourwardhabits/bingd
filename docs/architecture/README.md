@@ -1,6 +1,6 @@
 # Bingd — Architecture Overview
 
-**Version:** v1 design of 2026-08-12, with a current-state reconciliation of **2026-11-19**
+**Version:** v1 design of 2026-08-12, with a current-state reconciliation of **2026-11-19**, updated **2026-11-20**
 **Status:** Living overview. The AD-n records below are the dated design decisions and are kept
 as written; where the built system has moved, a dated note under the decision says how, and
 [§ Current state](#current-state-2026-11-19) summarises it.
@@ -22,6 +22,7 @@ Status words used across these documents: **Live in production** (on `main` and 
 | [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
 | [`api.md`](./api.md) | The write and read surface |
+| [`collection-rerank.md`](./collection-rerank.md) | Collection drag-to-rerank: moves across categories, the TV wall, silent ranking updates (#319) |
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
 | [`recommendations.md`](./recommendations.md) | Candidate generation through delivery, and how each guardrail is enforced |
 | [`recommendations-v2.md`](./recommendations-v2.md) | Engine V2 (off by default): behavioural language/era profile, catalogue coverage, the engine switch |
@@ -76,15 +77,15 @@ Nothing in the client holds a service credential. Every client request carries a
 
 ## Current state, 2026-11-19
 
-What each decision below looks like in the system that is running. The release facts behind this table are in [`production-state.md`](../release/production-state.md).
+What each decision below looks like in the system that is running (updated 2026-11-20 for production `1c24b5cd`). The release facts behind this table are in [`production-state.md`](../release/production-state.md).
 
 | Area | Live in production | Shipped dark, staging or proposed |
 |---|---|---|
 | Rankable units (AD-1) | **Movies, TV shows and TV seasons**, each its own pool (`tv_shows`, migrations `20261114000100`–`000400`). Episodes are never rankable; episode metadata is shown | — |
-| Ranking (AD-2, AD-3) | Dense positions, bucket bands, the placement ledger, the Unified Backlog. Update/Keep Show links a season to its parent show ([`ranking.md`](./ranking.md) §14) | Refine: built, flag off. Collection drag-to-rerank across categories (#319): staging only |
+| Ranking (AD-2, AD-3) | Dense positions, bucket bands, the placement ledger, the Unified Backlog. Update/Keep Show links a season to its parent show ([`ranking.md`](./ranking.md) §14). Collection drag-to-rerank, across categories and on the TV wall, writes `manual` placements (#319, 2026-11-20; [`collection-rerank.md`](./collection-rerank.md)) | Refine: built, flag off |
 | Writes (AD-4) | Every write is an RPC; write RPCs claim an `operation_id`, so a retry applies once | — |
 | Visibility (AD-5) | `can_view_profile` and `security_invoker` views, as designed | — |
-| Feed (AD-6) | Assembled on read, as designed. **Grouping** is a write-side join: a watchlist session, a backlog half hour, and historical title-page rankings become one post; members are hidden by `feed_events.presented_in` under the read policy, never deleted ([`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)) | Reactions and comments on follow stories (#322): draft, not on staging |
+| Feed (AD-6) | Assembled on read, as designed. **Grouping** is a write-side join: a watchlist session, a backlog half hour, and historical title-page rankings become one post; members are hidden by `feed_events.presented_in` under the read policy, never deleted ([`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). Ranking updates, moves and corrections post nothing new (2026-11-20) | Any two first rankings in one half hour as one post, whatever the watch date (#328): merged, on staging, production migration pending. Reactions and comments on follow stories (#322): draft, not on staging |
 | Taste Match (AD-7) | Computed live per pair by `taste_match`; shows and seasons are distinct signals | — |
 | Catalogue (AD-8) | `tmdb-adapter` only | — |
 | Notifications (AD-10) | Inbox rows for every notification; push **delivers** through `push-sender`, drained by `pg_cron` | `push.delivery_enabled` is inert (#119 would make it a switch); proactive notifications and release pushes are migrated with their switches off |

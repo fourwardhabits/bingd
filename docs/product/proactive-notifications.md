@@ -2,8 +2,8 @@
 
 > **Current state (2026-11-19): shipped dark.** The migrations below are applied in production
 > (they were among the twelve that reached production with the 2026-11-12 release; production
-> is at 203, head `20261128000100`). Its switches are seeded off and no production read since
-> has recorded either as on, so nothing is generated or sent. The status line that follows is
+> is at 206, head `20261129000300`, read 2026-11-20). Its switches are seeded off and no
+> production read since has recorded either as on, so nothing is generated or sent. The status line that follows is
 > the 2026-10-28 record. What is live: [`../release/production-state.md`](../release/production-state.md).
 
 **Status:** built on `feature/proactive-notifications`, **not applied anywhere**, 2026-10-28;

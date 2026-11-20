@@ -1,6 +1,6 @@
 # Bingd — Ranking Mechanics
 
-**Version:** v1 design, reconciled with production on 2026-11-19
+**Version:** v1 design, reconciled with production on 2026-11-20
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §10, §11 · [`data-model.md`](./data-model.md) §5
 
 > **Stopping point, 2026-09-23.** Everything below still holds, and §13 adds what #196 and
@@ -10,13 +10,15 @@
 > queue in §10 (now the backlog), and the feed score in §11 (a card keeps the score of its
 > own watch again).
 >
-> **Current state (2026-11-19, production `a3300bf0`).** There are **three** ranking pools:
+> **Current state (2026-11-20, production `1c24b5cd`).** There are **three** ranking pools:
 > Movies, TV shows and TV seasons (§14, live since 2026-11-12). Everything that says a series
 > cannot be ranked describes v1 and is marked where it stands (§3). The TV Collection shows one
 > poster per show (§14.3). Refine is still flag-off in production (§13.4). Feed grouping of
 > sittings changed what a sitting *posts*, not how it ranks (§7, and
-> [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). **Staging only:**
-> drag-to-rerank in the Collection, across categories (#319, `20261129000200`).
+> [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). **Live since 2026-11-20
+> (#319, `20261129000100`–`000300`):** drag-to-rerank in the Collection, across categories and
+> on the TV wall (§7, §14.3, [`collection-rerank.md`](./collection-rerank.md)), and silent
+> ranking updates: a correction, move or Refine posts nothing new (§14.2).
 >
 > **Earlier state (2026-09-26, `9d9683a`).** #208–#210 changed only what sits around the
 > engine. An Unranked sitting now ends in a summary and posts **one** grouped feed activity
@@ -330,6 +332,8 @@ update rankings set position = $new
 > - the title the client saw at the target.
 >
 > A move never writes a comparison, a watch, a feed post or a notification, and it keeps `rankings.created_at`. Like a correction, it brings the latest watch's existing post up to date. See [`collection-rerank.md`](./collection-rerank.md).
+>
+> **Across a category (`20261129000200`, live since 2026-11-20).** The founder rejected the band-only rule on 2026-11-19. `rank_reorder` takes `p_new_bucket`, the category a drop lands in, and `p_expected_bucket`, a third stale-list guard. A drop onto another category's place moves the title into that category (`rankings.bucket` and `user_media.bucket` together, under the locks) and takes that place's score; `22023` now means "not a place in that category". No comparison is re-run: Rerank stays the path for re-deciding a title from scratch. The paragraph above the note is the v1 rule.
 
 ### Ranking again, in the same band
 
@@ -705,6 +709,12 @@ accept a whole show with no other change. `_assert_loggable` no longer refuses a
 | Abandon the linked Update Show | the season's activity; the show's ranking is untouched (I6) |
 | Any movie correction | nothing (unchanged) |
 
+> **Superseded 2026-11-20 (`20261129000300`, live).** The second row is gone: a TV update that
+> moved its title posts nothing, like a movie correction, and the latest watch's existing post
+> takes the new score and category (`_correction_follows_latest_watch` no longer skips TV).
+> Earlier `update: true` posts are left as they are. The table is the 2026-11-14 record; see
+> [`collection-rerank.md`](./collection-rerank.md), *Silent ranking updates*.
+
 **Update Show** is the parent show's ordinary correction (the band chooser, then the
 prior-anchored search, §13.2), carrying `p_linked_placement_id`, the season placement that
 offered it. The link rides on `ranking_sessions.linked_placement_id` to `_rank_finalize`,
@@ -736,6 +746,13 @@ trigger leaves the earlier post its original score, so the two posts show what c
   or keeps it where it is. *Keep Show* (`keep_show`) records one owner-only
   `show_reaffirmations` row and writes no ranking, placement, watch or Feed row; one season
   placement resolves to Update or Keep, never both.
+- **The TV wall is dragged directly** (#319, live since 2026-11-20). A drop is read against the
+  explicitly ranked shows either side of it. An explicit show moves among them with
+  `rank_reorder` in `tv_shows`; a show scored by its seasons' average is given an explicit
+  show ranking at that place by `rank_promote_show` (`20261129000300`), and its seasons are
+  not read or written. The TV Reorder control and its pool editors were removed. Drawing the
+  wall still reorders nothing on its own: only a drop writes
+  ([`collection-rerank.md`](./collection-rerank.md), *TV, dragged on the wall*).
 - Mixed TV lists sort by score; an equal score between pools falls to a fixed pool order,
   then the id. Ordinals are never compared across pools.
 - Pills: a show keeps the filled Maroon number; a season reads `S4 9.1` on Parchment with a
