@@ -88,6 +88,15 @@ jobs:
   send:
     name: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }} on ${{ github.event_name == 'schedule' && 'production' || github.event.inputs.target }}
     runs-on: ubuntu-latest
+    # Only `main`'s copy of this file runs with a secret (security register 2026-11-20, B-2).
+    # The Environments below are restricted to `main` in the repository settings, and that
+    # stays the real control. This line is the second one, kept in the file where review
+    # sees it: a token that may dispatch workflows (the production dispatcher's is one) can
+    # name any branch or tag as the ref, and a run on such a ref is skipped here before it
+    # asks for an Environment at all, even if that setting were ever loosened. It guards
+    # refs that carry this line; an older branch's copy of the file is covered by the
+    # Environment setting alone.
+    if: github.ref == 'refs/heads/main'
     # Both are restricted to `main` in the repository settings, and that is where their
     # secrets belong: a workflow on any other branch cannot reach them there. A dry run
     # needs only the Supabase pair, so `nonprod` holds neither the Resend key nor the

@@ -88,6 +88,89 @@ describe('GitHub Actions', () => {
       assert.doesNotMatch(text, /pull_request_target|workflow_run/, name);
     }
   });
+
+  it('gives every workflow a read-only job token', () => {
+    // Security register 2026-11-20, B-3. Without a `permissions:` block a job's GITHUB_TOKEN
+    // gets the repository default, which is a setting nobody reviews, and ci.yml runs `npm ci`
+    // (every dependency's install scripts) beside it. Read-only at the top of each file; a
+    // job that one day needs more says so in its own block, in review.
+    for (const { name, text } of workflows) {
+      const block = text.match(/^permissions:\n((?: {2}.*\n)+)/m);
+      assert.ok(block, `${name} has no top-level permissions block`);
+      const grants = [...block[1].matchAll(/^ {2}([a-z-]+):\s*(\S+)/gm)];
+      assert.ok(grants.length > 0, `${name}: the permissions block is empty`);
+      for (const [, scope, level] of grants) {
+        assert.ok(['read', 'none'].includes(level), `${name} grants ${scope}: ${level}`);
+      }
+    }
+    for (const { name, text } of workflows) {
+      for (const job of jobsOf(text)) {
+        assert.doesNotMatch(job, /:\s*write\b/, `${name}: a job asks for a write scope`);
+      }
+    }
+  });
+
+  /**
+   * Only `main`'s copy of a workflow runs with a secret (security register 2026-11-20, B-2).
+   *
+   * The `production` and `nonprod` Environments are restricted to `main` in the repository
+   * settings, which this repository cannot test. A token that may dispatch workflows can name
+   * any branch or tag as the ref, so each job that holds a secret also refuses, in its own
+   * `if:`, to run anywhere but `main`. The expressions are evaluated here, the way the welcome
+   * test evaluates its own, rather than compared as text.
+   */
+  it('runs a job that holds a secret only on main', () => {
+    const conditionOf = (job) => {
+      const lines = job.split('\n');
+      const at = lines.findIndex((l) => /^ {4}if:/.test(l));
+      if (at < 0) return null;
+      const head = lines[at].replace(/^ {4}if:\s*/, '');
+      if (head !== '>-') return head.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+      const rest = [];
+      for (const l of lines.slice(at + 1)) {
+        if (!/^ {6}/.test(l)) break;
+        rest.push(l.trim());
+      }
+      return rest.join(' ');
+    };
+    const evaluate = (source, ctx) =>
+      new Function(
+        'ctx', 'contains', 'fromJSON',
+        `return ${source
+          .replace(/github\.ref\b/g, 'ctx.ref')
+          .replace(/github\.event_name/g, 'ctx.event')
+          .replace(/github\.event\.inputs\.(\w+)/g, 'ctx.inputs.$1')
+          .replace(/vars\.(\w+)/g, 'ctx.vars.$1')};`,
+      )(ctx, (list, item) => list.includes(item), (s) => JSON.parse(s));
+
+    const triggers = [
+      ['schedule', {}],
+      ...['nonprod', 'production', 'both'].flatMap((target) =>
+        ['dry-run', 'send'].map((mode) => ['workflow_dispatch', { target, mode, canary: 'false' }])),
+    ];
+    let held = 0;
+    for (const { name, text } of workflows) {
+      for (const job of jobsOf(text)) {
+        if (!job.includes('secrets.')) continue;
+        held += 1;
+        const label = `${name} ${job.match(/^ {2}([\w-]+):/)?.[1]}`;
+        const condition = conditionOf(job);
+        assert.ok(condition, `${label} holds a secret and has no if:`);
+        const vars = { BINGD_PRODUCTION_TRENDING: 'true' };
+        for (const ref of ['refs/heads/feature/x', 'refs/heads/main-copy', 'refs/tags/v1', 'refs/pull/1/merge']) {
+          for (const [event, inputs] of triggers) {
+            assert.equal(Boolean(evaluate(condition, { ref, event, inputs, vars })), false,
+              `${label} runs on ${ref} for ${event} ${JSON.stringify(inputs)}`);
+          }
+        }
+        // And the guard has not switched the job off where it belongs.
+        const onMain = triggers.some(([event, inputs]) =>
+          Boolean(evaluate(condition, { ref: 'refs/heads/main', event, inputs, vars })));
+        assert.ok(onMain, `${label} no longer runs on main at all`);
+      }
+    }
+    assert.ok(held >= 3, 'the scan found too few jobs with a secret, so it is not reading these files');
+  });
 });
 
 describe('the welcome job', () => {
