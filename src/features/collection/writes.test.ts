@@ -3,6 +3,7 @@ import {
   mustReconcile,
   newOperationId,
   removeFromCollection,
+  reorderRanking,
   saveNote,
   setBucket,
   setWatchlist,
@@ -491,5 +492,89 @@ describe('removeFromCollection', () => {
     expect(await removeFromCollection({ operationId, mediaItemId, wasRanked: false })).toEqual({
       outcome: 'already_applied',
     });
+  });
+});
+
+/**
+ * #318: a Collection drag's write. Both stale-list guards are always sent, and the four
+ * outcomes the screen acts on differently are told apart by SQLSTATE, never by message.
+ */
+describe('reorderRanking', () => {
+  const input = {
+    operationId,
+    mediaItemId,
+    toPosition: 1,
+    expectedPosition: 4,
+    anchorId: 'ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  };
+
+  it('sends the move with both guards and reads the reply', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { done: true, moved: true, position: 1, from_position: 4, score: '10.0', from_score: '7.0' },
+      error: null,
+    });
+    await expect(reorderRanking(input)).resolves.toEqual({
+      outcome: 'moved',
+      reply: {
+        moved: true,
+        position: 1,
+        fromPosition: 4,
+        bucket: null,
+        fromBucket: null,
+        score: 10,
+        fromScore: 7,
+      },
+    });
+    // A move inside one category sends exactly the call it always did: no p_new_bucket.
+    expect(mockRpc).toHaveBeenCalledWith('rank_reorder', {
+      p_media_item_id: mediaItemId,
+      p_new_position: 1,
+      p_operation_id: operationId,
+      p_expected_position: 4,
+      p_anchor_media_item_id: input.anchorId,
+    });
+  });
+
+  it('a move across a category names the category it lands in (20261129000200)', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        done: true,
+        moved: true,
+        position: 5,
+        from_position: 1,
+        bucket: 'fine',
+        from_bucket: 'loved',
+        score: '4.6',
+        from_score: '10.0',
+      },
+      error: null,
+    });
+    await expect(reorderRanking({ ...input, toPosition: 5, toBucket: 'fine' })).resolves.toMatchObject({
+      outcome: 'moved',
+      reply: { bucket: 'fine', fromBucket: 'loved', score: 4.6 },
+    });
+    expect(mockRpc).toHaveBeenLastCalledWith(
+      'rank_reorder',
+      expect.objectContaining({ p_new_position: 5, p_new_bucket: 'fine' }),
+    );
+  });
+
+  it('55000 is stale, 22023 is outside the band', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: '55000', message: 'the ranking changed' } });
+    await expect(reorderRanking(input)).resolves.toEqual({ outcome: 'stale' });
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: '22023', message: 'outside' } });
+    await expect(reorderRanking(input)).resolves.toEqual({ outcome: 'outside' });
+  });
+
+  it('a refusal is unchanged; a lost reply may have committed', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'suspended' } });
+    await expect(reorderRanking(input)).resolves.toMatchObject({ outcome: 'failed', changed: false });
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'Network request failed' } });
+    await expect(reorderRanking(input)).resolves.toMatchObject({ outcome: 'failed', changed: true });
+  });
+
+  it('a replay answered from the ledger is a move', async () => {
+    mockRpc.mockResolvedValueOnce({ data: { done: true, position: 1 }, error: null });
+    await expect(reorderRanking(input)).resolves.toMatchObject({ outcome: 'moved', reply: { position: 1 } });
   });
 });

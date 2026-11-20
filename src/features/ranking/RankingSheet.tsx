@@ -65,7 +65,7 @@ import {
   type SessionStep,
 } from './session';
 import { seedPivotCard } from './pivot-card';
-import { groupBackfillRanking } from './backlog';
+import { groupFirstRanking } from './backlog';
 import { TitleRecallSheet } from './TitleRecallSheet';
 
 export type RankingSubject = {
@@ -989,16 +989,17 @@ function Session({
   }, [onPlaced, step]);
 
   /**
-   * **A first ranking may join a backfill burst** (Feed PR 2). Once per placement, and only
-   * for a first ranking (no movement): the server re-checks that it is historical, untouched
-   * and unreviewed, and otherwise leaves the post exactly as it was. Never from Unranked,
-   * which does not use this sheet and has its own sitting.
+   * **A first ranking may join its half hour** (Feed PR 2, `20261130000200`). Once per
+   * placement, and only for a first ranking (no movement): the server re-checks that it is
+   * a first ranking, untouched and unreviewed, whatever its watch date, and otherwise leaves
+   * the post exactly as it was. Never from Unranked, which does not use this sheet and has
+   * its own sitting.
    */
   const grouped = useRef(false);
   useEffect(() => {
     if (step?.state !== 'placed' || step.movement != null || grouped.current) return;
     grouped.current = true;
-    void groupBackfillRanking(subject.id);
+    void groupFirstRanking(subject.id);
   }, [step, subject.id]);
 
   return (
