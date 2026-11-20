@@ -1,0 +1,73 @@
+-- A Feed read in its own order (2026-11-20).
+--
+-- WHAT WAS ACTUALLY WRONG
+--
+-- The Feed page (`useFeed` -> `activityRows`, src/features/feed/use-feed.ts) asks PostgREST for
+--
+--   feed_events where actor_id = any(<the reader and everyone they follow>)
+--                 and type = any(<the Feed's types>)
+--                 [and <the keyset after the previous page>]
+--   order by causal_at desc, causal_step desc, id asc  limit 20
+--
+-- with the media item (and its parent) and the actor's profile embedded. No index has that
+-- order. `feed_events_actor` is `(actor_id, created_at desc)`, so the only plan is: read every
+-- event of every followed account, evaluate the row policy on each one, build both embeds for
+-- each one, sort, and keep 20. The cost of a page is the followed accounts' whole history.
+--
+-- The row policy is the expensive part of that. `feed_events_read` is
+-- `can_i_view(actor_id) and presented_in is null`, and `can_i_view` is a SQL function that
+-- calls another SQL function (`can_view_profile`). On PostgreSQL 17 neither is inlined
+-- (security definer), so each call re-plans its body and re-parses and re-plans the inner
+-- function: about 0.35 ms a row on staging, eight times what `can_view_profile` costs called
+-- directly. docs/ops/feed-latency-2026-11-20.md has the measurements.
+--
+-- Production, read-only, pg_stat_statements since 2026-08-13: the first-page Feed statement is
+-- the top app query, 6,752 calls, mean 154 ms, stddev 184 ms, max 3.1 s, ~2,100 buffer hits a
+-- call; the same statement with the artwork columns (the current bundle) is 1,422 calls at a
+-- mean of 365 ms. The median reader has 241 candidate events, the largest 1,422.
+--
+-- THE CHANGE
+--
+-- One index whose key is the Feed's sort key, column for column and direction for direction:
+--
+--   feed_events (causal_at desc, causal_step desc, id)
+--
+-- The planner can then walk the events newest first and stop after the twentieth visible row.
+-- `actor_id = any(...)`, `type = any(...)` and the keyset comparisons are leakproof, so under
+-- row security they are evaluated before the policy, and `can_i_view` runs only on events of
+-- accounts the reader follows, until the page is full. The embeds are built for those rows
+-- only, not for the whole history.
+--
+-- Not partial on `presented_in is null`, although the policy only returns those rows: a
+-- partial index is used only while the policy states that predicate, and the Feed should not
+-- silently lose its plan if the policy is ever reworded. Hidden rows are skipped in the walk by
+-- a filter that costs nothing.
+--
+-- Staging, as `authenticated`, the PostgREST statement verbatim, medians:
+--
+--   reader with ~1,400 candidate events (production's largest):   page 1  628 ms -> 16 ms
+--   reader with ~14,000 candidate events (10x):                    page 1  6.3 s  -> 18 ms
+--
+-- The planner keeps the existing `feed_events_actor` plan where that is cheaper (a reader who
+-- follows a few quiet accounts). Forced onto this index for that reader, the worst walk (the
+-- whole 29,000-row index) is 37 ms.
+--
+-- WHAT DOES NOT CHANGE
+--
+-- Everything a reader can see. This adds an index and nothing else: no policy, function,
+-- grant, column or client query changes, and an index cannot change which rows a query
+-- returns. supabase/tests/feed-order-index.test.mjs checks the Feed returns the same rows
+-- with and without it, for every kind of account the policy treats differently.
+--
+-- Built inside the migration's transaction, which blocks writes to feed_events while it
+-- builds: 2,295 rows on production, milliseconds.
+--
+-- ROLLBACK
+--
+--   drop index if exists public.feed_events_feed_order;
+
+create index if not exists feed_events_feed_order
+  on public.feed_events (causal_at desc, causal_step desc, id);
+
+comment on index public.feed_events_feed_order is
+  'The Feed''s sort key (causal_at desc, causal_step desc, id), so a page walks newest-first and stops at its limit instead of sorting every followed event (20261130000600).';
