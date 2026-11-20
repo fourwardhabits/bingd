@@ -24,10 +24,12 @@
 --     and it is independent of everything in this database.
 --   * `bingd-alerts`: `/fail` while any actionable incident is open, success otherwise. An
 --     incident is actionable when it has been seen bad on two ticks (`last_seen_at >
---     opened_at`; a one-tick blip never emails) and stays actionable for an hour after it
---     recovers, the same hour `ops_alerts` folds relapses into one row, so a flapping job is
---     one "down" and one "up" email. `bingd-ops-health`'s own row is the heartbeat's, not
---     this check's, so one fault is one email.
+--     opened_at`; a one-tick blip never emails). Once this job has reported it as failing it
+--     records that on the row (`ops_alerts.signalled_at`), and a signalled incident keeps the
+--     check failing for an hour after it recovers, the same hour `ops_alerts` folds relapses
+--     into one row, so a flapping job is one "down" and one "up" email. An incident that was
+--     never signalled is never held, however long it was open. `bingd-ops-health`'s own row
+--     is the heartbeat's, not this check's, so one fault is one email.
 --
 -- The provider emails only when a check changes state (up to down, down to up). So the
 -- emails are deduplicated by construction, a recovery sends one "up", and a lost ping is
@@ -67,7 +69,9 @@
 -- reports both.
 --
 -- Inside one `do` block, so the functions are never executable by PUBLIC, anon or
--- authenticated between `create` and `revoke`. Re-applying the file is safe.
+-- authenticated between `create` and `revoke`. Re-applying the file is safe. The one change
+-- to 20261130000500's objects is a nullable column on `ops_alerts`, which its tick neither
+-- reads nor writes.
 --
 -- Operator notes: docs/ops/operator-alerts-proposal.md, docs/ops/background-jobs.md §2g.
 -- Stop the pings (the provider then emails that the heartbeat stopped; pause both checks
@@ -77,6 +81,12 @@
 
 do $install$
 begin
+
+-- When bingd-ops-alert first reported this incident to the provider as failing. Set only by
+-- _ops_alert_ping(); the hold-down after recovery applies only to a row that has it.
+alter table ops_alerts add column if not exists signalled_at timestamptz;
+comment on column ops_alerts.signalled_at is
+  'When bingd-ops-alert first sent this incident to the alert provider as failing; null if it never did. A recovered row with it set holds the bingd-alerts check failing for an hour (20261130000700).';
 
 -- ---------------------------------------------------------------------------
 -- 1. The state, computed without any I/O
@@ -123,9 +133,10 @@ begin
      and a.check_name <> 'bingd-ops-health'
      and a.last_seen_at > a.opened_at;
 
-  -- Recovered within the hour after having been actionable. Ticks are ten minutes apart,
-  -- so an incident seen bad on two ticks was open for at least twenty; a one-tick blip,
-  -- about ten. Muted and retired closes end the incident at once.
+  -- Recovered within the hour after this job reported it as failing. Whether it was ever
+  -- actionable cannot be read from the closed row (the tick overwrites last_seen_at when it
+  -- closes, and a skipped tick stretches a blip's open time), so it is recorded when it is
+  -- signalled. Muted and retired closes end the incident at once.
   select coalesce(jsonb_agg(jsonb_build_object(
            'check', a.check_name, 'recovered_at', a.closed_at) order by a.closed_at), '[]'::jsonb)
     into v_held
@@ -134,7 +145,7 @@ begin
      and a.check_name <> 'bingd-ops-health'
      and a.closed_at > v_at - interval '1 hour'
      and a.closed_at <= v_at
-     and a.closed_at - a.opened_at >= interval '15 minutes';
+     and a.signalled_at is not null;
 
   return jsonb_build_object(
     'heartbeat', case when v_tick = 'ok' and not v_tick_open then 'ok' else 'fail' end,
@@ -219,6 +230,14 @@ begin
       timeout_milliseconds := 10000
     ) into v_id;
     v_ids := v_ids || v_id;
+
+    -- Record which incidents have now been reported as failing: the same rows as `open`.
+    update ops_alerts a
+       set signalled_at = v_at
+     where a.closed_at is null
+       and a.check_name <> 'bingd-ops-health'
+       and a.last_seen_at > a.opened_at
+       and a.signalled_at is null;
   end if;
 
   return jsonb_build_object(
@@ -240,9 +259,9 @@ as $fn$
 $fn$;
 
 comment on function _ops_alert_signal(timestamptz) is
-  'What bingd-ops-alert would send, as of p_at, with no I/O: heartbeat ok or fail (the bingd-ops-health check and its own open alert), alerts ok or fail (an ops_alerts row open and seen on two ticks, or recovered within the hour after being so), and the check names, statuses and times behind them, never detail. Owner only (20261130000700).';
+  'What bingd-ops-alert would send, as of p_at, with no I/O: heartbeat ok or fail (the bingd-ops-health check and its own open alert), alerts ok or fail (an ops_alerts row open and seen on two ticks, or recovered within the hour after being signalled), and the check names, statuses and times behind them, never detail. Owner only (20261130000700).';
 comment on function _ops_alert_ping(timestamptz) is
-  'One bingd-ops-alert run: on a prod database with the Vault secret ops_alert_ping_key set, posts the heartbeat and alert state to hc-ping.com/<key>/bingd-heartbeat and /bingd-alerts (with /fail when bad). Returns not_production, unconfigured, invalid_key or posted with the pg_net request ids. Raises only when configured and pg_net is missing. Never returns or logs the key. Owner only (20261130000700).';
+  'One bingd-ops-alert run: on a prod database with the Vault secret ops_alert_ping_key set, posts the heartbeat and alert state to hc-ping.com/<key>/bingd-heartbeat and /bingd-alerts (with /fail when bad). Marks the open actionable incidents ops_alerts.signalled_at. Returns not_production, unconfigured, invalid_key or posted with the pg_net request ids. Raises only when configured and pg_net is missing. Never returns or logs the key. Owner only (20261130000700).';
 comment on function _ops_alert_ping() is
   'The bingd-ops-alert call: _ops_alert_ping(now()). Owner only (20261130000700).';
 

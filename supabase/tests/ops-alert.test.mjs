@@ -118,14 +118,18 @@ const configureProduction = async () => {
   await installNet();
 };
 
-/** An ops_alerts row, times in minutes before AT. closedAgo null = still open. */
-const alert = (check, { openedAgo, seenAgo = openedAgo, closedAgo = null, reason = null, status = 'late', reopened = 0, detail = {} }) =>
+/**
+ * An ops_alerts row, times in minutes before AT. closedAgo null = still open. signalledAgo:
+ * when bingd-ops-alert first reported it as failing (null = never).
+ */
+const alert = (check, { openedAgo, seenAgo = openedAgo, closedAgo = null, reason = null, status = 'late', reopened = 0, detail = {}, signalledAgo = null }) =>
   t.sql(
-    `insert into ops_alerts (check_name, status, opened_at, last_seen_at, closed_at, close_reason, reopened, detail)
+    `insert into ops_alerts (check_name, status, opened_at, last_seen_at, closed_at, close_reason, reopened, detail, signalled_at)
      values ($1, $2, $3::timestamptz - $4::float8 * interval '1 minute',
              $3::timestamptz - $5::float8 * interval '1 minute',
-             $3::timestamptz - $6::float8 * interval '1 minute', $7, $8, $9::jsonb)`,
-    [check, status, AT, openedAgo, closedAgo ?? seenAgo, closedAgo, reason, reopened, JSON.stringify(detail)],
+             $3::timestamptz - $6::float8 * interval '1 minute', $7, $8, $9::jsonb,
+             $3::timestamptz - $10::float8 * interval '1 minute')`,
+    [check, status, AT, openedAgo, closedAgo ?? seenAgo, closedAgo, reason, reopened, JSON.stringify(detail), signalledAgo],
   );
 
 const signal = async (at = AT) => (await t.sql(`select _ops_alert_signal($1::timestamptz) as s`, [at])).rows[0].s;
@@ -250,8 +254,8 @@ describe('the signal', () => {
 
   it('holds a recovery for an hour, so a flapping job is one down and one up', async () => {
     await healthyCron();
-    // Open for 30 minutes, recovered 20 minutes ago.
-    await alert('bingd-release-evaluate', { openedAgo: 50, closedAgo: 20, reason: 'recovered' });
+    // Open for 30 minutes, reported as failing, recovered 20 minutes ago.
+    await alert('bingd-release-evaluate', { openedAgo: 50, closedAgo: 20, reason: 'recovered', signalledAgo: 38 });
     let s = await signal();
     assert.equal(s.alerts, 'fail');
     assert.deepEqual(s.open, []);
@@ -267,8 +271,16 @@ describe('the signal', () => {
   it('does not hold a blip that recovered, or a muted or retired close', async () => {
     await healthyCron();
     await alert('bingd-push-drain', { openedAgo: 12, closedAgo: 2, reason: 'recovered' });
-    await alert('bingd-import-drain', { openedAgo: 60, closedAgo: 5, reason: 'muted' });
-    await alert('bingd-old-job', { openedAgo: 60, closedAgo: 5, reason: 'retired' });
+    await alert('bingd-import-drain', { openedAgo: 60, closedAgo: 5, reason: 'muted', signalledAgo: 50 });
+    await alert('bingd-old-job', { openedAgo: 60, closedAgo: 5, reason: 'retired', signalledAgo: 50 });
+    assert.equal((await signal()).alerts, 'ok');
+  });
+
+  it('does not hold an incident that was never signalled, however long it was open', async () => {
+    await healthyCron();
+    // Bad on one tick, the next tick skipped, recovered on the one after: open 20 minutes,
+    // never seen bad twice, so never reported. Elapsed time must not make it a hold.
+    await alert('bingd-push-drain', { openedAgo: 22, closedAgo: 2, reason: 'recovered' });
     assert.equal((await signal()).alerts, 'ok');
   });
 
@@ -380,6 +392,40 @@ describe('when it sends', () => {
     assert.equal(sent[1].url, `${BASE}bingd-alerts`);
   });
 
+  it('marks only the incidents it reported as failing, once, and then holds their recovery', async () => {
+    await configureProduction();
+    await alert('bingd-push-drain', { openedAgo: 30, seenAgo: 2 });
+    await alert('import-queue', { openedAgo: 2 }); // one tick only: not reported
+    await alert('bingd-ops-health', { openedAgo: 30, seenAgo: 2, status: 'failing', detail: { tick_error: 'XX000' } });
+    await ping();
+    const marked = async () =>
+      Object.fromEntries((await t.sql(`select check_name, signalled_at from ops_alerts`)).rows
+        .map((r) => [r.check_name, r.signalled_at && r.signalled_at.toISOString()]));
+    assert.deepEqual(await marked(), {
+      'bingd-push-drain': new Date(AT).toISOString(), 'import-queue': null, 'bingd-ops-health': null,
+    });
+
+    // A later run does not move the first time.
+    await ping(new Date(Date.parse(AT) + 10 * 60_000).toISOString());
+    assert.equal((await marked())['bingd-push-drain'], new Date(AT).toISOString());
+
+    // Recovered: the reported one holds, the other does not.
+    await t.sql(`update ops_alerts set closed_at = $1::timestamptz + interval '15 minutes', close_reason = 'recovered'
+                  where check_name <> 'bingd-ops-health'`, [AT]);
+    const s = await signal(new Date(Date.parse(AT) + 20 * 60_000).toISOString());
+    assert.deepEqual(s.recovering.map((r) => r.check), ['bingd-push-drain']);
+  });
+
+  it('does not mark anything when it cannot observe, or on a nonprod database', async () => {
+    await configureProduction();
+    await alert('bingd-push-drain', { openedAgo: 30, seenAgo: 2 });
+    await t.sql(`alter table cron.job_run_details drop column start_time`);
+    await ping();
+    await setEnv('nonprod');
+    await ping();
+    assert.equal((await t.sql(`select signalled_at from ops_alerts`)).rows[0].signalled_at, null);
+  });
+
   it('posts /fail to the heartbeat when the tick is unhealthy, and nothing for alerts when it cannot observe', async () => {
     await configureProduction();
     await alert('bingd-ops-health', { openedAgo: 2, status: 'failing', detail: { tick_error: 'XX000' } });
@@ -432,9 +478,11 @@ describe('the rollback', () => {
     assert.deepEqual((await t.sql(`select jobname from cron.job`)).rows.map((r) => r.jobname), ['bingd-ops-health']);
     const { rows } = await t.sql(
       `select (select count(*)::int from pg_proc where proname in ('_ops_alert_ping', '_ops_alert_signal')) as fns,
-              (select count(*)::int from ops_alerts) as alerts`,
+              (select count(*)::int from ops_alerts) as alerts,
+              (select count(*)::int from information_schema.columns
+                where table_name = 'ops_alerts' and column_name = 'signalled_at') as col`,
     );
-    assert.deepEqual(rows[0], { fns: 0, alerts: 1 });
+    assert.deepEqual(rows[0], { fns: 0, alerts: 1, col: 0 });
 
     await t.exec(await migrationSql(MIGRATION));
     assert.equal((await t.sql(`select count(*)::int as n from cron.job where jobname = 'bingd-ops-alert'`)).rows[0].n, 1);

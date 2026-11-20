@@ -141,10 +141,14 @@ That is all. There is no GitHub change, no Resend change, no new token and no ap
   a second tick, ten minutes later, still saw it bad. A single late observation that clears
   on the next tick never emails.
   - A relapse that `ops_alerts` folds into an older row (`reopened + 1`) counts at once.
-- **An incident ends an hour after it recovers.** A row closed as `recovered` keeps the
-  alerts check failing for one hour, provided it had been actionable, meaning open at least
-  15 minutes. One hour is the same window in which `ops_alerts` folds a relapse into one
+- **A reported incident ends an hour after it recovers.** When a run first sends an
+  incident as failing, it records that on the row (`ops_alerts.signalled_at`, the draft's
+  one new column). A row closed as `recovered` with that set keeps the alerts check failing
+  for one hour. One hour is the same window in which `ops_alerts` folds a relapse into one
   row. So a flapping job sends **one** down email and **one** up email, not one pair per flap.
+  - A row that was never reported is never held, however long it was open. Elapsed time
+    cannot stand in for this: the tick overwrites `last_seen_at` when it closes a row, and a
+    skipped tick stretches a one-observation blip to twenty minutes.
 - **Muted and retired closes end the incident at once.** `ops.alert_muted_checks` is the
   existing switch, and it now also silences email.
 - **The tick's own fault belongs to the heartbeat only,** so one fault is one email.
@@ -298,9 +302,9 @@ is dead.
 
 Implemented in `20261130000700`, staging only:
 
-- the job and both functions;
+- the job, both functions, and the nullable column `ops_alerts.signalled_at`;
 - the gates;
-- the tests: blip, two ticks, relapse, one-hour hold, muted and retired, the tick's own
+- the tests: blip, two ticks, relapse, one-hour hold only for a signalled incident, muted and retired, the tick's own
   alert, observe error, every no-send gate, exact URLs, the key only in the path, no `detail`
   in the body, grants, idempotent scheduling that touches no other job, and the rollback.
 

@@ -1,10 +1,11 @@
 -- ROLLBACK of 20261130000700_an_alert_that_leaves_the_database. STAGING ONLY unless
 -- separately approved.
 --
--- Removes everything the migration added: the pg_cron job `bingd-ops-alert` and the
--- functions `_ops_alert_ping()`, `_ops_alert_ping(timestamptz)` and
--- `_ops_alert_signal(timestamptz)`. `ops_alerts`, `bingd-ops-health` and every other job are
--- untouched: 20261130000500 keeps recording, as a pull signal again.
+-- Removes everything the migration added: the pg_cron job `bingd-ops-alert`, the functions
+-- `_ops_alert_ping()`, `_ops_alert_ping(timestamptz)` and `_ops_alert_signal(timestamptz)`,
+-- and the column `ops_alerts.signalled_at`. The rest of `ops_alerts` (every row),
+-- `bingd-ops-health` and every other job are untouched: 20261130000500 keeps recording, as a
+-- pull signal again.
 --
 -- It does not touch the Vault. Where the founder stored the key, remove it separately:
 --   delete from vault.secrets where name = 'ops_alert_ping_key';
@@ -34,6 +35,13 @@ $rollback$;
 drop function if exists _ops_alert_ping();
 drop function if exists _ops_alert_ping(timestamptz);
 drop function if exists _ops_alert_signal(timestamptz);
+do $column$
+begin
+  if to_regclass('public.ops_alerts') is not null then
+    alter table ops_alerts drop column if exists signalled_at;
+  end if;
+end;
+$column$;
 
 -- The migration's own record, where there is one (not in PGlite).
 do $record$
