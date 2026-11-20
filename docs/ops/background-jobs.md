@@ -238,7 +238,12 @@ here as `missing`, `late` or `failing` (the self-check).
   replacing (§3.3); it does not open an alert.
 - **Cost.** Cron history is read through the last 5,000 runids by primary key, about ten
   hours at production's rate, never by a scan of `cron.job_run_details`. Every other read is a
-  small table or an index.
+  small table or an index. Measured on staging on 2026-11-20 (180,000 history rows):
+  - the checks take 12 ms warm and 21 ms in a fresh session;
+  - the four scheduled ticks took 30 to 63 ms as pg_cron records them, including its session
+    start;
+  - the 16:03 tick added no sequential scan of `cron.job_run_details` (`pg_stat_all_tables`
+    before and after) and three index scans.
 
 #### The alert lifecycle
 

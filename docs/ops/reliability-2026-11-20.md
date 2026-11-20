@@ -115,6 +115,11 @@ reported. That is exact, and needs one migration.
 
 ### 6. Nothing alerts. Open.
 
+> **Update, #341 (`20261130000500`, staging only).** `ops_job_health()` reads every job and
+> queue in one query, and `bingd-ops-health` records each failure and recovery in
+> `ops_alerts`. It is still a pull signal: nothing is pushed to anybody, for the reason given in
+> [background-jobs.md](background-jobs.md) §2g.
+
 Every health signal is pull-only:
 
 - the status functions (`import_drain_status`, `push_drain_status`, `release_status`,
