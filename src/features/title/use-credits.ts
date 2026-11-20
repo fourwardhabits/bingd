@@ -54,12 +54,10 @@ export function useCredits(mediaItemId: string | null) {
     queryKey: ['credits', mediaItemId],
     enabled: Boolean(mediaItemId),
     queryFn: async (): Promise<CreditsResult | null> => {
-      const { count, error: countError } = await supabase
-        .from('media_cache')
-        .select('*', { count: 'exact', head: true });
-      if (countError) throw countError;
-      if (!count) return null;
-
+      // One read. This used to open with an unfiltered exact count of the whole of
+      // `media_cache`, which changed nothing (an empty cache already answers this read with
+      // no row) and cost a serial round trip of 85 ms on average on every title page, more
+      // as the cache grows (reliability review, 2026-11-20; use-credits.test.ts).
       const { data, error } = await supabase
         .from('media_cache')
         .select('payload')

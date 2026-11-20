@@ -100,12 +100,14 @@ export function useMyBlocks(viewerId: string) {
       const { data, error } = await supabase.rpc('my_blocks');
       if (error) throw error;
 
-      return ((data ?? []) as {
-        user_id: string;
-        username: string;
-        display_name: string | null;
-        avatar_path: string | null;
-      }[]).map((row) => ({
+      return (
+        (data ?? []) as {
+          user_id: string;
+          username: string;
+          display_name: string | null;
+          avatar_path: string | null;
+        }[]
+      ).map((row) => ({
         id: row.user_id,
         username: row.username,
         name: row.display_name || row.username,
@@ -151,6 +153,9 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
         ['comment-counts', viewerId],
         ['profile'],
         ['profile-follows'],
+        // The own Profile tab's Followers and Following counts. `['profile']` above is the
+        // public profile; the own header reads its own key (`queryKeys.profileStats`).
+        ['profile-stats', viewerId],
         ['actor-activity'],
         ['following-score', viewerId],
         ['user-search'],
