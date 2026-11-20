@@ -42,13 +42,13 @@ Three workers ran in separate worktrees: A (docs), B (security) and C (reliabili
 | [#335](https://github.com/fourwardhabits/bingd/pull/335) | Security findings register 2026-11-20 | `00361a70` | Codex: 3 × P2 fixed, then clean on `17152cd3` |
 | [#337](https://github.com/fourwardhabits/bingd/pull/337) | `docs/ops/background-jobs.md` and `docs/ops/reliability-2026-11-20.md` | `a7ed877c` | Codex: 1 finding fixed (stopped-job detection), then clean on `245c400f` |
 
-### Ready, awaiting founder approval (not merged, not in production)
+### Shipped 2026-11-20 after founder approval
 
-| PR | What | Evidence | Production step |
-|---|---|---|---|
-| [#333](https://github.com/fourwardhabits/bingd/pull/333) | Secret-holding jobs run only on `main`; every workflow gets a read-only token (B-2, B-3) | CI green, config tests 202/202, guard mutation-tested. Codex clean on `4fb17475` | Merge only; it takes effect on `main` |
-| [#334](https://github.com/fourwardhabits/bingd/pull/334) | Cron-history prune hourly, not every tick. Migration `20261130000400`, renumbered so it sorts before #322 | The prune was **61.4% of all production DB time** (24,157 s of `pg_stat_statements`; coordinator re-read). Staging ticks: maintenance 99.5 → 13.4 ms, release-evaluate 129.6 → 9.7 ms. `test:db` 3408/3408. Codex clean on `5fa9dc82`; the renumbered head `93e1eeca` is re-reviewed | Production migration |
-| [#336](https://github.com/fourwardhabits/bingd/pull/336) | Title pages stop counting the whole `media_cache` (prod: 4,853 calls, mean 85 ms, max 7.0 s). A follow refreshes your own profile counts | JS only, no fingerprint change. Tests fail on the old code. CI green, Codex clean on `c9f04bc5` | Next production OTA |
+The founder approved #333, #334 and #336. They are shipped and verified; the record is `production-2026-11-20-333-334-336.md`.
+
+- **#333** (`503fd75f`): secret-holding jobs run only on `main`, and every workflow gets a read-only token.
+- **#334** (`6a7bfb85`): migration `20261130000400` applied at about 14:32Z. Production is at 209 versions. Each `bingd-import-maintenance` run went from 81–165 ms (with about 2 s spikes) to 8–24 ms. Rollback: `pr334/rollback-20261130000400.sql`, captured from production before the apply.
+- **#336** (`e86596f2`): production OTA run `01a1f95f`. Android `01a1f964-4e35-77e9-a99d-4315a8141d06`, iOS `01a1f964-4e35-7374-af5b-c00ad4919058`. Runtimes equal the 1.1.0 (15) binaries. The live manifest serves `e86596f2`.
 
 ### Security (register: `docs/security/findings-register-2026-11-20.md`)
 - **No critical or high finding is open, and none was found.**
@@ -74,7 +74,7 @@ Three workers ran in separate worktrees: A (docs), B (security) and C (reliabili
   - B-10 (deleted handles reserved; privacy-policy wording).
 
 ### Reliability (`docs/ops/reliability-2026-11-20.md`)
-- **Fixed, pending approval:** the cron prune (#334); the `media_cache` count and the stale own-profile counts (#336).
+- **Fixed and shipped:** the cron prune (#334), the `media_cache` count and the stale own-profile counts (#336).
 - **Open, measured:**
   - The Feed page query costs more as followed history grows: prod 6,752 calls, mean 154 ms, max 3.1 s, with the per-row `can_i_view` check dominating. It needs a redesign before growth.
   - `report_device_context` takes about 1.2 s per launch (fire-and-forget).
@@ -96,6 +96,7 @@ Three workers ran in separate worktrees: A (docs), B (security) and C (reliabili
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-20 ~14:40Z: **Shipped.** #333, #334 (`20261130000400`) and #336 (OTA `e86596f2`), all with founder approval. Every gate on `e86596f2` was green. The live manifest is verified, and prune runs measured 8–24 ms after the apply. Next engineering work: job-failure alerting, a migration-order safeguard, then the Feed query long tail.
 - 2026-11-20 ~08:00Z: overnight closeout recorded above. Merged: #325, #332, #317, #335, #337 (all docs). Ready for founder approval: #333, #334 (staging), #336. Production changed only by the approved #331 migration.
 - 2026-11-20 ~05:40Z: **Shipped.** #331 migration `20261130000300` applied to production with founder approval, from a clean checkout of `ecd03517` (CI, races, release gate green). The script differs from the reviewed #328 script only in its expected version, and the dry run showed exactly that version pending. Verified: history, ownership, ACL, one job, and the `unconfigured` probe with no request. No token was created or stored.
 - 2026-11-20 ~05:15Z: #331 merged (`ecd03517`; CI, races, release gate green; Codex clean on `dd0b265a`). Production dry run: only `20261130000300` pending. The apply was held by the session's permission check, so it waits for founder go-ahead.
