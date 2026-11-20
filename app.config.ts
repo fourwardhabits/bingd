@@ -215,7 +215,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // config is one fingerprint source and even an iOS-only `ios.version` would move Android's
   // runtime as well. The binaries already installed keep their runtimes (iOS `61efbf17`,
   // Android `da3c7f47`) and the OTA already published for them, which is the same app.
-  version: '1.1.0',
+  //
+  // **1.2.0 on 2026-11-19, for the store refresh: the App Store name `bingd` and the new
+  // screenshots.** Apple only lets the name and screenshots change on an editable version, and
+  // 1.1.0 (15) has been on the App Store since 2026-09-26, so its train is closed. The binary
+  // embeds `main` as of 2026-11-20 (`68095e9`: production `1c24b5c`, #319 and #321, plus
+  // #328's server-only change), built on EAS by `.eas/workflows/store-build.yml`. A minor, by the
+  // same rule as 1.1.0: everything since `9d9683a` shipped by OTA (grouped feed, Requests,
+  // Sent to You, labelled engagement) is new to a store binary. This moves the runtime on
+  // both platforms; the 1.1.0 binaries keep `8ea562b7` / `ec79e181` and their OTAs.
+  version: '1.2.0',
   orientation: 'portrait',
   scheme: current.scheme,
   userInterfaceStyle: 'light',
@@ -421,7 +430,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-image-picker',
       {
-        photosPermission: 'Bingd uses your photos so you can choose a profile picture.',
+        photosPermission: 'bingd uses your photos so you can choose a profile picture.',
         // Drops NSCameraUsageDescription and the Android CAMERA permission
         // outright, rather than shipping a permission the app never asks for
         // and a reviewer has to ask about.
