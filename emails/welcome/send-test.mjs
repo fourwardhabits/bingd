@@ -12,6 +12,12 @@
  *          --name Suraj          the first name the greeting uses ("Hey Suraj,")
  *          --subject 1|2|3       which subject candidate to send (1 = subject.chosen)
  *          --from "Name <address>"  --reply-to <address>
+ *          --inline-images  attach the email's image (the logo, the committed web/src/ file,
+ *                           byte for byte) as an inline CID image instead of loading it
+ *                           from bingd.app. For a test sent
+ *                           before the deploy that publishes them there. The live email
+ *                           always loads them from bingd.app. (--inline-photo is the old
+ *                           name and still works.)
  *          --out <dir>  writes the exact request body as JSON and the personalised HTML
  *          and text beside it, so every header, URL and both parts can be read before
  *          anything is sent.
@@ -45,8 +51,9 @@
  * this email; never reuse the one named `Supabase`, which relays every sign-in code.
  */
 
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,7 +80,7 @@ const die = (...lines) => {
   process.exit(1);
 };
 
-const known = new Set(['--to', '--from', '--reply-to', '--name', '--invite-url', '--subject', '--out', '--send']);
+const known = new Set(['--to', '--from', '--reply-to', '--name', '--invite-url', '--subject', '--out', '--send', '--inline-images', '--inline-photo']);
 for (const arg of argv) {
   if (/^--(cc|bcc)$/.test(arg)) die(`Refusing ${arg}. This sends one message to one address.`);
   if (arg.startsWith('--') && !known.has(arg)) die(`Unknown option ${arg}.`);
@@ -164,6 +171,28 @@ const values = {
 const htmlValues = { ...values, postalAddress: escapeHtml(postalAddress) };
 const textValues = { ...values, postalAddress };
 
+/**
+ * The images, inline, for a test sent before bingd.app serves them.
+ *
+ * Each `src` the build wrote is swapped for a `cid:` reference and the committed file is
+ * attached under that Content-ID, so the test shows the very bytes the site will publish.
+ * Nothing else in the message changes.
+ */
+let html = personalise(template.html, htmlValues);
+let attachments;
+const inlineImages = argv.includes('--inline-images') || argv.includes('--inline-photo');
+const images = [{ ...copy.masthead, cid: 'bingd-logo' }];
+if (inlineImages) {
+  attachments = [];
+  for (const image of images) {
+    const src = `src="${image.src}"`;
+    if (html.split(src).length !== 2) die(`--inline-images expects exactly one ${src} in the rendered email.`);
+    html = html.replace(src, `src="cid:${image.cid}"`);
+    const bytes = await readFile(join(here, '..', '..', image.file));
+    attachments.push({ filename: image.file.split('/').pop(), content: bytes.toString('base64'), content_id: image.cid });
+  }
+}
+
 let payload;
 try {
   payload = resendPayload({
@@ -171,9 +200,10 @@ try {
     replyTo,
     to,
     subject: `[TEST] ${subjects[subjectChoice - 1]}`,
-    html: personalise(template.html, htmlValues),
+    html,
     text: personalise(template.text, textValues),
     unsubscribeUrl,
+    attachments,
   });
 } catch (error) {
   die(error.message);
@@ -183,6 +213,7 @@ const links = [...new Set([...payload.html.matchAll(/href="([^"]+)"/g)].map((m) 
 
 const warnings = [];
 if (copy.letter.status !== 'APPROVED') warnings.push(`letter.status is "${copy.letter.status}": the automation would refuse this copy.`);
+if (!payload.attachments) warnings.push(`The images load from ${images.map((i) => i.src).join(' and ')}, which exist only once main is deployed. Before that, add --inline-images.`);
 if (!inviteMatch) warnings.push('No --invite-url: the invite link uses an all-zero token the resolver refuses. Fine for a dry run.');
 if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd domain; Resend will refuse it.`);
 if (/@bingd\.app$/i.test(addressOf(from))) {
@@ -197,6 +228,9 @@ console.log('  Subject     ', payload.subject);
 console.log('  Headers     ', JSON.stringify(payload.headers));
 console.log('  HTML        ', `${(payload.html.length / 1024).toFixed(1)}KB, ${(payload.html.match(/<img\b/gi) ?? []).length} images`);
 console.log('  Text        ', `${(payload.text.length / 1024).toFixed(1)}KB`);
+if (payload.attachments) {
+  for (const a of payload.attachments) console.log('  Inline      ', `${a.filename}, cid:${a.content_id}, ${(Buffer.from(a.content, 'base64').length / 1024).toFixed(0)}KB`);
+}
 console.log('  Links');
 for (const link of links) console.log(`     ${link}`);
 for (const warning of warnings) console.log(`\n  ! ${warning}`);

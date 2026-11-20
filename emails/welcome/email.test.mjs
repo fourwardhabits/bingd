@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -35,7 +36,9 @@ import {
  *      paths the app claims, in both parts.
  *   4. **Every product label is one the app renders.** targets.json lists them; the
  *      2026-09-18 letter names none.
- *   5. **It is a letter.** No images, no buttons, and no bold: the approved copy asks for none.
+ *   5. **It is a letter.** One image, the bingd. logo, and no photo, no buttons and no bold:
+ *      the approved copy asks for none. The logo is a real file the site publishes, small
+ *      and stripped of metadata.
  *   6. **The test send cannot reach a user list.**
  */
 
@@ -48,8 +51,9 @@ const repo = join(here, '..', '..');
  * Changing a word of it changes this hash. Do not update it to make a test pass: update it
  * because the founder changed his letter.
  */
-// The founder's letter, revised 2026-09-18 after he read the real staging send in Gmail.
-const LOCKED_LETTER = 'acef1efc973b3e79364c8a4717ea2318047be6f42628761594926b529152e8e5';
+// The short founder note with the cafe photo, 2026-11-19, replacing the 2026-09-18 letter.
+// 2026-11-20: the founder's closing line, "(the movie nerd that made bingd)", after "Suraj".
+const LOCKED_LETTER = '6b9bfa328b74baca3a497b1d64375b4a3ca81aa701ba67f4a58a8de2d19bf4ed';
 
 const read = (path) => readFile(join(repo, path), 'utf8');
 
@@ -97,8 +101,8 @@ after(async () => {
 
 describe('welcome email: the founder letter', () => {
   it('is exactly the letter the founder approved', () => {
-    const { greeting, paragraphs, signoff } = copy.letter;
-    const hash = createHash('sha256').update(JSON.stringify({ greeting, paragraphs, signoff })).digest('hex');
+    const { greeting, paragraphs, signoff, closing } = copy.letter;
+    const hash = createHash('sha256').update(JSON.stringify({ greeting, paragraphs, signoff, closing })).digest('hex');
     assert.equal(hash, LOCKED_LETTER, 'the founder letter changed. If he changed it, update LOCKED_LETTER in the same commit.');
     assert.equal(copy.letter.status, 'APPROVED');
   });
@@ -111,19 +115,91 @@ describe('welcome email: the founder letter', () => {
     assert.equal((html.match(/<b>|font-weight:\s*(bold|[5-9]00)/g) ?? []).length, 0, 'no bold or semibold text, links included');
   });
 
-  it('is a letter: no images, no buttons, no cards', () => {
-    assert.doesNotMatch(html, /<img\b/i);
+  it('is a letter: one image, the logo, no photo, and no buttons or cards', () => {
+    const images = html.match(/<img\b[^>]*>/gi) ?? [];
+    assert.equal(images.length, 1, 'the logo, nothing else');
+    const [logo] = images;
+    assert.ok(logo.includes(`src="${copy.masthead.src}"`), 'the image is the logo');
+    assert.ok(logo.includes('alt="bingd."'), 'with images off the logo reads as the wordmark');
+    assert.match(logo, /font-family:Georgia[^"]*color:#773744/, 'and that alt text is set as the old text wordmark');
+    assert.ok(logo.includes(`width="${copy.masthead.width}"`) && logo.includes(`height="${copy.masthead.height}"`), 'a stated size, so nothing jumps');
+    assert.equal('photo' in copy, false, 'no photo (founder, 2026-11-20)');
+    assert.doesNotMatch(html, /founder-cafe-tea/, 'no photo in the letter');
     assert.doesNotMatch(html, /btn-wrap|class="btn"|dk-raised|dk-fill|dk-outline/);
   });
 
-  it('keeps the plain-text part as the approved letter reads', () => {
+  it('goes straight from the logo into the letter', () => {
+    const logoAt = html.indexOf(copy.masthead.src);
+    const greetingAt = html.indexOf('{{greeting}}');
+    assert.ok(logoAt > -1 && logoAt < greetingAt, 'the logo comes first');
+    assert.equal(html.slice(logoAt, greetingAt).includes('<img'), false, 'nothing between the logo and "Hey"');
+    assert.match(html, /Happy binging,<br \/>Suraj <span/, 'the sign-off, then the name line');
+    assert.doesNotMatch(html, /display:\s*flex|display:\s*grid/, 'tables, not flexbox');
+  });
+
+  it('keeps the plain-text part as the approved note reads', () => {
     assert.match(text, /^\{\{greeting\}\}\n\nThanks for giving bingd a shot!/);
     // Whitespace-tolerant, because the text part is word-wrapped at 72 columns.
-    assert.match(text, /\nThe app was inspired by my experience using Beli,\s+which changed the way\s+I enjoyed\s+restaurants\./);
-    assert.match(text, /See where your latest movie lands in your rankings,/);
-    assert.match(text, /\nI built bingd because I think movies and TV are missing that same loop,/);
+    assert.match(text, /\nBeli changed the way I experienced restaurants\./);
+    assert.match(text, /\nI built bingd because I wanted that same post-watch ritual for movies\s+and TV:/);
+    assert.match(text, /\nHope you enjoy it as much as I do\.\n/);
     assert.doesNotMatch(text, /\*\*/);
-    assert.match(text, /\nHappy binging,\nSuraj\n/);
+    assert.match(text, /\nHappy binging,\nSuraj \(the movie nerd that made bingd\)\n/);
+  });
+
+  it('carries none of the long 2026-09-18 letter it replaced', () => {
+    assert.doesNotMatch(
+      html + text,
+      /The app was inspired by my experience using Beli|missing that same loop|See where your latest movie lands|stronger recommendations with a better rating system/,
+    );
+  });
+
+  it('closes as the founder asked: on the name line, same font and colour, a little smaller', () => {
+    assert.equal(copy.letter.closing, '(the movie nerd that made bingd)');
+    assert.doesNotMatch(html + text, /The movie nerd who made bingd/, 'the 2026-11-19 closing line is gone');
+    const line = /<p style="([^"]*)"[^>]*>Happy binging,<br \/>Suraj <span style="([^"]*)"[^>]*>\(the movie nerd that made bingd\)<\/span><\/p>/.exec(html);
+    assert.ok(line, '"Suraj" and the phrase share one paragraph, so one line');
+    assert.match(line[1], /font-family:Georgia[^;]*;font-size:19px;[^"]*color:#242326/, 'the name: the sign-off serif, in ink');
+    assert.match(line[2], /^font-size:15px;white-space:nowrap;$/, 'the phrase: only smaller, and kept whole');
+  });
+});
+
+/**
+ * THE LOGO IS THE APP'S OWN LOCKUP, PUBLISHED BY THE SITE (founder, 2026-11-20).
+ *
+ * `bingd-logo.png` is BrandLockup rasterised once (copy.json `$sources`). Served from
+ * bingd.app like the photo, at 3x its display size, with a Paper ground so Gmail's forced
+ * dark mode cannot put Maroon on near-black.
+ */
+describe('welcome email: the logo', () => {
+  let bytes;
+  before(async () => {
+    bytes = await readFile(join(repo, copy.masthead.file));
+  });
+
+  it('is the web/src/ PNG the site publishes at the URL the email uses', () => {
+    assert.match(copy.masthead.src, /^https:\/\/bingd\.app\/email\/[a-z0-9-]+\.png$/);
+    assert.equal(copy.masthead.file, `web/src/${copy.masthead.src.slice('https://bingd.app/'.length)}`);
+    assert.ok(bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'not a PNG');
+  });
+
+  it('is small, the stated shape, and 3x its display size', () => {
+    assert.ok(bytes.length < 30_000, `${bytes.length} bytes`);
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    assert.equal(width, copy.masthead.width * 3);
+    assert.equal(height, copy.masthead.height * 3);
+  });
+
+  it('carries no text metadata chunks', () => {
+    for (const chunk of ['tEXt', 'iTXt', 'zTXt', 'eXIf']) assert.equal(bytes.includes(Buffer.from(chunk)), false, chunk);
+  });
+
+  it('is drawn from the brand mark the app uses, not a new one', async () => {
+    // The mark's source is the app's SVG; the logo was rendered from it unchanged.
+    const svg = await read('assets/brand/bingd-icon.svg');
+    assert.match(svg, /stroke="#773744"/);
+    assert.match(svg, /fill="#D4A64C"/);
   });
 });
 
@@ -174,12 +250,13 @@ describe('welcome email: every link lands', () => {
   const hrefs = () => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
 
   it('carries exactly the invite link, the founder profile and the unsubscribe', () => {
-    assert.deepEqual(hrefs().sort(), ['https://bingd.app/i/{{inviteToken}}', 'https://bingd.app/u/saisurajkan', '{{unsubscribeUrl}}'].sort());
+    assert.deepEqual(hrefs().sort(), ['https://bingd.app/i/{{inviteToken}}', 'https://bingd.app/u/surajkan', '{{unsubscribeUrl}}'].sort());
   });
 
   it('links "invite link" to the invite and "follow me on bingd" to the founder profile', () => {
     assert.match(html, /<a href="https:\/\/bingd\.app\/i\/\{\{inviteToken\}\}"[^>]*>invite link<\/a>/);
-    assert.match(html, /<a href="https:\/\/bingd\.app\/u\/saisurajkan"[^>]*>follow me on bingd<\/a>/);
+    // surajkan since 2026-11-19, when the founder renamed his handle; see targets.json.
+    assert.match(html, /<a href="https:\/\/bingd\.app\/u\/surajkan"[^>]*>follow me on bingd<\/a>/);
   });
 
   it('uses the same invite URL shape the app shares', async () => {
@@ -278,7 +355,7 @@ describe('welcome email: brand and compliance', () => {
     }
 
     // The masthead is the wordmark and keeps its period; it is not a sentence.
-    assert.equal(copy.masthead, 'bingd.');
+    assert.equal(copy.masthead.text, 'bingd.');
   });
 
   it('writes the name as the brand does, in everything a reader sees', () => {
@@ -368,6 +445,27 @@ describe('welcome email: the test send cannot reach anybody it was not given', (
       [...new Set([...code.matchAll(/rpc\(\s*'([a-z_]+)'/g)].map((m) => m[1]))].sort(),
       ['welcome_email_claim', 'welcome_email_preview', 'welcome_email_record'],
     );
+  });
+
+  it('can carry the logo inline for a test, as the same bytes the site will serve', async () => {
+    for (const flagName of ['--inline-images', '--inline-photo']) {
+      const out = await mkdtemp(join(tmpdir(), 'welcome-inline-'));
+      try {
+        await execFileAsync(process.execPath, [join(here, 'send-test.mjs'), '--to', 'a@b.co', flagName, '--out', out], {
+          env: { ...process.env, RESEND_API_KEY: '', WELCOME_POSTAL_ADDRESS: '1 Example Street, Sampleton EX1 2MP' },
+        });
+        const request = JSON.parse(await readFile(join(out, 'request.json'), 'utf8'));
+        assert.equal((request.html.match(/<img\b/g) ?? []).length, 1);
+        assert.equal(request.attachments.length, 1);
+        assert.ok(request.html.includes('src="cid:bingd-logo"'));
+        assert.equal(request.html.includes(copy.masthead.src), false);
+        const [attachment] = request.attachments;
+        assert.equal(attachment.content_id, 'bingd-logo');
+        assert.ok(Buffer.from(attachment.content, 'base64').equals(await readFile(join(repo, copy.masthead.file))), 'not the committed file');
+      } finally {
+        await rm(out, { recursive: true, force: true });
+      }
+    }
   });
 
   it('refuses a second recipient, a list, a bcc, and a real send without an invite link', async () => {
@@ -547,11 +645,15 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
    * workflow's own expressions are evaluated here for each kind of trigger rather than
    * compared as text.
    */
-  it('runs hourly at :23, and a scheduled run is a send on production', () => {
+  it('runs six times an hour, never on the hour, and a scheduled run is a send on production', () => {
     const active = workflowLines.filter((l) => /^\s*schedule:/.test(l));
     assert.equal(active.length, 1, 'exactly one active schedule');
     const crons = [...workflow.matchAll(/^\s*-\s*cron:\s*'([^']+)'/gm)].map((m) => m[1]);
-    assert.deepEqual(crons, ['23 * * * *'], 'the cadence changed');
+    // Six offsets an hour since 2026-11-20: GitHub dropped most runs of the single ':23'
+    // entry (about three a day ran). None on the hour, where GitHub's load is worst.
+    assert.deepEqual(crons, ['3,13,23,33,43,53 * * * *'], 'the cadence changed');
+    const minutes = crons[0].split(' ')[0].split(',').map(Number);
+    assert.equal(minutes.includes(0), false, 'nothing on the hour');
     assert.match(workflow, /workflow_dispatch:/, 'the manual path for staging QA is gone');
 
     const expr = (name) => {
@@ -574,6 +676,9 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
       ['workflow_dispatch', { target: 'nonprod', mode: 'dry-run' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'dry-run'],
       ['workflow_dispatch', { target: 'nonprod', mode: 'send' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'send'],
       ['workflow_dispatch', { target: 'production', mode: 'dry-run' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'dry-run'],
+      // What production's pg_cron dispatcher asks for (20261130000300): the same send a
+      // scheduled run makes.
+      ['workflow_dispatch', { target: 'production', mode: 'send' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'send'],
     ];
     for (const [event, inputs, wantUrl, wantKey, wantMode] of cases) {
       const label = `${event} ${JSON.stringify(inputs)}`;
@@ -581,6 +686,15 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
       assert.equal(evaluate(key, event, inputs), wantKey, `${label}: wrong service key`);
       assert.equal(evaluate(mode, event, inputs), wantMode, `${label}: wrong mode`);
     }
+
+    // A production dispatch runs in the production Environment, and queues behind a scheduled
+    // run in the same concurrency group rather than overlapping it.
+    const environment = expr('environment');
+    const group = workflow.match(/^\s*group:\s*welcome-email-\$\{\{(.+)\}\}\s*$/m)?.[1];
+    assert.ok(group, 'the concurrency group is not one welcome-email-${{ }} expression');
+    const dispatched = { target: 'production', mode: 'send' };
+    assert.equal(evaluate(environment, 'workflow_dispatch', dispatched), 'production');
+    assert.equal(evaluate(group, 'workflow_dispatch', dispatched), evaluate(group, 'schedule', {}));
 
     // The URL and the key must never disagree about which project a run is for.
     assert.equal(url.replace(/SUPABASE_URL_/g, 'X_'), key.replace(/SUPABASE_SERVICE_ROLE_KEY_/g, 'X_'), 'URL and key choose differently');

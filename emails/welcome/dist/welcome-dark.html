@@ -31,6 +31,10 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo's PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -69,28 +73,36 @@
           <!--[if mso]><table role="presentation" width="680" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FBF8F4" class="shell dk-card" style="width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;">
 
-            <!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. -->
+            <!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail's forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. -->
             <tr>
-              <td class="gutter pad-top" style="padding:30px 36px 0;">
-                <p style="margin:0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:26px;line-height:30px;color:#773744;" class="dk-accent">bingd.</p>
+              <td class="gutter-logo pad-top" style="padding:30px 36px 0 30px;">
+                <img src="https://bingd.app/email/bingd-logo.png" width="146" height="46" alt="bingd." style="display:block;width:146px;height:46px;border:0;outline:none;text-decoration:none;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:26px;line-height:30px;color:#773744;" class="dk-accent" />
               </td>
             </tr>
 
-            <!-- The letter. The founder's own words, in his order, and nothing under it but
-                 the footer. -->
+            <!-- The letter. The founder's own words, in his order, straight after the logo,
+                 and nothing under it but the footer. -->
             <tr>
-              <td class="gutter" style="padding:26px 36px 6px;">
+              <td class="gutter" style="padding:22px 36px 6px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td>
                       <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">{{greeting}}</p>
                       <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Thanks for giving bingd a shot!</p>
-                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.</p>
-                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends' latest TV shows, and get stronger recommendations with a better rating system.</p>
+                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Beli changed the way I experienced restaurants. I went from eating out occasionally to ranking every place, comparing lists with friends, and hunting for the next spot.</p>
+                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">I built bingd because I wanted that same post-watch ritual for movies and TV: rank what you watch, compare taste with friends, and keep the fun going after the credits roll.</p>
                       <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.</p>
-                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">bingd is more fun with friends, so here's your <a href="https://bingd.app/i/{{inviteToken}}" style="color:#773744;text-decoration:underline;" class="dk-accent">invite link</a>. And if you want to see what I'm watching, <a href="https://bingd.app/u/saisurajkan" style="color:#773744;text-decoration:underline;" class="dk-accent">follow me on bingd</a>.</p>
-                      <p style="margin:28px 0 0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:19px;line-height:28px;color:#242326;" class="dk-text">Happy binging,<br />Suraj</p>
+                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">bingd is more fun with friends, so here's your <a href="https://bingd.app/i/{{inviteToken}}" style="color:#773744;text-decoration:underline;" class="dk-accent">invite link</a>. And if you want to see what I'm watching, <a href="https://bingd.app/u/surajkan" style="color:#773744;text-decoration:underline;" class="dk-accent">follow me on bingd</a>.</p>
+                      <p style="margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Hope you enjoy it as much as I do.</p>
+                      <!-- The signature (founder, 2026-11-20): the sign-off, then "Suraj" with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. -->
+                      <p style="margin:28px 0 0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:19px;line-height:28px;color:#242326;" class="dk-text">Happy binging,<br />Suraj <span style="font-size:15px;white-space:nowrap;" class="sig-closing">(the movie nerd that made bingd)</span></p>
                     </td>
                   </tr>
                 </table>

@@ -3,6 +3,12 @@
 **Written 2026-08-26.** Every value a production build, a production function or a production
 job needs; where it lives; and what happens when it is missing.
 
+> **Historical (marked 2026-11-20).** This is the pre-production matrix of 2026-08-26 and is
+> not maintained. The fail-closed rule below still holds. Where values and secrets live now is
+> in [`../ops/disaster-recovery.md`](../ops/disaster-recovery.md). Since H-1 closed, the
+> privileged Actions secrets live only in the `production` and `nonprod` GitHub Environments.
+> What runs in production is in [`production-state.md`](./production-state.md).
+
 The rule the whole page is arranged around: **a missing production value fails closed.** It
 does not fall back to nonprod, and it does not produce a binary that discovers the problem on
 somebody's phone.

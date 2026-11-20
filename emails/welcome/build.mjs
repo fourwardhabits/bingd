@@ -38,10 +38,13 @@
  *   - **Inline styles carry everything that matters.** The `<style>` block holds only
  *     the media query and the dark-mode overrides, both of which are enhancements. Any
  *     client that drops the block still gets a correct light email.
- *   - **No images at all.** Not the wordmark, not an icon, not a tracking pixel. Roughly
- *     half of recipients have images off by default, so an image-based header is a
- *     header half of them never see. The wordmark is text in a serif stack, which is
- *     what it is in the product anyway.
+ *   - **One image, the logo** (founder, 2026-11-20). The masthead is the real bingd. logo
+ *     (`copy.masthead`, the app's BrandLockup rasterised once). There is no photo: a
+ *     reply-to-me note from the founder reads as a personal email, and every image makes
+ *     it look more like a newsletter (and more like Gmail's Promotions tab). Nothing else is
+ *     an image: no icon, no tracking pixel. Some recipients have images off, so the logo's
+ *     alt text is "bingd." styled as the old text wordmark, with a stated width and height
+ *     so the layout does not jump.
  *   - **Every background is stated.** A transparent cell inherits whatever a dark-mode
  *     client paints behind it, which is how dark text ends up on a dark ground.
  *   - **Tap targets are at least 44px.**
@@ -89,6 +92,34 @@ const target = (name) => {
   }
   return entry;
 };
+
+/**
+ * The logo, refusing anything that is not a real, absolute, bingd-hosted PNG.
+ *
+ * The email needs an absolute URL: a mail client has no base to resolve a relative one
+ * against. It must be on bingd.app because that is the only host this project publishes,
+ * and `web/build.mjs` copies `web/src/` into the site as-is, which is how `masthead.file`
+ * comes to be served at `masthead.src`. email.test.mjs checks the file itself.
+ */
+const logo = (() => {
+  const m = copy.masthead;
+  if (!m || typeof m !== 'object') {
+    problems.push('copy.json masthead must be the logo: { text, src, file, width, height }.');
+    return null;
+  }
+  if (!/^https:\/\/bingd\.app\/[a-z0-9/_-]+\.png$/.test(m.src ?? '')) {
+    problems.push(`masthead.src "${m.src}" is not an absolute https://bingd.app/... .png URL.`);
+  }
+  if (!m.file || !m.file.startsWith('web/src/') || m.src?.slice('https://bingd.app/'.length) !== m.file.slice('web/src/'.length)) {
+    problems.push(`masthead.file "${m.file}" is not the web/src/ file that web/build.mjs publishes at ${m.src}.`);
+  }
+  if (!Number.isInteger(m.width) || !Number.isInteger(m.height) || m.width < 1 || m.height < 1) {
+    problems.push('masthead.width and masthead.height must be positive whole numbers of pixels.');
+  }
+  if (m.text !== 'bingd.') problems.push('masthead.text is the wordmark, "bingd.".');
+  return m;
+})();
+
 
 // ---------------------------------------------------------------------------
 // Brand
@@ -281,6 +312,21 @@ const GREETING_TOKEN = '{{greeting}}';
  */
 const POSTAL_TOKEN = '{{postalAddress}}';
 
+/**
+ * The sign-off ("Happy binging,") and the name line under it, with
+ * the closing phrase after the name on the same line (founder, 2026-11-20: "Suraj (the
+ * movie nerd that made bingd)", same colour and font, a little smaller). It inherits the
+ * sign-off's serif and ink, so the dark rules that repaint the sign-off repaint it too.
+ * `nowrap` keeps the phrase whole: on a screen too narrow for the whole line it moves under
+ * the name as one piece rather than breaking mid-phrase.
+ */
+const signoffLines = copy.letter.signoff.slice(0, -1).map(esc).join('<br />');
+const nameLine = `${esc(copy.letter.signoff.at(-1))}${
+  copy.letter.closing
+    ? ` <span style="font-size:15px;white-space:nowrap;" class="sig-closing">${esc(copy.letter.closing)}</span>`
+    : ''
+}`;
+
 const html = `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
   <head>
@@ -313,6 +359,10 @@ const html = `<!DOCTYPE html>
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo's PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -351,24 +401,31 @@ const html = `<!DOCTYPE html>
           <!--[if mso]><table role="presentation" width="680" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" class="shell dk-card" style="width:100%;max-width:680px;margin:0 auto;background-color:${C.paper};border:1px solid ${C.hairline};border-radius:14px;">
 
-            <!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. -->
+            <!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail's forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. -->
             <tr>
-              <td class="gutter pad-top" style="padding:30px 36px 0;">
-                <p style="margin:0;font-family:${SERIF};font-size:26px;line-height:30px;color:${C.maroon};" class="dk-accent">${esc(copy.masthead)}</p>
+              <td class="gutter-logo pad-top" style="padding:30px 36px 0 30px;">
+                <img src="${esc(logo?.src ?? '')}" width="${logo?.width}" height="${logo?.height}" alt="${esc(logo?.text ?? '')}" style="display:block;width:${logo?.width}px;height:${logo?.height}px;border:0;outline:none;text-decoration:none;font-family:${SERIF};font-size:26px;line-height:30px;color:${C.maroon};" class="dk-accent" />
               </td>
             </tr>
 
-            <!-- The letter. The founder's own words, in his order, and nothing under it but
-                 the footer. -->
+            <!-- The letter. The founder's own words, in his order, straight after the logo,
+                 and nothing under it but the footer. -->
             <tr>
-              <td class="gutter" style="padding:26px 36px 6px;">
+              <td class="gutter" style="padding:22px 36px 6px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td>
                       <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
-                      <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
+                      <!-- The signature (founder, 2026-11-20): the sign-off, then "Suraj" with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. -->
+                      <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${signoffLines}<br />${nameLine}</p>
                     </td>
                   </tr>
                 </table>
@@ -450,7 +507,7 @@ const text = `${GREETING_TOKEN}
 
 ${copy.letter.paragraphs.map((p) => wrap(paragraphText(p))).join('\n\n')}
 
-${copy.letter.signoff.join('\n')}
+${[...copy.letter.signoff.slice(0, -1), [copy.letter.signoff.at(-1), copy.letter.closing].filter(Boolean).join(' ')].join('\n')}
 
 ${'-'.repeat(72)}
 
@@ -672,9 +729,9 @@ const preview = `<!doctype html>
       <div class="draft">
         <p style="margin:0 0 6px"><b>FOUNDER COPY &middot; NOT SENT.</b></p>
         <p style="margin:0">
-          The letter is the founder&rsquo;s own, locked on 2026-09-13. Nothing is sent to anybody
-          until the postal address is set, a test send has been approved, and the automation
-          is switched on. See the list at the bottom.
+          The short note of 2026-11-19, in the founder&rsquo;s own words.
+          It reaches new accounts only once this version is merged to main; the automation
+          that sends it is already on. See the list at the bottom.
         </p>
       </div>
 
@@ -1046,7 +1103,7 @@ const artifact = `<title>Welcome Email Review</title>
   <div class="notice">
     <p><b>FOUNDER COPY &middot; NOT SENT</b></p>
     <p>
-      The letter is the founder&rsquo;s own, locked on 2026-09-13.
+      The short note of 2026-11-19, in the founder&rsquo;s own words.
     </p>
     <p>
       Nobody is mailed until the postal address is set, a real test send has been approved,

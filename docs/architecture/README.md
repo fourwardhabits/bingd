@@ -1,23 +1,29 @@
 # Bingd — Architecture Overview
 
-**Version:** v1 (public alpha)
-**Status:** Draft for review
-**Date:** 2026-08-12
-**Specification:** [`../product/PRD.md`](../product/PRD.md) v0.6
+**Version:** v1 design of 2026-08-12, with a current-state reconciliation of **2026-11-19**, updated **2026-11-20**
+**Status:** Living overview. The AD-n records below are the dated design decisions and are kept
+as written; where the built system has moved, a dated note under the decision says how, and
+[§ Current state](#current-state-2026-11-19) summarises it.
+**Specification:** [`../product/PRD.md`](../product/PRD.md) v0.6 and its as-built blocks ·
+**What is live:** [`../release/production-state.md`](../release/production-state.md)
 
 ---
 
 ## How to read this
 
-This directory describes **how** Bingd is built. The PRD describes **what** it does and why. If the two disagree, the PRD wins and this document must be corrected.
+This directory describes **how** Bingd is built. The PRD describes **what** it does and why. If the two disagree, the PRD wins and this document must be corrected. For what is **in production today**, [`production-state.md`](../release/production-state.md) wins over both: it is updated at every release, and these documents are not.
+
+Status words used across these documents: **Live in production** (on `main` and released), **Shipped dark** (in production, switched off), **Staging or unreleased** (on staging, in a Preview build, or merged without a production release), **Proposed** (a design or a draft PR).
 
 | Document | Covers |
 |---|---|
 | **README.md** (this file) | System shape, the ten decisions everything else follows from |
+| [`diagrams.md`](./diagrams.md) | Mermaid diagrams of what exists on 2026-11-20: system context, app, database, ranking flow, Feed and social, recommendations, background jobs, release |
 | [`data-model.md`](./data-model.md) | Postgres schema, indexes, row-level security |
 | [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
 | [`api.md`](./api.md) | The write and read surface |
+| [`collection-rerank.md`](./collection-rerank.md) | Collection drag-to-rerank: moves across categories, the TV wall, silent ranking updates (#319) |
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
 | [`recommendations.md`](./recommendations.md) | Candidate generation through delivery, and how each guardrail is enforced |
 | [`recommendations-v2.md`](./recommendations-v2.md) | Engine V2 (off by default): behavioural language/era profile, catalogue coverage, the engine switch |
@@ -27,12 +33,47 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 | [`taste-affinity-v2-gap-analysis.md`](./taste-affinity-v2-gap-analysis.md) | Taste Score / Engine V2 / Affinity notifications against the 2026-11-10 founder spec |
 | [`client.md`](./client.md) | App structure, navigation, state, device cache |
 | [`push.md`](./push.md) | Device tokens, the outbox, the sender, and why push needs a new production binary |
+| [`web-deployment.md`](./web-deployment.md) | bingd.app on Cloudflare Pages: links, previews, what each build can open |
+| [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md) | Feed grouping: a group presents its members (`presented_in`), title-page backfill grouping, the reversible historical consolidation |
+| [`recommendation-benchmark-synthetic-2026-11-17.md`](./recommendation-benchmark-synthetic-2026-11-17.md) | The recommendation quality benchmark (#316) on synthetic data; dated results |
 
 Architecture decisions are recorded inline as **AD-n** with their rationale and what would reverse them. Anything an implementation agent may not decide alone is marked **Ask first**.
 
 ---
 
 ## System shape
+
+As built on 2026-11-20. Only deployed components are drawn. The full set of diagrams, including
+the database, ranking, Feed, recommendation, background-job and release views, is in
+[`diagrams.md`](./diagrams.md).
+
+```mermaid
+flowchart TB
+  app["Expo / React Native client, iOS and Android<br/>TanStack Query in memory, online writes"]
+  subgraph supa["Supabase (bingd-production; bingd-staging for Preview)"]
+    auth["Auth: email code, Apple, Google"]
+    pg[("Postgres: RLS default-deny,<br/>every write a SECURITY DEFINER RPC,<br/>pg_cron and pg_net")]
+    tmdbA["Edge Function tmdb-adapter<br/>only client-reachable holder of the TMDB key"]
+    lbx["Edge Function letterboxd-import<br/>Letterboxd and IMDb matching"]
+    push["Edge Function push-sender"]
+  end
+  tmdb["TMDB API"]
+  web["bingd.app on Cloudflare Pages<br/>share, invite and install pages"]
+  expo["Expo Push Service"]
+  gha["GitHub Actions<br/>Welcome email, trending refresh"]
+  app -->|"user JWT"| auth
+  app -->|"user JWT"| pg
+  app --> tmdbA
+  tmdbA --> tmdb
+  pg -->|"pg_net: import drain"| lbx --> tmdb
+  pg -->|"pg_net: push drain"| push --> expo
+  pg -->|"pg_net: release refresh"| tmdbA
+  web -->|"anon key"| pg
+  gha -->|"service role"| pg
+```
+
+<details>
+<summary>The v1 design diagram of 2026-08-12 (historical)</summary>
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -61,7 +102,31 @@ Architecture decisions are recorded inline as **AD-n** with their rationale and 
 └────────────┘    └──────────────────┘
 ```
 
+</details>
+
 Nothing in the client holds a service credential. Every client request carries a user JWT, and Postgres decides what that user may see.
+
+> **As built (2026-11-19): the v1 design diagram (collapsed above) has three boxes that were never built as drawn.** The deployed Edge Functions are `tmdb-adapter`, `letterboxd-import` (Letterboxd and IMDb matching) and `push-sender`. Import processing, notification fan-out and push draining run **inside Postgres**, on `pg_cron` ticks (`bingd-import-drain`, `bingd-import-maintenance`, `bingd-push-drain`, `bingd-release-refresh`, `bingd-release-evaluate`, and since 2026-11-20 `bingd-welcome-dispatch`), not in `import-worker` or `notify-dispatch`. *(Corrected 2026-11-20: an earlier version of this note listed `bingd-proactive-tick`. It is not scheduled on either project; proactive notifications are dark and `schedule_proactive_notifications()` would install it. Read from `cron.job`, 2026-11-20.)* `recs-builder` does not exist: For You runs on the device ([`recommendations.md`](./recommendations.md) §0). The client has **no SQLite cache and no outbox**: TanStack Query holds reads in memory, and every write is online ([`offline-sync.md`](./offline-sync.md)).
+
+---
+
+## Current state, 2026-11-19
+
+What each decision below looks like in the system that is running (updated 2026-11-20 for the production client `1c24b5cd` and database head `20261130000300`, 208 migrations). The release facts behind this table are in [`production-state.md`](../release/production-state.md).
+
+| Area | Live in production | Shipped dark, staging or proposed |
+|---|---|---|
+| Rankable units (AD-1) | **Movies, TV shows and TV seasons**, each its own pool (`tv_shows`, migrations `20261114000100`–`000400`). Episodes are never rankable; episode metadata is shown | — |
+| Ranking (AD-2, AD-3) | Dense positions, bucket bands, the placement ledger, the Unified Backlog. Update/Keep Show links a season to its parent show ([`ranking.md`](./ranking.md) §14). Collection drag-to-rerank, across categories and on the TV wall, writes `manual` placements (#319, 2026-11-20; [`collection-rerank.md`](./collection-rerank.md)) | Refine: built, flag off |
+| Writes (AD-4) | Every write is an RPC; write RPCs claim an `operation_id`, so a retry applies once | — |
+| Visibility (AD-5) | `can_view_profile` and `security_invoker` views, as designed | — |
+| Feed (AD-6) | Assembled on read, as designed. **Grouping** is a write-side join: a watchlist session, a backlog half hour, and first rankings within one half hour, whatever the watch date (#328, 2026-11-20), become one post; members are hidden by `feed_events.presented_in` under the read policy, never deleted ([`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). Ranking updates, moves and corrections post nothing new (2026-11-20) | Reactions and comments on follow stories (#322): **staging only** (migration `20261201000100`, Preview `5e5f55df`), awaiting founder device QA; not released |
+| Taste Match (AD-7) | Computed live per pair by `taste_match`; shows and seasons are distinct signals | — |
+| Catalogue (AD-8) | `tmdb-adapter` only | — |
+| Notifications (AD-10) | Inbox rows for every notification; push **delivers** through `push-sender`, drained by `pg_cron` | `push.delivery_enabled` is inert (#119 would make it a switch); proactive notifications and release pushes are migrated with their switches off |
+| Recommendations | For You V1, on device | Engine V2 is on `main` and its migrations are in production, but `recommendations.v2_engine` is `"v1"` at 0%: shipped dark ([`recommendations-v2.md`](./recommendations-v2.md)) |
+| Import | Letterboxd and IMDb, through `import_jobs` and `letterboxd-import` | Letterboxd Lists import: proposed, deferred |
+| Offline | Online-only writes; reads are cached in memory | The outbox and device mirror ([`offline-sync.md`](./offline-sync.md)): proposed, not built |
 
 ---
 
@@ -74,6 +139,8 @@ A movie and a TV season are both things you rank. Modeling them as separate tabl
 Instead, one `media_items` row represents **either** a movie **or** a specific season, distinguished by `kind`. Series exist as their own rows for browsing and grouping, but are never rankable. Every other table holds a plain foreign key to `media_items`.
 
 **Reverses if:** a third rankable kind appears with genuinely different attributes. Episodes would not qualify — they are explicitly never rankable (PRD §10).
+
+**Amended (migrations `20261114000100`–`000400`, live in production since 2026-11-12).** A whole series is now rankable too: `ranking_category` gained `tv_shows` and `rankable_category('series')` returns it, so a show ranks in its own pool beside Movies and TV seasons, and the one-table design absorbed it with no new reference type. The sentence above that series "are never rankable" describes v1. Episodes are still never rankable. Mechanics: [`ranking.md`](./ranking.md) §14.
 
 ### AD-2 — Ranking positions are dense integers maintained on write
 
@@ -132,6 +199,8 @@ Fan-out on read is a single indexed query against `feed_events` filtered by foll
 
 **Reverses if:** median follow counts reach the low thousands, at which point the query degrades. Revisit before mass market.
 
+**Amended 2026-11-19.** Fan-out on read stands. Grouping (2026-11-16/17) does not change it: a group is an ordinary `feed_events` row, and its members are hidden by `presented_in is null` in the read policy, so a block or a privacy change still takes effect at read time. See [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md).
+
 One consequence worth stating plainly, because the PRD originally described the opposite: **the feed is a live query, not a historical record.** Unfollowing someone removes their events from your feed entirely, past ones included, because the query filters on the current follow set. PRD §14's claim that unfollowing "does not retroactively rewrite history" was true of a fan-out-on-write inbox and is not true here — and it was the more surprising promise anyway. Someone who unfollows expects that person gone from their feed, not their last three weeks preserved. Nothing is deleted; a re-follow restores visibility. §14 has been corrected to describe this.
 
 ### AD-7 — Match scores are computed on a schedule, not on demand *(reversed as built — live per call; see the correction below)*
@@ -163,6 +232,8 @@ PRD §20's universal over-limit rule — data becomes read-only, never deleted �
 ### AD-10 — Notification delivery is an abstraction with the push channel dark
 
 PRD §15 requires the full system in v1 with push installed, credentialed, and flagged off, so that enabling it later needs no native build or store submission.
+
+> **As built:** there is no `notify-dispatch` function. Postgres triggers and functions write the inbox row and the `push_outbox` row; `pg_cron` drains the outbox into `push-sender`. Push delivers in production ([`push.md`](./push.md), [`../release/push-operations.md`](../release/push-operations.md)). The config row that was meant to gate it, `push.delivery_enabled`, is not read by anything (#119).
 
 `notify-dispatch` receives an event, resolves recipients, checks per-category preferences, always writes an inbox row, and then consults a server-side flag for whether to also send push. The flag is a config row, not an environment variable, so flipping it takes effect without a deploy.
 
@@ -200,6 +271,8 @@ The first row is the one that needed correcting. An allowlist of function *names
 
 Two Supabase projects, `bingd-nonprod` and `bingd-production`, with identical schemas applied by the same migrations. Three app variants (PRD §24) point at them: development and preview at nonprod, production at production.
 
+> **As built (2026-11-19).** The projects are `bingd-staging` (`fjxhcbowoxuzulwirzyr`, the nonprod backend) and `bingd-production` (`abheeqyjzekiowkztfxv`). Their schemas are equal except while a change is on staging first: on 2026-11-20 production holds 208 migrations (head `20261130000300`) and staging 209, the extra one being #322's unreleased `20261201000100`. *(On 2026-11-19 they were 203 and 205.)* Both run the same six `pg_cron` jobs ([`diagrams.md`](./diagrams.md) §7). The lanes and the Preview rule are in [`production-state.md`](../release/production-state.md) § The two lanes.
+
 Invite and share tokens carry an environment discriminator so a nonprod token cannot resolve in production (PRD §17).
 
 ---
@@ -210,7 +283,7 @@ Listed so they are not silently resolved.
 
 | Item | Who decides |
 |---|---|
-| Analytics provider | Engineering; PostHog is the working recommendation |
+| Analytics provider | **Settled:** PostHog ([`../product/analytics.md`](../product/analytics.md)) |
 | Rate-limit numeric thresholds | Engineering, from observed traffic |
 | Letterboxd title-matching thresholds | Engineering, tuned against real exports |
 

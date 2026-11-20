@@ -3,6 +3,16 @@
 **Version:** v1 (public alpha)
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §18 · [`api.md`](./api.md)
 
+> **Status (2026-11-19): proposed design, not built.** No outbox, no SQLite mirror and no
+> persister exist in the client; `expo-sqlite` is installed and unused. Every write is an
+> online RPC and a failure is shown as a failure, and reads are TanStack Query's in-memory
+> cache, so a cold start with no network shows no collection. What *is* live is the
+> server half: the write RPCs claim an `operation_id` (`processed_operations`,
+> `_claim_operation_result`), so a retried write applies once. The rules below (the allowlist,
+> ranking never queued, block and report never queued) still bind the day an outbox is built.
+> Tracked in [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) ("Offline
+> outbox and durable sync").
+
 Bingd is **offline-resilient, not offline-first**. The distinction is the whole design: reads of your own collection work offline, a narrow set of low-conflict writes queue, and everything else honestly refuses.
 
 ---

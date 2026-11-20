@@ -1,5 +1,14 @@
 # Recommendation Engine V2
 
+> **Status (2026-11-19): shipped dark.** The V2 code is on `main` and in the production OTA
+> since release 1115 (2026-11-15, #307, which integrated the #301 head; #301 itself is still
+> an open draft). Its two migrations (`20261122000100`, `20261122000200`) are applied in
+> production. `recommendations.v2_engine` is `"v1"`, `v2_rollout_percent` 0 and
+> `v2_allowlist` `[]` (read 2026-11-15, re-read 2026-11-20 unchanged), so `recommendation_engine()` answers V1 and no
+> reader gets V2. Turning it on is an `app_config` change and a founder decision; the evidence
+> so far is in [`recommendations-v2-reconcile-2026-11-13.md`](./recommendations-v2-reconcile-2026-11-13.md)
+> and [`recommendation-benchmark-synthetic-2026-11-17.md`](./recommendation-benchmark-synthetic-2026-11-17.md).
+
 Founder spec 2026-11-10 (§3, §8 A1–A3). V1 (`recommendations.md`) keeps shipping unchanged
 and is what every reader gets until an operator turns V2 on. This document grows one section
 per work package; gaps against the spec are in `taste-affinity-v2-gap-analysis.md`.

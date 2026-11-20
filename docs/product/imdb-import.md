@@ -1,7 +1,15 @@
 # IMDb import (and the multi-provider entry)
 
-**Status (2026-11-11):** implemented on `claude/admiring-fermi-0wkpe0`. **Not merged, not
-deployed, not physically tested.** No production release is authorized. Founder spec:
+**Status (2026-11-19): live in production.** Merged through the founder RC (#256 into #266/#267)
+and released in the production OTA of 2026-11-12; the matching changes (`20261118000100`,
+`20261118000200`, #280) and the redesigned import entry (#289, #303) followed in release 1115
+(2026-11-15) with `letterboxd-import` v4. The whole-show decision in §0 is unchanged: IMDb
+movies are added, whole TV shows are matched and reported, not added. What is live:
+[`../release/production-state.md`](../release/production-state.md).
+
+*Original status line (2026-11-11), kept as the record:* implemented on
+`claude/admiring-fermi-0wkpe0`. Not merged, not deployed, not physically tested. No production
+release is authorized. Founder spec:
 *Multi-Provider Import: IMDb + Letterboxd* (2026-11-10).
 
 The Letterboxd importer is documented in [`letterboxd-import.md`](./letterboxd-import.md).

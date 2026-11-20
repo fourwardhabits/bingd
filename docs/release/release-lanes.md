@@ -358,7 +358,7 @@ reports a missing token as `error: sentry-cli ...` and stops the iOS build; `sen
 reads the same variable. So the upload cannot be enabled before the token exists.
 
 **Two commands close it, and only the founder can run the first one.** They are written out
-in [`safe-update-runbook.md`](./safe-update-runbook.md#turning-sentry-source-maps-on).
+in [`safe-update-runbook.md`](./safe-update-runbook.md#7-turning-sentry-source-maps-on).
 
 ---
 

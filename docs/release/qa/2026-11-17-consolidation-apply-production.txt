@@ -1,0 +1,13 @@
+history-20261117-w01 2026-08-14 2026-08-22 applied {'ranking': 2, 'watchlist': 0} hidden 8 log {'groups': 2, 'members': 8}
+history-20261117-w02 2026-08-22 2026-08-30 applied {'ranking': 7, 'watchlist': 3} hidden 36 log {'groups': 10, 'members': 36}
+history-20261117-w03 2026-08-30 2026-09-07 applied {'ranking': 5, 'watchlist': 7} hidden 40 log {'groups': 12, 'members': 40}
+history-20261117-w04 2026-09-07 2026-09-15 applied {'ranking': 13, 'watchlist': 10} hidden 84 log {'groups': 23, 'members': 84}
+history-20261117-w05 2026-09-15 2026-09-23 applied {'ranking': 19, 'watchlist': 1} hidden 244 log {'groups': 20, 'members': 244}
+history-20261117-w06 2026-09-23 2026-10-01 applied {'ranking': 7, 'watchlist': 3} hidden 78 log {'groups': 10, 'members': 78}
+history-20261117-w07 2026-10-01 2026-10-09 applied {'ranking': 8, 'watchlist': 5} hidden 83 log {'groups': 13, 'members': 83}
+history-20261117-w08 2026-10-09 2026-10-17 applied {'ranking': 3, 'watchlist': 1} hidden 20 log {'groups': 4, 'members': 20}
+history-20261117-w09 2026-10-17 2026-10-25 applied {'ranking': 1, 'watchlist': 0} hidden 5 log {'groups': 1, 'members': 5}
+history-20261117-w10 2026-10-25 2026-11-02 applied {'ranking': 1, 'watchlist': 1} hidden 6 log {'groups': 2, 'members': 6}
+history-20261117-w11 2026-11-02 2026-11-10 applied {'ranking': 5, 'watchlist': 6} hidden 35 log {'groups': 11, 'members': 35}
+history-20261117-w12 2026-11-10 2026-11-17 applied {'ranking': 3, 'watchlist': 4} hidden 22 log {'groups': 7, 'members': 22}
+TOTAL {"groups": 115, "members": 702, "hidden": 661} APPLIED

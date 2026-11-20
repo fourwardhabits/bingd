@@ -57,6 +57,14 @@ export const POSTAL_ADDRESS_ENV = 'WELCOME_POSTAL_ADDRESS';
 const PLACEHOLDER = /\[|\]|FOUNDER TO SUPPLY|POSTAL ADDRESS|TODO|TBD|FIXME|XXXX/i;
 
 /**
+ * The documented fake address for tests and staging ("1 Example Street, Sampleton EX1 2MP").
+ * A test send and a canary may carry it; a real recipient never may (founder, 2026-11-20,
+ * after it appeared in a test footer). The worker refuses a cohort send with it, before
+ * claiming anybody.
+ */
+export const SAMPLE_POSTAL_ADDRESS = /example street|sampleton|\bEX1 2MP\b/i;
+
+/**
  * The address to print in the footer, read from `env` and normalised to one line.
  *
  * **Fails closed.** Missing, blank, whitespace-only, too short to be an address, or
@@ -186,7 +194,7 @@ export const personalise = (body, values) => {
  * receiver may discard both rather than fall back. Add it in the commit that adds an
  * HTTPS endpoint, which is conditional here so that commit is a one-line change.
  */
-export const resendPayload = ({ from, replyTo, to, subject, html, text, unsubscribeUrl }) => {
+export const resendPayload = ({ from, replyTo, to, subject, html, text, unsubscribeUrl, attachments }) => {
   for (const [label, value] of [['From', from], ['Reply-To', replyTo], ['To', to]]) {
     if (!isAddress(value)) throw new Error(`${label} "${value}" is not a single email address`);
   }
@@ -206,6 +214,10 @@ export const resendPayload = ({ from, replyTo, to, subject, html, text, unsubscr
         ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
         : {}),
     },
+    // Only `send-test.mjs --inline-photo` passes these (the photo as an inline CID image,
+    // for a test sent before bingd.app serves the file). The worker never does: the live
+    // email loads the photo from bingd.app.
+    ...(attachments?.length ? { attachments } : {}),
   };
 };
 

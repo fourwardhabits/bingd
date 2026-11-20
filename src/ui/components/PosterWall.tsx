@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import { useRef, type Ref } from 'react';
 import {
   Animated,
   Pressable,
@@ -7,6 +8,10 @@ import {
   StyleSheet,
   View,
   useWindowDimensions,
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -14,6 +19,7 @@ import {
 import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { hapticSelection } from '../haptics';
+import { useMakeRoom } from '../use-make-room';
 import { usePressScale, usePulse } from '../press';
 import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
@@ -302,6 +308,36 @@ export type PosterGridListProps = {
    * wall's gutters, so it lays itself out from the screen's edges like any other row.
    */
   header?: React.ReactElement | null;
+  /**
+   * **Collection drag-to-rerank** (#318). Everything below is optional and absent on every
+   * other wall, which is therefore unchanged.
+   */
+  listRef?: Ref<FlashListRef<PosterTile>>;
+  /** Re-renders the visible tiles when the drag state the extras read from changes. */
+  extraData?: unknown;
+  /** False while a tile is lifted, so the finger moves the tile and not the wall. */
+  scrollEnabled?: boolean;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  /** Per-tile drag affordances: a long-press, actions, a rank label, a displacement. */
+  tileExtras?: (tile: PosterTile, index: number) => PosterTileExtras | undefined;
+};
+
+/**
+ * What a wall that can be reordered adds to one tile (#318). The long-press is handed the
+ * tile's own view, so the caller can measure exactly where the lifted copy starts.
+ */
+export type PosterTileExtras = {
+  onLongPress?: (node: View | null) => void;
+  onPressOut?: () => void;
+  accessibilityActions?: AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
+  accessibilityHint?: string;
+  /** A small label on the tile's top-left corner: the rank in a pool editor, `#3`. */
+  badge?: string | null;
+  /** The lifted tile's own slot, which the floating copy stands in for. */
+  hidden?: boolean;
+  /** Where a tile moves to make room, from its own place. */
+  shift?: { x: number; y: number } | null;
 };
 
 /**
@@ -331,6 +367,11 @@ export function PosterGridList({
   paddingTop = 0,
   paddingBottom = 0,
   header,
+  listRef,
+  extraData,
+  scrollEnabled,
+  onScroll,
+  tileExtras,
 }: PosterGridListProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
@@ -341,8 +382,13 @@ export function PosterGridList({
 
   return (
     <FlashList
+      ref={listRef}
       data={tiles}
       numColumns={columns}
+      extraData={extraData}
+      scrollEnabled={scrollEnabled}
+      onScroll={onScroll}
+      scrollEventThrottle={onScroll ? 16 : undefined}
       keyExtractor={(tile) => tile.id}
       // A sort or a filter replaces the data, and FlashList 2 would otherwise scroll to
       // keep whichever tile was first on screen in place — a jump to somewhere mid-wall
@@ -369,10 +415,83 @@ export function PosterGridList({
                 : styles.cellCentre,
           ]}
         >
-          <Tile tile={item} width={cardWidth} onPress={() => onPressTile(item)} />
+          {tileExtras ? (
+            <LiftableTile
+              tile={item}
+              width={cardWidth}
+              onPress={() => onPressTile(item)}
+              extras={tileExtras(item, index)}
+            />
+          ) : (
+            <Tile tile={item} width={cardWidth} onPress={() => onPressTile(item)} />
+          )}
         </View>
       )}
     />
+  );
+}
+
+/**
+ * A wall tile that can be lifted (#318): the ordinary `Tile`, inside a view the long-press
+ * hands to the caller to measure, moved out of the way or hidden while another is held.
+ * Recycled with its cell, which is fine: the ref names whichever tile the cell draws now.
+ */
+function LiftableTile({
+  tile,
+  width,
+  onPress,
+  extras,
+}: {
+  tile: PosterTile;
+  width: number;
+  onPress: () => void;
+  extras: PosterTileExtras | undefined;
+}) {
+  const node = useRef<View>(null);
+  // Eased to its place while another title is held over it, rather than jumped there.
+  const offset = useMakeRoom(extras?.shift, tile.id);
+  return (
+    <Animated.View
+      ref={node}
+      collapsable={false}
+      style={[
+        { transform: offset.getTranslateTransform() },
+        extras?.hidden ? styles.hiddenTile : null,
+      ]}
+    >
+      <Tile
+        tile={tile}
+        width={width}
+        onPress={onPress}
+        onLongPress={extras?.onLongPress ? () => extras.onLongPress?.(node.current) : undefined}
+        onPressOut={extras?.onPressOut}
+        accessibilityActions={extras?.accessibilityActions}
+        onAccessibilityAction={extras?.onAccessibilityAction}
+        accessibilityHint={extras?.accessibilityHint}
+        badge={extras?.badge}
+      />
+    </Animated.View>
+  );
+}
+
+/**
+ * The lifted copy of a tile (#318): the same `Tile`, drawn over the wall while the reader
+ * holds it. Never pressable — the finger is already on it, and it is not in the
+ * accessibility tree, because the original stays there with its own actions.
+ */
+export function PosterTileCopy({
+  tile,
+  width,
+  badge,
+}: {
+  tile: PosterTile;
+  width: number;
+  badge?: string | null;
+}) {
+  return (
+    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Tile tile={tile} width={width} onPress={() => {}} badge={badge} />
+    </View>
   );
 }
 
@@ -391,15 +510,26 @@ function Tile({
   width,
   onPress,
   onLongPress,
+  onPressOut,
   onToggleSave,
   onDismiss,
+  accessibilityActions,
+  onAccessibilityAction,
+  accessibilityHint,
+  badge,
 }: {
   tile: PosterTile;
   width: number;
   onPress: () => void;
   onLongPress?: () => void;
+  onPressOut?: () => void;
   onToggleSave?: () => void;
   onDismiss?: () => void;
+  accessibilityActions?: AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
+  accessibilityHint?: string;
+  /** A rank label on the top-left corner (#318's pool editor). */
+  badge?: string | null;
 }) {
   const { score } = tile;
   const average = tile.scoreSource === 'average';
@@ -418,11 +548,17 @@ function Tile({
     <Animated.View style={press.pressStyle}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={labelFor(tile)}
+        accessibilityLabel={badge ? `${badge}, ${labelFor(tile)}` : labelFor(tile)}
+        accessibilityHint={accessibilityHint}
+        accessibilityActions={accessibilityActions}
+        onAccessibilityAction={onAccessibilityAction}
         onPress={onPress}
         onLongPress={onLongPress}
         onPressIn={press.onPressIn}
-        onPressOut={press.onPressOut}
+        onPressOut={() => {
+          press.onPressOut();
+          onPressOut?.();
+        }}
         style={({ pressed }) => [{ width }, pressed && styles.pressed]}
       >
         <Poster
@@ -431,6 +567,18 @@ function Tile({
           blurhash={tile.blurhash}
           width={width}
         />
+        {badge ? (
+          <View
+            style={styles.rankBadge}
+            testID="poster-rank-badge"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text variant="caption" tone="inverse" allowFontScaling={false} numberOfLines={1}>
+              {badge}
+            </Text>
+          </View>
+        ) : null}
         {score != null && average && tile.season == null ? (
           // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
           <SeasonAverageBadge score={score} style={styles.chipPosition} testID="poster-average-pill" />
@@ -746,4 +894,18 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   pressed: { opacity: 0.7 },
+  /** The lifted tile's own slot: the floating copy is drawn in its place (#318). */
+  hiddenTile: { opacity: 0 },
+  /** A pool editor's rank on the top-left corner, in ink so it never reads as a score. */
+  rankBadge: {
+    position: 'absolute',
+    left: theme.space[1],
+    top: theme.space[1],
+    minWidth: 28,
+    paddingHorizontal: theme.space[1],
+    paddingVertical: 2,
+    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    backgroundColor: inkAlpha(0.72),
+  },
 });
