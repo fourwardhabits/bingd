@@ -62,22 +62,34 @@ select j.jobname, d.status, count(*) as runs,
  group by 1, 2 order by 1, 2;
 ```
 
-Missed runs (a gap longer than the schedule plus a margin):
+Missed runs. A gap between two recorded runs only shows once the job has run again, so
+`overdue_now` also compares each job's latest start with `now()`. It starts from `cron.job`,
+so a job with no run in the window still appears, with `overdue_now` null. **`true` or null
+means the job is not running now.**
 
 ```sql
-with r as (
+with cadence as (
+  select jobid, jobname, active,
+         case jobname
+           when 'bingd-import-drain'     then interval '15 seconds'
+           when 'bingd-release-evaluate' then interval '16 minutes'
+           when 'bingd-release-refresh'  then interval '61 minutes'
+           when 'bingd-welcome-dispatch' then interval '61 minutes'
+           else interval '65 seconds' end as allowed
+    from cron.job),
+r as (
   select jobid, start_time,
          start_time - lag(start_time) over (partition by jobid order by start_time) as gap
     from cron.job_run_details
    where start_time > now() - interval '7 days')
-select j.jobname, max(r.gap) as longest_gap,
-       count(*) filter (where r.gap > case j.jobname
-         when 'bingd-import-drain'     then interval '15 seconds'
-         when 'bingd-release-evaluate' then interval '16 minutes'
-         when 'bingd-release-refresh'  then interval '61 minutes'
-         when 'bingd-welcome-dispatch' then interval '61 minutes'
-         else interval '65 seconds' end) as gaps
-  from r join cron.job j using (jobid) group by 1 order by 1;
+select c.jobname, c.active,
+       max(r.start_time)                          as last_start,
+       now() - max(r.start_time) > c.allowed      as overdue_now,   -- true, or null with no run in 7 days: stopped
+       max(r.gap)                                 as longest_gap,
+       count(*) filter (where r.gap > c.allowed)  as gaps
+  from cadence c left join r using (jobid)
+ group by c.jobname, c.active, c.allowed
+ order by 1;
 ```
 
 **Production, 2026-11-13 to 2026-11-20:**
