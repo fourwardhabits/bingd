@@ -5088,8 +5088,10 @@ until it is released, and then it gains criteria here.
 5. Movies, TV shows and TV seasons rank in three independent pools. Positions in each pool
    stay dense, and the bucket bands stay ordered after every write, including under
    concurrent writes. (`ranking.test.mjs`, `tv-show-ranking.test.mjs`, races)
-6. A score is derived from position and band size, and is never stored or imported.
-   (`score.test.mjs`, `correction-is-not-a-ranking.test.mjs`)
+6. A title's current score is derived from its position and band size. It is never stored on
+   the ranking and never taken from an import. Historical snapshots are kept as records, not
+   as the score: the placement ledger's `score` and `from_score`, and a watch's feed-post
+   score. (`score.test.mjs`, `feed-score-is-current.test.mjs`, `placement-ledger.test.mjs`)
 7. Every ranking has a placement explaining it, and a retried write applies once.
    (`placement-ledger.test.mjs`, `ranking-contract.test.mjs`)
 8. Ranking a season offers *Update Show* or *Keep Show*. (`keep-show.test.mjs`, `tv-update-show.test.mjs`)

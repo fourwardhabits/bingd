@@ -86,8 +86,13 @@ flowchart LR
 ```
 
 - The client holds the anon key and the user's JWT only. TMDB's key lives in `tmdb-adapter` and
-  `letterboxd-import`. The service-role key lives only in GitHub Actions Environment secrets
-  (H-1, closed by #317).
+  `letterboxd-import`.
+- **The service-role key bypasses RLS and has two kinds of holder.**
+  - All three Edge Functions get it injected by the platform: `tmdb-adapter`, `letterboxd-import`
+    and `push-sender` each build an administrative client with it.
+  - The GitHub Actions workflows (Welcome email, trending refresh) hold copies. H-1, closed by
+    #317, moved those copies into the `production` and `nonprod` Environment secrets,
+    restricted to `main`.
 - The *workflow_dispatch* edge is `bingd-welcome-dispatch` (#331). It is live but inert: it
   returns `unconfigured` until the founder stores the production Vault token. Until then the
   Welcome workflow's own GitHub schedule starts the sends.
@@ -262,7 +267,7 @@ flowchart LR
     internal["Internal functions (_name)<br/>no client grant; pg_cron runs them"]
     tables[("Tables")]
   end
-  service["Service role<br/>GitHub Actions only"]
+  service["Service role, bypasses RLS<br/>Edge Functions: tmdb-adapter, letterboxd-import, push-sender;<br/>GitHub Actions Environment secrets"]
   client -->|"select"| policies --> tables
   client -->|"select"| views --> policies
   client -->|"rpc"| rpcs --> tables
@@ -306,8 +311,12 @@ flowchart TD
   undo --> silent
 ```
 
-- Ordinal position is the truth, and the score is derived from position and band sizes
-  (`score_for`). Nothing stores a score.
+- Ordinal position is the truth. The **current** score is derived from position and band
+  sizes (`score_for`) and is never stored on the ranking. History keeps snapshots:
+  - a `ranking_placements` row records the score at that placement (`score`, `from_score`);
+  - a watch's feed post carries the score held at that watch.
+
+  Watch History reads both. A move or correction updates only the latest watch's post.
 - A move never creates a comparison, a watch, a session, a feed post or a notification.
   Retry resends the same `operation_id`; Undo is a new one with the same guards.
 - Refine (`ranking.refine_enabled`) is built and **dark** in production.
