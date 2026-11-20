@@ -25,11 +25,19 @@
  * It reads public GitHub data with no token, so no credential has to be added to EAS. EAS
  * machines can share an unauthenticated rate limit; a refusal for that reason names the
  * status and is safe to run again.
+ *
+ * **The database is checked from a file too.** Preflight refuses a production publish whose
+ * `supabase/migrations/` holds a version `config/production-migrations.json` does not, because
+ * that code may call a function or read a column production does not have yet. The jobs hold
+ * no database credential, so the record is the reviewed claim, as `live-runtimes.json` is for
+ * the binaries. See `scripts/production-migrations.mjs`.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { commitMigrationCheck, readCommittedRecord } from './production-migrations.mjs';
 
 export const REPO = 'fourwardhabits/bingd';
 
@@ -40,11 +48,27 @@ export const REPO = 'fourwardhabits/bingd';
  * reviewed pull request head before the founder decides. It runs with production variables, so
  * it needs CI and the release gate, and it cannot need `main`, because the commit is not there
  * yet. It has no publish job.
+ *
+ * `migrations` is what a migration production has not applied does to the lane. Production
+ * refuses. The production check reports it: the reviewed head it reads is often a pull request
+ * whose own migration is applied after it merges, and refusing would also withhold the runtime
+ * answer the check exists for, while the publish refuses regardless. Preview publishes against
+ * staging, which carries unreleased migrations by design, so it is not compared at all.
  */
 const LANES = {
-  production: { platforms: ['android', 'ios'], releaseChecks: true, onMain: true },
-  'production-check': { platforms: [], releaseChecks: true, onMain: false },
-  preview: { platforms: ['android'], releaseChecks: false, onMain: true },
+  production: {
+    platforms: ['android', 'ios'],
+    releaseChecks: true,
+    onMain: true,
+    migrations: 'refuse',
+  },
+  'production-check': {
+    platforms: [],
+    releaseChecks: true,
+    onMain: false,
+    migrations: 'report',
+  },
+  preview: { platforms: ['android'], releaseChecks: false, onMain: true, migrations: null },
 };
 
 /** Which runs can stand for a commit. A fork's pull request can carry any head SHA. */
@@ -102,10 +126,10 @@ function identityProblems(sha, git) {
 
 /**
  * Both stages are pure apart from what they are handed, so every refusal has a test. `git` is
- * the checkout on the EAS machine, `env` is the job's environment, and `live` is
- * `config/live-runtimes.json`.
+ * the checkout on the EAS machine, `env` is the job's environment, `live` is
+ * `config/live-runtimes.json`, and `readRecord` reads `config/production-migrations.json`.
  */
-export async function preflight({ env, git, fetchImpl }) {
+export async function preflight({ env, git, fetchImpl, readRecord }) {
   const lane = LANES[env.OTA_LANE];
   if (!lane) return { fatal: [`Unknown lane: ${env.OTA_LANE}`], notes: [] };
 
@@ -113,6 +137,14 @@ export async function preflight({ env, git, fetchImpl }) {
   const fatal = identityProblems(sha, git);
   const notes = [];
   if (!/^[0-9a-f]{40}$/.test(sha)) return { fatal, notes };
+
+  // From the commit itself, not the disk: the identity check above already refuses an
+  // untracked or modified file, and `sha` is what would be published.
+  if (lane.migrations) {
+    const database = commitMigrationCheck({ git, readRecord, ref: sha });
+    (lane.migrations === 'refuse' ? fatal : notes).push(...database.problems);
+    notes.push(...database.notes);
+  }
 
   const release = lane.releaseChecks ? fatal : notes;
   try {
@@ -169,6 +201,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     env: process.env,
     git: (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim(),
     fetchImpl: fetch,
+    readRecord: readCommittedRecord,
     live: JSON.parse(
       readFileSync(
         join(dirname(fileURLToPath(import.meta.url)), '../config/live-runtimes.json'),
