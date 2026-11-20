@@ -192,7 +192,11 @@ Username-or-email sign-in (#300) is **not in production**: its migration slot
 Recommendation Engine V2 (`v2_engine "v1"`, 0%;
 [`../architecture/recommendations-v2.md`](../architecture/recommendations-v2.md)), Refine
 (flag off), proactive notifications (generation and push off), proactive release pushes (shadow
-only), the push kill switch (#119, row inert).
+only).
+
+**Not a switch:** `push.delivery_enabled` is an inert row that no delivery code reads, so push
+cannot be turned off through configuration. The switch that would read it is #119, an open,
+unapplied PR; whether to apply it is a founder decision.
 
 ### Staging or unreleased (not in production)
 
@@ -202,6 +206,7 @@ only), the push kill switch (#119, row inert).
 | Reactions and comments on follow stories, Workstream C (#322) | Draft PR; **not on staging**, not in any Preview |
 | Username-or-email sign-in (#300) | Draft PR; migration not applied anywhere |
 | Design System v3 (#295) | Draft PR |
+| A push kill switch that stops delivery (#119) | Open PR, unapplied in production. Until it is, `push.delivery_enabled` is inert |
 
 ### Intentionally not live
 
