@@ -14,8 +14,8 @@ together, with the query that says whether it is working.
 
 ## 1. The inventory
 
-Eight scheduled things: six pg_cron jobs inside each database (staging has the same six) and
-two GitHub Actions schedules.
+Nine scheduled things: seven pg_cron jobs inside each database (staging has the same seven) and
+two GitHub Actions schedules. The seventh, `bingd-ops-health`, watches the other six (§2g).
 
 | Job | Where | Schedule | What it does | Defined in |
 |---|---|---|---|---|
@@ -25,6 +25,7 @@ two GitHub Actions schedules.
 | `bingd-release-evaluate` | pg_cron | `*/15` | `_release_evaluate()` (shadow evaluation of release notices) and `_release_prune_cron_history()` (14 days; once an hour, at :00, from `20261201000400`) | `20260930000200` |
 | `bingd-release-refresh` | pg_cron | `7 * * * *` | `_release_refresh_tick()`: asks `tmdb-adapter` to refresh release dates that are due | `20260930000200`, `20261031000100` |
 | `bingd-welcome-dispatch` | pg_cron | `41 * * * *` | `_dispatch_welcome_email()`: asks GitHub to run `welcome-email.yml` (production/send). Production only, and only with the Vault token; see section 3 | `20261130000300` |
+| `bingd-ops-health` | pg_cron | `3,13,23,33,43,53 * * * *` | `ops_health_tick()`: runs the checks `ops_job_health()` reports and records each check that goes late, failing or missing in `ops_alerts`, and its recovery. Transitions only; never raises; sends nothing | `20261130000500` |
 | Welcome email | GitHub Actions | `3,13,23,33,43,53 * * * *` (backup) | `emails/welcome/automation/send-welcome.mjs`: claim, send through Resend, record | `.github/workflows/welcome-email.yml` |
 | Trending refresh | GitHub Actions | `17 4 * * *` | fills `provider_list_cache` for the Trending shelf | `.github/workflows/trending-refresh.yml`, [trending-operations.md](../release/trending-operations.md) |
 
@@ -37,13 +38,18 @@ production. Proactive delivery is off.
 select jobid, jobname, schedule, active, command from cron.job order by jobid;
 ```
 
-Production on 2026-11-20 returned exactly the six pg_cron rows above, all `active`.
+Production on 2026-11-20 returned exactly the six pg_cron rows above, all `active`. From
+`20261130000500` it returns seven.
 
 ---
 
 ## 2. Health, job by job
 
 ### 2a. The general check: did every job run, and did any fail
+
+**Start with `select * from ops_job_health();` (§2g).** It answers this section's two
+questions for every job in one row each, from a bounded read. The queries below are the long
+form, over seven days.
 
 `cron.job_run_details` is where pg_cron records each run. **A function that returns normally is
 recorded as `succeeded` with the message `1 row`, whatever it returned.** Only an exception
@@ -190,17 +196,120 @@ curl -s "https://api.github.com/repos/fourwardhabits/bingd/actions/workflows/tre
   | python3 -c "import sys,json; [print(r['event'], r['conclusion'], r['created_at']) for r in json.load(sys.stdin)['workflow_runs']]"
 ```
 
-### 2g. Alerting: what exists
+### 2g. Alerting: `ops_job_health()` and `ops_alerts`
 
-Nothing pages anybody. All of the following are **pull** signals. Somebody has to look.
+From `20261130000500`. Nothing outside the database is contacted and nothing is sent: no
+email, no push, no new host, no new secret.
 
-- A `failed` row in `cron.job_run_details`. Only the push drain, and the welcome dispatch when
-  configured without `pg_net`, raise on purpose.
-- `import_drain_status()`, `push_drain_status()`, `release_status()` and `proactive_status()`.
-  These are service-role functions with no scheduled caller. `npm run test:remote` reads some of
-  them.
-- GitHub's failed-run email for the two Actions workflows, sent to whoever is subscribed.
-- Sentry, for the app only.
+#### The one query
+
+Run it in the SQL editor, or as `service_role`:
+
+```sql
+select check_name, status, last_run, consecutive_failures, alert_open_since, detail
+  from ops_job_health()
+ where status not in ('ok', 'info') or alert_open_since is not null;
+```
+
+**No rows means every job is running and nothing is stalled.** Drop the `where` to see every
+check. `ops_job_health()` is computed when you run it, so it does not depend on the alert tick
+having run. It includes `bingd-ops-health` itself, so a stopped or failing health tick shows
+here as `missing`, `late` or `failing` (the self-check).
+
+| `check_name` | What it reads | `late` | `failing` | `missing` |
+|---|---|---|---|---|
+| `bingd-import-drain` | `cron.job`, `cron.job_run_details` | no run for 2 min | the last finished run failed | no job of that name, or `active = false` |
+| `bingd-import-maintenance`, `bingd-push-drain` | the same | 5 min | the same | the same |
+| `bingd-release-evaluate` | the same | 20 min | the same | the same |
+| `bingd-release-refresh`, `bingd-welcome-dispatch` | the same | 75 min | the same | the same |
+| `bingd-ops-health` | the same, and a tick error recorded on its own alert | 25 min | the same, or the tick caught an error | the same |
+| `push-outbox` | `push_outbox` | a row older than 15 min (the drain posts and never reads push-sender's answer, so a 401 or 500 there shows only here) | | |
+| `import-queue` | `import_jobs` | an open job older than 15 min | | |
+| `welcome-dispatch-github` | gates as in §3.2, and GitHub's last answer in `net._http_response` (6 h) | always `info`: never an alert | | |
+
+- **`failing` counts failures since the last success** (`consecutive_failures`), and
+  `detail.last_error` is the first 200 characters of the latest failure's message. One failed
+  run followed by a success is `ok`.
+- **`welcome-dispatch-github` is informational.** `detail.dispatcher` is `not_production`,
+  `disabled`, `unconfigured` (production today, until the founder stores the token) or
+  `configured`, and `detail.last_github_answer` has the status code of the newest GitHub
+  answer pg_net still holds. An `unconfigured` dispatcher is not a broken email, because the
+  GitHub schedule still runs. A configured dispatcher answered `401` means the token needs
+  replacing (§3.3); it does not open an alert.
+- **Cost.** Cron history is read through the last 5,000 runids by primary key, about ten
+  hours at production's rate, never by a scan of `cron.job_run_details`. Every other read is a
+  small table or an index.
+
+#### The alert lifecycle
+
+`bingd-ops-health` runs `ops_health_tick()` every ten minutes, and writes to `ops_alerts`
+**only on a transition**:
+
+1. **Opened** when a check goes `late`, `failing` or `missing`: one row, `closed_at` null.
+   Later ticks update its `status`, `last_seen_at` and `detail`, and never add a second open
+   row for the same check (a partial unique index enforces it).
+2. **Closed** on the first tick that sees the check `ok`: `close_reason = 'recovered'`.
+3. **A relapse within an hour** of recovering reopens the same row and adds one to
+   `reopened`. A flapping job is one row, not six an hour. After an hour, it is a new row.
+4. **Muted** checks (below) never open an alert. An open one is closed with
+   `close_reason = 'muted'`. A check a later migration stops reporting is closed as `retired`.
+5. **The tick never raises.** If it fails inside, it records an open `bingd-ops-health` alert
+   with `detail.tick_error` (the SQLSTATE) and returns `{"status": "error"}`. pg_cron records
+   the run as `succeeded`, so `ops_job_health()` reads that alert and reports
+   `bingd-ops-health` as `failing`. The next good tick closes it.
+
+The last week of incidents, including ones that recovered before anybody looked:
+
+```sql
+select check_name, status, opened_at, closed_at, close_reason, reopened, detail
+  from ops_alerts
+ where closed_at is null or opened_at > now() - interval '7 days'
+ order by opened_at desc;
+```
+
+pg_cron records a tick's result only as `1 row`. To see what a tick does, run one by hand:
+`select ops_health_tick();` returns `opened`, `reopened`, `closed` and `open`. It is safe
+beside the scheduled one, which then returns `{"status": "busy"}` (or this one does).
+
+#### Operator setup
+
+**Nothing to set.** The job is scheduled by the migration and starts recording on its first
+tick. There is no recipient to configure because nothing is delivered (see below). The founder's
+one action is to run the query above when checking on the system, or to bookmark it in the
+SQL editor.
+
+#### Silencing
+
+| To | Run on the project concerned |
+|---|---|
+| Stop one check opening alerts (it is still reported, `muted = true`) | `update app_config set value = '["bingd-welcome-dispatch"]'::jsonb where key = 'ops.alert_muted_checks';` (a JSON array of `check_name`s; `'[]'` unmutes all) |
+| Stop recording entirely, keeping the history | `select cron.unschedule('bingd-ops-health');` |
+| Resume | `select cron.schedule('bingd-ops-health', '3,13,23,33,43,53 * * * *', 'select public.ops_health_tick()');` |
+| Remove it, history included | `docs/release/ops-health/rollback-20261130000500.sql` |
+
+Pausing a job on purpose (§4) makes it `missing` and opens an alert. Mute it for as long as it
+is meant to be off.
+
+#### Why the alert is not pushed to the operator
+
+A push needs a `notifications` row of a type the table, `_push_eligible`, `push-sender` and
+the app all know. `push-sender` writes the words itself (`copy.ts`). An actorless type it does
+not know is **settled as delivered with nothing sent**, and the app's inbox drops it. So an
+operator push is a migration, an Edge Function deploy and an app release together. Done with
+the migration alone, every alert would be recorded as delivered and never arrive.
+`ops_alerts` is shaped so that a later delivery can read it.
+
+#### Known limits
+
+- **It is still a pull signal.** An alert is recorded, durably and with its time, but nobody
+  is told. The open alerts are in the one query above.
+- **A job rescheduled by a migration** gets a new `jobid`, and its old runs no longer count.
+  It reads `late` until its first new run, at most one interval. An alert opened in that gap
+  closes on the next tick after the run.
+- **With `cron.log_run` off**, pg_cron records no runs and every job reads `late`.
+- Other pull signals still exist: `import_drain_status()`, `push_drain_status()`,
+  `release_status()` and `proactive_status()` (service role), GitHub's failed-run email for
+  the two Actions workflows, and Sentry for the app.
 
 ---
 
@@ -365,6 +474,7 @@ the SQL editor.
 | import drain and maintenance | `select unschedule_import_drain();` | `select schedule_import_drain();` |
 | push drain | `select unschedule_push_drain();`. Notifications stay in-app, and the outbox fills and drains on resume ([push-operations.md](../release/push-operations.md)) | `select schedule_push_drain();` |
 | release refresh and evaluation | `select unschedule_release_awareness();` | `select schedule_release_awareness();` |
+| ops health (alert recording) | `select cron.unschedule('bingd-ops-health');` (history kept) | §2g, Resume |
 | one job, by name | `select cron.unschedule('<jobname>');` | that job's installer above |
 | trending refresh | Actions → Trending refresh → Disable workflow | Enable workflow |
 
