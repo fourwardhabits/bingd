@@ -358,7 +358,7 @@ Deno.test('no excerpt falls back to the metadata sentence, never an empty quote'
 });
 
 Deno.test('a follow story says "your follow activity", and only a follow story', () => {
-  // Workstream C (20261130000100). A follow story has no title, so the noun carries it.
+  // Workstream C (20261201000100). A follow story has no title, so the noun carries it.
   for (const [type, body] of [
     ['reaction', 'reacted to your follow activity'],
     ['comment', 'commented on your follow activity'],

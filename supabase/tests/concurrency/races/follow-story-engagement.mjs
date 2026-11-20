@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import { call, fire, newOp, raceContext } from './_shared.mjs';
 
 /**
- * Engagement on follow stories racing a block (Workstream C, 20261130000100).
+ * Engagement on follow stories racing a block (Workstream C, 20261201000100).
  *
  * `_add_comment` checks the shared engagement predicate under the commenter's pair locks.
  * A block between the commenter and the story's only MEMBER takes a different pair lock, so

@@ -1315,7 +1315,7 @@ pieces award, goal and grouped rows draw (`ActivityRow` `labelledActions`):
 - Notifications read "reacted to your follow activity" and "commented on your follow
   activity", in the inbox and in a push.
 - Who may engage is the server's single predicate, `_follow_story_open_to`
-  (`20261130000100`, see `docs/architecture/data-model.md`). A story with no member the
+  (`20261201000100`, see `docs/architecture/data-model.md`). A story with no member the
   reader may still identify is hidden from them, including from its author, and returns
   when that changes. Nothing is deleted. People named in a story get no special access and
   no notifications for being named.

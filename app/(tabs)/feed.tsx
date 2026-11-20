@@ -961,7 +961,7 @@ export default function FeedScreen() {
                  * **Reactions and comments, since the founder's decision of 2026-11-19**,
                  * which replaces §A9's exclusion. One compact cluster at the row's end, one
                  * shared thread per story. Who may engage is the server's single predicate
-                 * (20261130000100): the people named are never notified as members, a story
+                 * (20261201000100): the people named are never notified as members, a story
                  * freezes on its first reaction or comment, and a story with nobody left the
                  * reader may see is hidden, conversation and all.
                  */

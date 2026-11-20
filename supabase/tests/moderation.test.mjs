@@ -488,7 +488,7 @@ describe('the guard is wired in, not merely present', () => {
      */
     'feed_event_presentation',
     /**
-     * 20261130000100. The caller-relative follow-story engagement predicate the
+     * 20261201000100. The caller-relative follow-story engagement predicate the
      * `reactions_read` and `comments_read` policies call: `stable`, writes nothing.
      */
     'follow_story_open_to_me',

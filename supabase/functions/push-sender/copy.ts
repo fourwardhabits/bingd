@@ -61,7 +61,7 @@ export type PushJob = {
    */
   feed_event_id: string | null;
   /**
-   * The activity's own type (20261130000100), read through the same join as the title, so
+   * The activity's own type (20261201000100), read through the same join as the title, so
    * it is set only when the activity is the recipient's own. A follow story's comment and
    * reaction pushes say "your follow activity" from it; absent (an older database), they
    * keep the generic sentence.

@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Reactions and comments on follow activity (Workstream C, 20261130000100).
+ * Reactions and comments on follow activity (Workstream C, 20261201000100).
  *
  * The founder's decisions, each pinned here against observables:
  *

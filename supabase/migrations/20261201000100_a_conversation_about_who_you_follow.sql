@@ -1,38 +1,137 @@
--- ROLLBACK of 20261130000100_a_conversation_about_who_you_follow (Workstream C). STAGING ONLY
--- unless separately approved. Generated from the TRUE prior bodies (the same sources the
--- migration was rebuilt from), so each function returns to exactly what it was. No signature
--- changed in the migration, so every grant survives `create or replace` and none is restated.
+-- ===========================================================================
+-- A CONVERSATION ABOUT WHO YOU FOLLOW
 --
--- Data: nothing is deleted. Reactions and comments made on follow stories stay; with the old
--- rules they are visible again under `can_i_view` alone (the pre-migration behaviour). Stories
--- frozen by Q1 stay as they are; new follows after rollback append to an open story again.
--- One transaction, so a failure leaves the migration fully in place.
-begin;
+-- Workstream C: reactions and comments on follow activity. Founder decisions, 2026-11-19.
+-- The plan is `docs/plans/follow-activity-engagement.md` on ops/preview-1115-records, with
+-- the requirements audit beside it.
+--
+-- What the founder decided:
+--   · Reactions AND comments on follow stories, one shared thread per story, grouped or not.
+--   · ONE shared server-side engagement predicate across writes, reads, counts, mentions and
+--     notifications. Ordinary feed posts behave exactly as before.
+--   · Q1: a story FREEZES on its first reaction or comment. The next follow starts a new one.
+--   · Q2: being named in a story grants nothing. Ordinary eligible followers participate, and
+--     nobody is notified merely for being a member.
+--   · Q3: when no eligible member remains, the story and its conversation are hidden from
+--     everyone, the author included. Nothing is deleted, and visibility returns when
+--     authorization does (a re-follow).
+--   · Heart Magnet excludes reactions on follow stories.
+--
+-- THE PREDICATE
+--
+-- `_follow_story_open_to(reader, event)` is TRUE for every event that is not a follow story.
+-- So each existing path keeps its own checks and gains one clause, a no-op for ordinary posts.
+--
+-- For a `follow_added` event it requires at least one member who:
+--   (a) is still followed by the story's actor (`follows` approved). An unfollow, or a block
+--       in either direction (which deletes both edges), removes them;
+--   (b) is active, and identifiable by the reader (`can_identify_profile`: blocks either way,
+--       suspension);
+--   (c) is not the reader. Under Q2, naming you in a story does not open it to you.
+--
+-- Every caller already establishes `can_view_profile(reader, actor)` itself, as before.
+--
+-- THE REBUILDS
+--
+-- Every function below is rebuilt from its TRUE latest body (the rebuild trap), changed only
+-- where a `20261201000100` comment says so. No signature changes, so installed clients keep
+-- working. A refusal is the P0002 they already handle.
+-- ===========================================================================
 
--- The policies first: they reference follow_story_open_to_me, which is dropped below.
-drop policy if exists reactions_read on reactions;
-create policy reactions_read on reactions for select
-  using (
-    can_i_view(user_id)
-    and exists (
-      select 1 from feed_events e
-       where e.id = feed_event_id
-         and can_i_view(e.actor_id)
-    )
+create or replace function _follow_story_open_to(p_reader uuid, p_event_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1
+      from feed_events e
+     where e.id = p_event_id
+       and e.type = 'follow_added'
+       and not exists (
+         select 1
+           from feed_follow_targets ft
+           join profiles p on p.id = ft.followed_id
+           join follows f on f.follower_id = e.actor_id
+                         and f.followee_id = ft.followed_id
+                         and f.state = 'approved'
+          where ft.event_id = e.id
+            and p.status = 'active'
+            and p.id is distinct from p_reader
+            and can_identify_profile(p_reader, p.id)
+       )
   );
+$$;
 
-drop policy if exists comments_read on comments;
-create policy comments_read on comments for select
-  using (
-    can_i_view(author_id)
-    and exists (
+comment on function _follow_story_open_to(uuid, uuid) is
+  'The follow-story clause of the shared engagement predicate (20261201000100). TRUE for any event that is not a follow story. For a follow_added event: at least one member the actor still follows (approved), who is active, is not the reader, and whom the reader may identify. Composed with each path''s own can_view_profile(reader, actor). Takes a reader, so a client grant would be a block-graph oracle. Internal.';
+
+revoke execute on function _follow_story_open_to(uuid, uuid) from public, anon, authenticated;
+
+-- The same clause for the CALLER only, for the table policies, which run as the caller and
+-- so cannot call the internal form above. It answers only about the caller's own view, as
+-- `can_i_view` does.
+--
+-- **It says nothing about a story whose actor the caller may not view.** Every policy that
+-- calls it already requires `can_i_view(actor)`, so for such a story it answers TRUE and the
+-- policy is decided by that clause, exactly as before. Otherwise a direct call would be an
+-- oracle on a private or blocking actor's follow graph: "does this actor still follow
+-- somebody I can identify?". Where the caller may view the actor, the answer is what
+-- `follow_activity_people` already shows them.
+create or replace function follow_story_open_to_me(p_event_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when exists (
       select 1 from feed_events e
-       where e.id = feed_event_id
-         and can_i_view(e.actor_id)
-    )
-  );
+       where e.id = p_event_id
+         and e.type = 'follow_added'
+         and not can_view_profile(auth.uid(), e.actor_id)
+    ) then true
+    else _follow_story_open_to(auth.uid(), p_event_id)
+  end;
+$$;
 
--- follow_activity_people, verbatim from 20260912000500_a_ceiling_on_the_ceiling_and_a_tie_that_holds.sql
+comment on function follow_story_open_to_me(uuid) is
+  '_follow_story_open_to for auth.uid(), for the reactions_read and comments_read policies (20261201000100). Caller-relative, like can_i_view.';
+
+revoke execute on function follow_story_open_to_me(uuid) from public, anon;
+grant  execute on function follow_story_open_to_me(uuid) to authenticated;
+
+
+-- 0. Q1's freeze, recorded rather than inferred (Codex, PR 322)
+--
+-- A story is frozen by its FIRST reaction or comment, and stays frozen if that reaction is
+-- later removed: otherwise the next follow could append to a story somebody had already been
+-- notified about, and change what the notification was about. One row per engaged follow
+-- story, written by set_reaction and _add_comment, read by _post_follow_activity. No client
+-- reads it: row security on, no policy, and no grant to either client role.
+create table if not exists follow_story_engaged (
+  event_id   uuid primary key references feed_events(id) on delete cascade,
+  engaged_at timestamptz not null default now()
+);
+alter table follow_story_engaged enable row level security;
+revoke all on follow_story_engaged from anon, authenticated;
+
+-- Stories engaged before this migration: any reaction or comment, deleted comments included.
+insert into follow_story_engaged (event_id)
+select e.id from feed_events e
+ where e.type = 'follow_added'
+   and (exists (select 1 from reactions r where r.feed_event_id = e.id)
+        or exists (select 1 from comments c where c.feed_event_id = e.id))
+on conflict do nothing;
+
+comment on table follow_story_engaged is
+  'Follow stories that have had a reaction or comment (20261201000100, Q1). Once a row exists the story is frozen: the next follow opens a new one. Server-only.';
+
+-- 1. Follow stories name only who is still followed
+
 create or replace function follow_activity_people(p_event_ids uuid[])
 returns table (
   event_id     uuid,
@@ -50,7 +149,8 @@ as $$
   -- this is a floor under a pathological caller rather than a real limit. It bounds how many
   -- *events* one call resolves, which is nothing to do with how completely each is answered.
   events as (
-    select e.id
+    -- 20261201000100: the actor too, for the edge check below.
+    select e.id, e.actor_id
       from feed_events e, me
      where me.id is not null
        and e.id = any (coalesce(p_event_ids, '{}'::uuid[]))
@@ -63,6 +163,12 @@ as $$
     from events ev
     join feed_follow_targets ft on ft.event_id = ev.id
     join profiles p on p.id = ft.followed_id
+    -- 20261201000100: only members the actor STILL follows. An unfollow, or a block in
+    -- either direction (which deletes both edges), takes a name out of every viewer's
+    -- story. Reader-side: nothing is deleted, and a re-follow restores the name.
+    join follows f on f.follower_id = ev.actor_id
+                  and f.followee_id = p.id
+                  and f.state = 'approved'
     cross join me
    where p.id <> me.id
      and p.status = 'active'
@@ -76,7 +182,11 @@ as $$
    order by ev.id, ft.created_at, ft.followed_id;
 $$;
 
--- set_reaction, verbatim from 20261115000100_a_reaction_from_anyone.sql
+revoke execute on function follow_activity_people(uuid[]) from public, anon;
+grant  execute on function follow_activity_people(uuid[]) to authenticated;
+
+-- 2. Writes
+
 create or replace function set_reaction(
   p_operation_id  uuid,
   p_feed_event_id uuid,
@@ -116,6 +226,18 @@ begin
     raise exception 'no such activity' using errcode = 'P0002';
   end if;
 
+  -- 20261201000100: a follow story with no member open to this reader is no activity.
+  if not _follow_story_open_to(auth.uid(), p_feed_event_id) then
+    raise exception 'no such activity' using errcode = 'P0002';
+  end if;
+
+  -- 20261201000100 (Q1): a reaction freezes a follow story, for good.
+  if p_kind is not null then
+    insert into follow_story_engaged (event_id)
+    select e.id from feed_events e where e.id = p_feed_event_id and e.type = 'follow_added'
+    on conflict do nothing;
+  end if;
+
   if v_kind is null then
     delete from reactions
      where feed_event_id = p_feed_event_id and user_id = auth.uid();
@@ -133,7 +255,8 @@ begin
 
   -- 20260816000200's rule, and now the only thing standing between an author's own
   -- reaction and their inbox: an author is never notified of their own reaction.
-  if v_actor <> auth.uid() then
+  -- 20261201000100: and the author is told only while the story is open to them.
+  if v_actor <> auth.uid() and _follow_story_open_to(v_actor, p_feed_event_id) then
     insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
     values (v_actor, 'reaction', auth.uid(), 'feed_event', p_feed_event_id,
             jsonb_build_object('kind', v_kind))
@@ -145,7 +268,6 @@ begin
 end;
 $$;
 
--- _add_comment, verbatim from 20261021000100_the_author_answering_without_replying.sql
 create or replace function _add_comment(
   p_operation_id  uuid,
   p_feed_event_id uuid,
@@ -224,6 +346,16 @@ begin
     raise exception 'no such activity' using errcode = 'P0002';
   end if;
 
+  -- 20261201000100: the shared engagement predicate, inside the pair locks.
+  if not _follow_story_open_to(auth.uid(), p_feed_event_id) then
+    raise exception 'no such activity' using errcode = 'P0002';
+  end if;
+
+  -- 20261201000100 (Q1): a comment freezes a follow story, for good.
+  insert into follow_story_engaged (event_id)
+  select e.id from feed_events e where e.id = p_feed_event_id and e.type = 'follow_added'
+  on conflict do nothing;
+
   if p_parent_id is not null then
     perform 1 from comments c where c.id = p_parent_id for share;
 
@@ -260,7 +392,9 @@ begin
 
   -- "There is a new remark on your post", unless the remark is addressed to them, in
   -- which case the mention row below says so and says it better.
-  if v_actor <> auth.uid() and not coalesce(v_actor = any (v_mentions), false) then
+  -- 20261201000100: every recipient below must have the story open to them.
+  if v_actor <> auth.uid() and not coalesce(v_actor = any (v_mentions), false)
+     and _follow_story_open_to(v_actor, p_feed_event_id) then
     insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
     values (v_actor, 'comment', auth.uid(), 'feed_event', p_feed_event_id,
             jsonb_build_object('comment_id', v_id));
@@ -269,7 +403,8 @@ begin
   -- The same rule for the person being replied to. Both rows open the same conversation,
   -- so losing the generic one costs the reader no destination.
   if v_reply_to is not null and v_reply_to <> auth.uid() and v_reply_to <> v_actor
-     and not coalesce(v_reply_to = any (v_mentions), false) then
+     and not coalesce(v_reply_to = any (v_mentions), false)
+     and _follow_story_open_to(v_reply_to, p_feed_event_id) then
     insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
     values (v_reply_to, 'comment', auth.uid(), 'feed_event', p_feed_event_id,
             jsonb_build_object('comment_id', v_id, 'reply_to', p_parent_id));
@@ -305,7 +440,8 @@ begin
        and c.id <> v_id
        and c.author_id <> auth.uid()
        and c.deleted_at is null
-       and not coalesce(c.author_id = any (v_mentions), false);
+       and not coalesce(c.author_id = any (v_mentions), false)
+       and _follow_story_open_to(c.author_id, p_feed_event_id);
   end if;
 
   -- A mention of yourself files nothing: `_can_mention` excludes `auth.uid()`, so the
@@ -316,7 +452,6 @@ begin
 end;
 $$;
 
--- _set_comment_reaction, verbatim from 20261115000100_a_reaction_from_anyone.sql
 create or replace function _set_comment_reaction(p_comment_id uuid, p_kind text)
 returns jsonb
 language plpgsql
@@ -339,7 +474,9 @@ begin
    where c.id = p_comment_id
      and c.deleted_at is null
      and can_view_profile(auth.uid(), c.author_id)
-     and can_view_profile(auth.uid(), e.actor_id);
+     and can_view_profile(auth.uid(), e.actor_id)
+     -- 20261201000100
+     and _follow_story_open_to(auth.uid(), e.id);
 
   if v_ok is null then
     raise exception 'no such comment' using errcode = 'P0002';
@@ -360,7 +497,6 @@ begin
 end;
 $$;
 
--- _edit_comment, verbatim from 20260908000100_a_name_the_text_can_say_for_itself.sql
 create or replace function _edit_comment(
   p_operation_id   uuid,
   p_comment_id     uuid,
@@ -402,6 +538,16 @@ begin
     raise exception 'no such comment' using errcode = 'P0002';
   end if;
 
+  -- 20261201000100: a comment under a follow story closed to its author cannot be edited.
+  -- Raised after the update, so the whole statement rolls back. A no-op for other events.
+  -- Asked only of a caller who may view the story's actor (Codex, PR 322): for anyone else
+  -- the answer would depend on the actor's follow graph, and an edit's success or failure
+  -- would report it. They keep today's rule, which is ownership alone.
+  if can_view_profile(auth.uid(), (select e.actor_id from feed_events e where e.id = v_event))
+     and not _follow_story_open_to(auth.uid(), v_event) then
+    raise exception 'no such comment' using errcode = 'P0002';
+  end if;
+
   if p_apply_mentions then
     perform _apply_comment_mentions(
       p_comment_id,
@@ -415,7 +561,8 @@ begin
 end;
 $$;
 
--- activity_comments, verbatim from 20260909000100_a_name_you_could_already_look_up.sql
+-- 3. Reads and counts
+
 create or replace function activity_comments(p_feed_event_id uuid)
 returns table (
   id             uuid,
@@ -461,6 +608,7 @@ as $$
       from feed_events e, me
      where e.id = p_feed_event_id
        and can_view_profile(me.id, e.actor_id)
+       and _follow_story_open_to(me.id, e.id)  -- 20261201000100
   ),
   rows as (
     select c.* from comments c, event where c.feed_event_id = event.id
@@ -575,7 +723,6 @@ as $$
    order by coalesce(r.parent_id, r.id), (r.parent_id is not null), r.created_at, r.id;
 $$;
 
--- activity_comment_counts, verbatim from 20260826000600_a_conversation_you_can_open.sql
 create or replace function activity_comment_counts(p_feed_event_ids uuid[])
 returns table (feed_event_id uuid, comment_count integer)
 language sql stable security definer
@@ -591,6 +738,7 @@ as $$
       join ids on ids.id = e.id
      cross join me
      where can_view_profile(me.id, e.actor_id)
+       and _follow_story_open_to(me.id, e.id)  -- 20261201000100
   ),
   rows as (
     select c.feed_event_id, c.author_id
@@ -610,7 +758,6 @@ as $$
    group by r.feed_event_id;
 $$;
 
--- _can_read_comment, verbatim from 20261101000100_the_excerpt_rule_on_this_branch.sql
 create or replace function _can_read_comment(p_reader uuid, p_comment_id uuid)
 returns boolean
 language sql
@@ -625,10 +772,10 @@ as $$
      where c.id = p_comment_id
        and can_view_profile(p_reader, c.author_id)
        and can_view_profile(p_reader, e.actor_id)
+       and _follow_story_open_to(p_reader, e.id)  -- 20261201000100
   );
 $$;
 
--- comment_reactors, verbatim from 20260827000900_who_reacted_to_a_comment.sql
 create or replace function comment_reactors(p_comment_id uuid)
 returns table (
   user_id      uuid,
@@ -649,6 +796,7 @@ as $$
      where c.id = p_comment_id
        and can_view_profile(me.id, e.actor_id)
        and can_view_profile(me.id, c.author_id)
+       and _follow_story_open_to(me.id, e.id)  -- 20261201000100
   )
   select cr.user_id,
          p.username::text,
@@ -666,7 +814,6 @@ as $$
    order by cr.created_at desc, cr.user_id;
 $$;
 
--- mention_candidates, verbatim from 20260909000100_a_name_you_could_already_look_up.sql
 create or replace function mention_candidates(
   p_feed_event_id uuid,
   p_query         text default '',
@@ -688,6 +835,7 @@ as $$
       from feed_events e, me
      where e.id = p_feed_event_id
        and can_view_profile(me.id, e.actor_id)
+       and _follow_story_open_to(me.id, e.id)  -- 20261201000100
   ),
   fragment as (
     -- Capped the way `search_users` caps its own query, and for its reason: nothing
@@ -755,26 +903,144 @@ as $$
    limit least(greatest(coalesce(p_limit, 8), 1), 10);
 $$;
 
--- _can_mention, verbatim from 20260909000100_a_name_you_could_already_look_up.sql
-create or replace function _can_mention(p_feed_event_id uuid, p_mentioned uuid)
-returns boolean
-language sql stable security definer
+-- 4. Mentions: recipient-side only (Codex, PR 322)
+
+create or replace function _apply_comment_mentions(
+  p_comment_id    uuid,
+  p_feed_event_id uuid,
+  p_mention_ids   uuid[],
+  -- Whether the comment is a reply, for the copy alone. The notification type is
+  -- the same either way: a mention is a mention, and splitting it into two types
+  -- would give it two preference categories to be silenced through.
+  p_is_reply      boolean
+)
+returns void
+language plpgsql
+security definer
 set search_path = public
 as $$
-  select p_mentioned is not null
-     -- Self, blocks in either direction, and any account that is not active. One call,
-     -- one definition, and the same one the People tab answers to.
-     and can_discover_profile(auth.uid(), p_mentioned)
-     -- The mentioned person can see the activity. Their view, not the caller's:
-     -- a mention must never be a way to tell somebody what a private account did.
-     and exists (
-       select 1 from feed_events e
-        where e.id = p_feed_event_id
-          and can_view_profile(p_mentioned, e.actor_id)
-     );
+declare
+  v_max    integer;
+  v_wanted uuid[];
+  v_bad    uuid;
+begin
+  -- Aliased `w(uid)`, and the alias is not decoration: written as `unnest(...) as
+  -- id`, an inner reference inside a correlated subquery over a table with its own
+  -- `id` silently binds to the wrong one. `set_watch_tags` shipped that bug and
+  -- filed three notifications for one save.
+  select coalesce(array_agg(distinct w.uid), '{}') into v_wanted
+    from unnest(coalesce(p_mention_ids, '{}'::uuid[])) as w(uid)
+   where w.uid is not null;
+
+  select coalesce((select (value)::integer from app_config where key = 'mentions.max_per_comment'), 10)
+    into v_max;
+
+  if coalesce(array_length(v_wanted, 1), 0) > v_max then
+    raise exception 'you can mention up to % people in one comment', v_max using errcode = '22023';
+  end if;
+
+  -- Refused as a whole rather than partially applied, which is `set_watch_tags`'
+  -- rule and for its reason: silently dropping the one person who is no longer
+  -- eligible leaves the author believing they said something they did not.
+  --
+  -- A person already carrying an *active* mention on this comment is exempt, so
+  -- an edit does not fail because somebody went private after the original
+  -- comment was posted. Their stamp is already spent, so the exemption cannot
+  -- produce a notification. A block is not exempted this way -- `_can_mention`
+  -- fails for the blocked pair, and the exemption only reaches somebody the
+  -- author is already, actively, naming.
+  select w.uid into v_bad
+    from unnest(v_wanted) as w(uid)
+   where not _can_mention(p_feed_event_id, w.uid)
+     and not exists (
+       select 1 from comment_mentions m
+        where m.comment_id = p_comment_id and m.mentioned_id = w.uid and m.active
+     )
+   limit 1;
+
+  if v_bad is not null then
+    raise exception 'you can only mention people you follow or who are in this conversation'
+      using errcode = '42501';
+  end if;
+
+  -- The handle is read here rather than trusted from the client: it has to be what the
+  -- *body* spells, and the body was written from this same list a moment ago.
+  insert into comment_mentions (comment_id, mentioned_id, active, handle)
+  select p_comment_id, w.uid, true, p.username::text
+    from unnest(v_wanted) as w(uid)
+    join profiles p on p.id = w.uid
+  -- `notified_at` is deliberately absent from this SET list, and its absence is
+  -- the whole feature. A row that survives keeps its stamp.
+  --
+  -- `handle` is deliberately absent too, and for the opposite reason: the stored
+  -- spelling must stay the one the *body* uses, so re-saving a comment after the person
+  -- renamed does not overwrite the only record of what the text says.
+  on conflict (comment_id, mentioned_id) do update set active = true;
+
+  update comment_mentions
+     set active = false
+   where comment_id = p_comment_id
+     and mentioned_id <> all (v_wanted)
+     and active;
+
+  with claimed as (
+    update comment_mentions m
+       set notified_at = now()
+     where m.comment_id = p_comment_id
+       and m.mentioned_id = any (v_wanted)
+       and m.notified_at is null
+       -- 20261201000100 (Codex, PR 322): nobody is told about a follow story closed to
+       -- them. Recipient-side and silent: whom the author may NAME is still `_can_mention`
+       -- alone, unchanged, because refusing a name (42501) or dropping it from the
+       -- candidates on this predicate would tell the author whether a third party and the
+       -- story's member have blocked each other. Not stamped either, so the stamp is not
+       -- spent on a mention nobody received.
+       and _follow_story_open_to(m.mentioned_id, p_feed_event_id)
+    returning m.mentioned_id
+  )
+  insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+  select c.mentioned_id,
+         'mention',
+         auth.uid(),
+         'feed_event',
+         p_feed_event_id,
+         jsonb_build_object('comment_id', p_comment_id, 'reply', coalesce(p_is_reply, false))
+    from claimed c;
+end;
 $$;
 
--- _post_follow_activity, verbatim from 20260912000500_a_ceiling_on_the_ceiling_and_a_tie_that_holds.sql
+-- 5. The table policies (direct PostgREST reads of reactions and comments)
+
+drop policy if exists reactions_read on reactions;
+create policy reactions_read on reactions for select
+  using (
+    can_i_view(user_id)
+    and exists (
+      select 1 from feed_events e
+       where e.id = feed_event_id
+         and can_i_view(e.actor_id)
+         and follow_story_open_to_me(e.id)  -- 20261201000100
+    )
+  );
+
+drop policy if exists comments_read on comments;
+create policy comments_read on comments for select
+  using (
+    can_i_view(author_id)
+    and exists (
+      select 1 from feed_events e
+       where e.id = feed_event_id
+         and can_i_view(e.actor_id)
+         and follow_story_open_to_me(e.id)  -- 20261201000100
+    )
+  );
+
+-- comment_reactions_read is unchanged: its `exists (select 1 from comments ...)` runs under
+-- the caller's RLS, so it inherits comments_read above.
+
+
+-- 6. Q1: freeze a story on its first reaction or comment
+
 create or replace function _post_follow_activity(p_actor uuid, p_target uuid)
 returns void
 language plpgsql
@@ -824,6 +1090,11 @@ begin
    where e.type = 'follow_added'
      and e.actor_id = p_actor
      and e.causal_at > now() - v_window
+     -- 20261201000100 (Q1): a story somebody has reacted to or commented on is frozen,
+     -- recorded at first engagement so removing the reaction does not thaw it (Codex,
+     -- PR 322). The next follow opens a new story, so a conversation is always about what
+     -- its participants saw.
+     and not exists (select 1 from follow_story_engaged x where x.event_id = e.id)
    order by e.causal_at desc
    limit 1
      for update;
@@ -867,7 +1138,8 @@ begin
 end;
 $$;
 
--- _award_metric, verbatim from 20261114000200_a_show_ranked_on_its_own.sql
+-- 7. Heart Magnet excludes follow stories
+
 create or replace function _award_metric(p_user uuid, p_award text, p_threshold integer)
  RETURNS bigint
  LANGUAGE plpgsql
@@ -987,7 +1259,9 @@ begin
       select count(*) into v
         from reactions r
         join feed_events fe on fe.id = r.feed_event_id
-       where fe.actor_id = p_user and r.user_id <> p_user;
+       where fe.actor_id = p_user and r.user_id <> p_user
+         -- 20261201000100: reactions on follow stories do not count.
+         and fe.type <> 'follow_added';
 
     when 'mutual-mania' then
       -- Approved in both directions, with a profile that still exists. Existence,
@@ -1011,7 +1285,8 @@ begin
 end;
 $function$;
 
--- claim_push_batch, verbatim from 20261113000100_an_import_from_more_than_one_place.sql
+-- 8. Push copy: the activity type rides with the job
+
 create or replace function claim_push_batch(p_limit integer default 20, p_now timestamptz default now())
 returns jsonb
 language plpgsql
@@ -1156,6 +1431,10 @@ begin
         'media_title',     j.media_title,
         'series_title',    j.series_title,
         'feed_event_id',   j.feed_event_id,
+        -- 20261201000100. The activity's own type, so a follow story's push can say
+        -- "your follow activity". Read through the `fe` join, so it is null wherever the
+        -- title is: no activity, or an activity that is not the recipient's own.
+        'feed_event_type', j.feed_event_type,
         'comment_excerpt', j.comment_excerpt,
         -- 20260917001500. The job an import notification is about, and the summary its
         -- completion push quotes. Null for every other type.
@@ -1191,6 +1470,7 @@ begin
            m.title                                 as media_title,
            parent.title                            as series_title,
            case when n.subject_type = 'feed_event' then n.subject_id end as feed_event_id,
+           fe.type::text                           as feed_event_type,
            case when n.subject_type = 'import_job' then n.subject_id end as import_job_id,
            case when n.type in ('import_started', 'import_completed', 'import_failed')
                 then n.payload end as import_counts,
@@ -1290,6 +1570,20 @@ begin
              on ac.user_id = n.recipient_id
      where n.id = any (v_claimed)
        and not (n.id = any (v_dead))
+       -- 20261201000100 (Codex, PR 322): eligibility at delivery, not only at filing. A
+       -- notification about a follow story that has since closed to its recipient is not
+       -- pushed (and, unclaimed, is reaped below). TRUE for every other subject.
+       -- Only where the recipient may view the story's owner (Codex, PR 322): for anyone
+       -- else the answer would track the owner's follow graph. Their rows keep today's
+       -- rules, which already withhold what they may not see.
+       and not exists (
+         select 1 from feed_events sfe
+          where n.subject_type = 'feed_event'
+            and sfe.id = n.subject_id
+            and sfe.type = 'follow_added'
+            and can_view_profile(n.recipient_id, sfe.actor_id)
+            and not _follow_story_open_to(n.recipient_id, sfe.id)
+       )
        -- **Restored 2026-08-30 (20260904000100).** An actorless notification has nobody
        -- to have gone, and this predicate was the actorless filter by accident until
        -- 20260828000100 wrote the escape. The 20260830000100 rebuild -- which added the
@@ -1337,105 +1631,11 @@ begin
 end;
 $$;
 
--- _apply_comment_mentions, verbatim from 20260830000100_a_name_you_can_say_in_a_comment.sql
-create or replace function _apply_comment_mentions(
-  p_comment_id    uuid,
-  p_feed_event_id uuid,
-  p_mention_ids   uuid[],
-  -- Whether the comment is a reply, for the copy alone. The notification type is
-  -- the same either way: a mention is a mention, and splitting it into two types
-  -- would give it two preference categories to be silenced through.
-  p_is_reply      boolean
-)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_max    integer;
-  v_wanted uuid[];
-  v_bad    uuid;
-begin
-  -- Aliased `w(uid)`, and the alias is not decoration: written as `unnest(...) as
-  -- id`, an inner reference inside a correlated subquery over a table with its own
-  -- `id` silently binds to the wrong one. `set_watch_tags` shipped that bug and
-  -- filed three notifications for one save.
-  select coalesce(array_agg(distinct w.uid), '{}') into v_wanted
-    from unnest(coalesce(p_mention_ids, '{}'::uuid[])) as w(uid)
-   where w.uid is not null;
+revoke execute on function claim_push_batch(integer, timestamptz) from public, anon, authenticated;
+grant execute on function claim_push_batch(integer, timestamptz) to service_role;
 
-  select coalesce((select (value)::integer from app_config where key = 'mentions.max_per_comment'), 10)
-    into v_max;
+-- 9. The inbox reads eligibility now, not when the row was filed
 
-  if coalesce(array_length(v_wanted, 1), 0) > v_max then
-    raise exception 'you can mention up to % people in one comment', v_max using errcode = '22023';
-  end if;
-
-  -- Refused as a whole rather than partially applied, which is `set_watch_tags`'
-  -- rule and for its reason: silently dropping the one person who is no longer
-  -- eligible leaves the author believing they said something they did not.
-  --
-  -- A person already carrying an *active* mention on this comment is exempt, so
-  -- an edit does not fail because somebody went private after the original
-  -- comment was posted. Their stamp is already spent, so the exemption cannot
-  -- produce a notification. A block is not exempted this way -- `_can_mention`
-  -- fails for the blocked pair, and the exemption only reaches somebody the
-  -- author is already, actively, naming.
-  select w.uid into v_bad
-    from unnest(v_wanted) as w(uid)
-   where not _can_mention(p_feed_event_id, w.uid)
-     and not exists (
-       select 1 from comment_mentions m
-        where m.comment_id = p_comment_id and m.mentioned_id = w.uid and m.active
-     )
-   limit 1;
-
-  if v_bad is not null then
-    raise exception 'you can only mention people you follow or who are in this conversation'
-      using errcode = '42501';
-  end if;
-
-  -- The handle is read here rather than trusted from the client: it has to be what the
-  -- *body* spells, and the body was written from this same list a moment ago.
-  insert into comment_mentions (comment_id, mentioned_id, active, handle)
-  select p_comment_id, w.uid, true, p.username::text
-    from unnest(v_wanted) as w(uid)
-    join profiles p on p.id = w.uid
-  -- `notified_at` is deliberately absent from this SET list, and its absence is
-  -- the whole feature. A row that survives keeps its stamp.
-  --
-  -- `handle` is deliberately absent too, and for the opposite reason: the stored
-  -- spelling must stay the one the *body* uses, so re-saving a comment after the person
-  -- renamed does not overwrite the only record of what the text says.
-  on conflict (comment_id, mentioned_id) do update set active = true;
-
-  update comment_mentions
-     set active = false
-   where comment_id = p_comment_id
-     and mentioned_id <> all (v_wanted)
-     and active;
-
-  with claimed as (
-    update comment_mentions m
-       set notified_at = now()
-     where m.comment_id = p_comment_id
-       and m.mentioned_id = any (v_wanted)
-       and m.notified_at is null
-    returning m.mentioned_id
-  )
-  insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
-  select c.mentioned_id,
-         'mention',
-         auth.uid(),
-         'feed_event',
-         p_feed_event_id,
-         jsonb_build_object('comment_id', p_comment_id, 'reply', coalesce(p_is_reply, false))
-    from claimed c;
-end;
-$$;
-
--- my_notifications, verbatim from 20261101000100_the_excerpt_rule_on_this_branch.sql
 create or replace function my_notifications(p_limit integer default 50)
 returns table (
   id                 uuid,
@@ -1610,14 +1810,18 @@ as $$
      and (n.type <> 'theatrical_release' or rel.opens_on is not null)
      -- And a season row whose availability is no longer on record says nothing true.
      and (n.type <> 'season_premiere' or sea.available_on is not null)
+     -- 20261201000100 (Codex, PR 322): and a row about a follow story that has since closed
+     -- to this reader is not drawn. Read-time, so it returns if the story opens again.
+     -- Only where the reader may view the story's owner (Codex, PR 322), for the reason
+     -- given in claim_push_batch.
+     and not exists (
+       select 1 from feed_events sfe
+        where n.subject_type = 'feed_event'
+          and sfe.id = n.subject_id
+          and sfe.type = 'follow_added'
+          and can_view_profile(auth.uid(), sfe.actor_id)
+          and not _follow_story_open_to(auth.uid(), sfe.id)
+     )
    order by n.created_at desc
    limit least(greatest(coalesce(p_limit, 50), 1), 200);
 $$;
-
-drop function if exists follow_story_open_to_me(uuid);
-drop table if exists follow_story_engaged;
-drop function if exists _follow_story_open_to(uuid, uuid);
-
-delete from supabase_migrations.schema_migrations where version = '20261130000100';
-
-commit;

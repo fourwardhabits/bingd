@@ -881,7 +881,7 @@ describe('a story is bounded, so the reader never pages one', () => {
     // would pass under the old ordering too.
     await follow(abi, seed);
     const story = (await stories(abi))[0];
-    // Since 20261130000100 a story names only people its actor still follows, so the two
+    // Since 20261201000100 a story names only people its actor still follows, so the two
     // appended by hand are followed by hand too (no story is posted by a direct insert).
     await t.sql(
       `insert into follows (follower_id, followee_id, state)

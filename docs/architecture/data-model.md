@@ -796,7 +796,7 @@ invitee's own edge is a request into a private owner, and there is no reverse ed
 story. PRD §17's As-built block for 2026-09-08 carries the founder's argument for the change
 and states plainly what it widens.
 
-### Engagement on follow stories — `20261130000100` (Workstream C, founder 2026-11-19)
+### Engagement on follow stories — `20261201000100` (Workstream C, founder 2026-11-19)
 
 The founder reversed the original rule that follow stories carry no reactions and no
 comments. The backend never excluded them by type (see above), so this migration is not

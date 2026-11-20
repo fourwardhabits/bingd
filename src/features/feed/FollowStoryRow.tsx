@@ -76,7 +76,7 @@ export type FollowStoryRowProps = {
  * Share: there is no title to save, and nothing to link to. No "who reacted" sentence line,
  * which keeps the row compact. One shared conversation per story, grouped or not. Who may
  * engage, and when a story stops being open to somebody, is the server's single predicate
- * (20261130000100).
+ * (20261201000100).
  */
 export function FollowStoryRow({
   event,

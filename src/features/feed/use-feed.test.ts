@@ -1297,7 +1297,7 @@ describe('follow stories', () => {
    * **A follow story's conversation page** (Workstream C, 2026-11-19). Its notifications
    * open the activity page, so the single-activity read asks for follow stories too, and
    * believes the server about who is in them: a story with nobody this reader may see is
-   * closed to them (20261130000100) and reads as unavailable, exactly like a deleted one.
+   * closed to them (20261201000100) and reads as unavailable, exactly like a deleted one.
    */
   it('opens a follow story on its conversation page, and nothing of a closed one', async () => {
     mockFeedRows = [followRow()];
