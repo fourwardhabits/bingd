@@ -324,8 +324,44 @@ there is nothing to symbolicate — and make the next build.
 ## 8. What must never be shipped over the air
 
 - **A database migration.** It is not in the bundle. An update that assumes a column the
-  live database does not have breaks every device that takes it, immediately.
+  live database does not have breaks every device that takes it, immediately. So the
+  migration is applied to production first, and the update is published after. The gate
+  below holds that order.
 - **A change to `web/`.** The site is deployed by Cloudflare Pages from `main`. `eas update`
   does not touch it.
 - **A native change.** Covered above; the fingerprint refuses.
 - **An update to `beta` or `production` to test something.** Test on `preview`.
+
+### The migration gate
+
+`config/production-migrations.json` records every migration version production has applied,
+read from `supabase_migrations.schema_migrations`. A production publish
+(`ota-production.yml`) and `npm run build:beta` / `update:beta`, which also use the production
+database, **refuse a commit whose `supabase/migrations/` has a version the record does not**.
+The error names each file and says whether it is above production's head or a gap below it. The
+production check only reports it. Preview is not compared: it runs on staging.
+
+The EAS jobs hold no database credential, so the record is a reviewed file, like
+`config/live-runtimes.json`. If it is stale, the gate refuses, which is the safe direction.
+
+**After every production migration**, in the docs pull request that records the apply:
+
+```
+node scripts/production-migrations.mjs write docs/release/<the record of the apply>.md
+node scripts/production-migrations.mjs check
+```
+
+`write` rewrites the record from a read-only Management API query (the session proxy supplies
+the credential, or `SUPABASE_ACCESS_TOKEN`). `check` compares production, the record and the
+files at HEAD, and exits 1 on any difference. Never edit the versions by hand.
+
+**When the gate refuses:**
+
+1. The named migrations are not applied. Apply them through the reviewed production script,
+   record them as above, merge that, and publish the commit that carries the record.
+2. They are applied, but the record was not updated. Run `write` and `check`, merge, and publish
+   that commit. The older commit carries the old record, so it is refused again.
+3. A file is misnamed or two files share a version. Fix it on `main` first.
+
+CI does not compare the record with `supabase/migrations/`. A migration merges before it is
+applied, so that comparison would fail `main` between every merge and its apply.

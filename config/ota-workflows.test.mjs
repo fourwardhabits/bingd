@@ -68,11 +68,37 @@ const github =
     return { ok: true, json: async () => json };
   };
 
-const cleanGit = (...args) => (args[0] === 'rev-parse' ? SHA : '');
+/** What production has applied, by `config/production-migrations.json`, and a commit that agrees. */
+const record = {
+  head: '20261130000400',
+  count: 2,
+  recordedAt: '2026-11-20T00:00:00Z',
+  evidence: 'docs/release/example.md',
+  versions: ['20261130000300', '20261130000400'],
+};
+const recorded = [
+  'supabase/migrations/20261130000300_a_welcome.sql',
+  'supabase/migrations/20261130000400_a_history.sql',
+];
+const readRecord = () => record;
+
+const cleanGit = (...args) =>
+  args[0] === 'rev-parse' ? SHA : args[0] === 'ls-tree' ? recorded.join('\n') : '';
+/** A clean checkout of SHA whose supabase/migrations/ holds `paths`. */
+const gitWith =
+  (paths) =>
+  (...args) =>
+    args[0] === 'ls-tree' ? paths.join('\n') : cleanGit(...args);
 
 /** Both stages, as a publish runs them. */
-const gate = async (env = {}, { git = cleanGit, fetchImpl = github() } = {}) => {
-  const deps = { env: { ...passing, ...env }, git, fetchImpl, live };
+const gate = async (env = {}, { git = cleanGit, fetchImpl = github(), ...rest } = {}) => {
+  const deps = {
+    env: { ...passing, ...env },
+    git,
+    fetchImpl,
+    live,
+    readRecord: rest.readRecord ?? readRecord,
+  };
   const [first, second] = [await preflight(deps), await runtimes(deps)];
   return {
     fatal: [...first.fatal, ...second.fatal],
@@ -373,19 +399,19 @@ describe('the OTA gate', () => {
   it('refuses an unadmitted commit with no fingerprint in hand', async () => {
     const env = { OTA_LANE: 'production', OTA_SHA: SHA };
     const fetchImpl = github({ compare: 'diverged' });
-    const { fatal } = await preflight({ env, git: cleanGit, fetchImpl });
+    const { fatal } = await preflight({ env, git: cleanGit, fetchImpl, readRecord });
     assert.match(fatal.join(), /not on main/);
   });
 
   it('admits a good commit with no fingerprint in hand', async () => {
     const env = { OTA_LANE: 'production', OTA_SHA: SHA };
-    const result = await preflight({ env, git: cleanGit, fetchImpl: github() });
+    const result = await preflight({ env, git: cleanGit, fetchImpl: github(), readRecord });
     assert.deepEqual(result, { fatal: [], notes: [] });
   });
 
   describe('on the production check, which reads a reviewed head before it merges', () => {
     const env = { OTA_LANE: 'production-check', OTA_SHA: SHA };
-    const check = (fetchImpl, git = cleanGit) => preflight({ env, git, fetchImpl });
+    const check = (fetchImpl, git = cleanGit) => preflight({ env, git, fetchImpl, readRecord });
 
     it('does not need main', async () => {
       const fetchImpl = github({ compare: 'ahead' });
@@ -448,6 +474,125 @@ describe('the OTA gate', () => {
       const git = (...a) => (a[0] === 'rev-parse' ? SHA : '?? new.ts');
       assert.match((await gate(preview, { git })).fatal.join(), /not clean/);
     });
+  });
+});
+
+describe('the OTA gate, on the database', () => {
+  const newer = 'supabase/migrations/20261201000100_follow_story_engagement.sql';
+  const older = 'supabase/migrations/20261129000900_a_late_arrival.sql';
+
+  it('passes a commit whose migrations are exactly the ones production has applied', async () => {
+    assert.deepEqual(await gate({}, { git: gitWith(recorded) }), { fatal: [], notes: [] });
+  });
+
+  it('reads the migrations of the commit being published', async () => {
+    const calls = [];
+    const git = (...args) => (calls.push(args), cleanGit(...args));
+    await preflight({ env: passing, git, fetchImpl: github(), readRecord });
+    assert.deepEqual(
+      calls.find((args) => args[0] === 'ls-tree'),
+      ['ls-tree', '--name-only', SHA, '--', 'supabase/migrations/'],
+    );
+  });
+
+  it('refuses a migration newer than production, naming it and what to do', async () => {
+    const { fatal } = await gate({}, { git: gitWith([...recorded, newer]) });
+    assert.equal(fatal.length, 1);
+    assert.match(fatal[0], /20261201000100_follow_story_engagement\.sql/);
+    assert.match(fatal[0], /newer than production's head 20261130000400/);
+    assert.match(
+      fatal[0],
+      /Apply it to production, record it in config\/production-migrations/,
+    );
+  });
+
+  it('refuses a migration that sorts below the head but was never applied', async () => {
+    const { fatal } = await gate({}, { git: gitWith([older, ...recorded]) });
+    assert.match(
+      fatal.join(),
+      /20261129000900_a_late_arrival\.sql \(older than .*not applied\)/,
+    );
+  });
+
+  it('names every unapplied migration at once', async () => {
+    const { fatal } = await gate({}, { git: gitWith([older, ...recorded, newer]) });
+    assert.match(fatal.join(), /these 2 migrations/);
+  });
+
+  const refusals = [
+    ['a record that cannot be read', { readRecord: () => JSON.parse('{') }, /Could not read/],
+    [
+      'a record whose head is not its last version',
+      { readRecord: () => ({ ...record, head: '20261201000100' }) },
+      /says head 20261201000100/,
+    ],
+    [
+      'a record whose count disagrees',
+      { readRecord: () => ({ ...record, count: 3 }) },
+      /says count 3/,
+    ],
+    [
+      'a record out of order',
+      { readRecord: () => ({ ...record, versions: [...record.versions].reverse() }) },
+      /ascending order/,
+    ],
+    ['no record at all', { readRecord: () => null }, /no "versions" list/],
+    [
+      'a migration whose version cannot be read',
+      { git: gitWith([...recorded, 'supabase/migrations/later.sql']) },
+      /later\.sql is not named/,
+    ],
+    [
+      'two files with one version',
+      { git: gitWith([...recorded, 'supabase/migrations/20261130000400_again.sql']) },
+      /Version 20261130000400 is used by/,
+    ],
+    ['an empty migrations directory', { git: gitWith([]) }, /is empty/],
+    [
+      'a commit whose migrations cannot be listed',
+      {
+        git: (...args) => {
+          if (args[0] === 'ls-tree') throw new Error('not a tree');
+          return cleanGit(...args);
+        },
+      },
+      /Could not list supabase\/migrations\/: not a tree/,
+    ],
+  ];
+
+  for (const [name, deps, expected] of refusals) {
+    it(`refuses ${name}`, async () => {
+      assert.match((await gate({}, deps)).fatal.join('\n'), expected);
+    });
+  }
+
+  it('notes, without refusing, a recorded version this commit has no file for', async () => {
+    const { fatal, notes } = await gate({}, { git: gitWith(recorded.slice(1)) });
+    assert.deepEqual(fatal, []);
+    assert.match(
+      notes.join(),
+      /lists 1 version\(s\) with no file at this commit: 20261130000300/,
+    );
+  });
+
+  it('the production check reports an unapplied migration rather than refusing', async () => {
+    const env = { OTA_LANE: 'production-check', OTA_SHA: SHA };
+    const git = gitWith([...recorded, newer]);
+    const { fatal, notes } = await preflight({ env, git, fetchImpl: github(), readRecord });
+    assert.deepEqual(fatal, []);
+    assert.match(notes.join(), /Production has not applied this migration/);
+  });
+
+  it('Preview does not compare against production, whose head it does not run on', async () => {
+    const unreadable = () => {
+      throw new Error('should not be read');
+    };
+    const result = await gate(
+      { OTA_LANE: 'preview' },
+      { git: gitWith([...recorded, newer]), readRecord: unreadable },
+    );
+    assert.deepEqual(result.fatal, []);
+    assert.doesNotMatch(result.notes.join(), /migration|production-migrations/);
   });
 });
 

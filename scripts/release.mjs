@@ -40,6 +40,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { commitMigrationCheck, readCommittedRecord } from './production-migrations.mjs';
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const eas = JSON.parse(readFileSync(join(root, 'eas.json'), 'utf8'));
 
@@ -171,6 +173,13 @@ if (GUARDED.has(lane)) {
         '    Not a review gate — a check that somebody chose this branch.',
     );
   }
+
+  // Beta and Production both read the production database (config/backends.cjs), so code that
+  // needs a migration production has not applied breaks for everyone who takes it. Same check,
+  // and same record, as the cloud publish in scripts/ota-gate.mjs.
+  const database = commitMigrationCheck({ git, readRecord: readCommittedRecord });
+  problems.push(...database.problems);
+  for (const note of database.notes) console.log(`note: ${note}`);
 
   // The release gate, on this exact commit. Not "recently", not "on this branch": a gate
   // that passed two commits ago did not run on what is about to ship.

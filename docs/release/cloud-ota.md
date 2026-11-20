@@ -71,11 +71,14 @@ only the checkout and public GitHub data. Anything they cannot prove on Producti
 | `preflight` | The commit is on `main` | `release.mjs`, narrowed from `main` or `release/*` | refuse | note |
 | `preflight` | `ci.yml` passed on this exact commit | **new** | refuse | note |
 | `preflight` | `release-gate.yml` passed on this exact commit | `release.mjs` | refuse | note |
+| `preflight` | Every file in `supabase/migrations/` is in `config/production-migrations.json` | **new** | refuse | not checked |
 | `runtimes` | The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
 
-`ota-production-check.yml` runs both stages too, with one difference: the commit need not be on
-`main`, because it reads a reviewed pull request head before the founder decides. It stops there
-and has no publish job.
+`ota-production-check.yml` runs both stages too, with two differences: the commit need not be on
+`main`, because it reads a reviewed pull request head before the founder decides, and a migration
+production has not applied is a note rather than a refusal, because that head's own migration is
+normally applied after it merges. It stops there and has no publish job. How the migration record
+is kept is in [`safe-update-runbook.md` §8](./safe-update-runbook.md#8-what-must-never-be-shipped-over-the-air).
 
 The fingerprint job runs in the same environment and lane as the publish, so it hashes what will
 ship. A commit is "on `main`" if `main` contains it, which is how a pull request head looks after
