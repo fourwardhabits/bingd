@@ -257,17 +257,18 @@ begin
     when not coalesce(v_token, false) then 'unconfigured'
     else 'configured' end;
 
-  -- GitHub's answers are the only ones with an x-github-request-id header. pg_net keeps six
-  -- hours, by an index on created; the newest 200 are plenty for one an hour.
+  -- GitHub's answers are the only ones with an x-github-request-id header. The header test
+  -- is applied before the limit, so other posts (the push drain, the import nudge) cannot
+  -- crowd the dispatcher's answer out. The read is bounded by pg_net's own six-hour TTL, by
+  -- the index on created, and stops at the newest match.
   if to_regclass('net._http_response') is not null then
     begin
       execute $q$
         select jsonb_build_object('status_code', r.status_code, 'at', r.created,
                                   'timed_out', r.timed_out, 'errored', r.error_msg is not null)
-          from (select * from net._http_response
-                 where created > $1 - interval '6 hours'
-                 order by created desc limit 200) r
-         where jsonb_typeof(r.headers) = 'object'
+          from net._http_response r
+         where r.created > $1 - interval '6 hours'
+           and jsonb_typeof(r.headers) = 'object'
            and exists (select 1 from jsonb_object_keys(r.headers) k where lower(k) = 'x-github-request-id')
          order by r.created desc limit 1
       $q$ into v_github using v_at;

@@ -414,6 +414,13 @@ describe('classification', () => {
          (204, '{"x-github-request-id": "def"}', $1::timestamptz - interval '7 hours')`,
       [AT],
     );
+    // 300 newer answers from the other posters do not hide GitHub's.
+    await t.sql(
+      `insert into net._http_response (status_code, headers, created)
+       select 200, '{"Content-Type": "application/json"}', $1::timestamptz - interval '1 minute'
+         from generate_series(1, 300)`,
+      [AT],
+    );
     o = await observe();
     assert.equal(o['welcome-dispatch-github'].status, 'info', 'a GitHub 401 is not an alert');
     assert.equal(o['welcome-dispatch-github'].detail.dispatcher, 'configured');
