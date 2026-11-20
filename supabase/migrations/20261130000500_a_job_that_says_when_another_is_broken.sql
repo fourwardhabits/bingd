@@ -170,25 +170,32 @@ begin
         select jobname, bool_or(active) as active, min(schedule) as schedule
           from jobs group by jobname),
       w as (
-        select j.jobname, d.runid, d.status, coalesce(d.start_time, d.end_time) as at, d.return_message
+        select j.jobname, d.runid, d.status, coalesce(d.start_time, d.end_time) as at
           from cron.job_run_details d join jobs j on j.jobid = d.jobid
          where d.runid > $1),
-      ok_run as (
-        select jobname, max(runid) as runid from w where status = 'succeeded' group by jobname),
-      per as (
+      -- One hashed pass and no sort: the newest run of each kind, by runid.
+      agg as (
         select w.jobname,
                count(*)::int as runs,
                max(w.at) as last_run,
                max(w.at) filter (where w.status = 'succeeded') as last_success,
-               -- Failed runs since the last success in the window. With no success in the
-               -- window, every failure in it: a lower bound.
-               count(*) filter (where w.status = 'failed' and w.runid > coalesce(o.runid, 0))::int as consecutive,
-               (array_agg(w.status order by w.runid desc)
-                  filter (where w.status in ('succeeded', 'failed')))[1] as last_status,
-               (array_agg(left(w.return_message, 200) order by w.runid desc)
-                  filter (where w.status = 'failed'))[1] as last_error
-          from w left join ok_run o on o.jobname = w.jobname
-         group by w.jobname)
+               max(w.runid) filter (where w.status = 'succeeded') as ok_runid,
+               max(w.runid) filter (where w.status = 'failed') as fail_runid,
+               max(w.runid) filter (where w.status in ('succeeded', 'failed')) as done_runid
+          from w group by w.jobname),
+      -- Failed runs since the last success in the window. With no success in the window,
+      -- every failure in it: a lower bound.
+      fails as (
+        select w.jobname, count(*)::int as consecutive
+          from w join agg a on a.jobname = w.jobname
+         where w.status = 'failed' and w.runid > coalesce(a.ok_runid, 0)
+         group by w.jobname),
+      per as (
+        select a.*, coalesce(f.consecutive, 0) as consecutive,
+               case when a.done_runid is null then null
+                    when a.done_runid = a.fail_runid then 'failed'
+                    else 'succeeded' end as last_status
+          from agg a left join fails f on f.jobname = a.jobname)
       select e.check_name, 'cron'::text,
              case when n.jobname is null or not n.active then 'missing'
                   when coalesce(p.consecutive, 0) > 0 then 'failing'
@@ -202,7 +209,10 @@ begin
                'schedule', n.schedule,
                'runs_in_window', coalesce(p.runs, 0),
                'last_status', p.last_status,
-               'last_error', case when coalesce(p.consecutive, 0) > 0 then p.last_error end))
+               -- The latest failure's message, by primary key, only while failing.
+               'last_error', case when coalesce(p.consecutive, 0) > 0 then
+                 (select left(d.return_message, 200) from cron.job_run_details d
+                   where d.runid = p.fail_runid) end))
         from expected e
         left join named n on n.jobname = e.check_name
         left join per p on p.jobname = e.check_name
