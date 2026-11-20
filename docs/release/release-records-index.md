@@ -4,9 +4,15 @@
 manifests, execution records and handoffs written while releases 1115 through #331 shipped.
 Until this import they lived only on that branch. The branch is kept as history.
 
-The records are **historical**: each one describes the state when it was written, and none was
-edited during the import except the two plans in `docs/plans/`, which gained a dated status
-line. What is in production now is in [`production-state.md`](./production-state.md).
+The records are **historical**: each one describes the state when it was written. Two kinds
+of edit were made during the import:
+- the two plans in `docs/plans/` gained a dated status line;
+- the Feed grouping reconciliation had its per-member examples summarised. They identified
+  individual members' activity by actor hash, event id and time.
+
+The living page for what is in production is [`production-state.md`](./production-state.md).
+Its 2026-11-20 update is PR #325. Until that merges, the copy on `main` is dated 2026-11-09 and
+is behind these records.
 
 ## Production releases
 
@@ -22,8 +28,10 @@ line. What is in production now is in [`production-state.md`](./production-state
 | 2026-11-20 | [`production-2026-11-20-328.md`](./production-2026-11-20-328.md) | #328 30-minute first-ranking grouping (database only) |
 
 #329 (logo-only Welcome email) and #331 (the `bingd-welcome-dispatch` pg_cron job) have no
-separate record on the branch. They are recorded in
-[`production-state.md`](./production-state.md).
+separate record on the branch. Their evidence is the PRs themselves and a read-only production
+read of 2026-11-20: 208 migrations applied, head `20261130000300` (#331), and the job present in
+`cron.job`, active, hourly at :41. #329 changed only the email template, which the Welcome
+workflow renders from `main` on every run, so merging it was its release.
 
 ## Preview and staging
 

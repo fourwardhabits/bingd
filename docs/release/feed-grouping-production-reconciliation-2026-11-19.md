@@ -6,7 +6,7 @@ Nothing was written, no flag was changed, nothing was published or pushed, and n
 
 The saved Supabase management token first returned 401 (Invalid access token). It was re-entered through the secure credential form, and all queries after that succeeded.
 
-In this report, "actor_h" is the first 8 hex characters of md5(actor_id), and "ev" is the first 8 hex characters of the feed_events id.
+*(Redacted on import to `main`, 2026-11-20: per-member examples in §6 are summarised without actor hashes, event ids or exact times.)*
 
 ## 1. Migrations
 
@@ -78,8 +78,8 @@ feed_events totals: 2,271 rows, of which 1,610 are visible and 661 are hidden.
 - **41 multi-title watchlist groups**, all from the consolidation. Each carries `consolidation_batch`.
 - By `created_at`, 2 fall in the last 7 days. Both are from batch w12, and a group takes the time of its first post.
 - 0 new multi-title watchlist groups since 2026-11-17.
-- Three posts have been written since the OTA. Each has `{count: 1}` and one member: 11-17 01:50Z, 11-18 17:48Z and 11-19 04:30Z.
-  - The 11-18 save sequence was add, remove, re-add of the same title. It produced one post, as the "announced once" rule intends.
+- Three posts have been written since the OTA. Each has `{count: 1}` and one member.
+  - One save sequence was add, remove, re-add of the same title. It produced one post, as the "announced once" rule intends.
 
 ## 5. Historical consolidation in production
 
@@ -159,28 +159,24 @@ Production matches the records exactly. The records are consol-apply.log, consol
 - The 11 qualifying posts that sit right next to an existing group are left for two reasons. 10 have a comment, reaction or notification, and 1 has no watch event.
 - **Watchlist leftovers are small:** 5 single watchlist posts are in a burst. Each one's only neighbour has a comment, reaction or notification, so it could not reach the 2-post minimum.
 
-**Examples**
+**Examples (redacted on import, 2026-11-20)**
 
-- **A. Today-dated rankings.** actor_h 6559bfdb, 2026-11-11 05:33:55Z to 06:27:54Z.
-  - 94 cards: 85 movies and 9 seasons.
-  - Ranked one title at a time: 92 separate placement sessions, not an Unranked sitting.
-  - Every watch event has basis `today_default` with the ranking day as its date (46 the same UTC day, 48 the previous UTC day, which is the local date). Each was recorded less than 2 minutes before its ranking.
-  - Nothing references these posts.
-  - Excluded by the after-watch rule.
-- **B. Pre-provenance unattributed dates.** actor_h 7330bcc4, 2026-09-09 00:02:49Z to 01:12:50Z.
-  - 66 cards: 56 movies and 10 seasons.
-  - 65 have basis `unattributed` with a date one UTC day earlier (the same local day). That is less than 7 days old, so they count as after-watch.
-  - The one post that qualifies (ev f8b10e49, basis `none`) has no qualifying partner, so it fails the 2-post minimum.
-  - The same actor has another burst on 2026-09-12 22:41Z to 23:30Z: 52 cards, all excluded for the same reason.
-- **C. Referenced posts break a burst.** actor_h cfee0fde, 2026-09-17 03:36:42Z to 03:37:14Z.
-  - 3 movies, all basis `none`, so all historical.
-  - ev f573df60 and ev 77c4124a have comments, reactions or notifications, which leaves 1 qualifying post, below the minimum.
-  - A similar case: actor_h fb638ab3 on 2026-09-15. History group 85f43394 (w05) covers 20:54:21Z to 21:19:35Z.
-    - ev 1b41b77d (20:54:12Z) stays outside it because it has a comment or reaction and a notification.
-    - ev 597d66b3 (20:55:16Z) stays outside because it has no watch event.
-- **New posts after the OTA (D).** actor_h c21c9061, 2026-11-19 02:57:32Z to 02:58:39Z.
-  - 6 title-page rankings (seasons and a show) in 67 seconds.
-  - `rank_group_note` ran for each one and returned `after_watch` (`today_default`) every time.
+The original record illustrated each reason with a production burst, identified by a truncated
+actor hash, event-id prefixes and exact times. Those are traces of individual members'
+activity, so they are not carried onto `main`. The patterns they showed:
+
+- **A. Today-dated rankings.** One member ranked about ninety titles one at a time in under an
+  hour. Every watch carried the default *Today* date, recorded less than two minutes before
+  its ranking, and nothing referenced the posts. All were excluded by the after-watch rule.
+- **B. Pre-provenance unattributed dates.** Two bursts of 50 to 70 rankings each, by one
+  member, carried `unattributed` dates one day old, so they counted as after-watch. The one
+  post that qualified had no qualifying partner and failed the 2-post minimum.
+- **C. Referenced posts break a burst.** In a burst of three historical rankings, two had
+  comments, reactions or notifications, which left one qualifying post. In another case, two
+  posts beside an existing history group stayed outside it: one was referenced, and one had
+  no watch event.
+- **D. New posts after the OTA.** Six title-page rankings in about a minute. `rank_group_note`
+  ran for each one and returned `after_watch` (`today_default`) every time.
 
 ## 7. Recommendations (nothing below has been done)
 
