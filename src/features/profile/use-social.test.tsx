@@ -73,6 +73,10 @@ const KEYS = [
   // or unfollow changes which comments this reader may see.
   ['comments', 'viewer', 'event-1'],
   ['comment-counts', 'viewer'],
+  // The own Profile tab's Followers and Following counts (`useProfileStats`). The tab stays
+  // mounted and does not refetch on focus, so without this a follow made from the Feed or
+  // People left the Following count where it was (reliability review, 2026-11-20).
+  ['profile-stats', 'viewer'],
 ];
 
 describe('a follow', () => {
@@ -88,7 +92,9 @@ describe('a follow', () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     // Awaited: everything in this library is async as of v14, `renderHook` included.
-    const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), { wrapper });
+    const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), {
+      wrapper,
+    });
     for (const key of [...KEYS, ...PEOPLE_KEYS]) client.setQueryData(key, 'seeded');
 
     // Inside act: the hook flips its own busy flag either side of the RPC, and a state
@@ -107,7 +113,10 @@ describe('a follow', () => {
     await followAnna();
 
     const call = mockRpcCalls.find((c) => c.name === 'follow');
-    expect(call?.args).toMatchObject({ p_followee_id: 'anna-id', p_operation_id: 'operation-id' });
+    expect(call?.args).toMatchObject({
+      p_followee_id: 'anna-id',
+      p_operation_id: 'operation-id',
+    });
   });
 
   /**
@@ -174,7 +183,9 @@ describe('an unfollow or a block', () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), { wrapper });
+    const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), {
+      wrapper,
+    });
     client.setQueryData(['taggable', 'viewer'], 'seeded');
     await act(async () => {
       await act_(result.current);
