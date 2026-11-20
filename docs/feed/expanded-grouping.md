@@ -10,13 +10,13 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 > reversible. The "Not run in production" line below records the state when this design was
 > written.
 >
-> **Merged, production pending:** the half-hour rule for first rankings (#328, `main`
-> `68095e99`, 2026-11-20, migration `20261130000200`). It is applied on staging. In production
-> the head is still `20261129000300` and `feed.ranking_backfill_days` is still set (both read
-> 2026-11-20), so production still runs PR 2's historical-date test: a ranking logged with the
-> default *Today* stays standalone. The *Forward* section below describes #328's rule. No
-> consolidation has been run under it. What is live:
-> [`../release/production-state.md`](../release/production-state.md).
+> **Live in production since 2026-11-20:** the half-hour rule for first rankings (#328, `main`
+> `68095e99`, migration `20261130000200`), which the *Forward* section below describes. It is
+> applied on staging and in production: the production head was `20261130000200`, and
+> `_ranking_is_historical` and `feed.ranking_backfill_days` were gone, when read at 03:08Z on
+> 2026-11-20. It needed no OTA. PR 2's historical-date test, under which a ranking logged with
+> the default *Today* stayed standalone, ran until then. No consolidation has been run under
+> the new rule. What is live: [`../release/production-state.md`](../release/production-state.md).
 
 ## One mechanism: a group presents its members
 

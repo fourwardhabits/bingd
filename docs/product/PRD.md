@@ -107,7 +107,8 @@
 >   as a review* in Edit watch publishes a copy as the title's review (2026-11-16). A first-ever
 >   review opens **private** (2026-11-04).
 > - **Feed grouping** (2026-11-16/17): a watchlist session and a backlog half hour are one
->   post each; historical first-time rankings made from title pages group too; grouped posts
+>   post each; first rankings made within one half hour group too, whatever the watch date
+>   (#328, 2026-11-20; before that, only historical title-page rankings did); grouped posts
 >   draw a poster rail and keep one Like and one Comment; 702 earlier posts were consolidated
 >   into 115 groups, reversibly. Every post has labelled Like · Comment (2026-11-19). §14's
 >   "no historical backfill" and "one durable watchlist event per person and title" are
@@ -129,11 +130,8 @@
 > **Shipped dark:** Recommendation Engine V2 (switch `"v1"`, 0%), Refine (flag off),
 > proactive notifications (generation and push off), release pushes (shadow only).
 >
-> **Staging or unreleased:** the half-hour rule for first rankings (#328: any two first rankings
-> within 30 minutes are one post, whatever the watch date) is merged to `main` and applied on
-> staging, and its production migration is pending; until it lands, production groups only
-> historical title-page rankings, as above. Reactions and comments on follow stories (#322) and
-> username sign-in (#300) are drafts.
+> **Staging or unreleased:** reactions and comments on follow stories (#322) and username
+> sign-in (#300) are drafts.
 >
 > **Still deferred** (unchanged): Letterboxd Lists import, predicted score, unmatched-import
 > repair, Stats/Wrapped, Watch Next, further share cards and Awards, episode-level tracking,

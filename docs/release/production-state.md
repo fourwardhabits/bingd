@@ -1,8 +1,8 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-20** (production OTA from `main` `1c24b5cd` and migrations to 206 recorded; store
-table unchanged since the public listings of 2026-11-08).
+**2026-11-20** (production OTA from `main` `1c24b5cd`, and migrations to 207 including #328's;
+store table unchanged since the public listings of 2026-11-08).
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -38,16 +38,17 @@ still open drafts, but their heads were integrated into release 1115 (#307) and 
 
 | | |
 |---|---|
-| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` has since moved to `68095e99` (#328, merged, **production pending**: see *Staging or unreleased*). |
+| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` is now `68095e99`: #328 changed only the server's grouping rule (its client diff is a rename), and its migration is applied, so the installed client is `1c24b5cd` and production behaviour is `68095e99`'s. |
 | **Production OTA, 1.1.0** | Published 2026-11-20 from `1c24b5cd` (workflow run `01a1f6ba-87cd-78ec-8fe0-1dafcbddddfc`). Android update `01a1f6bf-421a-7843-b074-8a0ec05cd692`, group `0a3f0fcb-7f8d-438d-901b-a164e53f95bc`, runtime `ec79e181`; iOS update `01a1f6bf-421a-76fa-b92a-19bfb6d8118a`, group `16309eb2-6034-41c2-9ecc-df88f2dc957b`, runtime `8ea562b7`. Rollback: republish the `a3300bf0` pair, Android `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, iOS `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, and leave the database as is (the `a3300bf0` client works against it). Source: `production-2026-11-20-319-321.md` on `ops/preview-1115-records`. |
-| **DB migrations** | **206 applied**, head `20261129000300` (2026-11-20: `20261129000100`, `000200`, `000300`, one at a time, every invariant re-checked after each). Read again 2026-11-20. `main` has 207 files: `20261130000200` (#328) is **not yet applied** in production. |
+| **DB migrations** | **207 applied**, head `20261130000200` (#328), equal to `main`'s 207 files. Read 2026-11-20 03:08Z; the same read at 02:43Z still showed 206. #319's three (`20261129000100`, `000200`, `000300`) were applied one at a time on 2026-11-20, every invariant re-checked after each. |
 | **Edge Functions** | `letterboxd-import` v4 (2026-11-15, `verify_jwt` on), `tmdb-adapter` v16, `push-sender` v6 (both 2026-11-12). Read 2026-11-15 (#307 release comment). |
 | **Production OTA, 1.0.1** | Unchanged: from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
 | **Preview OTA (staging backend)** | Last recorded: `integration/preview-1120` `219e2953` (Preview 2026-11-20b: `a3300bf0` + #319 at `0aabaa18` + #321), on the `preview` channel: Android group `c3b6dcce`, runtime `2503ffaa`; iOS group `420d6710`, runtime `ef07f4b8`. #319 and #321 have since been released; no later Preview is recorded. Staging migrations: head `20261130000200` (#328's, applied on staging per #328). **Staging only.** |
 
 ### Production releases since the last update of this page
 
-Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`). None needed a new binary.
+Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`), except #328, which was a
+database migration only. None needed a new binary.
 
 | Date | `main` | What it shipped | Migrations after | OTA groups (Android / iOS) |
 |---|---|---|---|---|
@@ -59,13 +60,13 @@ Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`). None n
 | 2026-11-17 | `0170506e` (#312 + #313) | Poster rails on grouped posts; title-page backfill grouping, cross-ladder groups; historical consolidation run (115 groups, 587 fewer visible cards) | 203, head `20261128000100` | `80f10846` / `7d2f3828` |
 | 2026-11-19 | `a3300bf0` (#320 + #323) | Feed card spacing; labelled Like · Comment on every post, visible "and others" links | 203 | `e9ea7c27` / `78bc77db` |
 | 2026-11-20 | `1c24b5cd` (#321 + #319) | *Who I watched with*: searchable picker, a follow-back taggable at once. Collection drag-to-rerank across rating categories; the TV wall dragged directly (dragging a show scored by its seasons' average ranks it as a show); silent ranking updates in the Feed; the TV Reorder control removed | 206, head `20261129000300` | `0a3f0fcb` / `16309eb2` |
+| 2026-11-20 | `68095e99` (#328), database only | Feed: two or more first rankings by one person inside one fixed 30-minute window are one post, whatever the watch date. `_ranking_is_historical` and `feed.ranking_backfill_days` removed. No consolidation run under the new rule | 207, head `20261130000200` | no OTA (client stays `1c24b5cd`) |
 
 Merged to `main` with no app release needed: #314 (Welcome canary workflow), #315
 (security register), #316 (recommendation benchmark, `eval/` only), #324 (Welcome email v2,
 merged 2026-11-19; the hourly Welcome workflow renders whatever `emails/welcome/dist/` is on
 `main`, so merging it is its release; no successful Welcome run on the new template is recorded
-here yet). **Merged, production pending:** #328 (`main` `68095e99`, 2026-11-20), whose migration
-`20261130000200` is not yet applied in production (read 2026-11-20); see *Staging or unreleased*.
+here yet).
 
 ### Store distribution
 
@@ -124,7 +125,7 @@ been re-read since; it is not known to have changed.
 | `recommendations.v2_engine` / `v2_rollout_percent` / `v2_allowlist` | **`"v1"`** / 0 / `[]`: Rec V2 is shipped dark | 2026-11-15 | `"v1"` / 0 / `[]` |
 | `score.contributor_min_rankings` | 10 | 2026-11-15 | 10 |
 | `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | 2026-11-20 | per QA round |
-| `feed.ranking_backfill_grouping_enabled` / `feed.ranking_backfill_days` | **true** / 7. `20261130000200` (#328, not yet in production) removes `ranking_backfill_days`; the first flag stays as the kill switch | 2026-11-20 | true / removed (#328 applied on staging) |
+| `feed.ranking_backfill_grouping_enabled` | **true**: the kill switch for grouping first rankings, which kept its name. `feed.ranking_backfill_days` no longer exists (`20261130000200`) | 2026-11-20 | true; `ranking_backfill_days` removed |
 
 **Security (2026-11-19).** H-2 is fixed in production (`20261124000100`, trigger
 `retire_unproven_password`). H-1 is **closed** (2026-11-18): the privileged Actions secrets
@@ -169,9 +170,9 @@ Username-or-email sign-in (#300) is **not in production**: its migration slot
 - **Notes and reviews.** One title-level review (`user_media.note`), shared or private, with a
   spoiler flag; review cards, review sort and **Helpful**.
 - **Feed and social.** Follows, ordinary activity, **grouped posts** (a watchlist session, a
-  backlog half hour, and historical first-time rankings from title pages, each one post with a
-  poster rail; see the semantics below), labelled Like · Comment on every post, comments with
-  author follow-up notifications, reactions, recommendations and **Sent to You** (read state,
+  backlog half hour, and first-time rankings made within one half hour whatever the watch date,
+  each one post with a poster rail; see the semantics below), labelled Like · Comment on every
+  post, comments with author follow-up notifications, reactions, recommendations and **Sent to You** (read state,
   unread first, Movies/TV filter), invites, the leaderboard, goals and Awards.
 - **Lists v1.** Native lists of movies, seasons and series, public/private/link, custom order,
   Add to List, share links, public web page.
@@ -202,7 +203,6 @@ unapplied PR; whether to apply it is a founder decision.
 
 | What | Where |
 |---|---|
-| Feed: a half hour of first rankings is one post, whatever the watch date (#328) | **Merged** to `main` (`68095e99`, 2026-11-20); migration `20261130000200` applied on staging, **not yet in production** (head read 2026-11-20). It needs no OTA: the installed client already asks to group every first ranking outside Unranked, and only the server's rule changes |
 | Reactions and comments on follow stories, Workstream C (#322) | Draft PR; **not on staging**, not in any Preview |
 | Username-or-email sign-in (#300) | Draft PR; migration not applied anywhere |
 | Design System v3 (#295) | Draft PR |
@@ -244,14 +244,14 @@ design in [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)):
   keeps its id, place and conversation (`feed.ranking_grouping_enabled`).
 - Movies, shows and seasons share one social group (cross-ladder); each title keeps its own
   ladder and score.
-- A **first-time** ranking from a title page joins a group only when its watch evidence is
-  historical: the newest watch's basis is `none` or `diary`, or a reader-entered date at least
-  `feed.ranking_backfill_days` (7) old. A ranking logged with the default *Today* date, a
-  recent date or no watch at all is after-watch and stays standalone.
-  **Merged, production pending:** #328 (`20261130000200`, founder rule of 2026-11-20) replaces
-  this test. Two or more eligible first rankings by one person inside one fixed 30-minute
-  window become one post, whatever the watch date. Until that migration is applied in
-  production, the rule above is the one that runs.
+- **First-time rankings in one half hour are one post** (#328, `20261130000200`, founder rule
+  of 2026-11-20, live since that day). Two or more eligible first rankings by one person inside
+  one fixed 30-minute window are one grouped post, whatever watch date was chosen. That covers
+  every surface but Unranked, and an Unranked sitting in the same half hour joins it. A
+  rewatch, a review, an update and anything already reacted to, commented on or notified stay
+  standalone. Until 2026-11-20 a title-page ranking grouped only when its watch was
+  historical, so one logged with the default *Today* stayed standalone. Earlier posts were not
+  consolidated under the new rule.
 - A grouped post draws its members as a poster rail with the author's scores, and keeps one
   Like and one Comment; Save and Share are not drawn on it.
 - Members are hidden by `feed_events.presented_in` under the read policy, never deleted.
