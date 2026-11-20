@@ -427,13 +427,11 @@ describe('what the reader is told', () => {
     });
   });
 
-  it('a move across a category names the new category, the rank and the score, with Undo', () => {
-    expect(notices.moved('Heat', 14, 4.6, 'fine')).toEqual({
-      message: 'Moved “Heat” to It was fine · #14 · 4.6',
-      action: { kind: 'undo', label: 'Undo' },
-      tone: 'info',
-    });
-    expect(notices.undone('Heat', 3, 'loved').message).toBe('Moved “Heat” back to I liked it · #3');
+  it('a move across a category reads the same: the rank and the score, never the category (founder QA, 2026-11-20)', () => {
+    const notice = notices.moved('Heat', 14, 4.6);
+    expect(notice.message).toBe('Moved “Heat” to #14 · 4.6');
+    expect(notice.message).not.toMatch(/I liked it|It was fine|I didn’t like it/);
+    expect(notices.undone('Heat', 3).message).toBe('Moved “Heat” back to #3');
   });
 
   it('a place the server refused says the list was refreshed, and never points at Rerank', () => {

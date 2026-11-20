@@ -241,13 +241,12 @@ export function useRerank(userId: string) {
           const score =
             (result.outcome === 'moved' ? result.reply.score : null) ??
             scoreFor(move.toBucket, move.toPosition, bandSizes(after));
-          const into = crosses(move) ? move.toBucket : undefined;
           if (isUndo) {
-            show(notices.undone(move.title, move.toPosition, into));
+            show(notices.undone(move.title, move.toPosition));
           } else {
             const back = undoOf(after, move);
             undoable.current = back ? { kind: 'move', move: back } : null;
-            show(notices.moved(move.title, move.toPosition, score, into));
+            show(notices.moved(move.title, move.toPosition, score));
           }
         } else if (write.kind === 'promote' && result.outcome === 'promoted') {
           const { plan } = write;

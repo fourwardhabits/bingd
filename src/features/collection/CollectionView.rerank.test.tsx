@@ -225,15 +225,15 @@ describe('the TV wall, dragged directly (#319)', () => {
     }),
   ];
 
-  it('lifts both kinds of poster, with no "ranked separately" refusal, and keeps Reorder', async () => {
-    const onReorderTv = jest.fn();
-    const rerank = { controller: controller(), pool: null, onReorderTv };
-    const { titleButton, getByTestId } = await draw({ items: SERIES, rerank });
+  it('lifts both kinds of poster, with no "ranked separately" refusal and no Reorder control', async () => {
+    const rerank = { controller: controller(), pool: null };
+    const { titleButton, queryByTestId, queryByText } = await draw({ items: SERIES, rerank });
     await fireEvent(titleButton('Average show') as never, 'longPress');
     await fireEvent(titleButton('Explicit show') as never, 'longPress');
     expect(rerank.controller.explain).not.toHaveBeenCalled();
-    await fireEvent.press(getByTestId('collection-reorder-tv'));
-    expect(onReorderTv).toHaveBeenCalled();
+    // The wall is the one place TV is reordered (founder QA, 2026-11-20).
+    expect(queryByTestId('collection-reorder-tv')).toBeNull();
+    expect(queryByText('Reorder')).toBeNull();
   });
 
   it('offers an average poster "Rank as a show here", which promotes it with its row', async () => {
@@ -278,41 +278,6 @@ describe('the TV wall, dragged directly (#319)', () => {
     expect(rerank.controller.explain).toHaveBeenCalledWith(
       expect.objectContaining({ action: expect.objectContaining({ kind: 'sortByRating' }) }),
     );
-  });
-});
-
-describe('a TV pool editor', () => {
-  const SEASONS = [
-    film('a1', 'Season 1', 1, 'loved', { kind: 'season', seasonNumber: 1, seriesTitle: 'Show A', category: 'tv_seasons' }),
-    film('a2', 'Season 2', 2, 'loved', { kind: 'season', seasonNumber: 2, seriesTitle: 'Show A', category: 'tv_seasons' }),
-    film('b1', 'Season 1', 3, 'loved', { kind: 'season', seasonNumber: 1, seriesTitle: 'Show B', category: 'tv_seasons' }),
-  ];
-
-  it('draws the pool in ranking order with its ranks, a Done, and no filters', async () => {
-    const onDone = jest.fn();
-    const rerank = {
-      controller: controller(),
-      pool: 'tv_seasons' as const,
-      editor: { title: 'Reorder TV seasons', onDone, footnote: 'Seasons only.' },
-    };
-    const view = await draw({
-      items: [...SEASONS].reverse(),
-      rerank,
-      // The editor ignores the wall's own sort and filters.
-      state: { sort: { axis: 'year', direction: 'asc' }, filters: { ...emptyFilters(), genres: ['Drama'] } },
-    });
-    expect(view.getByTestId('collection-editor-title').props.children).toBe('Reorder TV seasons');
-    expect(view.getAllByTestId('poster-rank-badge', { includeHiddenElements: true }).map((b) => b.props.children.props.children)).toEqual([
-      '#1',
-      '#2',
-      '#3',
-    ]);
-    expect(view.queryByTestId('collection-filter-sort')).toBeNull();
-    expect(view.getByTestId('collection-editor-note').props.children).toBe('Seasons only.');
-    const labels = view.getAllByRole('button').map((b) => String(b.props.accessibilityLabel ?? ''));
-    expect(labels.filter((l) => l.startsWith('#'))).toHaveLength(3);
-    await fireEvent.press(view.getByTestId('collection-editor-done'));
-    expect(onDone).toHaveBeenCalled();
   });
 });
 

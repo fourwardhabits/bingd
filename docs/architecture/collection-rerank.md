@@ -57,13 +57,11 @@ A long-press on a ranked title explains this and offers **Sort by rating** (one 
 filters and sets Rating, highest first). Unranked titles: a long-press says to rank it first.
 
 **TV.** The TV wall is dragged directly, like Movies (#319, founder QA 2026-11-20). See
-"TV, dragged on the wall" below. The pool editors stay as a secondary action:
-- **Reorder** in the count row opens **Reorder TV shows** or **Reorder TV seasons**, each with its ranked count.
-- The editor draws that pool's ranked titles in position order, in Poster or List, each labelled with its rank (`#3`).
-- Only explicitly ranked units appear. A series scored only by its seasons' average is not in the shows pool. A footnote says to drag it on the TV wall to rank it as a show.
-- **Done** leaves the editor.
-
-The "TV shows and seasons are ranked separately" refusal is gone.
+"TV, dragged on the wall" below. The wall is the one place TV is reordered: the Reorder
+button and its TV shows / TV seasons editors were removed at the founder's final QA
+(2026-11-20). The show and season rankings, their APIs and every season-specific ranking
+path (ranking a season from its page, Refine, corrections) are unchanged. The "TV shows
+and seasons are ranked separately" refusal is gone too.
 
 ## Across a category (founder decision, 2026-11-19)
 
@@ -75,8 +73,8 @@ distance.
 **Where it lands.** A dropped title takes the place of the title it displaces and joins that
 title's category. Drag *Heat* (I liked it, 7.6) onto a 4.x title and it is It was fine, at that
 place, with that place's score from `score_for`. A drag inside one category is exactly the move
-it always was. The rule needs no geometry, and the screen says it while dragging: crossing a
-line ticks once and the lifted copy reads **Move to It was fine**.
+it always was. The rule needs no geometry. While dragging, crossing a line ticks once (the
+"Move to …" label that also said so was removed in the 2026-11-20 QA pass).
 
 **The line itself.** The first place of a category, reached from above, is also the last place
 of the one above it: the same position, two possible categories. A drag reaches it in two steps
@@ -100,8 +98,7 @@ sends, so the server's refusal is a backstop that means the list had changed.
 belong to the next category. It carries the same guards as any move.
 
 **Pools.** The move's ranking category is the title's own, read under the lock. TV shows and TV
-seasons are separate pools, edited in their own Reorder editors, and a move cannot name
-another pool.
+seasons are separate pools, and a move cannot name another pool.
 
 **Rollback.** `docs/release/pr319/rollback-20261129000200.sql` restores the 20261129000100
 function, which is same-category only. Titles already moved across a category are valid
@@ -111,7 +108,7 @@ rankings and need no data change.
 
 - **Lift:** a `selection` haptic. The tile lifts and follows the finger. The others make room. Within about 64pt of the list's top or bottom edge, the list auto-scrolls.
 - **Drop:** a `decision` haptic. The cached ladder is reordered at once, so the new order and every reflowed score appear before the server answers.
-- **Success:** the bar reads `Moved “Heat” to #4 · 9.6` with **Undo**, or `Moved “Heat” to It was fine · #14 · 4.6` across a category. The relevant caches are reconciled through `invalidateAfterCollectionChange`.
+- **Success:** the bar reads `Moved “Heat” to #4 · 9.6` with **Undo** and a dismiss, across a category too: the place and the score, never the category's name (founder QA, 2026-11-20). Undo reads `Moved “Heat” back to #3`. A TV wall promotion keeps `Ranked “X” as a show · #N · score`. The relevant caches are reconciled through `invalidateAfterCollectionChange`.
 - **Undo** is a second, ordinary `rank_reorder` back to the old position. It has a new operation id and the same guards. If anything moved in between, it is refused like any stale move, rather than undoing the wrong thing.
 - **Failure** restores the snapshot and reconciles. A lost reply may have committed, so the refetch is the truth. The bar offers **Retry**, which resends the **same** operation id, so a move that did land is answered from the ledger rather than applied twice.
 - One write is in flight at a time. One more drop meanwhile is drawn at once and sent when

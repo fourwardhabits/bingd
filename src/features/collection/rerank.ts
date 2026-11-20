@@ -345,18 +345,17 @@ export type RerankNotice = {
 const quoted = (title: string) => `“${title}”`;
 
 export const notices = {
-  /** `into` is the new category, named only when the move changed it. */
-  moved: (title: string, position: number, score: number, into?: Bucket): RerankNotice => ({
-    message: into
-      ? `Moved ${quoted(title)} to ${BUCKET_LABEL[into]} · #${position} · ${formatScore(score)}`
-      : `Moved ${quoted(title)} to #${position} · ${formatScore(score)}`,
+  /**
+   * One confirmation for every ordinary move, across a category too (founder QA,
+   * 2026-11-20): the place and the score, never the category's name.
+   */
+  moved: (title: string, position: number, score: number): RerankNotice => ({
+    message: `Moved ${quoted(title)} to #${position} · ${formatScore(score)}`,
     action: { kind: 'undo', label: 'Undo' },
     tone: 'info',
   }),
-  undone: (title: string, position: number, into?: Bucket): RerankNotice => ({
-    message: into
-      ? `Moved ${quoted(title)} back to ${BUCKET_LABEL[into]} · #${position}`
-      : `Moved ${quoted(title)} back to #${position}`,
+  undone: (title: string, position: number): RerankNotice => ({
+    message: `Moved ${quoted(title)} back to #${position}`,
     tone: 'info',
   }),
   /**

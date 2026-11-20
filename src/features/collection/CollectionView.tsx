@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import {
   AccessibilityInfo,
   Animated,
-  Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -39,7 +38,6 @@ import {
   nextShuffleSeed,
   offersRuntime,
   sortAxesFor,
-  sortItems,
   visibleItems,
   type CollectionFilters,
   type CollectionItem,
@@ -153,16 +151,10 @@ export type CollectionRerank = {
    * The ranking these titles are, or null for the TV wall: one poster per series with an
    * explicit show score or a season average. The TV wall is dragged directly (#319,
    * `tv-wall.ts`): an explicit show moves among the explicit shows, and an average poster
-   * becomes an explicit show where it is dropped. The pool editors stay, under Reorder.
+   * becomes an explicit show where it is dropped. There is no separate Reorder view
+   * (founder QA, 2026-11-20): the wall is the one place TV is reordered.
    */
   pool: RankingCategory | null;
-  /**
-   * Set while a TV pool editor is open. The titles are then that pool's ranked units,
-   * always in ranking order with no filters, each labelled with its rank.
-   */
-  editor?: { title: string; onDone: () => void; footnote?: string };
-  /** The TV wall's way into the editors (`Reorder` in the count row). */
-  onReorderTv?: () => void;
 };
 
 /** The ranking order: the only order a display index can be a position in. */
@@ -196,7 +188,6 @@ export function CollectionView({
   rerank,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
-  const editor = rerank?.editor;
 
   // Runtime only where a row could carry one: not on a TV list made only of seasons.
   const axes = sortAxesFor(segment, { runtime: offersRuntime(items) });
@@ -210,10 +201,7 @@ export function CollectionView({
   // (app.config.ts `experiments.reactCompiler`), and it memoizes this itself —
   // a hand-written one here only gave it a dependency list it could not prove
   // stable, which it reports rather than silently ignoring.
-  // A pool editor is always the ranking itself: no filter, no other order.
-  const visible = editor
-    ? sortItems(items, RANKING_ORDER)
-    : visibleItems(items, state.filters, sort, state.seed);
+  const visible = visibleItems(items, state.filters, sort, state.seed);
 
   /**
    * **Whether this screen is one ranking, and which** (#318). `block` says why not; the
@@ -223,8 +211,8 @@ export function CollectionView({
   const block = rerank
     ? screenBlock({
         segment,
-        sort: editor ? RANKING_ORDER : sort,
-        filters: editor ? emptyFilters() : state.filters,
+        sort,
+        filters: state.filters,
       })
     : 'segment';
   const ladder: Ladder | null =
@@ -455,10 +443,6 @@ export function CollectionView({
     }
   };
 
-  /** A pool editor's rank label: the position, which is what a drop changes. */
-  const rankLabel = (index: number) =>
-    editor && ladder && index < rungCount ? `#${ladder.rungs[index]?.position}` : null;
-
   /**
    * **The page's toolbar, then its cards, then the count — all at the head of the list**
    * (founder, marquee cohesion sprint, 2026-11-07).
@@ -481,37 +465,9 @@ export function CollectionView({
       <View style={styles.toolbar}>
         <BrowseControlsRow
           testID="collection-toolbar"
-          leading={
-            editor ? (
-              <Text variant="headline" numberOfLines={1} testID="collection-editor-title">
-                {editor.title}
-              </Text>
-            ) : (
-              title
-            )
-          }
+          leading={title}
           trailing={
-            editor ? (
-              <>
-                <ViewModeToggle
-                  value={state.mode}
-                  onChange={(mode) => onChange({ ...state, mode })}
-                  testID="collection-view-mode"
-                />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Done reordering ${editor.title.replace(/^Reorder /, '')}`}
-                  onPress={editor.onDone}
-                  hitSlop={theme.space[2]}
-                  style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}
-                  testID="collection-editor-done"
-                >
-                  <Text variant="callout" tone="action">
-                    Done
-                  </Text>
-                </Pressable>
-              </>
-            ) : hasTitles ? (
+            hasTitles ? (
               <>
                 {/* **Filters & Sort first, the view toggle rightmost** (founder QA 11-14,
                     §5; was toggle then filter), as on For You. */}
@@ -544,37 +500,15 @@ export function CollectionView({
       {hasTitles ? (
         <View style={styles.countRow}>
           <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
-            {editor
-              ? `${rungCount} ranked · touch and hold to move`
-              : visible.length === items.length
-                ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
-                : `${visible.length} of ${items.length}`}
+            {visible.length === items.length
+              ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
+              : `${visible.length} of ${items.length}`}
           </Text>
-          {!editor && rerank?.onReorderTv ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Reorder TV shows or seasons"
-              onPress={rerank.onReorderTv}
-              hitSlop={theme.space[2]}
-              style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}
-              testID="collection-reorder-tv"
-            >
-              <Text variant="footnote" tone="action">
-                Reorder
-              </Text>
-            </Pressable>
-          ) : null}
-          {editor ? null : countAccessory}
+          {countAccessory}
         </View>
       ) : countAccessory ? (
         // The way to the lists never depends on there being titles.
         <View style={styles.accessoryOnly}>{countAccessory}</View>
-      ) : null}
-
-      {editor?.footnote ? (
-        <Text variant="footnote" tone="tertiary" style={styles.editorNote} testID="collection-editor-note">
-          {editor.footnote}
-        </Text>
       ) : null}
 
       {standIn}
@@ -616,7 +550,6 @@ export function CollectionView({
                       : undefined,
                     onPressOut: drag.releaseWithoutMoving,
                     ...a11yFor(index),
-                    badge: rankLabel(index),
                     hidden: shift?.hidden,
                     shift: shift && !shift.hidden ? { x: shift.x, y: shift.y } : null,
                   };
@@ -649,7 +582,6 @@ export function CollectionView({
             <PosterTileCopy
               tile={tileOf(shown[lifted.from] as CollectionItem)}
               width={lifted.frame.width}
-              badge={rankLabel(lifted.from)}
             />
           </Animated.View>
         ) : null}
@@ -671,9 +603,8 @@ export function CollectionView({
           contentContainerStyle={styles.list}
           renderItem={({ item, index }) => {
             const shift = rerank ? shiftAt(index) : null;
-            const label = rankLabel(index);
             const row: TitleRowProps = {
-              title: label ? `${label}  ${nameOf(item)}` : nameOf(item),
+              title: nameOf(item),
               year: item.year,
               posterUri: posterUri(item.posterPath),
               secondary: (
@@ -908,13 +839,6 @@ const styles = StyleSheet.create({
   wall: { paddingBottom: theme.space[10] },
   wallTop: { height: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
-  textAction: {
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.space[2],
-  },
-  pressed: { opacity: 0.7 },
-  editorNote: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   /** The floating copy of a lifted title, over the list it was lifted from (#318). */
   lifted: { position: 'absolute', zIndex: 10, elevation: 10 },
   liftedRow: {

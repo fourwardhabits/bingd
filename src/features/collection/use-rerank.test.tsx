@@ -196,7 +196,7 @@ describe('a move', () => {
     await act(async () =>
       answer.resolve(await lands(4.6)({ mediaItemId: 'c', toPosition: 4, toBucket: 'fine' })),
     );
-    expect(result.current.notice?.message).toBe('Moved “Title c” to It was fine · #4 · 4.6');
+    expect(result.current.notice?.message).toBe('Moved “Title c” to #4 · 4.6');
 
     mockReorder.mockImplementationOnce(lands(7));
     await act(async () => {
@@ -214,7 +214,7 @@ describe('a move', () => {
     const restored = client.getQueryData<RankedEntry[]>(KEY);
     expect(order(restored)).toEqual(['a', 'b', 'c', 'd']);
     expect(restored?.find((e) => e.mediaItemId === 'c')?.bucket).toBe('loved');
-    expect(result.current.notice?.message).toBe('Moved “Title c” back to I liked it · #3');
+    expect(result.current.notice?.message).toBe('Moved “Title c” back to #3');
   });
 
   /**
