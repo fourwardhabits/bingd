@@ -1,7 +1,7 @@
 # Sending the welcome email on a schedule
 
 **Status: SENDING ON PRODUCTION since 2026-09-18.** The procedure that turned it on is
-"Turning it on" at the bottom. Since `20261201000200` a production pg_cron job is the primary
+"Turning it on" at the bottom. Since `20261130000300` a production pg_cron job is the primary
 trigger and the GitHub schedule is the backup; see "What starts a run". The founder's one-time
 setup for that job is steps 1 to 3 there.
 
@@ -22,7 +22,7 @@ supabase/migrations/20260923000100_a_welcome_note_sent_once.sql
 emails/welcome/automation/
   send-welcome.mjs       the worker: claim, send, record
 .github/workflows/welcome-email.yml   the job: hourly schedule (backup) and workflow_dispatch
-supabase/migrations/20261201000200_a_welcome_that_does_not_wait_for_github.sql
+supabase/migrations/20261130000300_a_welcome_that_does_not_wait_for_github.sql
                          the primary trigger: pg_cron dispatches the workflow hourly
 supabase/tests/welcome-email.test.mjs            the SQL against every migration, and the
                                                  worker end to end over it
@@ -41,7 +41,7 @@ Two triggers start the same workflow, and either one alone is enough.
 
 - **Primary: production Postgres.** The pg_cron job `bingd-welcome-dispatch` runs
   `_dispatch_welcome_email()` at :41 every hour
-  (`supabase/migrations/20261201000200_a_welcome_that_does_not_wait_for_github.sql`). It calls
+  (`supabase/migrations/20261130000300_a_welcome_that_does_not_wait_for_github.sql`). It calls
   GitHub's `workflow_dispatch` API for `welcome-email.yml` on `main` with `target=production`,
   `mode=send` and no canary, which is the same send a scheduled run makes. GitHub starts a
   dispatched run promptly.
@@ -139,7 +139,7 @@ schedule, which is slower, until the token is replaced.
 - **Remove the token:** `delete from vault.secrets where name = 'welcome_dispatch_github_token';`
   in production, then delete the token on GitHub. The dispatcher then returns `unconfigured`
   every hour and posts nothing.
-- **Remove the dispatcher entirely:** `docs/release/welcome-dispatch/rollback-20261201000200.sql`.
+- **Remove the dispatcher entirely:** `docs/release/welcome-dispatch/rollback-20261130000300.sql`.
 
 ## Why this and not a Resend Automation
 

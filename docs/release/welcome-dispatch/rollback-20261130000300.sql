@@ -1,4 +1,4 @@
--- ROLLBACK of 20261201000200_a_welcome_that_does_not_wait_for_github. STAGING ONLY unless
+-- ROLLBACK of 20261130000300_a_welcome_that_does_not_wait_for_github. STAGING ONLY unless
 -- separately approved.
 --
 -- Removes what the migration added: the pg_cron job `bingd-welcome-dispatch` and the function
@@ -39,7 +39,7 @@ drop function if exists _dispatch_welcome_email();
 do $record$
 begin
   if to_regclass('supabase_migrations.schema_migrations') is not null then
-    execute $q$ delete from supabase_migrations.schema_migrations where version = '20261201000200' $q$;
+    execute $q$ delete from supabase_migrations.schema_migrations where version = '20261130000300' $q$;
   end if;
 end;
 $record$;

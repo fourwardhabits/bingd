@@ -676,7 +676,7 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
       ['workflow_dispatch', { target: 'nonprod', mode: 'dry-run' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'dry-run'],
       ['workflow_dispatch', { target: 'nonprod', mode: 'send' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'send'],
       ['workflow_dispatch', { target: 'production', mode: 'dry-run' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'dry-run'],
-      // What production's pg_cron dispatcher asks for (20261201000200): the same send a
+      // What production's pg_cron dispatcher asks for (20261130000300): the same send a
       // scheduled run makes.
       ['workflow_dispatch', { target: 'production', mode: 'send' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'send'],
     ];

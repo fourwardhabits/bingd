@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createTestDb, migrationSql } from './harness.mjs';
 
 /**
- * The welcome email's pg_cron dispatcher, `20261201000200`.
+ * The welcome email's pg_cron dispatcher, `20261130000300`.
  *
  * `_dispatch_welcome_email()` asks GitHub to run `.github/workflows/welcome-email.yml` with
  * `target=production, mode=send`, once an hour, because GitHub's own `schedule:` starts this
@@ -26,8 +26,8 @@ import { createTestDb, migrationSql } from './harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
-const MIGRATION = '20261201000200_a_welcome_that_does_not_wait_for_github.sql';
-const ROLLBACK = join(root, 'docs', 'release', 'welcome-dispatch', 'rollback-20261201000200.sql');
+const MIGRATION = '20261130000300_a_welcome_that_does_not_wait_for_github.sql';
+const ROLLBACK = join(root, 'docs', 'release', 'welcome-dispatch', 'rollback-20261130000300.sql');
 const TOKEN = 'fixture-token-not-real-0123456789';
 const DISPATCH_URL =
   'https://api.github.com/repos/fourwardhabits/bingd/actions/workflows/welcome-email.yml/dispatches';

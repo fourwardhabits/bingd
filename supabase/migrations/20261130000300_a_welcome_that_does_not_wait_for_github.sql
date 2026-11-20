@@ -71,7 +71,7 @@
 --   update app_config set value = 'false'::jsonb where key = 'welcome.delivery_enabled';
 -- Stop only the dispatches:
 --   select cron.unschedule('bingd-welcome-dispatch');
--- Rollback: docs/release/welcome-dispatch/rollback-20261201000200.sql.
+-- Rollback: docs/release/welcome-dispatch/rollback-20261130000300.sql.
 
 do $install$
 begin

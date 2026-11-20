@@ -21,7 +21,7 @@ name: Welcome email
 # The schedule was turned on in its own commit, after the founder confirmed Sign in with
 # Apple private email relay for bingd.app (step 5 of emails/welcome/automation/README.md).
 #
-# WHAT STARTS A RUN (since 20261201000200)
+# WHAT STARTS A RUN (since 20261130000300)
 #
 #   Primary: production Postgres. The pg_cron job `bingd-welcome-dispatch` calls GitHub's
 #   workflow_dispatch API at :41 every hour with target=production, mode=send (no canary),
