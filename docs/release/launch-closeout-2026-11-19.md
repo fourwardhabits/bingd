@@ -25,10 +25,10 @@ An open PR, green CI or a prepared upload is **not** "Shipped and verified".
 | #328 Feed: 30-minute first-ranking grouping window | `main` `68095e99`. Migration `20261130000200`, database-only | Production head `20261130000200` (207 versions); I/P/W invariants OK; `_ranking_is_historical` removed. **No historical consolidation** (82 posts / 11 groups pending separate authorization). Record: `docs/release/production-2026-11-20-328.md`. |
 | Welcome email dispatcher ([#331](https://github.com/fourwardhabits/bingd/pull/331)) | `main` `ecd03517`. Migration `20261130000300`, database-only, founder-approved 2026-11-20 | Production head `20261130000300` (208 versions). `_dispatch_welcome_email()`: owner `postgres`, security definer, `search_path=public`, ACL `{postgres=X/postgres}` (anon, authenticated, service_role and public all denied). Exactly one `bingd-welcome-dispatch` job, `41 * * * *`, active, as `postgres`, with 6 jobs in all. Gates: env `prod`, delivery on, **0 token rows**. Probe in a rolled-back transaction returned `unconfigured` with 0 GitHub requests queued before and after. `welcome-email.yml` is still `active`, with its cron unchanged as the backup. **Rollback:** `docs/release/welcome-dispatch/rollback-20261130000300.sql` on `main` (unschedules the job, drops the function, removes the history row; any Vault secret is left for manual deletion). Stop without rollback: `select cron.unschedule('bingd-welcome-dispatch');`. |
 
-**In founder QA:** #322 (follow-story engagement). Staging (re-read 2026-11-21 ~08:10Z): head `20261201000100`, 210 versions. That count includes #331's `20261130000300` and #334's `20261130000400`; #334 was first applied as `20261201000400` and its history row was renamed. Preview `5e5f55df`: Android `01a1f6ea-7758-7d92-8289-577aa7b5a8f5`, iOS `01a1f6ea-7758-7d86-bef5-3da925a67628`. Checklist: `docs/release/preview-2026-11-21-wsc.md`. No production change before device QA passes.
+**In founder QA:** #322 (follow-story engagement). Staging (re-read 2026-11-20 ~08:05Z): head `20261201000100`, 210 versions. That count includes #331's `20261130000300` and #334's `20261130000400`; #334 was first applied as `20261201000400` and its history row was renamed. Preview `5e5f55df`: Android `01a1f6ea-7758-7d92-8289-577aa7b5a8f5`, iOS `01a1f6ea-7758-7d86-bef5-3da925a67628`. Checklist: `docs/release/preview-2026-11-21-wsc.md`. No production change before device QA passes.
 
 
-## Overnight closeout, 2026-11-20 to 11-21
+## Overnight closeout, 2026-11-20
 
 Three workers ran in separate worktrees: A (docs), B (security) and C (reliability). The coordinator verified each claim below against `main`, GitHub or a read-only production query before recording it.
 
@@ -96,7 +96,7 @@ Three workers ran in separate worktrees: A (docs), B (security) and C (reliabili
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
-- 2026-11-21 ~08:00Z: overnight closeout recorded above. Merged: #325, #332, #317, #335, #337 (all docs). Ready for founder approval: #333, #334 (staging), #336. Production changed only by the approved #331 migration.
+- 2026-11-20 ~08:00Z: overnight closeout recorded above. Merged: #325, #332, #317, #335, #337 (all docs). Ready for founder approval: #333, #334 (staging), #336. Production changed only by the approved #331 migration.
 - 2026-11-20 ~05:40Z: **Shipped.** #331 migration `20261130000300` applied to production with founder approval, from a clean checkout of `ecd03517` (CI, races, release gate green). The script differs from the reviewed #328 script only in its expected version, and the dry run showed exactly that version pending. Verified: history, ownership, ACL, one job, and the `unconfigured` probe with no request. No token was created or stored.
 - 2026-11-20 ~05:15Z: #331 merged (`ecd03517`; CI, races, release gate green; Codex clean on `dd0b265a`). Production dry run: only `20261130000300` pending. The apply was held by the session's permission check, so it waits for founder go-ahead.
 - 2026-11-20 ~04:00Z: GitHub scheduled runs still not starting (none since 22:17Z). Fix in progress: a pg_cron dispatcher in production, following the push/import drain pattern. #325 ready to merge (`78570611`).
