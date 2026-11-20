@@ -104,9 +104,13 @@ jobs:
   nonprod:
     name: nonprod
     runs-on: ubuntu-latest
+    # Only `main`'s copy of this file runs with a secret (security register 2026-11-20, B-2):
+    # a run dispatched on any other branch or tag is skipped before it asks for an
+    # Environment. The Environment's own `main` restriction stays the real control.
     if: >-
+      github.ref == 'refs/heads/main' && (
       github.event_name == 'schedule' ||
-      contains(fromJSON('["nonprod", "both"]'), github.event.inputs.target)
+      contains(fromJSON('["nonprod", "both"]'), github.event.inputs.target))
     environment: nonprod
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
@@ -125,9 +129,11 @@ jobs:
   production:
     name: production
     runs-on: ubuntu-latest
+    # The same `main`-only line as the nonprod job above.
     if: >-
+      github.ref == 'refs/heads/main' && (
       (github.event_name == 'schedule' && vars.BINGD_PRODUCTION_TRENDING == 'true') ||
-      contains(fromJSON('["production", "both"]'), github.event.inputs.target)
+      contains(fromJSON('["production", "both"]'), github.event.inputs.target))
     environment: production
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0

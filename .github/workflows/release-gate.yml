@@ -28,6 +28,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only job token (security register 2026-11-20, B-3). Nothing here writes to the
+# repository, and `npm ci` runs every dependency's install scripts beside this token, so it
+# gets no more than the checkout needs, whatever the repository's default token setting is.
+permissions:
+  contents: read
+
 jobs:
   gate:
     name: Full suite, real Postgres, export
