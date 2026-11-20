@@ -20,9 +20,9 @@
     "The Beli paragraph, the 'I built bingd' paragraph and 'Hope you enjoy it as much as I do.': the founder note on bingd.app ('A note from me', web/build.mjs founder-section), verbatim; the same words the founder approved for Instagram Story 04 (v5, 2026-11-10).",
     "'The movie nerd who made bingd.': the founder's requested closing line for this note, 2026-11-19. Replaced 2026-11-20 by the founder's own wording, '(the movie nerd that made bingd)', set on the same line as 'Suraj' in the same font and colour, a little smaller.",
     "The photo: founder-cafe-tea-square.jpg from the founder's Drive folder, resized to 1120px and stripped of all metadata. Alt text drafted for this email.",
-    "2026-11-20 (founder, after reading the test in Gmail): the masthead is the real bingd. logo, not the text wordmark, and the photo moves from a 560px block under the masthead to a small portrait beside the sign-off.",
+    "2026-11-20 (founder, after reading the test in Gmail): the masthead is the real bingd. logo, not the text wordmark, and the 560px photo under the masthead is gone.",
     "The logo: bingd-logo.png is the app's BrandLockup (assets/brand/bingd-icon.svg, the filmstrip mark at 42x25, an 8px gap, and 'bingd.' in DM Serif Display 28px, Maroon), rasterised at 3x on a Paper ground with rounded corners, so Gmail's forced dark mode cannot put Maroon on near-black. Nothing about the logo was redrawn.",
-    "The portrait: founder-cafe-tea-portrait.jpg is a square crop of founder-cafe-tea.jpg (580px from x 390, y 40: the face and shoulders) at 264px, 3x the 88px it is shown at. founder-cafe-tea.jpg stays published, because every email already sent loads it."
+    "Later the same day the founder dropped the photo altogether: a reply-to-me note reads as a personal email without it. founder-cafe-tea.jpg stays published, because every email already sent loads it."
   ],
 
   "$edits": [
@@ -52,22 +52,6 @@
     "file": "web/src/email/bingd-logo.png",
     "width": 146,
     "height": 46
-  },
-
-  "$photoComment": [
-    "The signature portrait, beside the sign-off: 88px on a desktop, 76px on a phone.",
-    "Served from bingd.app: web/build.mjs copies web/src/ into the site as-is,",
-    "so `file` is published at `src` by the Cloudflare Pages deploy of main. email.test.mjs",
-    "checks the file exists, is the stated size, is under 200KB and carries no EXIF or GPS.",
-    "`width` and `height` are the desktop display size (the file is 3x for high-density screens)."
-  ],
-  "photo": {
-    "src": "https://bingd.app/email/founder-cafe-tea-portrait.jpg",
-    "file": "web/src/email/founder-cafe-tea-portrait.jpg",
-    "width": 88,
-    "height": 88,
-    "mobileSize": 76,
-    "alt": "Suraj, smiling, at a café table"
   },
 
   "letter": {

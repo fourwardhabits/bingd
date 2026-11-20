@@ -38,15 +38,13 @@
  *   - **Inline styles carry everything that matters.** The `<style>` block holds only
  *     the media query and the dark-mode overrides, both of which are enhancements. Any
  *     client that drops the block still gets a correct light email.
- *   - **Two images: the logo and the founder** (founder, 2026-11-20). The masthead is the
- *     real bingd. logo (`copy.masthead`, the app's BrandLockup rasterised once), and the
- *     cafe photo (`copy.photo`) is a small portrait beside the sign-off, so the note reads
- *     as coming from a person without a hero image. Nothing else is an image: no icon, no
- *     tracking pixel. Some recipients have images off, so the letter must lose nothing but
- *     the pictures without them: the logo's alt text is "bingd." styled as the old text
- *     wordmark, the portrait's is styled to read as a caption, both have a stated width and
- *     height so the layout does not jump, and the portrait has a filled background so a
- *     blocked image is a quiet box rather than a hole.
+ *   - **One image, the logo** (founder, 2026-11-20). The masthead is the real bingd. logo
+ *     (`copy.masthead`, the app's BrandLockup rasterised once). There is no photo: a
+ *     reply-to-me note from the founder reads as a personal email, and every image makes
+ *     it look more like a newsletter (and more like Gmail's Promotions tab). Nothing else is
+ *     an image: no icon, no tracking pixel. Some recipients have images off, so the logo's
+ *     alt text is "bingd." styled as the old text wordmark, with a stated width and height
+ *     so the layout does not jump.
  *   - **Every background is stated.** A transparent cell inherits whatever a dark-mode
  *     client paints behind it, which is how dark text ends up on a dark ground.
  *   - **Tap targets are at least 44px.**
@@ -96,15 +94,12 @@ const target = (name) => {
 };
 
 /**
- * The photo, refusing anything that is not a real, absolute, bingd-hosted image.
+ * The logo, refusing anything that is not a real, absolute, bingd-hosted PNG.
  *
  * The email needs an absolute URL: a mail client has no base to resolve a relative one
  * against. It must be on bingd.app because that is the only host this project publishes,
- * and `web/build.mjs` copies `web/src/` into the site as-is, which is how `photo.file`
- * comes to be served at `photo.src`. email.test.mjs checks the file itself.
- */
-/**
- * The logo, under the same rules as the photo, as a PNG (it has a transparent corner).
+ * and `web/build.mjs` copies `web/src/` into the site as-is, which is how `masthead.file`
+ * comes to be served at `masthead.src`. email.test.mjs checks the file itself.
  */
 const logo = (() => {
   const m = copy.masthead;
@@ -125,27 +120,6 @@ const logo = (() => {
   return m;
 })();
 
-const photo = (() => {
-  const p = copy.photo;
-  if (!p) {
-    problems.push('copy.json has no photo.');
-    return null;
-  }
-  if (!/^https:\/\/bingd\.app\/[a-z0-9/_-]+\.jpg$/.test(p.src ?? '')) {
-    problems.push(`photo.src "${p.src}" is not an absolute https://bingd.app/... .jpg URL.`);
-  }
-  if (!p.file || !p.file.startsWith('web/src/') || p.src?.slice('https://bingd.app/'.length) !== p.file.slice('web/src/'.length)) {
-    problems.push(`photo.file "${p.file}" is not the web/src/ file that web/build.mjs publishes at ${p.src}.`);
-  }
-  if (!Number.isInteger(p.width) || !Number.isInteger(p.height) || p.width < 1 || p.height < 1) {
-    problems.push('photo.width and photo.height must be positive whole numbers of pixels.');
-  }
-  if (!p.alt || p.alt.trim().length < 10) problems.push('photo.alt must describe the photo.');
-  if (!Number.isInteger(p.mobileSize) || p.mobileSize < 1 || p.mobileSize > p.width) {
-    problems.push('photo.mobileSize must be a whole number of pixels no larger than photo.width.');
-  }
-  return p;
-})();
 
 // ---------------------------------------------------------------------------
 // Brand
@@ -339,7 +313,7 @@ const GREETING_TOKEN = '{{greeting}}';
 const POSTAL_TOKEN = '{{postalAddress}}';
 
 /**
- * The sign-off ("Happy binging,", beside the portrait) and the name line under it, with
+ * The sign-off ("Happy binging,") and the name line under it, with
  * the closing phrase after the name on the same line (founder, 2026-11-20: "Suraj (the
  * movie nerd that made bingd)", same colour and font, a little smaller). It inherits the
  * sign-off's serif and ink, so the dark rules that repaint the sign-off repaint it too.
@@ -388,9 +362,6 @@ const html = `<!DOCTYPE html>
         /* The logo's PNG carries a 6px inset of its own, so its cell sits 6px further
            out than the text column and the mark lines up with the letter. */
         .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
-        .sig-photo, .sig-photo-cell { width: ${photo?.mobileSize}px !important; }
-        .sig-photo { height: ${photo?.mobileSize}px !important; }
-        .sig-gap { padding-right: 12px !important; }
         .sig-closing { font-size: 14px !important; }
       }
 
@@ -451,29 +422,10 @@ const html = `<!DOCTYPE html>
                     <td>
                       <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
-                      <!-- The signature (founder, 2026-11-20). The portrait sits beside the
-                           sign-off, its foot on the "Happy binging," line, and the name line runs
-                           under both at the full width of the letter: "Suraj" with the closing
-                           phrase on the same line, same serif and colour, a little smaller. A
-                           Gmail phone column is about 293px, and the name line is about 280px
-                           in Android's serif, so beside a 76px portrait it could never stay on
-                           one line; under it, it does. Tables, not flexbox, so Outlook and
-                           Gmail draw it the same; with images off the words stand alone. -->
-                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
-                        <tr>
-                          <td valign="bottom" class="sig-gap" style="padding:0 16px 0 0;">
-                            <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};white-space:nowrap;" class="dk-text">${signoffLines}</p>
-                          </td>
-                          <td valign="bottom" width="${photo?.width}" class="sig-photo-cell" style="width:${photo?.width}px;padding:0 0 4px;">
-                            <img src="${esc(photo?.src ?? '')}" width="${photo?.width}" height="${photo?.height}" alt="${esc(photo?.alt ?? '')}" class="sig-photo" style="display:block;width:${photo?.width}px;height:${photo?.height}px;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:${C.parchment};font-family:${FONT};font-size:11px;line-height:14px;color:${C.secondary};" />
-                          </td>
-                        </tr>
-                        <tr>
-                          <td colspan="2">
-                            <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${nameLine}</p>
-                          </td>
-                        </tr>
-                      </table>
+                      <!-- The signature (founder, 2026-11-20): the sign-off, then "Suraj" with the
+                           closing phrase on the same line, same serif and colour, a little
+                           smaller. No photo. -->
+                      <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${signoffLines}<br />${nameLine}</p>
                     </td>
                   </tr>
                 </table>
@@ -777,7 +729,7 @@ const preview = `<!doctype html>
       <div class="draft">
         <p style="margin:0 0 6px"><b>FOUNDER COPY &middot; NOT SENT.</b></p>
         <p style="margin:0">
-          The short note of 2026-11-19, in the founder&rsquo;s own words, with his cafe photo.
+          The short note of 2026-11-19, in the founder&rsquo;s own words.
           It reaches new accounts only once this version is merged to main; the automation
           that sends it is already on. See the list at the bottom.
         </p>
@@ -1151,7 +1103,7 @@ const artifact = `<title>Welcome Email Review</title>
   <div class="notice">
     <p><b>FOUNDER COPY &middot; NOT SENT</b></p>
     <p>
-      The short note of 2026-11-19, in the founder&rsquo;s own words, with his cafe photo.
+      The short note of 2026-11-19, in the founder&rsquo;s own words.
     </p>
     <p>
       Nobody is mailed until the postal address is set, a real test send has been approved,

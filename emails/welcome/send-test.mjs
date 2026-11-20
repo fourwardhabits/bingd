@@ -12,9 +12,9 @@
  *          --name Suraj          the first name the greeting uses ("Hey Suraj,")
  *          --subject 1|2|3       which subject candidate to send (1 = subject.chosen)
  *          --from "Name <address>"  --reply-to <address>
- *          --inline-images  attach the email's images (the logo and the founder portrait,
- *                           the committed web/src/ files, byte for byte) as inline CID
- *                           images instead of loading them from bingd.app. For a test sent
+ *          --inline-images  attach the email's image (the logo, the committed web/src/ file,
+ *                           byte for byte) as an inline CID image instead of loading it
+ *                           from bingd.app. For a test sent
  *                           before the deploy that publishes them there. The live email
  *                           always loads them from bingd.app. (--inline-photo is the old
  *                           name and still works.)
@@ -181,10 +181,7 @@ const textValues = { ...values, postalAddress };
 let html = personalise(template.html, htmlValues);
 let attachments;
 const inlineImages = argv.includes('--inline-images') || argv.includes('--inline-photo');
-const images = [
-  { ...copy.masthead, cid: 'bingd-logo' },
-  { ...copy.photo, cid: 'founder-photo' },
-];
+const images = [{ ...copy.masthead, cid: 'bingd-logo' }];
 if (inlineImages) {
   attachments = [];
   for (const image of images) {

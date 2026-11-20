@@ -36,9 +36,9 @@ import {
  *      paths the app claims, in both parts.
  *   4. **Every product label is one the app renders.** targets.json lists them; the
  *      2026-09-18 letter names none.
- *   5. **It is a letter.** Two images, the bingd. logo and a small portrait of the founder
- *      beside his sign-off, and no buttons and no bold: the approved copy asks for none.
- *      Both are real files the site publishes, small and stripped of metadata.
+ *   5. **It is a letter.** One image, the bingd. logo, and no photo, no buttons and no bold:
+ *      the approved copy asks for none. The logo is a real file the site publishes, small
+ *      and stripped of metadata.
  *   6. **The test send cannot reach a user list.**
  */
 
@@ -115,34 +115,25 @@ describe('welcome email: the founder letter', () => {
     assert.equal((html.match(/<b>|font-weight:\s*(bold|[5-9]00)/g) ?? []).length, 0, 'no bold or semibold text, links included');
   });
 
-  it('is a letter: two images, the logo and the founder portrait, and no buttons or cards', () => {
+  it('is a letter: one image, the logo, no photo, and no buttons or cards', () => {
     const images = html.match(/<img\b[^>]*>/gi) ?? [];
-    assert.equal(images.length, 2, 'the logo and the portrait, nothing else');
-    const [logo, portrait] = images;
-    assert.ok(logo.includes(`src="${copy.masthead.src}"`), 'the first image is the logo');
+    assert.equal(images.length, 1, 'the logo, nothing else');
+    const [logo] = images;
+    assert.ok(logo.includes(`src="${copy.masthead.src}"`), 'the image is the logo');
     assert.ok(logo.includes('alt="bingd."'), 'with images off the logo reads as the wordmark');
     assert.match(logo, /font-family:Georgia[^"]*color:#773744/, 'and that alt text is set as the old text wordmark');
-    assert.ok(portrait.includes(`src="${copy.photo.src}"`), 'the second image is the founder portrait');
-    assert.match(portrait, /alt="[^"]{10,}"/, 'the portrait is described for a reader with images off');
-    for (const [img, item] of [[logo, copy.masthead], [portrait, copy.photo]]) {
-      assert.ok(img.includes(`width="${item.width}"`) && img.includes(`height="${item.height}"`), 'a stated size, so nothing jumps');
-      assert.ok(img.includes(`width:${item.width}px;height:${item.height}px`), 'a fixed size, never a hero');
-    }
-    assert.ok(copy.photo.width >= 80 && copy.photo.width <= 88, 'a signature portrait, 80-88px on a desktop');
-    assert.ok(copy.photo.mobileSize >= 72 && copy.photo.mobileSize <= 80, 'and 72-80px on a phone');
-    assert.match(html, new RegExp(`\\.sig-photo \\{ height: ${copy.photo.mobileSize}px !important; \\}`));
-    assert.match(portrait, /border-radius:12px/, 'rounded corners');
+    assert.ok(logo.includes(`width="${copy.masthead.width}"`) && logo.includes(`height="${copy.masthead.height}"`), 'a stated size, so nothing jumps');
+    assert.equal('photo' in copy, false, 'no photo (founder, 2026-11-20)');
+    assert.doesNotMatch(html, /founder-cafe-tea/, 'no photo in the letter');
     assert.doesNotMatch(html, /btn-wrap|class="btn"|dk-raised|dk-fill|dk-outline/);
   });
 
-  it('goes straight from the logo into the letter, and keeps the portrait with the signature', () => {
+  it('goes straight from the logo into the letter', () => {
     const logoAt = html.indexOf(copy.masthead.src);
     const greetingAt = html.indexOf('{{greeting}}');
-    const portraitAt = html.indexOf(copy.photo.src);
     assert.ok(logoAt > -1 && logoAt < greetingAt, 'the logo comes first');
-    assert.equal(html.slice(logoAt, greetingAt).includes('<img'), false, 'no image between the logo and "Hey"');
-    assert.ok(portraitAt > html.indexOf('Hope you enjoy it as much as I do.'), 'the portrait is after the letter, at the signature');
-    assert.ok(portraitAt > html.indexOf('Happy binging,') && portraitAt < html.indexOf('Suraj <span'), 'beside the sign-off, before the name line');
+    assert.equal(html.slice(logoAt, greetingAt).includes('<img'), false, 'nothing between the logo and "Hey"');
+    assert.match(html, /Happy binging,<br \/>Suraj <span/, 'the sign-off, then the name line');
     assert.doesNotMatch(html, /display:\s*flex|display:\s*grid/, 'tables, not flexbox');
   });
 
@@ -166,68 +157,10 @@ describe('welcome email: the founder letter', () => {
   it('closes as the founder asked: on the name line, same font and colour, a little smaller', () => {
     assert.equal(copy.letter.closing, '(the movie nerd that made bingd)');
     assert.doesNotMatch(html + text, /The movie nerd who made bingd/, 'the 2026-11-19 closing line is gone');
-    const line = /<p style="([^"]*)"[^>]*>Suraj <span style="([^"]*)"[^>]*>\(the movie nerd that made bingd\)<\/span><\/p>/.exec(html);
+    const line = /<p style="([^"]*)"[^>]*>Happy binging,<br \/>Suraj <span style="([^"]*)"[^>]*>\(the movie nerd that made bingd\)<\/span><\/p>/.exec(html);
     assert.ok(line, '"Suraj" and the phrase share one paragraph, so one line');
     assert.match(line[1], /font-family:Georgia[^;]*;font-size:19px;[^"]*color:#242326/, 'the name: the sign-off serif, in ink');
     assert.match(line[2], /^font-size:15px;white-space:nowrap;$/, 'the phrase: only smaller, and kept whole');
-  });
-});
-
-/**
- * THE PHOTO IS A REAL FILE, PUBLISHED BY THE SITE, AND CARRIES NOTHING BUT PIXELS.
- *
- * `web/build.mjs` copies `web/src/` into bingd.app as-is, so `photo.file` is served at
- * `photo.src` by the Cloudflare Pages deploy of main. A phone photo arrives with EXIF:
- * the camera, the time and, often, where it was taken. None of that may ship.
- */
-describe('welcome email: the founder photo', () => {
-  let bytes;
-  before(async () => {
-    bytes = await readFile(join(repo, copy.photo.file));
-  });
-
-  /** Width and height from a JPEG's start-of-frame segment. */
-  const jpegSize = (buf) => {
-    let at = 2;
-    while (at < buf.length) {
-      if (buf[at] !== 0xff) return null;
-      const marker = buf[at + 1];
-      const length = buf.readUInt16BE(at + 2);
-      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
-        return { height: buf.readUInt16BE(at + 5), width: buf.readUInt16BE(at + 7) };
-      }
-      at += 2 + length;
-    }
-    return null;
-  };
-
-  it('is the web/src/ file the site publishes at the URL the email uses', () => {
-    assert.match(copy.photo.src, /^https:\/\/bingd\.app\/email\/[a-z0-9-]+\.jpg$/);
-    assert.equal(copy.photo.file, `web/src/${copy.photo.src.slice('https://bingd.app/'.length)}`);
-    assert.equal(bytes[0], 0xff);
-    assert.equal(bytes[1], 0xd8, 'not a JPEG');
-  });
-
-  it('is small, square, and at least twice its display size for high-density screens', () => {
-    assert.ok(bytes.length < 200_000, `${bytes.length} bytes`);
-    const size = jpegSize(bytes);
-    assert.ok(size, 'no start-of-frame segment');
-    assert.ok(size.width <= 1200, `${size.width}px wide`);
-    assert.equal(size.width * copy.photo.height, size.height * copy.photo.width, 'the stated size has a different shape from the file');
-    assert.ok(size.width >= copy.photo.width * 2 * 0.95, 'too small for a 2x screen');
-  });
-
-  it('carries no EXIF, GPS, XMP or other camera metadata', () => {
-    // APP1 (0xFFE1) holds EXIF and XMP; anything from APP1 to APP15 is metadata a photo
-    // does not need to be shown. Only JFIF (APP0) may remain.
-    let at = 2;
-    while (at < bytes.length && bytes[at] === 0xff && bytes[at + 1] !== 0xda) {
-      const marker = bytes[at + 1];
-      assert.ok(!(marker >= 0xe1 && marker <= 0xef), `APP${marker - 0xe0} segment present`);
-      at += 2 + bytes.readUInt16BE(at + 2);
-    }
-    assert.equal(bytes.includes(Buffer.from('Exif\0')), false);
-    assert.equal(bytes.includes(Buffer.from('GPS')), false);
   });
 });
 
@@ -514,7 +447,7 @@ describe('welcome email: the test send cannot reach anybody it was not given', (
     );
   });
 
-  it('can carry both images inline for a test, as the same bytes the site will serve', async () => {
+  it('can carry the logo inline for a test, as the same bytes the site will serve', async () => {
     for (const flagName of ['--inline-images', '--inline-photo']) {
       const out = await mkdtemp(join(tmpdir(), 'welcome-inline-'));
       try {
@@ -522,14 +455,13 @@ describe('welcome email: the test send cannot reach anybody it was not given', (
           env: { ...process.env, RESEND_API_KEY: '', WELCOME_POSTAL_ADDRESS: '1 Example Street, Sampleton EX1 2MP' },
         });
         const request = JSON.parse(await readFile(join(out, 'request.json'), 'utf8'));
-        assert.equal((request.html.match(/<img\b/g) ?? []).length, 2);
-        assert.equal(request.attachments.length, 2);
-        for (const [item, cid] of [[copy.masthead, 'bingd-logo'], [copy.photo, 'founder-photo']]) {
-          assert.ok(request.html.includes(`src="cid:${cid}"`));
-          assert.equal(request.html.includes(item.src), false);
-          const attachment = request.attachments.find((a) => a.content_id === cid);
-          assert.ok(Buffer.from(attachment.content, 'base64').equals(await readFile(join(repo, item.file))), 'not the committed file');
-        }
+        assert.equal((request.html.match(/<img\b/g) ?? []).length, 1);
+        assert.equal(request.attachments.length, 1);
+        assert.ok(request.html.includes('src="cid:bingd-logo"'));
+        assert.equal(request.html.includes(copy.masthead.src), false);
+        const [attachment] = request.attachments;
+        assert.equal(attachment.content_id, 'bingd-logo');
+        assert.ok(Buffer.from(attachment.content, 'base64').equals(await readFile(join(repo, copy.masthead.file))), 'not the committed file');
       } finally {
         await rm(out, { recursive: true, force: true });
       }
