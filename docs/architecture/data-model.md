@@ -796,6 +796,52 @@ invitee's own edge is a request into a private owner, and there is no reverse ed
 story. PRD §17's As-built block for 2026-09-08 carries the founder's argument for the change
 and states plainly what it widens.
 
+### Engagement on follow stories — `20261201000100` (Workstream C, founder 2026-11-19)
+
+The founder reversed the original rule that follow stories carry no reactions and no
+comments. The backend never excluded them by type (see above), so this migration is not
+what *allows* engagement. It decides **who** may engage, and it does so in one place.
+
+**One predicate.** `_follow_story_open_to(reader, event)` is true for every event that is
+not `follow_added`, so ordinary posts are unchanged. For a follow story it is true when at
+least one member is still followed by the actor (an `approved` edge), is active, is not the
+reader, and passes `can_identify_profile(reader, member)`. That is the same member set
+`follow_activity_people` now returns, so "the row shows somebody" and "you may engage" cannot
+disagree. `follow_story_open_to_me(event)` is the caller-relative form for policies. It is
+the only one granted to `authenticated`; the two-argument form is server-only.
+
+It is applied on every path:
+
+| Path | Where |
+|---|---|
+| Writes | `set_reaction`, `_add_comment` (inside the pair locks), `_set_comment_reaction`, `_edit_comment` |
+| Reads and counts | `reactions_read` and `comments_read` policies, `activity_comments`, `activity_comment_counts`, `_can_read_comment`, `comment_reactors` |
+| Mentions | `mention_candidates`, `_can_mention` (a person cannot be named into a story closed to them) |
+| Notifications | each recipient of a reaction or comment notification must have the story open when it is filed |
+
+**Members get nothing for being named.** No special read access and no notification. An
+ordinary follower of the actor engages under the same rules as on any other post.
+
+**A closed story is hidden, not deleted.** When no eligible member remains (an unfollow, a
+block in either direction, a suspension), the story and its conversation disappear for that
+reader, the author included. Reactions and comments stay in place and reappear if
+authorization allows it again. A comment that races a block can land, because it was
+checked while the story was open; it is then hidden on every read path from whoever the story
+has closed to (race FE1).
+
+**`follow_activity_people` now names only members the actor still follows.** Before this
+migration an unfollow or block left the name in the story.
+
+**A story freezes at first engagement.** `_post_follow_activity` no longer appends to a
+story that has any reaction or comment, deleted comments included. The next follow opens a
+new story.
+
+**Heart Magnet ignores follow stories.** `_award_metric` excludes reactions on `follow_added`
+events.
+
+**Push copy.** `claim_push_batch` returns `feed_event_type`, read through the same
+recipient-owned join as the title, so a follow story's push can say "your follow activity".
+
 ### `ranking_batch`, one post per Unranked sitting — `20261020000100` … `20261023000100`
 
 A backlog sitting's placements are silent one by one (`import` kind). The sitting as a whole

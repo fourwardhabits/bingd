@@ -958,11 +958,12 @@ export default function FeedScreen() {
                  * `ActivityRow` has to remember that one caller means something else by
                  * every field.
                  *
-                 * **No reactions and no comments, deliberately.** §A9's instruction is that
-                 * follow activity is *social discovery content* and not an audit log, and a
-                 * follow you can react to and comment under is neither: it is a post about
-                 * somebody's relationship, on which the two people best placed to feel
-                 * strange about a thread are the ones named in it.
+                 * **Reactions and comments, since the founder's decision of 2026-11-19**,
+                 * which replaces §A9's exclusion. One compact cluster at the row's end, one
+                 * shared thread per story. Who may engage is the server's single predicate
+                 * (20261201000100): the people named are never notified as members, a story
+                 * freezes on its first reaction or comment, and a story with nobody left the
+                 * reader may see is hidden, conversation and all.
                  */
                 /**
                  * **A whole sitting is one row** (20261020000100). Working through an
@@ -985,6 +986,9 @@ export default function FeedScreen() {
                       track({ name: 'follow_activity_opened' });
                       setFollowStoryFor(event.id);
                     }}
+                    reaction={reactionFor(event.id)}
+                    onPressComments={() => setCommentsFor(event.id)}
+                    commentCount={commentCounts.data?.get(event.id) ?? 0}
                   />
                 ) : takesFeedCard(event) ? (
                   /**
@@ -1327,6 +1331,7 @@ export default function FeedScreen() {
         eventId={commentsFor}
         mediaItemId={openComments?.mediaItemId ?? null}
         title={openComments?.title ?? null}
+        allowSpoilers={openComments?.type !== 'follow_added'}
         viewerId={profile.id}
         watched={watched.data}
         onClose={() => setCommentsFor(null)}

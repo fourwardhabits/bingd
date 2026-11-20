@@ -1283,9 +1283,44 @@ content rather than an audit log**, which decides everything about how the row i
 ```
 
 A lighter row than an activity row — avatar, one sentence, one time label — with no poster,
-no score, no note, **no reactions and no comments**. That lightness is the frequency rule
-expressed as composition: a follow story cannot dominate a screenful of rankings because it
-is a third of the height of one. Aggregation does the rest: one story per actor per hour,
+no score and no note. That lightness is the frequency rule expressed as composition: a
+follow story cannot dominate a screenful of rankings because it is a third of the height of
+one.
+
+**Reactions and comments since 2026-11-19 (Workstream C).** The founder reversed the
+original "no reactions and no comments" rule, and then asked that follow stories use **the
+same labelled engagement controls as every other supported Feed post** (2026-11-19, the Feed
+consistency decision, #323). The sentence stays compact, and under it come the same three
+pieces award, goal and grouped rows draw (`ActivityRow` `labelledActions`):
+
+```
+ (A)  Abi followed Ravi and 4 others
+      12m ago
+ ❤️ Priya and 2 others like this
+   ♡ Like            💬 Comment
+```
+
+- The summary sentence (`ReactionSummary`) opens "who reacted", for every reader, the
+  author included. Absent with no reactions.
+- `EngagementRow`'s labelled Like · Comment: equal 44pt columns at the card's edge, outside
+  the text column, so neither can open the list of people. Like: tap for the default
+  reaction, long press for the picker. No Save and no Share: there is no title to save and
+  no public link for a follow story.
+- One shared conversation per story, grouped or not. Comment opens the Feed's comment sheet.
+  A follow story's notification opens the activity page, which draws this same row above the
+  thread, without Comment because the thread is below it.
+- Labels: "React to Abi's activity about following Ravi. Long press for more reactions." and
+  "Comment on Abi's activity about following Ravi", in `EngagementRow`'s own grammar.
+- The composer has no "Contains spoilers" toggle here: there is no title to spoil.
+- Notifications read "reacted to your follow activity" and "commented on your follow
+  activity", in the inbox and in a push.
+- Who may engage is the server's single predicate, `_follow_story_open_to`
+  (`20261201000100`, see `docs/architecture/data-model.md`). A story with no member the
+  reader may still identify is hidden from them, including from its author, and returns
+  when that changes. Nothing is deleted. People named in a story get no special access and
+  no notifications for being named.
+- A story freezes at its first reaction or comment. The next follow starts a new story, so
+  a conversation is always about the people its participants saw. Aggregation does the rest: one story per actor per hour,
 appended to, so a session spent following ten suggestions is one row and not ten.
 
 **The count is the reader's, not the actor's.** The people a story names are resolved per
