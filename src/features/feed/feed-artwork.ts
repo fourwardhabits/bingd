@@ -42,7 +42,9 @@ export function feedArtwork(item: {
  * Which activities the Feed draws as a card: the ones about a title.
  *
  * Awards and goals keep their compact row — their subject is a badge, not a film, and a
- * badge stretched to a 190pt frame is a worse picture of it. Follow stories keep theirs.
+ * badge stretched to a 190pt frame is a worse picture of it. Since 2026-11-19 that row
+ * carries the card's labelled Like and Comment (`ActivityRow`'s `labelledActions`), so the
+ * engagement is the same either way. Follow stories keep theirs.
  * A grouped ranking sitting is a card about its first title, as its row already was.
  */
 const CARD_TYPES = new Set([

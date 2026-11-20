@@ -2,7 +2,7 @@ import { fireEvent, render, within } from '@testing-library/react-native';
 
 import { StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 
 import { ActivityRow } from './ActivityRow';
 
@@ -720,5 +720,132 @@ describe('the comment control', () => {
       view.getByLabelText("Comment on Suraj's activity about Inception"),
     );
     expect(onPressComments).toHaveBeenCalled();
+  });
+});
+
+/**
+ * **The Feed's labelled actions** (founder, 2026-11-19). An award, a goal or a post with no
+ * title is drawn on the Feed through this row, and now carries the card's labelled row.
+ */
+describe('the Feed’s labelled actions', () => {
+  const award = {
+    ...props,
+    title: 'Tourist',
+    verb: 'earned the',
+    tail: 'award',
+    year: null,
+    metadata: 'Ranked titles from 5 countries',
+    lead: <Text testID="award-lead">badge</Text>,
+  };
+
+  it('labels Like and Comment on an award, with no Save or Share to invent', async () => {
+    const view = await render(
+      <ActivityRow
+        {...award}
+        labelledActions
+        reaction={{ count: 0, onPress: jest.fn(), onLongPress: jest.fn() }}
+        onPressComments={jest.fn()}
+      />,
+    );
+    expect(within(view.getByTestId('activity-like')).getByText('Like')).toBeTruthy();
+    expect(within(view.getByTestId('activity-comment')).getByText('Comment')).toBeTruthy();
+    expect(view.queryByTestId('activity-save')).toBeNull();
+    expect(view.queryByTestId('activity-share')).toBeNull();
+    expect(
+      view.getByLabelText(
+        "React to Suraj's activity about Tourist. Long press for more reactions.",
+      ),
+    ).toBeTruthy();
+    for (const id of ['activity-like', 'activity-comment']) {
+      const style = StyleSheet.flatten(
+        view.getByTestId(id).props.style as StyleProp<ViewStyle>,
+      );
+      expect(style.minHeight).toBeGreaterThanOrEqual(44);
+      expect(style).toMatchObject({ flexGrow: 1, flexBasis: 0 });
+    }
+  });
+
+  it('moves the time under the metadata, off the actions line', async () => {
+    const view = await render(
+      <ActivityRow {...award} labelledActions onPressComments={jest.fn()} />,
+    );
+    expect(view.getByTestId('activity-time').props.children).toBe('13h ago');
+    expect(within(view.getByTestId('activity-actions')).queryByText('13h ago')).toBeNull();
+    // The achievement keeps its own line.
+    expect(view.getByText('Ranked titles from 5 countries')).toBeTruthy();
+  });
+
+  it('labels Save and Share where the caller wired them, as on a card', async () => {
+    const save = jest.fn();
+    const share = jest.fn();
+    const view = await render(
+      <ActivityRow
+        {...props}
+        labelledActions
+        onPressWatchlist={save}
+        onPressRecommend={share}
+      />,
+    );
+    await fireEvent.press(view.getByTestId('activity-save'));
+    expect(save).toHaveBeenCalled();
+    await fireEvent.press(view.getByTestId('activity-share'));
+    expect(share).toHaveBeenCalled();
+    expect(within(view.getByTestId('activity-share')).getByText('Share')).toBeTruthy();
+  });
+
+  it('leaves the compact icons on every other surface', async () => {
+    const view = await render(
+      <ActivityRow
+        {...props}
+        onPressComments={jest.fn()}
+        reaction={{ count: 0, onPress: jest.fn() }}
+      />,
+    );
+    expect(view.queryByTestId('activity-actions')).toBeNull();
+    expect(view.queryByText('Like')).toBeNull();
+    expect(view.queryByTestId('activity-time')).toBeNull();
+    expect(view.getByText('13h ago')).toBeTruthy();
+  });
+});
+
+describe('the links in the sentence', () => {
+  it('makes "and 2 others" a link to everyone the actor watched with', async () => {
+    const open = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} companions={['Anna', 'Raj', 'Beth']} onPressCompanions={open} />,
+    );
+    const link = view.getByTestId('activity-companions-link');
+    expect(link.props.children).toBe('2 others');
+    expect(StyleSheet.flatten(link.props.style)).toMatchObject({
+      fontFamily: fontFamily.sansSemibold,
+      color: theme.text.primary,
+    });
+    await fireEvent.press(link);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(props.onPressTitle).not.toHaveBeenCalled();
+  });
+
+  it('sets the tail’s count as a link that opens the rest, never the title', async () => {
+    const open = jest.fn();
+    const view = await render(
+      <ActivityRow
+        {...props}
+        tailAction={{ connector: 'and', label: '1 other', onPress: open }}
+      />,
+    );
+    const link = view.getByTestId('activity-tail-link');
+    expect(link.props.children).toBe('1 other');
+    expect(StyleSheet.flatten(link.props.style)).toMatchObject({
+      fontFamily: fontFamily.sansSemibold,
+      color: theme.text.primary,
+    });
+    await fireEvent.press(link);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(props.onPressTitle).not.toHaveBeenCalled();
+    // A sentence that ends in a control is never clamped: no Text above the link may be.
+    type Node = { props?: Record<string, unknown>; parent?: Node | null };
+    for (let node = link as unknown as Node | null; node; node = node.parent ?? null) {
+      expect(node.props?.numberOfLines).toBeUndefined();
+    }
   });
 });

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * The welcome-email worker. NOT ENABLED: nothing schedules it, and no database has its
- * functions until `welcome_email.sql` is applied.
+ * The welcome-email worker. Scheduled against production by `.github/workflows/welcome-email.yml`
+ * since 2026-09-18; it mails only accounts created after `welcome.start_after`, and only
+ * while `welcome.delivery_enabled` is true in that project (20260923000100).
  *
  *   node emails/welcome/automation/send-welcome.mjs --dry-run
  *   node emails/welcome/automation/send-welcome.mjs --dry-run --canary <user-id> --canary-email <address>

@@ -28,6 +28,7 @@ import {
   watchlistTailAction,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
+import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
 import { groupCount, previewKey, useGroupPreviews } from '@/features/feed/use-group-previews';
 import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
@@ -449,6 +450,12 @@ export default function FeedScreen() {
     null,
   );
   /**
+   * The post whose "with Anna and 2 others" is open, or none (founder, 2026-11-19). An id,
+   * resolved against the current list like `followStoryFor`, so a refresh that drops the
+   * post closes the sheet.
+   */
+  const [companionsFor, setCompanionsFor] = useState<string | null>(null);
+  /**
    * The event being recommended, if any.
    *
    * The whole event rather than an id, because the sheet needs the title and the kind
@@ -632,6 +639,9 @@ export default function FeedScreen() {
    */
   const openFollowStory = followStoryFor
     ? (events.find((e) => e.id === followStoryFor) ?? null)
+    : null;
+  const openCompanions = companionsFor
+    ? (events.find((e) => e.id === companionsFor) ?? null)
     : null;
 
   return (
@@ -1010,6 +1020,7 @@ export default function FeedScreen() {
                         : watchlistTailAction(event, setWatchlistGroupFor)
                     }
                     companions={event.companions}
+                    onPressCompanions={() => setCompanionsFor(event.id)}
                     title={event.title}
                     year={event.year}
                     metadata={metadataFor(event)}
@@ -1037,15 +1048,20 @@ export default function FeedScreen() {
                     reaction={reactionFor(event.id)}
                     onPressComments={() => setCommentsFor(event.id)}
                     commentCount={commentCounts.data?.get(event.id) ?? 0}
+                    /**
+                     * Save and Share are an individual title's (founder, 2026-11-19). A
+                     * group's would act on its first title alone, so a group has neither,
+                     * whether it is drawn as its rail or falls back to the representative
+                     * card: Like and Comment are the whole post's. A group has no share
+                     * mechanism of its own yet (`docs/design/screens.md` §7).
+                     */
                     onPressSave={
-                      event.actorId !== profile.id
+                      event.actorId !== profile.id && !groupCount(event)
                         ? () => toggleWatchlist(event.mediaItemId!)
                         : undefined
                     }
                     saved={saved.has(event.mediaItemId!)}
-                    onPressShare={() => openRecommend(event)}
-                    // A group's Save and Share would act on its first title alone, so
-                    // FeedCard draws neither beside a rail; each poster opens its title.
+                    onPressShare={groupCount(event) ? undefined : () => openRecommend(event)}
                     rail={railFor(event)}
                   />
                 ) : (
@@ -1079,6 +1095,7 @@ export default function FeedScreen() {
                       : watchlistTailAction(event, setWatchlistGroupFor)
                   }
                   companions={event.companions}
+                  onPressCompanions={() => setCompanionsFor(event.id)}
                   title={event.title}
                   year={event.year}
                   posterUri={posterUri(event.posterPath)}
@@ -1156,17 +1173,29 @@ export default function FeedScreen() {
                     }
                   }}
                   // Watchlisting your own already-watched title is not a thing anyone
-                  // means to do, so the control is not offered on your own activity.
+                  // means to do, so the control is not offered on your own activity. Nor
+                  // on a group, whose Save and Share would act on one member (2026-11-19).
                   onPressWatchlist={
-                    event.mediaItemId && event.actorId !== profile.id
+                    event.mediaItemId && event.actorId !== profile.id && !groupCount(event)
                       ? () => toggleWatchlist(event.mediaItemId!)
                       : undefined
                   }
                   inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
-                  onPressRecommend={event.mediaItemId ? () => openRecommend(event) : undefined}
+                  onPressRecommend={
+                    event.mediaItemId && !groupCount(event)
+                      ? () => openRecommend(event)
+                      : undefined
+                  }
                   reaction={reactionFor(event.id)}
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
+                  /**
+                   * The Feed card's labelled Like · Comment row on every post this row
+                   * draws here — an award, a goal (founder, 2026-11-19). Neither has a
+                   * Save, and neither has a Share: there is no link to send for an award
+                   * yet, so the row offers none rather than a dead one (screens.md §7).
+                   */
+                  labelledActions
                 />
                 ),
               )
@@ -1263,6 +1292,17 @@ export default function FeedScreen() {
             router.push(`/title/${mediaItemId}`);
           }}
           onClose={() => setWatchlistGroupFor(null)}
+        />
+      ) : null}
+
+      {/* Everyone behind "with Anna and 2 others" (2026-11-19). No read: the names are the
+          post's own, so the list is exactly what the count was taken from. */}
+      {openCompanions ? (
+        <CompanionsSheet
+          actorName={openCompanions.actorName}
+          title={openCompanions.title}
+          names={openCompanions.companions}
+          onClose={() => setCompanionsFor(null)}
         />
       ) : null}
 

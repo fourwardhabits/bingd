@@ -84,7 +84,7 @@ export const SHRINK_PRIOR = 5;
  *
  * Every V2 variant is scored exactly as V2 metadata.
  */
-type Engine =
+export type Engine =
   'v1' | 'v2_metadata' | 'v2_metadata_social' | 'v2_metadata+social' | 'v2_metadata+v1_anchors';
 export const ENGINES: Engine[] = [
   'v1',
@@ -93,7 +93,7 @@ export const ENGINES: Engine[] = [
   'v2_metadata+social',
   'v2_metadata+v1_anchors',
 ];
-const socialFor = (engine: Engine, medium: Medium) =>
+export const socialFor = (engine: Engine, medium: Medium) =>
   engine === 'v2_metadata+social' ||
   asksSocial(engine === 'v2_metadata+v1_anchors' ? 'v2_metadata' : engine, medium);
 
@@ -133,7 +133,7 @@ const KEYS: (keyof Metrics)[] = [
   'poolViaCatalogue',
 ];
 
-type Account = {
+export type Account = {
   key: number;
   visible: ReplayRanking[];
   logged: { m: string; b: ReplayRanking['b'] | null }[];
@@ -150,7 +150,7 @@ const bucketOf = (visible: number): Bucket =>
 // ---------------------------------------------------------------------------
 
 /** Positions renumbered 1..n per category, keeping the account's own order. */
-function renumber(rows: readonly ReplayRanking[]): ReplayRanking[] {
+export function renumber(rows: readonly ReplayRanking[]): ReplayRanking[] {
   const out: ReplayRanking[] = [];
   for (const category of ['movies', 'tv_seasons', 'tv_shows'] as const) {
     rows
@@ -205,7 +205,7 @@ export function holdOut(doc: ReplayExport): { accounts: Account[]; skipped: numb
 // The client's inputs, from the export
 // ---------------------------------------------------------------------------
 
-type World = {
+export type World = {
   doc: ReplayExport;
   media: Map<string, ReplayMedia>;
   similar: Map<string, string[]>;
@@ -288,7 +288,7 @@ function loggedEntry(l: Account['logged'][number], w: World): LoggedEntry | null
   };
 }
 
-const candidateOf = (m: ReplayMedia, w: World): Candidate => ({
+export const candidateOf = (m: ReplayMedia, w: World): Candidate => ({
   mediaItemId: m.m,
   title: m.m,
   year: m.year,
@@ -300,7 +300,7 @@ const candidateOf = (m: ReplayMedia, w: World): Candidate => ({
 });
 
 /** Everything the reader has met, as the wall's ids: films, and shows met whole or by a season. */
-function metOf(account: Account, w: World): Set<string> {
+export function metOf(account: Account, w: World): Set<string> {
   const met = new Set<string>();
   for (const id of [...account.visible.map((r) => r.m), ...account.logged.map((l) => l.m)]) {
     met.add(id);
@@ -391,7 +391,7 @@ function catalogueMirror(
   return [...out.values()];
 }
 
-const TRENDING: Record<Medium, string[]> = {
+export const TRENDING: Record<Medium, string[]> = {
   movies: ['trending.movie.week'],
   tv: ['trending.series.week', 'trending.series.day'],
 };
@@ -400,7 +400,7 @@ const TRENDING: Record<Medium, string[]> = {
 // One wall
 // ---------------------------------------------------------------------------
 
-function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: number) {
+export function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: number) {
   const kind = medium === 'movies' ? 'movie' : 'series';
   const entries = account.visible
     .map((r) => rankedEntry(r, w))
@@ -512,15 +512,19 @@ function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: 
     wall: drawn.slice(0, SLATE_SIZE),
     met,
     via,
+    // The model this wall was scored with, for the benchmark's common-candidate mode.
+    anchors,
+    taste,
+    profile,
   };
 }
 
-type Source = 'anchors' | 'social' | 'trending' | 'catalogue';
+export type Source = 'anchors' | 'social' | 'trending' | 'catalogue';
 const SOURCES: Source[] = ['anchors', 'social', 'trending', 'catalogue'];
 const viaKey = (source: Source) =>
   `poolVia${source[0]!.toUpperCase()}${source.slice(1)}` as `poolVia${Capitalize<Source>}`;
 
-const entropy = (lists: readonly (readonly string[])[]) => {
+export const entropy = (lists: readonly (readonly string[])[]) => {
   const mass = new Map<string, number>();
   let total = 0;
   for (const g of lists) {
