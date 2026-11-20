@@ -18,6 +18,7 @@ Status words used across these documents: **Live in production** (on `main` and 
 | Document | Covers |
 |---|---|
 | **README.md** (this file) | System shape, the ten decisions everything else follows from |
+| [`diagrams.md`](./diagrams.md) | Mermaid diagrams of what exists on 2026-11-20: system context, app, database, ranking flow, Feed and social, recommendations, background jobs, release |
 | [`data-model.md`](./data-model.md) | Postgres schema, indexes, row-level security |
 | [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
@@ -41,6 +42,38 @@ Architecture decisions are recorded inline as **AD-n** with their rationale and 
 ---
 
 ## System shape
+
+As built on 2026-11-20. Only deployed components are drawn. The full set of diagrams, including
+the database, ranking, Feed, recommendation, background-job and release views, is in
+[`diagrams.md`](./diagrams.md).
+
+```mermaid
+flowchart TB
+  app["Expo / React Native client, iOS and Android<br/>TanStack Query in memory, online writes"]
+  subgraph supa["Supabase (bingd-production; bingd-staging for Preview)"]
+    auth["Auth: email code, Apple, Google"]
+    pg[("Postgres: RLS default-deny,<br/>every write a SECURITY DEFINER RPC,<br/>pg_cron and pg_net")]
+    tmdbA["Edge Function tmdb-adapter<br/>only client-reachable holder of the TMDB key"]
+    lbx["Edge Function letterboxd-import<br/>Letterboxd and IMDb matching"]
+    push["Edge Function push-sender"]
+  end
+  tmdb["TMDB API"]
+  web["bingd.app on Cloudflare Pages<br/>share, invite and install pages"]
+  expo["Expo Push Service"]
+  gha["GitHub Actions<br/>Welcome email, trending refresh"]
+  app -->|"user JWT"| auth
+  app -->|"user JWT"| pg
+  app --> tmdbA
+  tmdbA --> tmdb
+  pg -->|"pg_net: import drain"| lbx --> tmdb
+  pg -->|"pg_net: push drain"| push --> expo
+  pg -->|"pg_net: release refresh"| tmdbA
+  web -->|"anon key"| pg
+  gha -->|"service role"| pg
+```
+
+<details>
+<summary>The v1 design diagram of 2026-08-12 (historical)</summary>
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -69,15 +102,17 @@ Architecture decisions are recorded inline as **AD-n** with their rationale and 
 └────────────┘    └──────────────────┘
 ```
 
+</details>
+
 Nothing in the client holds a service credential. Every client request carries a user JWT, and Postgres decides what that user may see.
 
-> **As built (2026-11-19): the diagram is the v1 design, and three boxes in it were never built as drawn.** The deployed Edge Functions are `tmdb-adapter`, `letterboxd-import` (Letterboxd and IMDb matching) and `push-sender`. Import processing, notification fan-out and push draining run **inside Postgres**, on `pg_cron` ticks (`bingd-import-drain`, `bingd-push-drain`, `bingd-release-*`, `bingd-proactive-tick`), not in `import-worker` or `notify-dispatch`. `recs-builder` does not exist: For You runs on the device ([`recommendations.md`](./recommendations.md) §0). The client has **no SQLite cache and no outbox**: TanStack Query holds reads in memory, and every write is online ([`offline-sync.md`](./offline-sync.md)).
+> **As built (2026-11-19): the v1 design diagram (collapsed above) has three boxes that were never built as drawn.** The deployed Edge Functions are `tmdb-adapter`, `letterboxd-import` (Letterboxd and IMDb matching) and `push-sender`. Import processing, notification fan-out and push draining run **inside Postgres**, on `pg_cron` ticks (`bingd-import-drain`, `bingd-import-maintenance`, `bingd-push-drain`, `bingd-release-refresh`, `bingd-release-evaluate`, and since 2026-11-20 `bingd-welcome-dispatch`), not in `import-worker` or `notify-dispatch`. *(Corrected 2026-11-20: an earlier version of this note listed `bingd-proactive-tick`. It is not scheduled on either project; proactive notifications are dark and `schedule_proactive_notifications()` would install it. Read from `cron.job`, 2026-11-20.)* `recs-builder` does not exist: For You runs on the device ([`recommendations.md`](./recommendations.md) §0). The client has **no SQLite cache and no outbox**: TanStack Query holds reads in memory, and every write is online ([`offline-sync.md`](./offline-sync.md)).
 
 ---
 
 ## Current state, 2026-11-19
 
-What each decision below looks like in the system that is running (updated 2026-11-20 for production `1c24b5cd`). The release facts behind this table are in [`production-state.md`](../release/production-state.md).
+What each decision below looks like in the system that is running (updated 2026-11-20 for the production client `1c24b5cd` and database head `20261130000300`, 208 migrations). The release facts behind this table are in [`production-state.md`](../release/production-state.md).
 
 | Area | Live in production | Shipped dark, staging or proposed |
 |---|---|---|
@@ -85,7 +120,7 @@ What each decision below looks like in the system that is running (updated 2026-
 | Ranking (AD-2, AD-3) | Dense positions, bucket bands, the placement ledger, the Unified Backlog. Update/Keep Show links a season to its parent show ([`ranking.md`](./ranking.md) §14). Collection drag-to-rerank, across categories and on the TV wall, writes `manual` placements (#319, 2026-11-20; [`collection-rerank.md`](./collection-rerank.md)) | Refine: built, flag off |
 | Writes (AD-4) | Every write is an RPC; write RPCs claim an `operation_id`, so a retry applies once | — |
 | Visibility (AD-5) | `can_view_profile` and `security_invoker` views, as designed | — |
-| Feed (AD-6) | Assembled on read, as designed. **Grouping** is a write-side join: a watchlist session, a backlog half hour, and first rankings within one half hour, whatever the watch date (#328, 2026-11-20), become one post; members are hidden by `feed_events.presented_in` under the read policy, never deleted ([`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). Ranking updates, moves and corrections post nothing new (2026-11-20) | Reactions and comments on follow stories (#322): draft, not on staging |
+| Feed (AD-6) | Assembled on read, as designed. **Grouping** is a write-side join: a watchlist session, a backlog half hour, and first rankings within one half hour, whatever the watch date (#328, 2026-11-20), become one post; members are hidden by `feed_events.presented_in` under the read policy, never deleted ([`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). Ranking updates, moves and corrections post nothing new (2026-11-20) | Reactions and comments on follow stories (#322): **staging only** (migration `20261201000100`, Preview `5e5f55df`), awaiting founder device QA; not released |
 | Taste Match (AD-7) | Computed live per pair by `taste_match`; shows and seasons are distinct signals | — |
 | Catalogue (AD-8) | `tmdb-adapter` only | — |
 | Notifications (AD-10) | Inbox rows for every notification; push **delivers** through `push-sender`, drained by `pg_cron` | `push.delivery_enabled` is inert (#119 would make it a switch); proactive notifications and release pushes are migrated with their switches off |
@@ -236,7 +271,7 @@ The first row is the one that needed correcting. An allowlist of function *names
 
 Two Supabase projects, `bingd-nonprod` and `bingd-production`, with identical schemas applied by the same migrations. Three app variants (PRD §24) point at them: development and preview at nonprod, production at production.
 
-> **As built (2026-11-19).** The projects are `bingd-staging` (`fjxhcbowoxuzulwirzyr`, the nonprod backend) and `bingd-production` (`abheeqyjzekiowkztfxv`). Their schemas are equal except while a change is on staging first: on 2026-11-19 staging holds 205 migrations (#319's `20261129000200` on top) and production 203. The lanes and the Preview rule are in [`production-state.md`](../release/production-state.md) § The two lanes.
+> **As built (2026-11-19).** The projects are `bingd-staging` (`fjxhcbowoxuzulwirzyr`, the nonprod backend) and `bingd-production` (`abheeqyjzekiowkztfxv`). Their schemas are equal except while a change is on staging first: on 2026-11-20 production holds 208 migrations (head `20261130000300`) and staging 209, the extra one being #322's unreleased `20261201000100`. *(On 2026-11-19 they were 203 and 205.)* Both run the same six `pg_cron` jobs ([`diagrams.md`](./diagrams.md) §7). The lanes and the Preview rule are in [`production-state.md`](../release/production-state.md) § The two lanes.
 
 Invite and share tokens carry an environment discriminator so a nonprod token cannot resolve in production (PRD §17).
 

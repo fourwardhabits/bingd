@@ -18,7 +18,9 @@
 > [`../feed/expanded-grouping.md`](../feed/expanded-grouping.md)). **Live since 2026-11-20
 > (#319, `20261129000100`–`000300`):** drag-to-rerank in the Collection, across categories and
 > on the TV wall (§7, §14.3, [`collection-rerank.md`](./collection-rerank.md)), and silent
-> ranking updates: a correction, move or Refine posts nothing new (§14.2).
+> ranking updates: a correction, move or Refine posts nothing new (§14.2). The whole flow,
+> from first ranking to Undo and what each step posts, is drawn in
+> [`diagrams.md`](./diagrams.md) §4.
 >
 > **Earlier state (2026-09-26, `9d9683a`).** #208–#210 changed only what sits around the
 > engine. An Unranked sitting now ends in a summary and posts **one** grouped feed activity

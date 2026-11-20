@@ -1,8 +1,9 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-20** (production OTA from `main` `1c24b5cd`, and migrations to 207 including #328's;
-store table unchanged since the public listings of 2026-11-08).
+**2026-11-20, 06:20Z**: production client is the OTA from `main` `1c24b5cd`; the database is at
+208 migrations, head `20261130000300` (#331); `main` is `ecd03517`. The store table is
+unchanged since the public listings of 2026-11-08.
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -22,11 +23,12 @@ unreleased**: on staging or a Preview build, or merged without a production rele
 a design or a draft PR. A PR's open/draft state on GitHub is not the test: #305 and #301 are
 still open drafts, but their heads were integrated into release 1115 (#307) and are on `main`.
 
-> **Where the 2026-11-11 to 2026-11-20 records live.** Each release below was recorded by its
-> operator in `docs/release/manifests/production-*.json` and the handoff notes on the branch
-> `ops/preview-1115-records`, which is **not merged to `main`**. The facts on this page are
-> copied from those records and from the release comments on the PRs named. Merging that
-> branch, or moving its manifests to `main`, is a separate step.
+> **Where the 2026-11-15 to 2026-11-20 records live.** Each release below was recorded by its
+> operator in a manifest, an execution record or a handoff. They were written on the branch
+> `ops/preview-1115-records` and imported to `main` on 2026-11-20 (#332), at their original
+> paths: [`release-records-index.md`](./release-records-index.md). The branch is kept as
+> history. One-off operator scripts and three Preview manifests stayed on it; the index says
+> why.
 
 > **Coordination note (2026-11-09, still open):** PR #224 (`docs/release-record-219`) also
 > edits this file, recording the 2026-11-03 security OTA. This page supersedes it. If #224 is
@@ -38,17 +40,18 @@ still open drafts, but their heads were integrated into release 1115 (#307) and 
 
 | | |
 |---|---|
-| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` is now `68095e99`: #328 changed only the server's grouping rule (its client diff is a rename), and its migration is applied, so the installed client is `1c24b5cd` and production behaviour is `68095e99`'s. |
-| **Production OTA, 1.1.0** | Published 2026-11-20 from `1c24b5cd` (workflow run `01a1f6ba-87cd-78ec-8fe0-1dafcbddddfc`). Android update `01a1f6bf-421a-7843-b074-8a0ec05cd692`, group `0a3f0fcb-7f8d-438d-901b-a164e53f95bc`, runtime `ec79e181`; iOS update `01a1f6bf-421a-76fa-b92a-19bfb6d8118a`, group `16309eb2-6034-41c2-9ecc-df88f2dc957b`, runtime `8ea562b7`. Rollback: republish the `a3300bf0` pair, Android `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, iOS `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, and leave the database as is (the `a3300bf0` client works against it). Source: `production-2026-11-20-319-321.md` on `ops/preview-1115-records`. |
-| **DB migrations** | **207 applied**, head `20261130000200` (#328), equal to `main`'s 207 files. Read 2026-11-20 03:08Z; the same read at 02:43Z still showed 206. #319's three (`20261129000100`, `000200`, `000300`) were applied one at a time on 2026-11-20, every invariant re-checked after each. |
+| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` is now `ecd03517`. #328, #329 and #331 changed no app code: #328 only the server's grouping rule (its client diff is a rename), #329 the email template, #331 a database job. So the installed client is `1c24b5cd`, and production behaviour is `ecd03517`'s. |
+| **Production OTA, 1.1.0** | Published 2026-11-20 from `1c24b5cd` (workflow run `01a1f6ba-87cd-78ec-8fe0-1dafcbddddfc`). Android update `01a1f6bf-421a-7843-b074-8a0ec05cd692`, group `0a3f0fcb-7f8d-438d-901b-a164e53f95bc`, runtime `ec79e181`; iOS update `01a1f6bf-421a-76fa-b92a-19bfb6d8118a`, group `16309eb2-6034-41c2-9ecc-df88f2dc957b`, runtime `8ea562b7`. Rollback: republish the `a3300bf0` pair, Android `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, iOS `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, and leave the database as is (the `a3300bf0` client works against it). Source: [`production-2026-11-20-319-321.md`](./production-2026-11-20-319-321.md). |
+| **DB migrations** | **208 applied**, head `20261130000300` (#331), equal to `main`'s 208 files. Read 2026-11-20 06:20Z. Earlier the same day: 206 at 02:43Z, 207 (#328) at 03:08Z. #319's three (`20261129000100`, `000200`, `000300`) were applied one at a time on 2026-11-20, every invariant re-checked after each. |
+| **pg_cron** | Six jobs, all active, the same on staging: `bingd-import-drain` (10 s), `bingd-import-maintenance` (1 min), `bingd-push-drain` (1 min), `bingd-release-refresh` (:07 hourly), `bingd-release-evaluate` (every 15 min), `bingd-welcome-dispatch` (:41 hourly, #331). Read 2026-11-20. `bingd-proactive-tick` is not scheduled. Diagram: [`../architecture/diagrams.md`](../architecture/diagrams.md) §7 |
 | **Edge Functions** | `letterboxd-import` v4 (2026-11-15, `verify_jwt` on), `tmdb-adapter` v16, `push-sender` v6 (both 2026-11-12). Read 2026-11-15 (#307 release comment). |
 | **Production OTA, 1.0.1** | Unchanged: from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
-| **Preview OTA (staging backend)** | Last recorded: `integration/preview-1120` `219e2953` (Preview 2026-11-20b: `a3300bf0` + #319 at `0aabaa18` + #321), on the `preview` channel: Android group `c3b6dcce`, runtime `2503ffaa`; iOS group `420d6710`, runtime `ef07f4b8`. #319 and #321 have since been released; no later Preview is recorded. Staging migrations: head `20261130000200` (#328's, applied on staging per #328). **Staging only.** |
+| **Preview OTA (staging backend)** | Last recorded: `integration/preview-1121` `5e5f55df` (`main` `68095e99` + #322 at `b2dba1a8`), on the `preview` channel: Android group `15c2a381`, runtime `2503ffaa`; iOS group `a8ceecc7`, runtime `ef07f4b8` ([`preview-2026-11-21-wsc.md`](./preview-2026-11-21-wsc.md)). The Preview before it, `219e2953` (#319 + #321), was released. Staging migrations: **209**, head `20261201000100` (#322's, staging only; read 2026-11-20). **Staging only.** |
 
 ### Production releases since the last update of this page
 
-Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`), except #328, which was a
-database migration only. None needed a new binary.
+Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`), except #328 and #331,
+which were database migrations only. None needed a new binary.
 
 | Date | `main` | What it shipped | Migrations after | OTA groups (Android / iOS) |
 |---|---|---|---|---|
@@ -61,12 +64,15 @@ database migration only. None needed a new binary.
 | 2026-11-19 | `a3300bf0` (#320 + #323) | Feed card spacing; labelled Like · Comment on every post, visible "and others" links | 203 | `e9ea7c27` / `78bc77db` |
 | 2026-11-20 | `1c24b5cd` (#321 + #319) | *Who I watched with*: searchable picker, a follow-back taggable at once. Collection drag-to-rerank across rating categories; the TV wall dragged directly (dragging a show scored by its seasons' average ranks it as a show); silent ranking updates in the Feed; the TV Reorder control removed | 206, head `20261129000300` | `0a3f0fcb` / `16309eb2` |
 | 2026-11-20 | `68095e99` (#328), database only | Feed: two or more first rankings by one person inside one fixed 30-minute window are one post, whatever the watch date. `_ranking_is_historical` and `feed.ranking_backfill_days` removed. No consolidation run under the new rule | 207, head `20261130000200` | no OTA (client stays `1c24b5cd`) |
+| 2026-11-20 | `333c1a79` (#329) | Welcome email: the bingd. logo (served from bingd.app) and no photo; the workflow's schedule raised to six attempts an hour. Released by merging, because every Welcome run renders `main` | 207 | no OTA |
+| 2026-11-20 | `ecd03517` (#331), database only | Welcome dispatch: the `pg_cron` job `bingd-welcome-dispatch` asks GitHub to run the Welcome workflow hourly at :41. **Inert until the founder stores the production Vault token** `welcome_dispatch_github_token`: until then it returns `unconfigured` and makes no request, and the workflow's own GitHub schedule (six offsets an hour, `welcome-email.yml`) remains the trigger. Stop: `welcome.delivery_enabled` false, or `cron.unschedule('bingd-welcome-dispatch')` | 208, head `20261130000300` | no OTA |
 
 Merged to `main` with no app release needed: #314 (Welcome canary workflow), #315
 (security register), #316 (recommendation benchmark, `eval/` only), #324 (Welcome email v2,
-merged 2026-11-19; the hourly Welcome workflow renders whatever `emails/welcome/dist/` is on
-`main`, so merging it is its release; no successful Welcome run on the new template is recorded
-here yet).
+merged 2026-11-19) and #329 (logo-only Welcome email, 2026-11-20). The Welcome workflow renders
+whatever `emails/welcome/dist/` is on `main`, so merging a template is its release. Whether a
+scheduled send has run on the current template is the reliability workstream's check: see
+`docs/ops/reliability-2026-11-20.md`.
 
 ### Store distribution
 
@@ -81,6 +87,10 @@ They **embed** the frozen app, including the fresh-install reload guard (#198), 
 deliver to a first launch.
 
 Read from the public App Store lookup and Play listing on 2026-11-08. Both show 1.1.0 (15).
+
+**Store refresh 1.2.0 (#326, #330): built, not public.** iOS build 16 is uploaded to App Store
+Connect and the Android `.aab` is built. Submission and the store listing steps are the
+founder's. Until a 1.2.0 binary is public, the table above stands, and so do the OTA runtimes.
 The Play listing shows the current version, not rollout percentage. `config/live-runtimes.json`
 holds the same two runtimes for the OTA gate, and changes with this table. A store refresh is
 being prepared separately; until a new binary is public, this table stands.
@@ -109,25 +119,25 @@ being prepared separately; until a new binary is public, this table stands.
 
 ## Feature flags (production)
 
-Each value carries the date it was last read from production. A row with an old date has not
-been re-read since; it is not known to have changed.
+**Every row was re-read on 2026-11-20** (06:20Z, read-only, production and staging). Earlier
+reads are kept in brackets where the value matters to a past decision.
 
-| Flag | Production | Last read | Staging |
-|---|---|---|---|
-| `ranking.backlog_enabled` | **true** | 2026-09-26 | true |
-| `ranking.refine_enabled` | **false**, a founder decision still open | 2026-09-26 | true |
-| `goals.count_watch_events` | true | 2026-09-26 | true |
-| `leaderboard.monthly_from_events` | true | 2026-09-26 | true |
-| `welcome.delivery_enabled` | **true** (13 sent, 0 failed) | 2026-11-17 ([`welcome-email-diagnosis-2026-11-17.md`](./welcome-email-diagnosis-2026-11-17.md)) | false |
-| `release.shadow_enabled` / `release.push_enabled` | true / **false** | 2026-09-26 | true / false |
-| `push.delivery_enabled` | `false`, **but inert**: nothing reads this row, and push delivery runs. #119 would make it a real switch; that is a founder decision | 2026-11-15 | false |
-| `proactive.generation_enabled` / `proactive.push_enabled` | false / false, as the migrations seed them | not re-read | — |
-| `recommendations.v2_engine` / `v2_rollout_percent` / `v2_allowlist` | **`"v1"`** / 0 / `[]`: Rec V2 is shipped dark | 2026-11-15 | `"v1"` / 0 / `[]` |
-| `score.contributor_min_rankings` | 10 | 2026-11-15 | 10 |
-| `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | 2026-11-20 | per QA round |
-| `feed.ranking_backfill_grouping_enabled` | **true**: the kill switch for grouping first rankings, which kept its name. `feed.ranking_backfill_days` no longer exists (`20261130000200`) | 2026-11-20 | true; `ranking_backfill_days` removed |
+| Flag | Production | Staging |
+|---|---|---|
+| `ranking.backlog_enabled` | **true** | true |
+| `ranking.refine_enabled` | **false**: Refine is shipped dark (unchanged since the 2026-09-26 read) | true |
+| `goals.count_watch_events` | true | true |
+| `leaderboard.monthly_from_events` | true | true |
+| `welcome.delivery_enabled` | **true**. `welcome_emails`: 13 sent, 0 in any other state; the same count as 2026-11-17 ([`welcome-email-diagnosis-2026-11-17.md`](./welcome-email-diagnosis-2026-11-17.md)) | false |
+| `release.refresh_enabled` / `release.shadow_enabled` / `release.push_enabled` | true / true / **false**: release awareness runs in shadow, with no push | true / true / false |
+| `push.delivery_enabled` | `false`, **but inert**: nothing reads this row, and push delivery runs. #119 would make it a real switch; that is a founder decision | false |
+| `proactive.generation_enabled` / `push_enabled` / `resurface_enabled` / `season_enabled` | false / false / false / false: shipped dark, and `bingd-proactive-tick` is not scheduled | the same |
+| `recommendations.v2_engine` / `v2_rollout_percent` / `v2_allowlist` | **`"v1"`** / 0 / `[]`: Rec V2 is shipped dark | `"v1"` / 0 / `[]` |
+| `score.contributor_min_rankings` | 10 | 10 |
+| `feed.watchlist_grouping_enabled` / `feed.ranking_grouping_enabled` | **true** / **true** (30-minute windows) | true / true |
+| `feed.ranking_backfill_grouping_enabled` | **true**: the kill switch for grouping first rankings, which kept its name. `feed.ranking_backfill_days` no longer exists (`20261130000200`) | true |
 
-**Security (2026-11-19).** H-2 is fixed in production (`20261124000100`, trigger
+**Security (2026-11-19; unchanged 2026-11-20).** H-2 is fixed in production (`20261124000100`, trigger
 `retire_unproven_password`). H-1 is **closed** (2026-11-18): the privileged Actions secrets
 live only in the `production` and `nonprod` Environments, restricted to `main`; evidence in
 [#317](https://github.com/fourwardhabits/bingd/pull/317) on
@@ -185,15 +195,18 @@ Username-or-email sign-in (#300) is **not in production**: its migration slot
 - **Discovery.** Search (the Search tab), title pages, For You (engine V1), Top Rated,
   Trending, Similar, Cast, person pages, Discover People, Taste Match (computed live per pair).
 - **Email.** The Welcome email, 48–168 hours after sign-up, for accounts created after
-  2026-09-18.
+  2026-09-18, with a logo-only header (#329). It is started by the GitHub schedule in
+  `welcome-email.yml`. #331's hourly `pg_cron` dispatch joins it once the founder stores its
+  Vault token.
 - **Web.** bingd.app: install page, public title, profile and list previews, invite links.
 
 ### Shipped dark (in production, switched off)
 
 Recommendation Engine V2 (`v2_engine "v1"`, 0%;
 [`../architecture/recommendations-v2.md`](../architecture/recommendations-v2.md)), Refine
-(flag off), proactive notifications (generation and push off), proactive release pushes (shadow
-only).
+(flag off), proactive notifications (every switch off, and the tick not scheduled), proactive
+release pushes (shadow only). The Welcome dispatch job (#331) is live but inert until its token
+is stored.
 
 **Not a switch:** `push.delivery_enabled` is an inert row that no delivery code reads, so push
 cannot be turned off through configuration. The switch that would read it is #119, an open,
@@ -203,7 +216,8 @@ unapplied PR; whether to apply it is a founder decision.
 
 | What | Where |
 |---|---|
-| Reactions and comments on follow stories, Workstream C (#322) | Draft PR; **not on staging**, not in any Preview |
+| Reactions and comments on follow stories, Workstream C (#322) | Draft PR. **On staging** (migration `20261201000100`, staging at 209) and in Preview `5e5f55df`, awaiting founder device QA. Not in production ([`preview-2026-11-21-wsc.md`](./preview-2026-11-21-wsc.md)) |
+| Store refresh 1.2.0 (#326, #330) | iOS build 16 uploaded to App Store Connect; Android `.aab` built. Not submitted for release; the listing steps are the founder's |
 | Username-or-email sign-in (#300) | Draft PR; migration not applied anywhere |
 | Design System v3 (#295) | Draft PR |
 | A push kill switch that stops delivery (#119) | Open PR, unapplied in production. Until it is, `push.delivery_enabled` is inert |
@@ -342,8 +356,8 @@ preview lane. **Preview never points at production data.**
 4. only the explicitly unreleased fix being tested.
 
 Preview never accumulates its own history that later has to be reconciled. Its last recorded
-candidate (2026-11-20b, `219e2953`) was `main` `a3300bf0` plus #319 and #321, both released to
-production on 2026-11-20. No later Preview is recorded. Staging QA accounts and the states they cover are
+candidate (2026-11-21, `5e5f55df`) is `main` `68095e99` plus #322 only. The one before it
+(2026-11-20b, `219e2953`, #319 and #321) was released to production on 2026-11-20. Staging QA accounts and the states they cover are
 in [`staging-qa-inventory.md`](./staging-qa-inventory.md).
 
 ---

@@ -8,6 +8,9 @@
 > still read by nothing (#119), and proactive and release pushes are migrated with their
 > switches off. Operations: [`../release/push-operations.md`](../release/push-operations.md);
 > what is live: [`../release/production-state.md`](../release/production-state.md).
+> *(2026-11-20: unchanged. The drain and the other `pg_cron` jobs are drawn in
+> [`diagrams.md`](./diagrams.md) §5 and §7. `bingd-proactive-tick` is not scheduled in either
+> project.)*
 
 Specification: [PRD §15](../product/PRD.md) · AD-10 ·
 [`deferred-roadmap.md` §4](../product/deferred-roadmap.md)

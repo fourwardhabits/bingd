@@ -11,7 +11,8 @@ No language model. Recommendations are derived from human ranking behavior, cont
 > is in production **dark** (switch `"v1"`, 0%): [`recommendations-v2.md`](./recommendations-v2.md).
 > Since 2026-11-12 For You scores TV shows and seasons as distinct signals, each in its own
 > pool ([`ranking.md`](./ranking.md) §14.4). Taste Match is computed live per pair by
-> `taste_match` ([`README.md`](./README.md) AD-7).
+> `taste_match` ([`README.md`](./README.md) AD-7). Diagram of V1, V2 (dark) and their caches:
+> [`diagrams.md`](./diagrams.md) §6. *(Re-read 2026-11-20: still `"v1"`, 0%, empty allowlist.)*
 
 ## 0. What actually shipped — For You V1, 2026-08-16
 

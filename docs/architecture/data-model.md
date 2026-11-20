@@ -5,6 +5,12 @@
 
 All SQL is Postgres 15 as provided by Supabase.
 
+> **Diagram (2026-11-20).** The core entities, the three ranking pools and the authorisation
+> boundaries as they are in production are drawn in [`diagrams.md`](./diagrams.md) §3. On
+> 2026-11-20 production has 82 tables in `public`, every one with RLS enabled, and 208
+> migrations. The sections below explain the reasoning, and the migrations win where they
+> differ.
+
 **The migrations in [`../../supabase/migrations/`](../../supabase/migrations/) are now the source of truth.** This document explains the reasoning; the migrations are what runs. They are applied to real Postgres in CI and the structural guarantees in §15 are each tested by attempting to violate them, so the two cannot drift silently.
 
 Three differences from the SQL sketched below, all deliberate:

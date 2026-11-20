@@ -18,6 +18,9 @@ Expo, React Native, TypeScript. One codebase, three variants.
 >   from the show's page ([`ranking.md`](./ranking.md) §14).
 >
 > What is in production: [`../release/production-state.md`](../release/production-state.md).
+> Screens, feature modules, shared services and the cache strategy are drawn in
+> [`diagrams.md`](./diagrams.md) §2 (2026-11-20). The current defaults are in `src/lib/query.ts`:
+> `staleTime` 60 s, 2 retries for reads, 0 for writes, and no refetch on window focus.
 
 ---
 

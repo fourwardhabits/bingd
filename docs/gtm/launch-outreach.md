@@ -6,13 +6,20 @@ can and cannot be measured once they arrive.
 
 It is an operating plan, not a pitch. Where a claim cannot be verified it says so.
 
-> **Product facts reconciled with production on 2026-11-19.** The strategy, audiences and
+> **Product facts reconciled with production on 2026-11-19, re-checked 2026-11-20.** The strategy, audiences and
 > channels are unchanged. What changed is what bingd. does: **Lists** (live since 2026-09-23),
 > **Letterboxd import** (since 2026-09-14) and **IMDb import** (since 2026-11-12) exist, and a
 > **whole TV show can be ranked** as well as each season (since 2026-11-12). §2, §3.6, §3.8,
 > the message templates in §8 and §9 are corrected to match. Before quoting any capability
 > outward, check [`../release/production-state.md`](../release/production-state.md): a feature
 > on staging or in a draft PR is not something bingd. does.
+>
+> **Re-checked 2026-11-20.** Since the 2026-11-19 pass:
+> - Collection drag-to-rerank and the *Who I watched with* picker are live. They are fine to
+>   mention, and they change no claim below.
+> - **Not yet quotable:** reactions and comments on *follow stories* (#322) are on staging
+>   only, as is the 1.2.0 store refresh, which is built but not public. "Reactions, comments
+>   and mentions" below means on rankings, reviews and other activity posts.
 
 **Canonical identity.** Everything outward-facing uses these and nothing else.
 
