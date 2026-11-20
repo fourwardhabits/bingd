@@ -63,13 +63,16 @@ async function title(kind, name) {
  */
 async function rankFirst(kind, name, { basis = 'today_default', note = true } = {}) {
   const id = await title(kind, name);
-  await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [user, id]);
   if (basis) {
-    await t.sql(
-      `insert into watch_events (user_id, media_item_id, watched_on, basis)
-       values ($1, $2, case when $3 = 'none' then null else current_date end, $3::watch_date_basis)`,
-      [user, id, basis],
-    );
+    // The log sheet's own write: `log_title`, with the date it offered.
+    await call(`log_title($1, $2, 'loved', $3::date, $4::watch_date_basis)`, [
+      await uuid(),
+      id,
+      basis === 'none' ? null : new Date().toISOString().slice(0, 10),
+      basis,
+    ]);
+  } else {
+    await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [user, id]);
   }
   await t.rankToCompletion(id, 'loved', (pivot, subject) => subject);
   const result = note ? await call(`rank_group_note($1, $2)`, [await uuid(), id]) : null;
@@ -148,6 +151,15 @@ describe('the founder reproduction', () => {
     assert.equal(a.result.status, 'solo', 'one ranking stays its own card until a second');
     await age(4);
     const b = await rankFirst('movie', 'Second film', { note: false });
+    const { rows: bases } = await t.sql(
+      `select distinct basis::text as basis from watch_events where user_id = $1`,
+      [user],
+    );
+    assert.deepEqual(
+      bases,
+      [{ basis: 'today_default' }],
+      'both watched "Today", as the sheet offers',
+    );
     const before = await counts();
     b.result = await call(`rank_group_note($1, $2)`, [await uuid(), b.id]);
     assert.equal(b.result.status, 'grouped');
