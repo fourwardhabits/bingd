@@ -783,9 +783,9 @@ const ENV = {
   SUPABASE_URL: 'https://project.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-key',
   RESEND_API_KEY: 're_test',
-  // Supplied by the workflow from a repository secret. Obviously fake here, which is
-  // also the documented staging value.
-  WELCOME_POSTAL_ADDRESS: '1 Example Street, Sampleton EX1 2MP',
+  // Supplied by the workflow from a repository secret. Obviously fake here. Not the
+  // documented test address, which the worker refuses for the cohort (2026-11-20).
+  WELCOME_POSTAL_ADDRESS: '10 Fixture Lane, Testville TT1 1TT',
 };
 
 /**
@@ -1013,6 +1013,9 @@ describe('welcome email: the worker, against the real SQL', () => {
     ['blank', ''],
     ['whitespace only', '   \n  '],
     ['still a placeholder', '[POSTAL ADDRESS - FOUNDER TO SUPPLY]'],
+    // The documented fake address belongs in a test or a canary, never in a real
+    // recipient's footer (founder, 2026-11-20).
+    ['the documented test address', '1 Example Street, Sampleton EX1 2MP'],
   ]) {
     it(`refuses the cohort, before claiming anybody, while WELCOME_POSTAL_ADDRESS is ${label}`, async () => {
       await t.exec(OPEN_COHORT_SQL);
