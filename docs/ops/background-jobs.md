@@ -256,7 +256,9 @@ here as `missing`, `late` or `failing` (the self-check).
 5. **The tick never raises.** If it fails inside, it records an open `bingd-ops-health` alert
    with `detail.tick_error` (the SQLSTATE) and returns `{"status": "error"}`. pg_cron records
    the run as `succeeded`, so `ops_job_health()` reads that alert and reports
-   `bingd-ops-health` as `failing`. The next good tick closes it.
+   `bingd-ops-health` as `failing`. The next good tick closes it. If the checks cannot run
+   at all, `ops_job_health()` does not raise either: it returns `bingd-ops-health` as
+   `failing` with `detail.observe_error`, followed by every open alert (`kind = 'alert'`).
 
 The last week of incidents, including ones that recovered before anybody looked:
 

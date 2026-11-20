@@ -608,6 +608,26 @@ describe('the tick never raises', () => {
     assert.equal(row.detail.tick_error, '42703');
     assert.equal((await alerts()).length, 1);
 
+    // The readout does not raise either: it reports the health tick as failing, with the
+    // error, and the open alerts beside it.
+    await t.sql(
+      `insert into ops_alerts (check_name, status, opened_at, last_seen_at) values ('bingd-push-drain', 'late', now(), now())`,
+    );
+    const { rows: readout } = await t.sql(
+      `select check_name, kind, status, alert_open_since, detail from ops_job_health()`,
+    );
+    assert.deepEqual(
+      readout.map((x) => [x.check_name, x.kind, x.status]),
+      [
+        ['bingd-ops-health', 'cron', 'failing'],
+        ['bingd-push-drain', 'alert', 'late'],
+      ],
+    );
+    assert.equal(readout[0].detail.observe_error, '42703');
+    assert.equal(readout[0].detail.tick_error, '42703');
+    assert.ok(readout[0].alert_open_since);
+    await t.sql(`delete from ops_alerts where check_name = 'bingd-push-drain'`);
+
     // It fails again: still one row.
     assert.equal((await tick(minutesAfter(10))).status, 'error');
     assert.equal((await alerts()).length, 1);

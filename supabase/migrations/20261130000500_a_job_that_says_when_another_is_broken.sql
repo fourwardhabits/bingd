@@ -317,25 +317,55 @@ returns table (
   alert_open_since     timestamptz,
   detail               jsonb
 )
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public
 as $fn$
-  select o.check_name, o.kind,
-         -- A tick that failed internally recorded its error on its own open alert; the
-         -- cron run itself succeeded, because the tick never raises.
-         case when o.check_name = 'bingd-ops-health' and a.detail ? 'tick_error' then 'failing'
-              else o.status end,
-         o.muted, o.max_interval, o.last_run, o.last_success, o.consecutive_failures,
-         a.opened_at,
-         case when o.check_name = 'bingd-ops-health' and a.detail ? 'tick_error'
-              then o.detail || jsonb_build_object('tick_error', a.detail -> 'tick_error',
-                                                  'message', a.detail -> 'message')
-              else o.detail end
-    from _ops_observe(now()) with ordinality o
-    left join ops_alerts a on a.check_name = o.check_name and a.closed_at is null
-   order by o.ordinality;
+#variable_conflict use_column
+declare
+  v_state text;
+  v_msg   text;
+begin
+  -- _ops_observe() is materialised before its first row reaches this query, so an error in
+  -- it arrives before any row is returned, and the handler below answers alone.
+  return query
+    select o.check_name, o.kind,
+           -- A tick that failed internally recorded its error on its own open alert; the
+           -- cron run itself succeeded, because the tick never raises.
+           case when o.check_name = 'bingd-ops-health' and a.detail ? 'tick_error' then 'failing'
+                else o.status end,
+           o.muted, o.max_interval, o.last_run, o.last_success, o.consecutive_failures,
+           a.opened_at,
+           case when o.check_name = 'bingd-ops-health' and a.detail ? 'tick_error'
+                then o.detail || jsonb_build_object('tick_error', a.detail -> 'tick_error',
+                                                    'message', a.detail -> 'message')
+                else o.detail end
+      from _ops_observe(now()) with ordinality o
+      left join ops_alerts a on a.check_name = o.check_name and a.closed_at is null
+     order by o.ordinality;
+exception when others then
+  /**
+   * The observation itself fails: the same fault the tick records as its own alert. The
+   * readout must still say so rather than raise, or the self-check is lost exactly when it
+   * matters. So: bingd-ops-health as failing, with this error and the tick's, then every
+   * other open alert as the tick last saw it.
+   */
+  get stacked diagnostics v_state = returned_sqlstate, v_msg = message_text;
+  return query
+    select 'bingd-ops-health'::text, 'cron'::text, 'failing'::text, false, interval '25 minutes',
+           null::timestamptz, null::timestamptz, 0, a.opened_at,
+           jsonb_strip_nulls(jsonb_build_object(
+             'observe_error', v_state, 'message', left(v_msg, 200),
+             'tick_error', a.detail -> 'tick_error'))
+      from (select 1) one
+      left join ops_alerts a on a.check_name = 'bingd-ops-health' and a.closed_at is null
+    union all
+    select a.check_name, 'alert'::text, a.status, false, null::interval,
+           null::timestamptz, null::timestamptz, 0, a.opened_at, a.detail
+      from ops_alerts a
+     where a.closed_at is null and a.check_name <> 'bingd-ops-health';
+end;
 $fn$;
 
 -- ---------------------------------------------------------------------------
@@ -456,7 +486,7 @@ comment on function _ops_observe(timestamptz) is
 comment on function _ops_expected_jobs() is
   'The pg_cron jobs ops_job_health() expects, and the longest gap each may go without a run. Internal (20261130000500).';
 comment on function ops_job_health() is
-  'Live background-job health: one row per check, status ok, late, failing, missing or info, and the open ops_alerts row if there is one. Includes bingd-ops-health itself, so a stopped health tick shows here. Reads cron history by primary key only. service_role and the SQL editor (20261130000500).';
+  'Live background-job health: one row per check, status ok, late, failing, missing or info, and the open ops_alerts row if there is one. Includes bingd-ops-health itself, so a stopped health tick shows here. If the observation itself fails it does not raise: it returns bingd-ops-health as failing with the error, then the open alerts (kind alert). Reads cron history by primary key only. service_role and the SQL editor (20261130000500).';
 comment on function ops_health_tick(timestamptz) is
   'One bingd-ops-health tick as of p_at: opens an ops_alerts row when a check goes late, failing or missing, closes it when the check recovers (or is muted), and folds a relapse within an hour into the same row. Transitions only. Never raises: an internal failure is recorded as an open bingd-ops-health alert and returned as status error. Internal (20261130000500).';
 comment on function ops_health_tick() is
