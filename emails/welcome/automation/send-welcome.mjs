@@ -61,6 +61,7 @@ import {
   loadTemplate,
   personalise,
   postalAddressFrom,
+  SAMPLE_POSTAL_ADDRESS,
   resendPayload,
   sendViaResend,
   unsubscribeFor,
@@ -261,6 +262,11 @@ export async function run({
     postalAddress = postalAddressFrom(env);
   } catch (error) {
     return stop(error.message, 1);
+  }
+  // The documented fake address is for tests and canaries only. A real recipient never
+  // gets it (founder, 2026-11-20). The message names the variable, not the value.
+  if (!canary && SAMPLE_POSTAL_ADDRESS.test(postalAddress)) {
+    return stop('WELCOME_POSTAL_ADDRESS is the documented test address. Set the real one before sending to anybody but a canary.', 1);
   }
 
   /**

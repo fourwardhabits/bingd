@@ -38,13 +38,15 @@
  *   - **Inline styles carry everything that matters.** The `<style>` block holds only
  *     the media query and the dark-mode overrides, both of which are enhancements. Any
  *     client that drops the block still gets a correct light email.
- *   - **One image, and it is the founder.** The cafe photo (`copy.photo`, 2026-11-19), so
- *     the note reads as coming from a person. Nothing else is an image: not the wordmark,
- *     not an icon, not a tracking pixel. Some recipients have images off, so the letter
- *     must lose nothing but the picture without it: the photo carries alt text styled to
- *     read as a caption, a stated width and height so the layout does not jump, and a
- *     filled background so a blocked image is a quiet box rather than a hole. The
- *     wordmark is text in a serif stack, which is what it is in the product anyway.
+ *   - **Two images: the logo and the founder** (founder, 2026-11-20). The masthead is the
+ *     real bingd. logo (`copy.masthead`, the app's BrandLockup rasterised once), and the
+ *     cafe photo (`copy.photo`) is a small portrait beside the sign-off, so the note reads
+ *     as coming from a person without a hero image. Nothing else is an image: no icon, no
+ *     tracking pixel. Some recipients have images off, so the letter must lose nothing but
+ *     the pictures without them: the logo's alt text is "bingd." styled as the old text
+ *     wordmark, the portrait's is styled to read as a caption, both have a stated width and
+ *     height so the layout does not jump, and the portrait has a filled background so a
+ *     blocked image is a quiet box rather than a hole.
  *   - **Every background is stated.** A transparent cell inherits whatever a dark-mode
  *     client paints behind it, which is how dark text ends up on a dark ground.
  *   - **Tap targets are at least 44px.**
@@ -101,6 +103,28 @@ const target = (name) => {
  * and `web/build.mjs` copies `web/src/` into the site as-is, which is how `photo.file`
  * comes to be served at `photo.src`. email.test.mjs checks the file itself.
  */
+/**
+ * The logo, under the same rules as the photo, as a PNG (it has a transparent corner).
+ */
+const logo = (() => {
+  const m = copy.masthead;
+  if (!m || typeof m !== 'object') {
+    problems.push('copy.json masthead must be the logo: { text, src, file, width, height }.');
+    return null;
+  }
+  if (!/^https:\/\/bingd\.app\/[a-z0-9/_-]+\.png$/.test(m.src ?? '')) {
+    problems.push(`masthead.src "${m.src}" is not an absolute https://bingd.app/... .png URL.`);
+  }
+  if (!m.file || !m.file.startsWith('web/src/') || m.src?.slice('https://bingd.app/'.length) !== m.file.slice('web/src/'.length)) {
+    problems.push(`masthead.file "${m.file}" is not the web/src/ file that web/build.mjs publishes at ${m.src}.`);
+  }
+  if (!Number.isInteger(m.width) || !Number.isInteger(m.height) || m.width < 1 || m.height < 1) {
+    problems.push('masthead.width and masthead.height must be positive whole numbers of pixels.');
+  }
+  if (m.text !== 'bingd.') problems.push('masthead.text is the wordmark, "bingd.".');
+  return m;
+})();
+
 const photo = (() => {
   const p = copy.photo;
   if (!p) {
@@ -117,6 +141,9 @@ const photo = (() => {
     problems.push('photo.width and photo.height must be positive whole numbers of pixels.');
   }
   if (!p.alt || p.alt.trim().length < 10) problems.push('photo.alt must describe the photo.');
+  if (!Number.isInteger(p.mobileSize) || p.mobileSize < 1 || p.mobileSize > p.width) {
+    problems.push('photo.mobileSize must be a whole number of pixels no larger than photo.width.');
+  }
   return p;
 })();
 
@@ -311,6 +338,21 @@ const GREETING_TOKEN = '{{greeting}}';
  */
 const POSTAL_TOKEN = '{{postalAddress}}';
 
+/**
+ * The sign-off ("Happy binging,", beside the portrait) and the name line under it, with
+ * the closing phrase after the name on the same line (founder, 2026-11-20: "Suraj (the
+ * movie nerd that made bingd)", same colour and font, a little smaller). It inherits the
+ * sign-off's serif and ink, so the dark rules that repaint the sign-off repaint it too.
+ * `nowrap` keeps the phrase whole: on a screen too narrow for the whole line it moves under
+ * the name as one piece rather than breaking mid-phrase.
+ */
+const signoffLines = copy.letter.signoff.slice(0, -1).map(esc).join('<br />');
+const nameLine = `${esc(copy.letter.signoff.at(-1))}${
+  copy.letter.closing
+    ? ` <span style="font-size:15px;white-space:nowrap;" class="sig-closing">${esc(copy.letter.closing)}</span>`
+    : ''
+}`;
+
 const html = `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
   <head>
@@ -343,6 +385,13 @@ const html = `<!DOCTYPE html>
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
+        /* The logo's PNG carries a 6px inset of its own, so its cell sits 6px further
+           out than the text column and the mark lines up with the letter. */
+        .gutter-logo { padding-left: 16px !important; padding-right: 22px !important; }
+        .sig-photo, .sig-photo-cell { width: ${photo?.mobileSize}px !important; }
+        .sig-photo { height: ${photo?.mobileSize}px !important; }
+        .sig-gap { padding-right: 12px !important; }
+        .sig-closing { font-size: 14px !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -381,34 +430,50 @@ const html = `<!DOCTYPE html>
           <!--[if mso]><table role="presentation" width="680" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" class="shell dk-card" style="width:100%;max-width:680px;margin:0 auto;background-color:${C.paper};border:1px solid ${C.hairline};border-radius:14px;">
 
-            <!-- Masthead. Text, not an image: roughly half of recipients have images off
-                 by default, and a wordmark they cannot see is not a wordmark. -->
+            <!-- Masthead: the bingd. logo, left-aligned (founder, 2026-11-20). The PNG has a
+                 Paper ground with rounded corners: invisible on the light card, and a soft
+                 pill rather than Maroon on near-black under Gmail's forced dark mode. With
+                 images off, its alt text is the old text wordmark, in the same serif and
+                 Maroon. The cell is 6px further out than the text column because the PNG
+                 carries a 6px inset, so the mark lines up with the letter. -->
             <tr>
-              <td class="gutter pad-top" style="padding:30px 36px 0;">
-                <p style="margin:0;font-family:${SERIF};font-size:26px;line-height:30px;color:${C.maroon};" class="dk-accent">${esc(copy.masthead)}</p>
+              <td class="gutter-logo pad-top" style="padding:30px 36px 0 30px;">
+                <img src="${esc(logo?.src ?? '')}" width="${logo?.width}" height="${logo?.height}" alt="${esc(logo?.text ?? '')}" style="display:block;width:${logo?.width}px;height:${logo?.height}px;border:0;outline:none;text-decoration:none;font-family:${SERIF};font-size:26px;line-height:30px;color:${C.maroon};" class="dk-accent" />
               </td>
             </tr>
 
-            <!-- The founder. Fluid to the text column, with a stated size for Outlook and
-                 for a client that has not loaded it yet. With images off, the alt text
-                 shows in the body face on a parchment box, so it reads as a caption. -->
+            <!-- The letter. The founder's own words, in his order, straight after the logo,
+                 and nothing under it but the footer. -->
             <tr>
-              <td class="gutter" style="padding:24px 36px 0;">
-                <img src="${esc(photo?.src ?? '')}" width="${photo?.width}" height="${photo?.height}" alt="${esc(photo?.alt ?? '')}" style="display:block;width:100%;max-width:${photo?.width}px;height:auto;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:${C.parchment};font-family:${FONT};font-size:14px;line-height:20px;color:${C.secondary};" />
-              </td>
-            </tr>
-
-            <!-- The letter. The founder's own words, in his order, and nothing under it but
-                 the footer. -->
-            <tr>
-              <td class="gutter" style="padding:26px 36px 6px;">
+              <td class="gutter" style="padding:22px 36px 6px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td>
                       <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
-                      <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
-                      <p style="margin:6px 0 0;font-family:${SERIF};font-style:italic;font-size:15px;line-height:22px;color:${C.maroon};" class="dk-accent">${esc(copy.letter.closing ?? '')}</p>
+                      <!-- The signature (founder, 2026-11-20). The portrait sits beside the
+                           sign-off, its foot on the "Happy binging," line, and the name line runs
+                           under both at the full width of the letter: "Suraj" with the closing
+                           phrase on the same line, same serif and colour, a little smaller. A
+                           Gmail phone column is about 293px, and the name line is about 280px
+                           in Android's serif, so beside a 76px portrait it could never stay on
+                           one line; under it, it does. Tables, not flexbox, so Outlook and
+                           Gmail draw it the same; with images off the words stand alone. -->
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+                        <tr>
+                          <td valign="bottom" class="sig-gap" style="padding:0 16px 0 0;">
+                            <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};white-space:nowrap;" class="dk-text">${signoffLines}</p>
+                          </td>
+                          <td valign="bottom" width="${photo?.width}" class="sig-photo-cell" style="width:${photo?.width}px;padding:0 0 4px;">
+                            <img src="${esc(photo?.src ?? '')}" width="${photo?.width}" height="${photo?.height}" alt="${esc(photo?.alt ?? '')}" class="sig-photo" style="display:block;width:${photo?.width}px;height:${photo?.height}px;border:0;outline:none;text-decoration:none;border-radius:12px;background-color:${C.parchment};font-family:${FONT};font-size:11px;line-height:14px;color:${C.secondary};" />
+                          </td>
+                        </tr>
+                        <tr>
+                          <td colspan="2">
+                            <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${nameLine}</p>
+                          </td>
+                        </tr>
+                      </table>
                     </td>
                   </tr>
                 </table>
@@ -490,8 +555,7 @@ const text = `${GREETING_TOKEN}
 
 ${copy.letter.paragraphs.map((p) => wrap(paragraphText(p))).join('\n\n')}
 
-${copy.letter.signoff.join('\n')}
-${copy.letter.closing ?? ''}
+${[...copy.letter.signoff.slice(0, -1), [copy.letter.signoff.at(-1), copy.letter.closing].filter(Boolean).join(' ')].join('\n')}
 
 ${'-'.repeat(72)}
 

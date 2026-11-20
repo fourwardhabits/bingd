@@ -57,6 +57,14 @@ export const POSTAL_ADDRESS_ENV = 'WELCOME_POSTAL_ADDRESS';
 const PLACEHOLDER = /\[|\]|FOUNDER TO SUPPLY|POSTAL ADDRESS|TODO|TBD|FIXME|XXXX/i;
 
 /**
+ * The documented fake address for tests and staging ("1 Example Street, Sampleton EX1 2MP").
+ * A test send and a canary may carry it; a real recipient never may (founder, 2026-11-20,
+ * after it appeared in a test footer). The worker refuses a cohort send with it, before
+ * claiming anybody.
+ */
+export const SAMPLE_POSTAL_ADDRESS = /example street|sampleton|\bEX1 2MP\b/i;
+
+/**
  * The address to print in the footer, read from `env` and normalised to one line.
  *
  * **Fails closed.** Missing, blank, whitespace-only, too short to be an address, or
