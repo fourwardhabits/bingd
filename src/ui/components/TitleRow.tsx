@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
+} from 'react-native';
 
 import { theme } from '../tokens';
 import { Poster } from './Poster';
@@ -36,6 +42,16 @@ export type TitleRowProps = {
    */
   spacious?: boolean;
   onPress: () => void;
+  /**
+   * **Collection drag-to-rerank** (#318): a long-press lifts the row, and the same moves are
+   * accessibility actions. Absent everywhere else, so every other list is unchanged.
+   */
+  onLongPress?: () => void;
+  onPressOut?: () => void;
+  accessibilityActions?: AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
+  /** Overrides the pending hint; a pending row keeps its own. */
+  accessibilityHint?: string;
 };
 
 /**
@@ -69,6 +85,11 @@ export function TitleRow({
   divided = false,
   spacious = false,
   onPress,
+  onLongPress,
+  onPressOut,
+  accessibilityActions,
+  onAccessibilityAction,
+  accessibilityHint,
 }: TitleRowProps) {
   const compact = size !== 'sm';
   const secondaryLabel = typeof secondary === 'string' ? secondary : null;
@@ -78,8 +99,12 @@ export function TitleRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={[title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')}
-      accessibilityHint={pending ? 'Saved on this device, waiting to sync' : undefined}
+      accessibilityHint={pending ? 'Saved on this device, waiting to sync' : accessibilityHint}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       onPress={onPress}
+      onLongPress={onLongPress}
+      onPressOut={onPressOut}
       style={[
         styles.row,
         compact && styles.rowCompact,

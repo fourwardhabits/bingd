@@ -418,3 +418,177 @@ export const today = () => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
+
+/**
+ * What `rank_reorder` answered (20261129000100): where the title is now and was, its band,
+ * and its score before and after. Read only to reconcile and to word the confirmation.
+ */
+export type ReorderReply = {
+  moved: boolean;
+  position: number;
+  fromPosition: number;
+  /** The category it is in now, and was in (20261129000200). Null from an older server. */
+  bucket: string | null;
+  fromBucket: string | null;
+  score: number | null;
+  fromScore: number | null;
+};
+
+/**
+ * A Collection drag's outcome (#318). Four, because the screen does four different things:
+ *
+ *   moved    applied, or answered from the ledger for a replayed operation id;
+ *   stale    55000: the list the drop was computed from is not the list any more. Nothing
+ *            moved. Refetch and say so;
+ *   outside  22023: the target is not a place in the named category. Nothing moved. The
+ *            client checks the same rule before sending, so this is the server's backstop;
+ *   failed   anything else. `changed` is true when the outcome is unknown (a lost reply),
+ *            which is when a retry must reuse the same operation id.
+ */
+export type ReorderResult =
+  | { outcome: 'moved'; reply: ReorderReply }
+  | { outcome: 'stale' }
+  | { outcome: 'outside' }
+  | { outcome: 'failed'; message: string; changed: boolean };
+
+const toNumber = (value: unknown): number | null =>
+  value === null || value === undefined ? null : Number(value);
+
+/**
+ * Moves a ranked title to another place in its own ranking: `rank_reorder`, with both
+ * stale-list guards.
+ *
+ * `expectedPosition` is where the screen drew the title, and `anchorId` is the title the
+ * screen drew at the target. The server refuses with 55000 when either is no longer true,
+ * so a ranking changed by another device is never moved by a stale index.
+ *
+ * `toBucket` is sent only for a move that changes the title's rating category
+ * (20261129000200). `expectedBucket` is where the screen drew the title: a change of category
+ * that kept its position is invisible to the position guard, so without it a stale Undo could
+ * overwrite another device's newer rating.
+ */
+export async function reorderRanking(input: {
+  operationId: string;
+  mediaItemId: string;
+  toPosition: number;
+  expectedPosition: number;
+  anchorId: string;
+  toBucket?: string;
+  /** The category the screen drew the title in: the third stale-list guard (Codex, PR 319). */
+  expectedBucket?: string;
+}): Promise<ReorderResult> {
+  const { data, error } = await supabase.rpc('rank_reorder', {
+    p_media_item_id: input.mediaItemId,
+    p_new_position: input.toPosition,
+    p_operation_id: input.operationId,
+    p_expected_position: input.expectedPosition,
+    p_anchor_media_item_id: input.anchorId,
+    ...(input.toBucket ? { p_new_bucket: input.toBucket } : {}),
+    ...(input.expectedBucket ? { p_expected_bucket: input.expectedBucket } : {}),
+  });
+
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+
+  const reply = (data ?? {}) as Record<string, unknown>;
+  return {
+    outcome: 'moved',
+    reply: {
+      moved: reply.moved !== false,
+      position: Number(reply.position ?? input.toPosition),
+      fromPosition: Number(reply.from_position ?? input.expectedPosition),
+      bucket: typeof reply.bucket === 'string' ? reply.bucket : null,
+      fromBucket: typeof reply.from_bucket === 'string' ? reply.from_bucket : null,
+      score: toNumber(reply.score),
+      fromScore: toNumber(reply.from_score),
+    },
+  };
+}
+
+export type PromoteResult =
+  | {
+      outcome: 'promoted';
+      reply: { position: number; score: number | null; placementId: string | null };
+    }
+  | { outcome: 'stale' }
+  | { outcome: 'outside' }
+  | { outcome: 'failed'; message: string; changed: boolean };
+
+/**
+ * **A show drawn at its seasons' average, placed from the TV wall** (#319,
+ * 20261129000300): `rank_promote_show`. It becomes an explicit `tv_shows` ranking at
+ * `toPosition` in `toBucket`, with that place's score. No watch, post or season change.
+ * `anchorId` is the explicit show at that position now (null past the last), so a wall
+ * gone stale is refused (55000) rather than misplaced.
+ */
+export async function promoteShow(input: {
+  operationId: string;
+  mediaItemId: string;
+  toPosition: number;
+  toBucket: string;
+  anchorId: string | null;
+}): Promise<PromoteResult> {
+  const { data, error } = await supabase.rpc('rank_promote_show', {
+    p_media_item_id: input.mediaItemId,
+    p_new_position: input.toPosition,
+    p_new_bucket: input.toBucket,
+    p_operation_id: input.operationId,
+    p_anchor_media_item_id: input.anchorId,
+  });
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+  const reply = (data ?? {}) as Record<string, unknown>;
+  return {
+    outcome: 'promoted',
+    reply: {
+      position: Number(reply.position ?? input.toPosition),
+      score: toNumber(reply.score),
+      placementId: typeof reply.placement_id === 'string' ? reply.placement_id : null,
+    },
+  };
+}
+
+/**
+ * Undo of {@link promoteShow}: `rank_unpromote_show`, only while that promotion is still the
+ * show's latest placement and the show is at `expectedPosition` (55000 otherwise).
+ */
+export async function unpromoteShow(input: {
+  operationId: string;
+  mediaItemId: string;
+  placementId: string;
+  expectedPosition: number;
+}): Promise<PromoteResult> {
+  const { error } = await supabase.rpc('rank_unpromote_show', {
+    p_media_item_id: input.mediaItemId,
+    p_placement_id: input.placementId,
+    p_operation_id: input.operationId,
+    p_expected_position: input.expectedPosition,
+  });
+  if (error) {
+    if (error.code === '55000') return { outcome: 'stale' };
+    if (error.code === '22023') return { outcome: 'outside' };
+    return {
+      outcome: 'failed',
+      message: error.message,
+      changed: classifyWrite(error) === 'unknown',
+    };
+  }
+  return {
+    outcome: 'promoted',
+    reply: { position: input.expectedPosition, score: null, placementId: null },
+  };
+}

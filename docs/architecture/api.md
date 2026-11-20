@@ -102,7 +102,7 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 | `rank_skip(session_id, operation_id?)` | Re-anchor. Places at the midpoint on the third skip |
 | `rank_back(session_id, operation_id?)` | Step back one comparison |
 | `rank_cancel(session_id)` | Abandon the session. The bucket survives; the title stays Logged |
-| `rank_reorder(media_item_id, new_position, operation_id?)` | Manual reorder, clamped to the title's own band |
+| `rank_reorder(media_item_id, new_position, operation_id?, expected_position?, anchor_media_item_id?)` | Manual reorder inside the title's own band (Collection drag-to-rerank, #318). A cross-band position is **refused** with `22023`, never clamped. Either guard mismatching refuses with `55000`. Writes one `manual` placement per move. Granted back by `20261129000100`; see [`collection-rerank.md`](./collection-rerank.md) |
 | `rank_unrank(media_item_id, operation_id?)` | Remove the position, keep the `user_media` row and its history |
 | `rank_again(media_item_id, bucket, operation_id?)` | Drop the position and open a fresh session, in one transaction |
 | `ranking_backlog(...)` / `rank_backlog_start(...)` | The Unranked backlog: read the queue, and open or resume one title's placement (`20261019000100`, behind `ranking.backlog_enabled`) |
