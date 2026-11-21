@@ -51,7 +51,7 @@ export type TitleReviewsProps = {
   viewerHasReview: boolean;
   /** Opens the log sheet, where a note is written. */
   onWrite: () => void;
-  /** Movie or season, for the copy. Never "title". */
+  /** Movie, season or show, for the copy. Never "title". */
   noun: string;
   /**
    * Who is reading, so that the reporting control is absent from their own review.
