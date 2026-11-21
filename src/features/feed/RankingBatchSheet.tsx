@@ -1,11 +1,13 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { RankedSummaryRow } from '@/features/ranking/RankedSummary';
+import { posterUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
-import { Sheet, SheetDone, SkeletonRow, SpoilerNote, Text } from '@/ui/components';
+import { Poster, Sheet, SheetDone, SkeletonRow, SpoilerNote, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -37,6 +39,12 @@ export type RankingBatchTitle = {
    * when the sheet's `medium` stands in as it always did.
    */
   category: RankingCategory | null;
+  /**
+   * What the author did to it in this post (20261130000900): an activity session holds
+   * rankings and saves, so a saved title's row says so and carries no standing or score.
+   * Null from an older backend, where every row is a ranking.
+   */
+  action: 'ranked' | 'saved' | null;
 };
 
 const CATEGORIES: readonly RankingCategory[] = ['movies', 'tv_seasons', 'tv_shows'];
@@ -55,6 +63,7 @@ export async function rankingBatchTitles(eventId: string): Promise<RankingBatchT
     category: CATEGORIES.includes(row.category as RankingCategory)
       ? (row.category as RankingCategory)
       : null,
+    action: row.action === 'ranked' || row.action === 'saved' ? row.action : null,
   }));
 }
 
@@ -125,7 +134,11 @@ export function RankingBatchSheet({
   });
 
   const titles = data ?? [];
-  const titleIds = titles.map((title) => title.mediaItemId);
+  // Reviews belong to watched titles only: a save is an intention (`isWatchActivity`).
+  const titleIds = titles
+    .filter((title) => title.action !== 'saved')
+    .map((title) => title.mediaItemId);
+  const mixed = titles.some((title) => title.action === 'saved');
   const reviews = useQuery({
     queryKey: ['ranking-batch-reviews', eventId, actorId, titleIds.join(',')],
     enabled: Boolean(eventId && actorId && titleIds.length),
@@ -136,7 +149,11 @@ export function RankingBatchSheet({
   const watched = useWatched(viewerId ?? '');
 
   return (
-    <Sheet visible={Boolean(eventId)} onClose={onClose} label="Ranked in this sitting">
+    <Sheet
+      visible={Boolean(eventId)}
+      onClose={onClose}
+      label={mixed ? 'Ranked and saved' : 'Ranked in this sitting'}
+    >
       <ScrollView contentContainerStyle={styles.scroll} testID="ranking-batch-scroll">
         {isPending ? (
           <>
@@ -154,7 +171,11 @@ export function RankingBatchSheet({
               const review = reviews.data?.get(title.mediaItemId) ?? null;
               return (
                 <View key={title.mediaItemId}>
-                  <RankedSummaryRow title={title} medium={title.category ?? medium} />
+                  {title.action === 'saved' ? (
+                    <SavedRow title={title} />
+                  ) : (
+                    <RankedSummaryRow title={title} medium={title.category ?? medium} />
+                  )}
                   {review && actorId ? (
                     <View style={styles.review} testID="ranking-batch-review">
                       <SpoilerNote
@@ -185,7 +206,42 @@ export function RankingBatchSheet({
   );
 }
 
+/**
+ * A session's saved title (20261130000900): the ranked row's shape, with "Added to watchlist"
+ * where a standing would be and a bookmark where the score would be, so the list never
+ * implies the title was ranked.
+ */
+function SavedRow({ title }: { title: RankingBatchTitle }) {
+  return (
+    <View
+      style={styles.savedRow}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={`${title.title}, added to watchlist`}
+      testID="ranking-batch-saved-row"
+    >
+      <Poster uri={posterUri(title.posterPath ?? null, 'card')} title={title.title} size="row" />
+      <View style={styles.savedText}>
+        <Text variant="callout" numberOfLines={2}>
+          {title.title}
+        </Text>
+        <Text variant="footnote" tone="tertiary" numberOfLines={1}>
+          Added to watchlist
+        </Text>
+      </View>
+      <Ionicons name="bookmark" size={16} color={theme.semantic.action} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  savedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    paddingVertical: theme.space[2],
+  },
+  savedText: { flex: 1, gap: 2 },
   scroll: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
   rows: { gap: theme.space[1] },
   // Under its own row, aligned with the title's name rather than the poster.

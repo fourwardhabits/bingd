@@ -182,11 +182,12 @@ describe('the reported case', () => {
       'one post: no separate card for the reviewed ranking',
     );
     assert.equal(seen[0].payload.count, 8, '"ranked 8 titles"');
-    assert.deepEqual(await sheetAs(friend, group.id), [...seven, invincible.id]);
+    // Newest first since 20261130000900: the reviewed eighth leads the sheet and the rail.
+    assert.deepEqual(await sheetAs(friend, group.id), [invincible.id, ...seven.reverse()]);
     assert.deepEqual(
-      (await railAs(friend, group.id)).at(-1),
+      (await railAs(friend, group.id))[0],
       invincible.id,
-      'the carousel ends on it',
+      'the carousel starts on it',
     );
     assert.equal(
       await reviewAs(friend, invincible.id),
@@ -201,7 +202,9 @@ describe('the reported case', () => {
     assert.equal(await notificationCount(), notified, 'nobody is notified');
 
     // The hidden member is still there, with its id, and a stale link finds the group.
-    const member = (await posts()).find((p) => p.media_item_id === invincible.id);
+    const member = (await posts()).find(
+      (p) => p.type === 'title_ranked' && p.media_item_id === invincible.id,
+    );
     assert.equal(member.presented_in, group.id);
     const followed = await as(
       friend,
@@ -259,12 +262,9 @@ describe('forming a group, and staying alone', () => {
       seen.map((p) => p.type),
       ['ranking_batch'],
     );
-    assert.equal(
-      seen[0].media_item_id,
-      reviewed.id,
-      'the group stands where its first title did',
-    );
-    assert.deepEqual(await sheetAs(friend, seen[0].id), [reviewed.id, plain.id]);
+    // 20261130000900: the group names its newest title and lists newest first.
+    assert.equal(seen[0].media_item_id, plain.id, 'the group leads with its newest title');
+    assert.deepEqual(await sheetAs(friend, seen[0].id), [plain.id, reviewed.id]);
     assert.equal(await reviewAs(friend, reviewed.id), 'Loved it.');
   });
 
@@ -292,8 +292,8 @@ describe('forming a group, and staying alone', () => {
     assert.deepEqual(
       rows.map((r) => [r.media_item_id, r.category]),
       [
-        [film.id, 'movies'],
         [show.id, 'tv_shows'],
+        [film.id, 'movies'],
       ],
     );
     assert.equal(await reviewAs(friend, show.id), 'The whole run holds up.');
@@ -436,7 +436,9 @@ describe('what keeps its treatment', () => {
     await rankFirst('movie', 'M1');
     await rankFirst('movie', 'M2');
     const m3 = await rankFirst('movie', 'M3', { text: 'Has a review.' });
-    const member = (await posts()).find((p) => p.media_item_id === m3.id);
+    const member = (await posts()).find(
+      (p) => p.type === 'title_ranked' && p.media_item_id === m3.id,
+    );
     assert.notEqual(member.presented_in, null);
     await t.sql(
       `insert into reactions (feed_event_id, user_id, kind) values ($1, $2, 'love')`,

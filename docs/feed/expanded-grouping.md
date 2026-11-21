@@ -23,6 +23,12 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 > [Reviews inside a group](#reviews-inside-a-group-20261130000800) below. Not applied to
 > staging or production; nothing in this document above that section changes until it is.
 
+> **Superseded in part by activity sessions (`20261130000900`, applied on staging, not in
+> production, 2026-11-21):** rankings and watchlist saves of one half hour are one post, which
+> moves to its newest activity and names its newest title. See
+> [`activity-sessions.md`](activity-sessions.md). Everything below still describes the
+> mechanism the sessions are built on.
+
 ## One mechanism: a group presents its members
 
 `feed_events.presented_in uuid` (nullable, FK to `feed_events(id)`).

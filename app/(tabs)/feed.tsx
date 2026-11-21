@@ -20,12 +20,10 @@ import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import {
+  activitySentence,
   metadataFor,
   relativeTime,
-  tailFor,
-  verbFor,
   watchLabel,
-  watchlistTailAction,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
@@ -526,10 +524,14 @@ export default function FeedScreen() {
         title: row.title,
         year: row.year,
         posterUri: posterUri(row.posterPath, 'card'),
-        score: row.score,
+        // Each poster says what the author did to it (20261130000900): a ranked title its
+        // score, a saved one a bookmark.
+        score: row.action === 'saved' ? null : row.score,
+        addedToWatchlist: row.action === 'saved' || (row.action === null && event.type === 'watchlist_added'),
         season: row.seasonNumber,
         reviewed:
           event.type === 'ranking_batch' &&
+          row.action !== 'saved' &&
           groupReviews.data?.has(reviewKey(event.actorId, row.mediaItemId)) === true,
       })),
       onPressTile: (tile: { id: string }) => router.push(`/title/${tile.id}`),
@@ -537,6 +539,18 @@ export default function FeedScreen() {
     };
   };
   const { setReaction } = useSetReaction(profile.id);
+
+  /** One post's sentence, shared with every surface that draws a post (`activitySentence`). */
+  const sentenceFor = (event: FeedItem) =>
+    activitySentence(event, {
+      ranking: () =>
+        setRankingBatchFor({
+          id: event.id,
+          medium: batchMedium(event.kind),
+          actorId: event.actorId,
+        }),
+      watchlist: setWatchlistGroupFor,
+    });
 
   const choose = async (eventId: string, kind: ReactionKind | null) => {
     setPickerFor(null);
@@ -1028,29 +1042,17 @@ export default function FeedScreen() {
                         ? undefined
                         : () => router.push(`/u/${event.actorUsername}`)
                     }
-                    verb={verbFor(event.type, event)}
-                    tail={tailFor(event.type, event.title)}
-                    tailAction={
-                      event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
-                        ? {
-                            connector: 'and',
-                            label: `${(event.rankedCount ?? 1) - 1} more`,
-                            onPress: () =>
-                              setRankingBatchFor({
-                                id: event.id,
-                                medium: batchMedium(event.kind),
-                                actorId: event.actorId,
-                              }),
-                          }
-                        : watchlistTailAction(event, setWatchlistGroupFor)
-                    }
+                    verb={sentenceFor(event).verb}
+                    tail={sentenceFor(event).tail}
+                    tailAction={sentenceFor(event).tailAction}
+                    session={event.session ? { breakdown: sentenceFor(event).breakdown } : null}
                     companions={event.companions}
                     onPressCompanions={() => setCompanionsFor(event.id)}
                     title={event.title}
                     year={event.year}
                     metadata={metadataFor(event)}
                     watchLabel={watchLabel(event.watchNumber)}
-                    timeLabel={relativeTime(event.createdAt)}
+                    timeLabel={relativeTime(event.activityAt)}
                     artwork={feedArtwork(event)}
                     score={event.score}
                     bucket={event.bucket}
@@ -1101,25 +1103,13 @@ export default function FeedScreen() {
                       ? undefined
                       : () => router.push(`/u/${event.actorUsername}`)
                   }
-                  verb={verbFor(event.type, event)}
-                  tail={tailFor(event.type, event.title)}
+                  verb={sentenceFor(event).verb}
+                  tail={sentenceFor(event).tail}
                   /* A grouped sitting reads "ranked Sheroes and 2 more": the connector
                      is ordinary ink so the eye finds the break after the title, and the
-                     count is the thing you press to see the rest (20261023000100). */
-                  tailAction={
-                    event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
-                      ? {
-                          connector: 'and',
-                          label: `${(event.rankedCount ?? 1) - 1} more`,
-                          onPress: () =>
-                            setRankingBatchFor({
-                              id: event.id,
-                              medium: batchMedium(event.kind),
-                              actorId: event.actorId,
-                            }),
-                        }
-                      : watchlistTailAction(event, setWatchlistGroupFor)
-                  }
+                     count is the thing you press to see the rest (20261023000100). A
+                     session reads "ranked Kaiju No. 8 + 15 more" (20261130000900). */
+                  tailAction={sentenceFor(event).tailAction}
                   companions={event.companions}
                   onPressCompanions={() => setCompanionsFor(event.id)}
                   title={event.title}
@@ -1166,7 +1156,7 @@ export default function FeedScreen() {
                     authorId: event.actorId,
                     watched: watched.data,
                   })}
-                  timeLabel={relativeTime(event.createdAt)}
+                  timeLabel={relativeTime(event.activityAt)}
                   // An award row opens the earner's Awards, not a title (§5): their
                   // own tab for the viewer's own award, the public profile's sheet
                   // for anybody else's. An event with neither subject is a no-op.

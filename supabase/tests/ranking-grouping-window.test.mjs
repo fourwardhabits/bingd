@@ -117,7 +117,7 @@ const visibleTo = (viewer) =>
 const previewsAs = (viewer, eventId) =>
   t.asUser(viewer, async () => {
     const { rows } = await t.sql(
-      `select media_item_id, kind, score, ranked from feed_group_previews(array[$1]::uuid[], 12)
+      `select media_item_id, kind, score, ranked, action from feed_group_previews(array[$1]::uuid[], 12)
         order by ordinal`,
       [eventId],
     );
@@ -182,8 +182,8 @@ describe('the founder reproduction', () => {
     const rail = await previewsAs(friend, group.id);
     assert.deepEqual(
       rail.map((r) => r.media_item_id),
-      [a.id, b.id],
-      'the carousel shows both titles, in the order they were ranked',
+      [b.id, a.id],
+      'the carousel shows both titles, newest first (20261130000900)',
     );
     for (const row of rail) {
       assert.equal(row.ranked, true);
@@ -247,7 +247,7 @@ describe('the fixed 30-minute window', () => {
     );
   });
 
-  it('a note that arrives late groups by the ranking’s own time, and the group stands where the first title did', async () => {
+  it('a note that arrives late groups by the ranking’s own time; the window starts at the first title and the post stands at the latest', async () => {
     const early = await rankFirst('movie', 'Ranked first, noted late', { note: false });
     await age(3);
     const later = await rankFirst('movie', 'Ranked second, noted at once');
@@ -256,10 +256,17 @@ describe('the fixed 30-minute window', () => {
     assert.equal(noted.status, 'grouped');
     const all = await posts();
     const g = all.find((p) => p.type === 'ranking_batch');
-    const first = all.find((p) => p.media_item_id === early.id);
+    const first = all.find((p) => p.type === 'title_ranked' && p.media_item_id === early.id);
+    const second = all.find((p) => p.type === 'title_ranked' && p.media_item_id === later.id);
     assert.equal(g.created_at.getTime(), first.created_at.getTime());
-    assert.equal(g.causal_at.getTime(), first.causal_at.getTime());
-    assert.equal(g.media_item_id, early.id);
+    assert.equal(
+      new Date(g.payload.started_at).getTime(),
+      first.created_at.getTime(),
+      'the window is anchored on the first title',
+    );
+    // 20261130000900: the post moves to its newest activity and names its newest title.
+    assert.equal(g.causal_at.getTime(), second.causal_at.getTime());
+    assert.equal(g.media_item_id, later.id);
   });
 
   it('exactly 30 minutes is outside', async () => {
@@ -295,7 +302,8 @@ describe('what may share a group, and what never does', () => {
     const rail = await previewsAs(friend, g.id);
     assert.deepEqual(
       rail.map((r) => r.kind),
-      ['movie', 'series', 'season'],
+      ['season', 'series', 'movie'],
+      'newest first',
     );
     for (const row of rail) {
       assert.notEqual(row.score, null, `${row.kind} carries its score`);
@@ -304,24 +312,28 @@ describe('what may share a group, and what never does', () => {
     const { rows } = await t.sql(`select category from ranking_batch_titles($1)`, [g.id]);
     assert.deepEqual(
       rows.map((r) => r.category),
-      ['movies', 'tv_shows', 'tv_seasons'],
+      ['tv_seasons', 'tv_shows', 'movies'],
     );
   });
 
-  it('a watchlist save in the same minutes is never merged into the ranking group', async () => {
+  it('a watchlist save in the same minutes is the same session post (20261130000900)', async () => {
     const saved = await title('movie', 'Saved');
     await call(`set_watchlist($1, $2, true)`, [await uuid(), saved]);
+    const [w] = await visibleTo(friend);
+    await t.actAs(user); // `asUser` leaves the reader's claims set
     await rankFirst('movie', 'R1');
     await rankFirst('movie', 'R2');
     const visible = await visibleTo(friend);
     assert.deepEqual(
-      new Set(visible.map((p) => p.type)),
-      new Set(['watchlist_added', 'ranking_batch']),
+      visible.map((p) => [p.id, p.type]),
+      [[w.id, 'ranking_batch']],
+      'the save started the session; its post took the rankings and became a ranking group',
     );
-    const g = visible.find((p) => p.type === 'ranking_batch');
-    const titles = (await previewsAs(friend, g.id)).map((r) => r.media_item_id);
-    assert.ok(!titles.includes(saved), 'the save is not one of the ranking titles');
-    assert.equal(g.payload.count, 2);
+    const rail = await previewsAs(friend, w.id);
+    const save = rail.find((r) => r.media_item_id === saved);
+    assert.equal(save.action, 'saved');
+    assert.equal(save.score, null, 'a save carries no score');
+    assert.equal(visible[0].payload.count, 3);
   });
 
   it('a rewatch keeps its own card and is never a peer', async () => {

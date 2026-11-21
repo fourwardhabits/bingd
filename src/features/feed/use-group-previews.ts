@@ -1,3 +1,4 @@
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { useChunkedById } from '@/lib/chunked-query';
@@ -13,7 +14,11 @@ import type { FeedItem } from './use-feed';
  * list stays the "View all" sheets' read (`watchlist_group_titles`, `ranking_batch_titles`).
  *
  * Keyed by event id **and** the post's count, so a group that grew is read again on the
- * next ordinary refresh, and one that did not is served from the cache.
+ * next ordinary refresh, and one that did not is served from the cache. A session post
+ * (20261130000900) adds its latest activity to the key, because a session can change its
+ * newest title, and so its order, without its count changing (a title saved and then
+ * ranked). The key moves only when the Feed's own rows are re-read, so the rail never
+ * reorders between refreshes.
  */
 export type GroupPreviewTitle = {
   mediaItemId: string;
@@ -25,6 +30,12 @@ export type GroupPreviewTitle = {
   posterPath: string | null;
   /** The author's current score on that title's own ladder; null if unranked, or a save. */
   score: number | null;
+  /**
+   * What the author did to it in this post (20261130000900): `ranked` carries the score,
+   * `saved` the bookmark. An older backend sends nothing: a ranking group's members are
+   * ranked and a watchlist post's saved, as they always were.
+   */
+  action: 'ranked' | 'saved' | null;
 };
 
 /** How many members a rail previews. The rest are one "View all" away. */
@@ -41,9 +52,11 @@ export function groupCount(event: Pick<FeedItem, 'type' | 'rankedCount' | 'watch
   return typeof count === 'number' && count > 1 ? Math.trunc(count) : null;
 }
 
-/** The cache key for one post's preview: its id and its count. */
-export const previewKey = (event: Pick<FeedItem, 'id'>, count: number) =>
-  `${event.id}#${count}`;
+/** The cache key for one post's preview: its id, its count and, for a session, its version. */
+export const previewKey = (
+  event: Pick<FeedItem, 'id'> & Partial<Pick<FeedItem, 'session'>>,
+  count: number,
+) => (event.session ? `${event.id}#${count}#${event.session.version}` : `${event.id}#${count}`);
 
 type Row = {
   event_id: string;
@@ -57,6 +70,7 @@ type Row = {
   parent_title: string | null;
   score: number | string | null;
   ranked: boolean | null;
+  action?: string | null;
 };
 
 const yearOf = (date: string | null) => {
@@ -94,13 +108,42 @@ export async function readGroupPreviews(
       seasonNumber: row.kind === 'season' ? (row.season_number ?? null) : null,
       year: yearOf(row.release_date),
       posterPath: row.poster_path ?? null,
-      score: row.ranked === false || !Number.isFinite(score) ? null : score,
+      score:
+        row.ranked === false || row.action === 'saved' || !Number.isFinite(score)
+          ? null
+          : score,
+      action: row.action === 'ranked' || row.action === 'saved' ? row.action : null,
     });
   }
   return out;
 }
 
+/**
+ * The newest preview this cache holds for one post under any earlier key, so a session that
+ * changed version on a refresh keeps drawing the posters it had until the new read lands,
+ * rather than flashing to placeholders. Pure: it reads the cache and writes nothing.
+ */
+export function lastPreview(
+  client: QueryClient,
+  prefix: readonly unknown[],
+  eventId: string,
+): GroupPreviewTitle[] | undefined {
+  let best: { at: number; rows: GroupPreviewTitle[] } | undefined;
+  for (const query of client.getQueryCache().findAll({ queryKey: [...prefix] })) {
+    const data = query.state.data;
+    if (!(data instanceof Map)) continue;
+    for (const [key, rows] of data as Map<string, GroupPreviewTitle[]>) {
+      if (!key.startsWith(`${eventId}#`) || !Array.isArray(rows) || rows.length < 2) continue;
+      if (!best || query.state.dataUpdatedAt > best.at) {
+        best = { at: query.state.dataUpdatedAt, rows };
+      }
+    }
+  }
+  return best?.rows;
+}
+
 export function useGroupPreviews(events: FeedItem[], viewerId: string) {
+  const client = useQueryClient();
   const keys = useMemo(
     () =>
       events.flatMap((event) => {
@@ -109,11 +152,20 @@ export function useGroupPreviews(events: FeedItem[], viewerId: string) {
       }),
     [events],
   );
-  return useChunkedById<GroupPreviewTitle[]>(
-    ['feed-group-previews', viewerId],
-    keys,
-    readGroupPreviews,
-  );
+  const prefix = useMemo(() => ['feed-group-previews', viewerId] as const, [viewerId]);
+  const result = useChunkedById<GroupPreviewTitle[]>(prefix, keys, readGroupPreviews);
+  const data = useMemo(() => {
+    let out = result.data;
+    for (const key of keys) {
+      if (out?.has(key)) continue;
+      const rows = lastPreview(client, prefix, key.split('#')[0] ?? key);
+      if (!rows) continue;
+      out = new Map(out ?? []);
+      out.set(key, rows);
+    }
+    return out;
+  }, [client, keys, prefix, result.data]);
+  return { ...result, data };
 }
 
 /**
@@ -175,7 +227,11 @@ export function useGroupReviews(
       if (event.type !== 'ranking_batch') continue;
       const count = groupCount(event);
       const rows = count ? previews?.get(previewKey(event, count)) : undefined;
-      for (const row of rows ?? []) keys.add(reviewKey(event.actorId, row.mediaItemId));
+      for (const row of rows ?? []) {
+        // A saved title's review is not this post's: a save is not a watch (`isWatchActivity`).
+        if (row.action === 'saved') continue;
+        keys.add(reviewKey(event.actorId, row.mediaItemId));
+      }
     }
     return [...keys].sort();
   }, [events, previews]);

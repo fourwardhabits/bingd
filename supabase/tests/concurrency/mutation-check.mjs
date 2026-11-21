@@ -91,6 +91,13 @@
  *      `races/ranking-grouping-window.mjs`) must stop serialising: the second no longer waits
  *      for the first's mark, so both stay single cards in one half hour, which the founder's
  *      rule forbids. The honest function is run first as a control and must leave one group.
+ *      (Since 20261130000900 the line removed is `_lock_activity_session(v_me)`.)
+ *  20. The two session writers back on their own family's key only (20261130000900): the
+ *      ranking note on `ranking_story`, the save on `watchlist_story`, which is how they
+ *      locked before sessions. A first ranking noted uncommitted on one device and a save on
+ *      another (RS1 in `races/activity-sessions.mjs`) must stop serialising: the save sees
+ *      no session and no marked ranking and starts a second post in one half hour. The
+ *      honest functions are run first as a control and must leave one post.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1767,13 +1774,89 @@ end; $$;
   const [{ def }] = await db.rows(
     `select pg_get_functiondef('rank_group_note(uuid, uuid)'::regprocedure) as def`,
   );
-  const lockLine = /perform pg_advisory_xact_lock\(hashtextextended\('ranking_story:' \|\| v_me::text, 0\)\);/;
+  // Since 20261130000900 the lock is the actor's two session keys, taken by one helper.
+  const lockLine = /perform _lock_activity_session\(v_me\);/;
   if (!lockLine.test(def)) throw new Error('mutant 19: the lock line was not found in rank_group_note');
   await db.sql(def.replace(lockLine, '-- mutant 19: lock removed'));
 
   results.push([
     'rank_group_note lock dropped -> two first rankings in one half hour stay two cards',
     (await scenario('mutant')) === 0,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 20: the session writers on their own family's key only (20261130000900).
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const scenario = async (label) => {
+    const me = await fx.createUser();
+    const film = await fx.createMovie(`Mutant 20 ${label} ranked`);
+    const saved = await fx.createMovie(`Mutant 20 ${label} saved`);
+    await db.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [me, film]);
+    await db.sql(
+      `insert into rankings (user_id, media_item_id, category, bucket, position)
+       values ($1, $2, 'movies', 'loved', 1)`,
+      [me, film],
+    );
+    await db.sql(
+      `insert into feed_events (actor_id, type, media_item_id, payload)
+       values ($1, 'title_ranked', $2, '{"bucket":"loved","category":"movies"}')`,
+      [me, film],
+    );
+    const t1 = await db.session('phone');
+    const t2 = await db.session('tablet');
+    try {
+      await t1.actAs(me);
+      await t2.actAs(me);
+      await t1.begin();
+      await t1.q(`select rank_group_note($1, $2)`, [crypto.randomUUID(), film]);
+      const p2 = t2.start(`select set_watchlist($1, $2, true) as r`, [crypto.randomUUID(), saved]);
+      const blocked = t2.awaitBlocked({ timeoutMs: 1500 });
+      blocked.catch(() => {});
+      await Promise.race([p2, blocked]).catch(() => {});
+      await t1.commit();
+      await p2;
+      const [{ n }] = await db.rows(
+        `select count(*)::int as n from feed_events where actor_id = $1 and presented_in is null`,
+        [me],
+      );
+      return n;
+    } finally {
+      await t1.rollback().catch(() => {});
+      await t1.end().catch(() => {});
+      await t2.end().catch(() => {});
+    }
+  };
+
+  controls.push([
+    'session keys present -> a ranking and a save at once are one post (RS1 holds)',
+    (await scenario('honest')) === 1,
+  ]);
+
+  for (const [fn, sig, arg, family] of [
+    ['rank_group_note', '(uuid, uuid)', 'v_me', 'ranking_story'],
+    ['_post_watchlist_activity', '(uuid, uuid)', 'p_actor', 'watchlist_story'],
+  ]) {
+    const [{ def }] = await db.rows(`select pg_get_functiondef($1::regprocedure) as def`, [
+      `${fn}${sig}`,
+    ]);
+    const line = new RegExp(`perform _lock_activity_session\\(${arg}\\);`);
+    if (!line.test(def)) throw new Error(`mutant 20: the session lock was not found in ${fn}`);
+    await db.sql(
+      def.replace(
+        line,
+        `perform pg_advisory_xact_lock(hashtextextended('${family}:' || ${arg}::text, 0)); -- mutant 20`,
+      ),
+    );
+  }
+
+  results.push([
+    'session writers on their own family key -> a ranking and a save at once are two posts',
+    (await scenario('mutant')) === 2,
   ]);
 
   await db.close();

@@ -87,6 +87,14 @@ export type FeedCardProps = {
     onPressTile: (tile: PosterTile) => void;
     onPressAll: () => void;
   } | null;
+  /**
+   * **An activity session** (20261130000900): a group of rankings and saves from one half
+   * hour. Given with a rail, the sentence names the newest title instead of the group's size
+   * ("ranked Kaiju No. 8 + 15 more"), with `tailAction` as the way into the complete list,
+   * and the line under it carries `breakdown` ("9 ranked · 7 saved") when the session mixes
+   * both, so the sentence never claims every title was ranked or every title saved.
+   */
+  session?: { breakdown: string | null } | null;
 };
 
 /**
@@ -136,9 +144,12 @@ export function FeedCard({
   onPressShare,
   leading = false,
   rail = null,
+  session = null,
 }: FeedCardProps) {
   const grouped = rail != null;
-  const groupName = rail ? `${rail.total} titles` : null;
+  // A session names its newest title and keeps "+ N more" as the link to the list.
+  const namesLead = grouped && session != null;
+  const groupName = rail && !namesLead ? `${rail.total} titles` : null;
   const filmName = groupName ?? title ?? 'a title';
   const { width } = useWindowDimensions();
   const cardWidth = width - theme.layout.gutter * 2;
@@ -147,7 +158,9 @@ export function FeedCard({
   const height = artwork.treatment === 'none' ? NO_ARTWORK_HEIGHT : artworkHeight(cardWidth);
   const posterHeight = height - theme.space[3] * 2;
   const posterWidth = Math.round((posterHeight * 2) / 3);
-  const subline = (grouped ? [timeLabel] : [timeLabel, watchLabel, metadata])
+  const subline = (
+    grouped ? [timeLabel, session?.breakdown] : [timeLabel, watchLabel, metadata]
+  )
     .filter(Boolean)
     .join(' · ');
 
@@ -158,6 +171,7 @@ export function FeedCard({
   // rest, and truncation would cut exactly that.
   const companionsLink = !grouped && companions.length > 2 && onPressCompanions != null;
   const holdsLink = grouped || tailAction != null || companionsLink;
+  const showsTailAction = tailAction != null && (!grouped || namesLead);
 
   return (
     <View style={[styles.card, leading && styles.cardLeading]} testID="feed-card">
@@ -221,7 +235,7 @@ export function FeedCard({
             {/* "ranked Sheroes and 2 more", and since grouped watchlist posts
                 (20261125000100) "added Dune and 4 others to their watchlist": the count
                 comes before the tail, so a sentence can carry both. */}
-            {tailAction && !grouped ? (
+            {tailAction && showsTailAction ? (
               <Text variant="subhead" tone="secondary">
                 {` ${tailAction.connector} `}
                 <SentenceLink

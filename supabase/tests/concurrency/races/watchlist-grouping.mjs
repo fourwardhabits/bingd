@@ -12,7 +12,8 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  * find no open group and each insert one.
  *
  * **WG2. The second device waits on that lock, demonstrated.** The first save is paused
- * uncommitted; the second must block on the advisory key, and after the first commits it
+ * uncommitted; the second must block on the advisory key (since 20261130000900 the first of
+ * the actor's two session keys, `ranking_story`), and after the first commits it
  * joins the first's post rather than starting another.
  *
  * **WG3. Two devices saving the same title at once announce it once.** The second reads
@@ -43,11 +44,17 @@ export default function suite() {
         [actor],
       );
 
-    /** Recomputed, as `follow-activity.mjs` does, and kept as a string for 64-bit fidelity. */
+    /**
+     * Recomputed, as `follow-activity.mjs` does, and kept as a string for 64-bit fidelity.
+     *
+     * The first of the actor's two session keys (20261130000900): every session writer, the
+     * save and the catalogue trigger included, takes `ranking_story:<actor>` and then
+     * `watchlist_story:<actor>`, so a second writer waits on the first key.
+     */
     const storyKey = async (actor) =>
       (
         await ctx.db.rows(
-          `select hashtextextended('watchlist_story:' || $1::text, 0)::text as k`,
+          `select hashtextextended('ranking_story:' || $1::text, 0)::text as k`,
           [actor],
         )
       )[0].k;

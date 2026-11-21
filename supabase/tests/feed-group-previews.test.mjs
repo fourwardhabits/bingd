@@ -82,7 +82,7 @@ const previews = (viewer, ids, limit) =>
   });
 
 describe('watchlist groups', () => {
-  it('previews the members in save order, with their artwork fields', async () => {
+  it('previews the members newest first, with their artwork fields', async () => {
     const me = await actor();
     const titles = [];
     for (const name of ['Dune', 'Arrival', 'Sicario']) {
@@ -94,9 +94,10 @@ describe('watchlist groups', () => {
     assert.equal(post.payload.count, 3);
 
     const rows = await previews(follower, [post.id]);
+    // Newest first since 20261130000900: the latest save leads the rail.
     assert.deepEqual(
       rows.map((row) => row.media_item_id),
-      titles,
+      [...titles].reverse(),
     );
     assert.deepEqual(
       rows.map((row) => row.ordinal),
@@ -104,6 +105,7 @@ describe('watchlist groups', () => {
     );
     assert.ok(rows.every((row) => row.event_id === post.id && row.kind === 'movie'));
     assert.ok(rows.every((row) => row.score === null && row.ranked === false));
+    assert.ok(rows.every((row) => row.action === 'saved'), 'each poster is marked a save');
   });
 
   it('is capped per post, so a large group never loads every member', async () => {

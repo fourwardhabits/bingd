@@ -249,16 +249,20 @@ describe('a grouped watchlist post', () => {
 
     expect(textOf(view.toJSON())).toMatch(/Ada added 4 titles to their watchlist/);
     const tiles = within(rail).getAllByRole('button', { name: /, 2021/ });
+    // Each poster is marked a save (20261130000900), in its label and with a bookmark.
     expect(tiles.map((tile) => tile.props.accessibilityLabel)).toEqual([
-      'Dune, 2021',
-      'Arrival, 2021',
-      'Sicario, 2021',
-      'Enemy, 2021',
+      'Dune, 2021, added to watchlist',
+      'Arrival, 2021, added to watchlist',
+      'Sicario, 2021, added to watchlist',
+      'Enemy, 2021, added to watchlist',
     ]);
     // A save carries no score.
     expect(
       within(rail).queryByTestId('poster-score-pill', { includeHiddenElements: true }),
     ).toBeNull();
+    expect(
+      within(rail).getAllByTestId('poster-saved-mark', { includeHiddenElements: true }),
+    ).toHaveLength(4);
     // The representative's artwork is not drawn as well.
     expect(view.queryByTestId('feed-card-artwork')).toBeNull();
   });
@@ -279,9 +283,9 @@ describe('a grouped watchlist post', () => {
       },
     });
     expect(mockPush).not.toHaveBeenCalled();
-    await fireEvent.press(within(rail).getByLabelText('Sicario, 2021'));
+    await fireEvent.press(within(rail).getByLabelText('Sicario, 2021, added to watchlist'));
     expect(mockPush).toHaveBeenLastCalledWith('/title/sicario');
-    await fireEvent.press(within(rail).getByLabelText('Arrival, 2021'));
+    await fireEvent.press(within(rail).getByLabelText('Arrival, 2021, added to watchlist'));
     expect(mockPush).toHaveBeenLastCalledWith('/title/arrival');
 
     // No separate "View all" under the rail (founder, 2026-11-17): the posters are the
