@@ -56,17 +56,21 @@ Before starting:
 | 1.1 | Install the new Preview. Open it and sign in as `whatever`. | It opens and signs in. Settings shows backend `…rzyr` and the new build's version. | S5 | | | |
 | 1.2 | Profile → change photo. | **i:** the iOS permission prompt reads **"bingd uses your photos so you can choose a profile picture."** (lowercase; this native string is why a new build is needed). **A:** the picker opens. | S5 | | | |
 
-## 2. Title pages: Rank Movie / Show / Season, Log rewatch, Edit ranking
+## 2. Title pages: Rank Movie / Show / Season, Log rewatch, the ⋯ menu, Edit ranking
 | # | Step | Expected | Needs | A | i | Notes |
 |---|---|---|---|---|---|---|
-| 2.1 | Open an **unranked** movie, an unranked whole **show** and an unranked **season**. | The filled primary reads **Rank Movie**, **Rank Show** and **Rank Season**. Watchlist, Add to List and Recommend sit beside it, all on **one row**. *(changed: a show used to have no rank control)* | S3 | | | |
+| 2.1 | Open an **unranked** movie, an unranked whole **show** and an unranked **season**. | The filled primary reads **Rank Movie**, **Rank Show** and **Rank Season**. Exactly two controls sit beside it on **one row**: the Watchlist bookmark and **⋯**. No Recommend or Add to List on the row. The top bar has Back only, no ⋯. *(changed 2026-11-21)* | S3 | | | |
 | 2.2 | Start a ranking on an unranked title, kill the app halfway, reopen and tap Rank again. | The half-finished ranking resumes at the same comparison. Covers movie, show and season. | S3 | | | |
 | 2.3 | Open a **ranked** movie. | The primary button is **Log rewatch** (repeat icon). There is no Rank button and no second prominent Edit ranking. | | | | |
 | 2.4 | Tap Log rewatch, then close the sheet. | "Log another watch" opened at once. After closing, the watch count, history and Feed are unchanged. | | | | |
 | 2.5 | Log rewatch → band → finish the comparisons. Separately, start one and close mid-comparison. | Finished: Watch History gains one viewing and Feed gets exactly one activity. Closed: the old score is kept. | | | | |
-| 2.6 | ⋯ menu on a ranked movie. | The Ranking group row reads **Edit ranking**; "Update your rating" appears nowhere. It changes the score without adding a watch or a Feed post. | | | | |
+| 2.6 | Row ⋯ on a ranked movie. Then tap **Edit ranking / …**, change the band, and finish the comparisons. Separately, open it and Close. | The menu reads, in order: **Recommend to a friend**, **Share off bingd**, **Add to list**, **Edit ranking / Add note** (or **/ note**, **/ review**), then a rule and **Remove from collection**. No Rerank, Who I watched with, Log another watch or group headings. Edit opens the log sheet with nothing expanded, so Note, Who I watched with and Watch date are each one tap away. The band change moves the score without adding a watch or a Feed post. Close changes nothing. *(changed 2026-11-21)* | | | | |
 | 2.7 | Repeat 2.3–2.6 on a ranked **season** and a ranked whole **show**. | The same, with one difference: an Edit ranking on a show or season that **moves** it posts one "updated their ranking of …" (see 12.2). Landing in the same place posts nothing. *(changed)* | S3 | | | |
-| 2.8 | On a ranked show and a ranked season. | The row reads **Log rewatch** · Watchlist · Add to List · Recommend, on one row. Edit ranking is in ⋯. | S3 | | | |
+| 2.8 | On a ranked show and a ranked season. | The row reads **Log rewatch** · Watchlist · **⋯**, on one row. Edit ranking / … is in ⋯. *(changed 2026-11-21)* | S3 | | | |
+| 2.9 | Row ⋯ → **Recommend to a friend**, then back; ⋯ → **Share off bingd**; ⋯ → **Add to list**. Do it once quickly on iPhone. | Recommend opens the friend picker headed "Recommend <title>". Share opens the phone's own share sheet with "<title> on bingd" and the link, and posts nothing in bingd. Add to list opens the list sheet. Each opens only after the menu has gone; the screen never freezes. *(new 2026-11-21)* | | | | |
+| 2.10 | On a ranked title: ⋯ → Edit ranking / … → Note → edit the text and close. On a title with a review, edit the review the same way. | The ranking and score do not change, and no watch is added. A review edit adds no second Feed post. *(new 2026-11-21)* | | | | |
+| 2.11 | Open an imported (logged, unranked) title. Row ⋯. | The menu reads **Edit log / …** (never Edit ranking), then **Remove from collection**. Edit log opens the log sheet with no comparison; Remove asks the usual confirmation. *(new 2026-11-21)* | S1 | | | |
+| 2.12 | **Largest text size** and the narrowest phone: open a ranked season and an unranked movie. | The row stays one line: the word shrinks to fit, never cut; the bookmark and ⋯ stay tappable. *(new 2026-11-21)* | | | | |
 
 ## 3. Watch History: editing, dates, companions, removal, rewatch
 | # | Step | Expected | Needs | A | i | Notes |
@@ -74,7 +78,7 @@ Before starting:
 | 3.1 | Open a title watched 2+ times → Watch history. | Back arrow, wordmark, divider, no blank band. It reads "Watched N times / First … · Latest …". | | | | |
 | 3.2 | Look at the rows. | Newest first, "(First watch)" on the earliest, Edit under the date, and frozen per-watch scores. | | | | |
 | 3.3 | Edit a row: companions, date, a long note, then Save. | The keyboard does not hide the note, and the edits are saved. | | | | |
-| 3.4 | **Edit ranking** in the expanded editor. Cancel once, then finish once. | It is the same flow as ⋯ → Edit ranking. Cancel changes nothing; finishing moves only the current ranking. | | | | |
+| 3.4 | **Edit ranking** in the expanded editor. Cancel once, then finish once. | It is the same flow as the title page's ⋯ → Edit ranking / …. Cancel changes nothing; finishing moves only the current ranking. | | | | |
 | 3.5 | Remove one watch. Then remove the last watch. | One watch removed. For the last one: "Remove from collection", then back to the title page. | | | | |
 | 3.6 | Log rewatch on a ranked whole **show**, then open its Watch history. | It behaves exactly like a film's history. Update Show is **not** offered from Watch History. | S3 | | | |
 
@@ -188,15 +192,15 @@ Use a long show the reader has not ranked; Shameless is the example. Do 11.1–1
 | # | Step | Expected | Needs | A | i | Notes |
 |---|---|---|---|---|---|---|
 | 12.1 | Feed after 11.1 and 11.3, seen from the friend's phone too. | One "ranked Shameless" and one S4 activity. A show renders like a film, with Recommend / Share. | S3 | | | |
-| 12.2 | **Standalone TV update:** show page ⋯ → **Edit ranking** → pick a band that moves it. Repeat, landing in the same place. Then S4 page ⋯ → Edit ranking → move it. | The moving edit posts one "updated their ranking of Shameless", and the first "ranked Shameless" post **keeps its original score**. The same-place edit posts **nothing**. The S4 edit posts one "updated their ranking of Shameless, S4". | S3 | | | |
-| 12.3 | **Movie unchanged:** ⋯ → Edit ranking on a film, moving it. Then Log rewatch on a film. | The edit posts no Feed activity, as before. Log rewatch posts exactly one. | S3 | | | |
+| 12.2 | **Standalone TV update:** show page row ⋯ → **Edit ranking / …** → pick a band that moves it. Repeat, landing in the same place. Then S4 page ⋯ → Edit ranking / … → move it. | The moving edit posts one "updated their ranking of Shameless", and the first "ranked Shameless" post **keeps its original score**. The same-place edit posts **nothing**. The S4 edit posts one "updated their ranking of Shameless, S4". | S3 | | | |
+| 12.3 | **Movie unchanged:** ⋯ → Edit ranking / … on a film, moving it. Then Log rewatch on a film. | The edit posts no Feed activity, as before. Log rewatch posts exactly one. | S3 | | | |
 | 12.4 | **Profile:** Top ranked → TV, and **See all**. | The same precedence as Collection. A whole show's row reads `#N` with **show** under it, so the show and season lists never read as one list. | S3 | | | |
 | 12.5 | Look at the profile TV count. | Ranked seasons + shows with no ranked season. | S3 | | | |
 | 12.6 | The reader's public profile, seen from the friend's account. | The same as 12.4–12.5. | S3 | | | |
 | 12.7 | **For You → TV.** | Shameless (logged and ranked) is not recommended back, and neither are its seasons. | S3 | | | |
 | 12.8 | **Taste Match** with the friend, after the friend ranks the same show and some of its seasons. | One series counts once, not once per season. A show is never compared with a season. | S3 | | | |
 | 12.9 | **Scores** on a show both accounts ranked. | bingd / Following on the show page count **show rankings only**. A season's page shows that season's. | S3 | | | |
-| 12.10 | **Recommend** a whole show to the friend from its page. | It sends, and the friend's Sent to You row names the show. | S3 | | | |
+| 12.10 | **Recommend** a whole show to the friend from its page (row ⋯ → Recommend to a friend). | It sends, and the friend's Sent to You row names the show. | S3 | | | |
 
 ## 13. Branding, accessibility, narrowest Android width at largest text, small screens, states
 | # | Step | Expected | Needs | A | i | Notes |
@@ -226,7 +230,7 @@ Use a long show the reader has not ranked; Shameless is the example. Do 11.1–1
 - A logged-but-unranked show (an abandoned first show ranking) is not in the TV backlog or its Unranked count. It shows on the Watched grid and resumes from Rank Show.
 - Goals, the monthly board, the season and genre awards, and the TV Top Rated wall stay on seasons and films. The rankings award counts shows.
 - A show page has no Reviews section yet (#265 limitation). A note written on a show's log is saved.
-- The original title layout, a per-device saved choice, keeps its Ranked pill. The immersive default shows Log rewatch.
+- Both title layouts show Log rewatch on a ranked title since 2026-11-21; the original layout's Ranked pill is gone.
 - The For You / Collection toolbar move needs your visual sign-off (4.6, 5.3).
 
 ## Tracked pre-production issues (1 resolved, the rest not)

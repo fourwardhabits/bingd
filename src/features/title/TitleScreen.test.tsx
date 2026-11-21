@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
-import { Alert, Linking, StyleSheet } from 'react-native';
+import { Alert, Linking, Share, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { brand } from '@/ui/tokens';
@@ -375,6 +375,52 @@ const open = async () => {
   return view;
 };
 
+type View = Awaited<ReturnType<typeof open>>;
+
+/** The ⋯ on the action row (2026-11-21), and the menu it opens. */
+const openTitleMenu = async (view: View) => {
+  await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
+  await fireEvent.press(view.getByTestId('title-action-more'));
+  await waitFor(() => expect(view.getByTestId('title-menu')).toBeTruthy());
+  return view;
+};
+
+/** The menu's rows, by their spoken names, in order. */
+const menuRows = (view: View) =>
+  within(view.getByTestId('title-menu'))
+    .getAllByRole('button')
+    .map((node) => node.props.accessibilityLabel as string);
+
+/**
+ * Every RPC this screen or a sheet on it can send that writes something: a ranking, a
+ * log, a viewing, a note, a companion, a watchlist row, a recommendation or a removal.
+ * Reads go through RPCs too, so "nothing was written" is asserted against this list.
+ */
+const WRITE_RPCS = new Set([
+  'set_bucket',
+  'log_title',
+  'log_watched',
+  'save_note',
+  'clear_watch_date',
+  'set_watch_date',
+  'set_watch_tags',
+  'hide_watch_tag',
+  'log_rewatch',
+  'log_rewatch_with_details',
+  'set_watch_details',
+  'edit_watch_event',
+  'rank_start',
+  'rank_again',
+  'rank_rebucket',
+  'rank_unrank',
+  'rank_answer',
+  'unlog',
+  'set_watchlist',
+  'recommend_title',
+]);
+const writesSent = () =>
+  mockRpc.mock.calls.map(([name]) => name as string).filter((name) => WRITE_RPCS.has(name));
+
 describe('a title nobody has ranked', () => {
   it('offers a visible Rank button, never an invisible tappable area', async () => {
     // The badge-only version was a hotspot: tappable, with nothing saying so. The
@@ -500,7 +546,7 @@ describe('the page hierarchy', () => {
     expect(positionOf(view, 'bingd')).toBeLessThan(positionOf(view, 'Details'));
   });
 
-  it('puts Rank, Save and Recommend in one group under the identity', async () => {
+  it('puts Rank, Save and the ⋯ in one group under the identity', async () => {
     /**
      * The founder's physical Android complaint, as an assertion. They were labelled
      * chips under the description, then bare glyphs beside the score, while Rank was a
@@ -515,9 +561,11 @@ describe('the page hierarchy', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
 
-    // Still there, still named in full for a screen reader — the acts are unchanged.
+    // Still there, still named in full for a screen reader. Recommend is a ⋯ row since
+    // the founder's final specification (2026-11-21), and the ⋯ itself is on the row.
     expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
-    expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
+    expect(view.getByLabelText('More options for Inception')).toBeTruthy();
+    expect(view.queryByLabelText('Recommend Inception to a friend')).toBeNull();
 
     // And in one cluster, above the synopsis rather than in a band of their own below
     // it. Only the rank control carries a word — the other two are glyphs with spoken
@@ -774,178 +822,79 @@ describe('a title this user has ranked', () => {
     );
   });
 
-  it('shows a Ranked control that opens the rating and collection menu', async () => {
-    /**
-     * **The control and its contract are the ones this page has always had** (founder,
-     * final direction, 2026-09-07). An intermediate pass replaced it with an Adjust glyph
-     * that went straight to a same-watch rerank; that was rejected, because choosing
-     * between adjusting a placement and declaring a rewatch is the reader's decision and
-     * the menu is where they make it.
-     *
-     * The menu is reachable two ways and both open the same sheet: the control itself,
-     * and the overflow in the top bar.
-     */
+  /**
+   * **Log rewatch, Save, ⋯ — on the original page as on the Cinematic one** (founder's
+   * final specification, 2026-11-21).
+   *
+   * The original page's outlined *Ranked* pill opened the ranking menu; that menu is gone,
+   * and the ranked title's primary is Log rewatch on both layouts. The menu is the row's ⋯
+   * now, and the top bar has none.
+   */
+  it('shows Log rewatch, the bookmark and the ⋯, and no Ranked pill', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
-    expect(view.getByText('Ranked')).toBeTruthy();
-
-    await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Rerank')).toBeTruthy();
-    expect(view.getByText('Log another watch')).toBeTruthy();
+    const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+    expect(within(control).getByText('Log rewatch')).toBeTruthy();
+    expect(view.queryByText('Ranked')).toBeNull();
+    expect(view.queryByTestId('title-action-rank')).toBeNull();
+    expect(
+      within(view.getByTestId('title-actions'))
+        .getAllByRole('button')
+        .map((node) => node.props.testID),
+    ).toEqual(['title-action-ranked', 'title-action-save', 'title-action-more']);
+    expect(view.queryByTestId('title-more')).toBeNull();
   });
 
-  it('offers the same menu from the overflow control in the bar', async () => {
+  it('opens Log another watch from Log rewatch, not a menu', async () => {
     const view = await open();
+    await fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
 
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-
-    expect(view.getByText('Rerank')).toBeTruthy();
-  });
-
-  /**
-   * The way out of a ranking, which did not exist before the pass that added this
-   * sheet — `rank_unrank` and `unlog` were granted from the first migration and nothing
-   * on the client had ever called either.
-   *
-   * **Two rows became five, in three groups.** The founder's device pass found the menu
-   * was where writing went to be unreachable: once a title was ranked there was no
-   * obvious way back to a review or a private note, and Rank again — which T2 built as
-   * an atomic server call — was offered nowhere at all.
-   *
-   * "Remove ranking" is still gone and is still not coming back. It offered a state
-   * Bingd does not otherwise have: a title kept in the collection with no position,
-   * permanently, by choice.
-   */
-  it('groups the rows: your log, then ranking, then the collection', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
-    // Five rows in one column with no structure is a list you read rather than a menu
-    // you use, and the destructive one has to be last and on its own.
-    expect(view.getByText('YOUR LOG')).toBeTruthy();
-    expect(view.getByText('RANKING')).toBeTruthy();
-    expect(view.getByText('COLLECTION')).toBeTruthy();
-    expect(view.getByLabelText('Remove from collection')).toBeTruthy();
-  });
-
-  /**
-   * **Rank again, which T2 built and nothing offered.**
-   *
-   * `rank_again` (20260825000200) unranks and re-opens a session inside the *same* band
-   * in one atomic call — it exists because `rank_rebucket` refuses a bucket that is not
-   * moving. The client reaches it by opening the ranking sheet in `rerank` mode, which
-   * is the only way this app is allowed to do it: composing `rank_unrank` and
-   * `rank_start` here would open a window in which the title has no position and no
-   * session, and a dropped connection inside it loses the ranking outright.
-   */
-  /**
-   * **The rewatch row opens the watch, and the atomic guarantee is still what matters
-   * behind it** (T3b).
-   *
-   * The row reached `rank_again` directly until 20261005000100 — a forced full re-rank
-   * that recorded no watch and no date. It opens the sheet that records the viewing
-   * first, so this test asserts what is still true and load-bearing at this seam: the
-   * screen never composes `rank_unrank` and `rank_start`, which would open a window in
-   * which the title has no position and no session, and a dropped connection inside it
-   * loses the ranking outright.
-   */
-  it('never composes an unrank and a restart, from either ranking row', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
-
-    await fireEvent.press(view.getByLabelText('Log another watch'));
-
-    // The rewatch sheet opens on its bands; nothing is unranked or restarted by opening it.
     await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
-    expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
-    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
-  });
-
-  it('names the title the rewatch is about, rather than deciding a rating', async () => {
-    // The sheet decides no band: the re-check behind it passes `rankings.bucket`
-    // straight through, which is asserted where that call is made
-    // (`adjusting a ranking versus watching it again`). What belongs here is that the
-    // row opens the right title's sheet at all.
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
-
-    await fireEvent.press(view.getByLabelText('Log another watch'));
-
-    // The log sheet in rewatch mode: the title's own header, and How was it?.
-    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
-    expect(view.getByText('How was it?')).toBeTruthy();
-    expect(view.getAllByText('Inception').length).toBeGreaterThan(0);
+    expect(view.queryByTestId('title-menu')).toBeNull();
   });
 
   /**
-   * **The Ranking group is two rows, and it is the founder's list** (2026-09-08).
-   *
-   *   ★ Edit ranking         the current watch, corrected
-   *   ↻ Log another watch    an explicit second viewing
-   *
-   * It was three. *Rank it again* and *Change your rating* were two doors into the same
-   * correction, distinguished only by a mechanism — one skipped the band chooser — and
-   * no ordinary reader could say which of the two they wanted from the labels. The
-   * founder's consolidation keeps the act and drops the second door.
-   *
-   * **The subtext under each row is gone, and this test says so too.** It asserted both
-   * sentences were present, and the founder's device pass is the reason it does the
-   * opposite: `SheetRow` puts the label and its secondary sentence on one line, so at the
-   * width of a phone every explanation in this menu truncated. Rows of clipped grey text
-   * under clear labels are worse than no explanation, because the reader can see
-   * something was meant to be said and cannot read it.
+   * **The founder's final menu, in order** (2026-11-21): Recommend to a friend, Share off
+   * bingd, Add to list, the one editing row, and Remove from collection behind a rule.
+   * The four rows the editing one replaces are gone, and so are the group headings that
+   * held them.
    */
-  it('offers exactly two ranking rows, and neither of the retired labels', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
+  it('lists the five rows in the founder’s order, Remove last and set apart', async () => {
+    const view = await openTitleMenu(await open());
 
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
-    expect(view.getByLabelText('Log another watch')).toBeTruthy();
-
-    // The two labels the founder retired, in both the forms they were ever drawn in.
-    expect(view.queryByText('Rank it again')).toBeNull();
-    expect(view.queryByLabelText('Rank it again')).toBeNull();
-    expect(view.queryByText('Change your rating')).toBeNull();
-    expect(view.queryByLabelText('Change your rating')).toBeNull();
-    expect(view.queryByLabelText('Rank again')).toBeNull();
-
-    expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
-    expect(view.queryByText('Compare it again in the same rating')).toBeNull();
-  });
-
-  /**
-   * Every row in this menu, and not one secondary sentence between them.
-   *
-   * Asserted as a sweep rather than row by row, because the failure mode is *a row
-   * somebody adds later with a `value` on it* — which is how the menu accumulated five
-   * of them in the first place.
-   */
-  it('draws the whole ranked menu without a line of truncating subtext', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-
-    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
-    // This fixture holds a private note, so the one writing row reads Edit your note.
-    // The headings and the last three rows are the same whichever state it is in.
-    for (const label of [
-      'Edit your note',
-      'Who I watched with',
+    // This fixture holds a private note, so the editing row names it.
+    expect(menuRows(view)).toEqual([
+      'Recommend to a friend',
+      'Share off bingd',
+      'Add to list',
+      'Edit ranking / note',
+      'Remove from collection',
+    ]);
+    const menu = within(view.getByTestId('title-menu'));
+    expect(menu.getByTestId('title-menu-destructive-rule')).toBeTruthy();
+    for (const heading of ['YOUR LOG', 'RANKING', 'COLLECTION']) {
+      expect(menu.queryByText(heading)).toBeNull();
+    }
+    for (const gone of [
       'Rerank',
       'Log another watch',
-      'Remove from collection',
+      'Who I watched with',
+      'Edit your note',
+      'Edit your review',
+      'Add a note',
+      'Add to list…',
     ]) {
-      expect(view.getByLabelText(label)).toBeTruthy();
+      expect(menu.queryByLabelText(gone)).toBeNull();
     }
+  });
+
+  /**
+   * Every row in this menu, and not one secondary sentence between them: `SheetRow` puts
+   * the label and its value on one line, so at phone width an explanation truncates.
+   */
+  it('draws the whole menu without a line of truncating subtext', async () => {
+    const view = await openTitleMenu(await open());
+
     for (const subtext of [
       'Anyone who can see your profile',
       'Only you can read this',
@@ -957,46 +906,7 @@ describe('a title this user has ranked', () => {
     }
   });
 
-  /**
-   * **Writing, reachable after the fact — as one row (founder simplification,
-   * 2026-08-27).**
-   *
-   * One `user_media` row holds one `note` under one `note_visibility`, and the menu
-   * now shows it as one thing. The two rows this replaces — Edit and the conversion,
-   * each way around — asked the reader to choose between two names for one piece of
-   * writing before opening it. The label still says which state the writing is in,
-   * because "Edit your review" is a promise about where the text is visible; the
-   * conversion control lives in the composer, beside the text it describes.
-   */
-  const openMenu = async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
-    return view;
-  };
-
-  it('says Edit your note for the note this title already carries, and lands in it', async () => {
-    const view = await openMenu();
-
-    expect(view.getByLabelText('Edit your note')).toBeTruthy();
-    // The old pair — and the conversion rows that travelled with it — are gone.
-    expect(view.queryByLabelText('Edit private note')).toBeNull();
-    expect(view.queryByLabelText('Share as a review')).toBeNull();
-    expect(view.queryByLabelText('Add a note')).toBeNull();
-
-    await fireEvent.press(view.getByLabelText('Edit your note'));
-
-    // A row that names a piece of writing lands the reader inside it: the log sheet
-    // opens with the composer already showing the stored text.
-    await waitFor(() =>
-      expect(view.getByPlaceholderText('What did you think?').props.value).toBe(
-        'Held up better than I expected.',
-      ),
-    );
-  });
-
-  it('says Edit your review when the writing is one', async () => {
+  it('says Edit ranking / review when the writing is a review', async () => {
     tableRows.user_media = [
       {
         user_id: 'user-1',
@@ -1008,94 +918,183 @@ describe('a title this user has ranked', () => {
         note_has_spoilers: false,
       },
     ];
-    const view = await openMenu();
+    const view = await openTitleMenu(await open());
 
-    expect(view.getByLabelText('Edit your review')).toBeTruthy();
-    // No conversion row in either direction: the chip in the composer is the only
-    // control that moves writing between the two states now.
-    expect(view.queryByLabelText('Edit review')).toBeNull();
-    expect(view.queryByLabelText('Make it a private note')).toBeNull();
+    expect(view.getByLabelText('Edit ranking / review')).toBeTruthy();
+  });
+
+  it('says Edit ranking / Add note when there is no writing yet', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: '',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openTitleMenu(await open());
+
+    expect(view.getByLabelText('Edit ranking / Add note')).toBeTruthy();
   });
 
   /**
-   * **Who I watched with, reachable without going through the rating** (founder device
-   * pass, 2026-08-29).
-   *
-   * Companions were behind *Change your rating*, which opens the bucket chooser — so the
-   * way to correct who you watched something with ran through a control that offers to
-   * re-rate it. The founder called that hidden, and it is: the row somebody is looking
-   * for is named "Who I watched with" and the row they had to press was named something
-   * else entirely.
-   *
-   * The row edits the log occurrence that is already there. Everything it must NOT do is
-   * asserted below, because that list is the whole risk of adding a second door into the
-   * same sheet.
+   * **One door into the existing log sheet, with nothing forced** (2026-11-21). The sheet
+   * opens on the log that is already there with no row pre-expanded and no comparison
+   * started, so the reader goes straight to the detail they came for: the band (the
+   * ranking correction), the note or review, who they watched it with, or the date.
    */
-  it('offers Who I watched with directly under the writing row', async () => {
-    const view = await openMenu();
+  it('opens the log sheet on the existing log, with nothing expanded and nothing ranked', async () => {
+    const view = await openTitleMenu(await open());
+    const before = writesSent().length;
 
-    const rows = view.getAllByRole('button').map((node) => node.props.accessibilityLabel);
-    const note = rows.indexOf('Edit your note');
-    const who = rows.indexOf('Who I watched with');
-    expect(note).toBeGreaterThanOrEqual(0);
-    expect(who).toBe(note + 1);
+    await fireEvent.press(view.getByLabelText('Edit ranking / note'));
+
+    await waitFor(() => expect(view.getByTestId('log-sheet-scroll')).toBeTruthy());
+    expect(view.queryByTestId('title-menu')).toBeNull();
+    // Every way to edit is one tap away, and none of them is open on arrival.
+    expect(view.getByRole('button', { name: 'Who I watched with' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Note' })).toBeTruthy();
+    expect(view.getByText('I liked it')).toBeTruthy();
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+    expect(
+      view.getByRole('button', { name: 'Who I watched with' }).props.accessibilityState
+        ?.expanded,
+    ).toBeFalsy();
+    // Opening it is not an edit, and it is never a viewing or a comparison.
+    expect(writesSent().slice(before)).toEqual([]);
+    expect(view.queryByTestId('rewatch-bucket-choices')).toBeNull();
   });
 
-  it('opens the companion picker on the log that is already there', async () => {
-    const view = await openMenu();
-    await fireEvent.press(view.getByLabelText('Who I watched with'));
+  it('lands in the note in one tap from there, showing the stored text', async () => {
+    const view = await openTitleMenu(await open());
+    await fireEvent.press(view.getByLabelText('Edit ranking / note'));
+    await waitFor(() =>
+      expect(view.getByLabelText('Note').props.accessibilityState.disabled).toBe(false),
+    );
 
-    // The picker is expanded on arrival — the point of the row — and the note composer
-    // is not, so the keyboard stays down. Read off the row's own announced state rather
-    // than off a child, because "expanded" is exactly what the row promises.
+    await fireEvent.press(view.getByRole('button', { name: 'Note' }));
+
+    await waitFor(() =>
+      expect(view.getByPlaceholderText('What did you think?').props.value).toBe(
+        'Held up better than I expected.',
+      ),
+    );
+  });
+
+  /**
+   * **Editing a note never changes the ranking** — and editing a review never posts a
+   * second activity from here. The one write is `save_note` on the existing row; none of
+   * the calls that move a band or a position, or that record a viewing, is made. Whether
+   * a review edit notifies anybody is `save_note`'s business on the server, unchanged.
+   */
+  it('saves an edited note through save_note alone, leaving the ranking untouched', async () => {
+    const view = await openTitleMenu(await open());
+    await fireEvent.press(view.getByLabelText('Edit ranking / note'));
+    await waitFor(() =>
+      expect(view.getByLabelText('Note').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByRole('button', { name: 'Note' }));
+    const note = await waitFor(() => view.getByPlaceholderText('What did you think?'));
+    const before = writesSent().length;
+
+    await fireEvent.changeText(note, 'Better on a second look.');
+    await fireEvent(note, 'blur');
+
+    await waitFor(() => expect(writesSent().slice(before)).toEqual(['save_note']));
+    for (const name of [
+      'rank_again',
+      'rank_rebucket',
+      'rank_start',
+      'rank_unrank',
+      'set_bucket',
+      'log_title',
+      'log_watched',
+      'log_rewatch',
+      'log_rewatch_with_details',
+    ]) {
+      expect(mockRpc).not.toHaveBeenCalledWith(name, expect.anything());
+    }
+  });
+
+  it('saves an edited review once, as the same review, and ranks nothing', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: 'Held up better than I expected.',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openTitleMenu(await open());
+    await fireEvent.press(view.getByLabelText('Edit ranking / review'));
+    await waitFor(() =>
+      expect(view.getByLabelText('Note').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByRole('button', { name: 'Note' }));
+    const note = await waitFor(() => view.getByPlaceholderText('What did you think?'));
+    const before = writesSent().length;
+
+    await fireEvent.changeText(note, 'Even better the second time.');
+    await fireEvent(note, 'blur');
+
+    await waitFor(() => expect(writesSent().slice(before)).toEqual(['save_note']));
+    // Still a review: the visibility the writing was saved with rides along unchanged.
+    const saved = mockRpc.mock.calls.filter(([name]) => name === 'save_note');
+    expect(saved).toHaveLength(1);
+    expect((saved[0]![1] as { p_note_visibility: unknown }).p_note_visibility).not.toBe('private');
+    expect(
+      mockRpc.mock.calls.map(([name]) => name).filter((name) => /^(rank_|log_)/.test(name)),
+    ).toEqual([]);
+  });
+
+  it('writes nothing when the edit sheet is opened and closed', async () => {
+    const view = await openTitleMenu(await open());
+    const before = writesSent().length;
+
+    await fireEvent.press(view.getByLabelText('Edit ranking / note'));
+    await waitFor(() => expect(view.getByTestId('log-sheet-scroll')).toBeTruthy());
+    await fireEvent.press(
+      within(view.getByTestId('log-sheet-scroll')).getByRole('button', { name: 'Close' }),
+    );
+
+    await waitFor(() => expect(view.queryByTestId('log-sheet-scroll')).toBeNull());
+    expect(writesSent().slice(before)).toEqual([]);
+    // And the page is unchanged: still ranked, still Log rewatch.
+    expect(within(view.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
+  });
+
+  /**
+   * **Who I watched with, through the same sheet** (founder device pass, 2026-08-29, kept).
+   * It was its own menu row; it is one tap inside the sheet the editing row opens, and it
+   * still edits the log occurrence that is already there.
+   */
+  it('opens the companion picker on the log that is already there, and writes nothing', async () => {
+    const view = await openTitleMenu(await open());
+    await fireEvent.press(view.getByLabelText('Edit ranking / note'));
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Who I watched with' }).props.accessibilityState
+          ?.disabled,
+      ).toBeFalsy(),
+    );
+    const before = writesSent().length;
+
+    await fireEvent.press(view.getByRole('button', { name: 'Who I watched with' }));
+
     await waitFor(() =>
       expect(view.getByLabelText('Who I watched with').props.accessibilityState?.expanded).toBe(
         true,
       ),
     );
     expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
-  });
-
-  it('starts no ranking and creates no second log', async () => {
-    const view = await openMenu();
-    await fireEvent.press(view.getByLabelText('Who I watched with'));
-    await waitFor(() =>
-      expect(view.getByLabelText('Who I watched with').props.accessibilityState?.expanded).toBe(
-        true,
-      ),
-    );
-
-    // None of the four writers that would move a score, a band or a position, and none
-    // of the two that would post an activity.
-    // `log_title` joins the list, and `set_bucket` stays on it: the sheet calls the
-    // first now (T3b) and installed clients still call the second, so a screen that
-    // opened a row must be silent to both.
-    for (const rpc of [
-      'rank_again',
-      'rank_start',
-      'rank_rebucket',
-      'set_bucket',
-      'log_title',
-    ]) {
-      expect(mockRpc).not.toHaveBeenCalledWith(rpc, expect.anything());
-    }
-  });
-
-  it('writes nothing at all until somebody is chosen', async () => {
-    // Opening a row is not an edit. The founder's rule for every other row in this sheet
-    // and there is no reason for this one to be the exception.
-    const view = await openMenu();
-    const before = mockRpc.mock.calls.length;
-
-    await fireEvent.press(view.getByLabelText('Who I watched with'));
-    await waitFor(() =>
-      expect(view.getByLabelText('Who I watched with').props.accessibilityState?.expanded).toBe(
-        true,
-      ),
-    );
-
-    expect(mockRpc).not.toHaveBeenCalledWith('set_watch_tags', expect.anything());
-    expect(mockRpc.mock.calls.length).toBeGreaterThanOrEqual(before);
+    // Opening a row is not an edit: no companion write, no ranking, no second log.
+    expect(writesSent().slice(before)).toEqual([]);
   });
 
   /**
@@ -1103,16 +1102,12 @@ describe('a title this user has ranked', () => {
    *
    * It was one paragraph of four clauses, which is a wall at the moment somebody is
    * trying to make a decision — the founder's note. It is two sentences now: what goes,
-   * then who else it touches.
-   *
-   * Nothing was traded away for the length. Every consequence the old copy named is
-   * still named — rating, watch date, writing, activity, reactions, comments, and that
-   * you can log it again — and the second sentence stands alone because it is the half
-   * that falls on somebody who is not in the room, which is exactly the sort a
-   * confirmation exists to state.
+   * then who else it touches. Every consequence the old copy named is still named, and the
+   * second sentence stands alone because it is the half that falls on somebody who is not
+   * in the room. It is reached from the ⋯'s last row, behind its rule.
    */
   it('names every consequence in two short sentences', async () => {
-    const view = await openMenu();
+    const view = await openTitleMenu(await open());
 
     await fireEvent.press(view.getByLabelText('Remove from collection'));
 
@@ -1129,45 +1124,42 @@ describe('a title this user has ranked', () => {
   });
 
   it('still asks before it removes anything, and removes nothing until it is answered', async () => {
-    const view = await openMenu();
+    const view = await openTitleMenu(await open());
 
     await fireEvent.press(view.getByLabelText('Remove from collection'));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    // Shorter copy, same gate. The deletion behaviour behind it is untouched by this
-    // tranche.
     expect(mockRpc).not.toHaveBeenCalledWith('unlog', expect.anything());
     const buttons = alertSpy.mock.calls.at(-1)?.[2] ?? [];
     expect(buttons.map((button) => button.text)).toEqual(['Cancel', 'Remove']);
     expect(buttons.find((button) => button.text === 'Remove')?.style).toBe('destructive');
   });
 
-  it('offers one Add a note row when there is no writing yet', async () => {
-    tableRows.user_media = [
-      {
-        user_id: 'user-1',
-        media_item_id: 'film-1',
-        bucket: 'loved',
-        watched_on: '2026-08-12',
-        note: '',
-        note_visibility: 'private',
-        note_has_spoilers: false,
-      },
-    ];
-    const view = await openMenu();
+  /**
+   * **The confirmation waits for the menu to leave, on iOS** (2026-11-21). An `Alert` is
+   * a `UIAlertController` presented from the same view controller, so it counts as the
+   * next presentation (`Sheet.onDismissed`): while the menu is still sliding away, nothing
+   * is asked.
+   */
+  it('asks only once the menu has finished leaving', async () => {
+    type Held = { hold: boolean; pending: (() => void)[] };
+    const dismissals = (globalThis as unknown as { __modalDismissals: Held }).__modalDismissals;
+    const view = await openTitleMenu(await open());
 
-    // One row, one word. A note is private until its author shares it, and the
-    // sharing is the composer's chip — not a second menu row.
-    expect(view.getByLabelText('Add a note')).toBeTruthy();
-    expect(view.queryByLabelText('Write review')).toBeNull();
-    expect(view.queryByLabelText('Add private note')).toBeNull();
+    dismissals.hold = true;
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+    await waitFor(() => expect(dismissals.pending.length).toBeGreaterThan(0));
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    dismissals.hold = false;
+    await act(async () => {
+      for (const finish of dismissals.pending.splice(0)) finish();
+    });
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(1));
   });
 
   it('no longer offers to keep a title in the collection without a ranking', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
+    const view = await openTitleMenu(await open());
 
     expect(view.queryByLabelText('Remove ranking')).toBeNull();
     expect(view.queryByText('Keeps it in your collection')).toBeNull();
@@ -1761,7 +1753,62 @@ describe('a series', () => {
     await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
     const rank = view.getByTestId('title-action-rank');
     expect(within(rank).getByText('Rank Show')).toBeTruthy();
-    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
+    expect(view.getByTestId('title-action-save')).toBeTruthy();
+    expect(view.getByTestId('title-action-more')).toBeTruthy();
+  });
+
+  /**
+   * **A whole show with ranked seasons and no ranking of its own** — the show the Cinematic
+   * page scores by its seasons' average (WS-TVC). The menu reads the show's own state, never
+   * its seasons': Rank Show leads, and with no log of the show there is nothing to edit or
+   * remove, so the menu is the three rows every title has (2026-11-21).
+   */
+  it('gives a show scored by its seasons Rank Show, and a menu with nothing to edit', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        bucket: 'loved',
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    expect(within(view.getByTestId('title-action-rank')).getByText('Rank Show')).toBeTruthy();
+    await openTitleMenu(view);
+    expect(menuRows(view)).toEqual(['Recommend to a friend', 'Share off bingd', 'Add to list']);
+  });
+
+  it('says Edit log for a show that is logged but not ranked, and lets it be removed', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: null,
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openSeries();
+    await openTitleMenu(view);
+
+    await waitFor(() => expect(view.getByLabelText('Edit log / Add note')).toBeTruthy());
+    expect(menuRows(view).at(-1)).toBe('Remove from collection');
   });
 
   it('gives each season row the search row’s +, and ranks that season from it', async () => {
@@ -2356,30 +2403,134 @@ describe('the following score with nothing to say', () => {
 });
 
 /**
- * The action row: Watchlist and Recommend.
+ * **The action row: Rank, Watchlist, ⋯** (founder's final specification, 2026-11-21).
  *
- * Share was the third chip and is now the last row of the Recommend sheet, because
- * three labelled chips do not fit a 360pt screen and of the three it was the one with
- * somewhere else to be. Rank is deliberately not here either: it belongs opposite the
- * poster, with the score it changes.
+ * Recommend and Add to List left the row for the ⋯, which left the top bar for the row.
+ * In the menu, recommending to a bingd friend and sharing outside the app are two rows,
+ * because they go to different people by different routes: *Recommend to a friend* opens
+ * the in-app Recommend sheet, and *Share off bingd* opens the native share sheet with the
+ * same message the Recommend sheet's own *Share off bingd* button sends.
  */
 describe('the action row', () => {
-  it('offers Watchlist and Recommend, and no separate Share', async () => {
+  // Restored one by one: the file's Alert spy is module-wide and must outlive these.
+  let spied: jest.SpyInstance | null = null;
+  const shareSpy = () => {
+    spied = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    return spied;
+  };
+  afterEach(() => {
+    spied?.mockRestore();
+    spied = null;
+  });
+
+  it('offers Watchlist and the ⋯, and no Recommend, Add to List or Share on the row', async () => {
     const view = await open();
 
     expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
-    expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
-    // Two chips fit a narrow Android screen and three did not. Sharing is not gone:
-    // it is the last row of the Recommend sheet, which the next test opens.
+    expect(view.getByLabelText('More options for Inception')).toBeTruthy();
+    expect(view.queryByLabelText('Recommend Inception to a friend')).toBeNull();
+    expect(view.queryByLabelText('Add Inception to a list')).toBeNull();
     expect(view.queryByLabelText('Share Inception')).toBeNull();
+    expect(view.queryByTestId('title-action-recommend')).toBeNull();
+    expect(view.queryByTestId('title-action-list')).toBeNull();
   });
 
-  it('opens a sheet headed with the title, and that is where sharing lives', async () => {
-    const view = await open();
-    await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+  it('offers recommending and sharing as two rows on a title nobody has touched', async () => {
+    const view = await openTitleMenu(await open());
 
+    // Nothing to edit or remove yet: the three rows that apply to every title, and only
+    // those. Rank is already the door to the log sheet.
+    expect(menuRows(view)).toEqual(['Recommend to a friend', 'Share off bingd', 'Add to list']);
+    expect(view.queryByTestId('title-menu-destructive-rule')).toBeNull();
+  });
+
+  it('opens the Recommend sheet from Recommend to a friend, once the menu has gone', async () => {
+    const share = shareSpy();
+    const view = await openTitleMenu(await open());
+
+    await fireEvent.press(view.getByLabelText('Recommend to a friend'));
+
+    // The existing in-app flow: headed with the title, the friend picker, and its own
+    // way out of the app as the secondary act.
     await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
+    expect(view.queryByTestId('title-menu')).toBeNull();
     expect(view.getByText('Share off bingd')).toBeTruthy();
+    // Opening it sends nothing to anybody, here or outside the app.
+    expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
+    expect(share).not.toHaveBeenCalled();
+    const shows = (globalThis as unknown as { __modalShows: { refused: number } }).__modalShows;
+    expect(shows.refused).toBe(0);
+  });
+
+  it('opens the native share sheet from Share off bingd, with the title’s link alone', async () => {
+    const share = shareSpy();
+    const view = await openTitleMenu(await open());
+    const before = writesSent().length;
+
+    await fireEvent.press(view.getByLabelText('Share off bingd'));
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    expect(share).toHaveBeenCalledWith({
+      message: 'Inception on bingd\nhttps://bingd.app/title/film-1',
+      url: 'https://bingd.app/title/film-1',
+    });
+    // Not the Recommend sheet, and not a recommendation: nothing is written on bingd.
+    expect(view.queryByText('Recommend Inception')).toBeNull();
+    expect(view.queryByTestId('title-menu')).toBeNull();
+    expect(writesSent().slice(before)).toEqual([]);
+  });
+
+  it('presents the share sheet only once the menu has finished leaving, on iOS', async () => {
+    type Held = { hold: boolean; pending: (() => void)[] };
+    const dismissals = (globalThis as unknown as { __modalDismissals: Held }).__modalDismissals;
+    const share = shareSpy();
+    const view = await openTitleMenu(await open());
+
+    dismissals.hold = true;
+    await fireEvent.press(view.getByLabelText('Share off bingd'));
+    await waitFor(() => expect(dismissals.pending.length).toBeGreaterThan(0));
+    // UIKit would refuse a presentation issued while the menu is still dismissing.
+    expect(share).not.toHaveBeenCalled();
+
+    dismissals.hold = false;
+    await act(async () => {
+      for (const finish of dismissals.pending.splice(0)) finish();
+    });
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  });
+
+  it('says so on the page when the share sheet could not open', async () => {
+    shareSpy().mockRejectedValue(new Error('Sharing failed.'));
+    const view = await openTitleMenu(await open());
+
+    await fireEvent.press(view.getByLabelText('Share off bingd'));
+
+    await waitFor(() => expect(view.getByText('Sharing failed.')).toBeTruthy());
+  });
+
+  it('shares a season under its show’s name, as the Recommend sheet does', async () => {
+    const share = shareSpy();
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+      },
+    ];
+    const view = await openTitleMenu(await renderWithProviders(<TitleScreen />));
+
+    await fireEvent.press(view.getByLabelText('Share off bingd'));
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const [{ message, url }] = share.mock.calls[0] as [{ message: string; url: string }];
+    expect(url).toBe('https://bingd.app/title/season-1');
+    expect(message).toMatch(/Breaking Bad/);
+    expect(message).toMatch(/ on bingd\nhttps:\/\/bingd\.app\/title\/season-1$/);
   });
 
   /**
@@ -2423,7 +2574,7 @@ describe('the action row', () => {
     expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
-  it('offers Recommend on a series, which is rankable in its own pool (2026-11-14)', async () => {
+  it('offers Recommend on a series, from the ⋯ (rankable in its own pool, 2026-11-14)', async () => {
     // `recommend_title` resolves a series through `rankable_category`, which maps it to
     // tv_shows, so the show page has the same capabilities as a film's.
     const film = (tableRows.media_items ?? [])[0] as Record<string, unknown>;
@@ -2433,8 +2584,10 @@ describe('the action row', () => {
     ];
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
+    await openTitleMenu(view);
 
-    expect(view.getByLabelText(/^Recommend /)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Recommend to a friend'));
+    await waitFor(() => expect(view.getByText('Recommend Breaking Bad')).toBeTruthy());
   });
 });
 
@@ -3164,11 +3317,13 @@ describe('the score row and what surrounds it', () => {
  * one skipped the band chooser — a mechanism, which is precisely what the 2026-09-07
  * pass had decided this menu must stop exposing. So the menu is:
  *
- *   Edit ranking  the same-watch correction, whole. Opens the log sheet's band
+ *   Edit ranking  the same-watch correction, whole (⋯ → *Edit ranking / Add note*
+ *                       since 2026-11-21). Opens the log sheet's band
  *                       chooser, from which a *different* band is `rank_rebucket` and
  *                       the *same* band is `rankAgain(newWatch: false)` — which is
  *                       exactly the call *Rank it again* used to make directly.
- *   Log another watch   `again` — a real rewatch, exactly one activity.
+ *   Log another watch   `again` — a real rewatch, exactly one activity. The action
+ *                       row's *Log rewatch* since 2026-11-21, never a menu row.
  *
  * **Nothing under the menu changed.** No RPC, no argument, no migration, no ranking
  * maths, and no historical activity. `rerank` is still reached; it is reached through
@@ -3179,7 +3334,7 @@ describe('the score row and what surrounds it', () => {
  * behaviour is not re-tested here — it is SQL, and it was already correct.
  */
 describe('adjusting a ranking versus watching it again', () => {
-  /** A ranked film, which is the only state this menu exists in. */
+  /** A ranked film: Log rewatch on the row, Edit ranking / Add note in the ⋯. */
   beforeEach(() => {
     tableRows.rankings = [
       {
@@ -3203,18 +3358,23 @@ describe('adjusting a ranking versus watching it again', () => {
     ];
   });
 
+  /** The one editing row's words for this fixture: ranked, no writing yet. */
+  const EDIT = 'Edit ranking / Add note';
+
   const openMenu = async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
+    const view = await openTitleMenu(await open());
+    await waitFor(() => expect(view.getByLabelText(EDIT)).toBeTruthy());
     return view;
   };
+
+  /** Log rewatch, on the action row: the one door into another viewing. */
+  const logRewatch = async (view: View) =>
+    fireEvent.press(await waitFor(() => view.getByTestId('title-action-ranked')));
 
   /**
    * **The same-watch correction, taken the way a reader now takes it.**
    *
-   * *Edit ranking* opens the log sheet's band chooser; re-choosing the band the
+   * *Edit ranking / Add note* opens the log sheet's band chooser; re-choosing the band the
    * title already has is the correction, and it goes **straight into the comparisons** —
    * `rankAgain(newWatch: false)` on the tap, with no confirmation card between (founder QA,
    * 2026-09-21). That is the exact call the retired *Rank it again* row made in one tap,
@@ -3223,7 +3383,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
   const correctTheRating = async (view: Awaited<ReturnType<typeof openMenu>>) => {
-    await fireEvent.press(view.getByLabelText('Rerank'));
+    await fireEvent.press(view.getByLabelText(EDIT));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
   };
@@ -3243,8 +3403,12 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Rerank')).toBeTruthy();
-    expect(view.getByLabelText('Log another watch')).toBeTruthy();
+    // The correction is the ⋯'s editing row; the viewing is the row's Log rewatch, and
+    // never a menu row (founder's final specification, 2026-11-21).
+    expect(view.getByLabelText(EDIT)).toBeTruthy();
+    expect(view.queryByLabelText('Log another watch')).toBeNull();
+    expect(view.getByLabelText('Log a rewatch of Inception', { includeHiddenElements: true }))
+      .toBeTruthy();
     // Every label this row has ever worn that meant "another viewing" while reading like
     // "redo my ranking", plus the second correction door the founder consolidated away.
     expect(view.queryByLabelText('Rank again')).toBeNull();
@@ -3286,10 +3450,10 @@ describe('adjusting a ranking versus watching it again', () => {
    * The correction row's own `p_new_watch: false` is asserted by the tests around this
    * one, which is where that half of the distinction now lives.
    */
-  it('records a watch before it ranks anything, from the rewatch row', async () => {
-    const view = await openMenu();
+  it('records a watch before it ranks anything, from Log rewatch', async () => {
+    const view = await open();
 
-    await fireEvent.press(view.getByLabelText('Log another watch'));
+    await logRewatch(view);
 
     // The sheet opens on the bands; nothing is saved or ranked until one is chosen.
     await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
@@ -3341,16 +3505,16 @@ describe('adjusting a ranking versus watching it again', () => {
     expect(Object.keys(againCalls()[0]![1] as object)).toContain('p_operation_id');
   });
 
-  it('does not open a second session when the rewatch row is double-tapped', async () => {
-    const view = await openMenu();
-    const row = view.getByLabelText('Log another watch');
+  it('does not open a second session when Log rewatch is double-tapped', async () => {
+    const view = await open();
+    const control = await waitFor(() => view.getByTestId('title-action-ranked'));
 
-    await fireEvent.press(row);
-    await fireEvent.press(row);
+    await fireEvent.press(control);
+    await fireEvent.press(control);
 
     /**
-     * The menu closes on the first press, so the second lands on nothing — and the
-     * sheet is keyed by title, so even a re-entry would reuse one.
+     * `openRewatch` acts only from a closed sheet, so the second press lands on nothing —
+     * and the sheet is keyed by title, so even a re-entry would reuse one.
      *
      * **What it opens is the watch, not a session** (T3b). The double tap still has to
      * cost nothing, and the property is stronger than it was: no session exists yet at
@@ -3398,10 +3562,8 @@ describe('adjusting a ranking versus watching it again', () => {
       },
     ];
 
-    const view = await renderWithProviders(<TitleScreen />);
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
+    const view = await openTitleMenu(await renderWithProviders(<TitleScreen />));
+    await waitFor(() => expect(view.getByLabelText(EDIT)).toBeTruthy());
 
     await correctTheRating(view);
 
@@ -3418,7 +3580,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rerank'));
+    await fireEvent.press(view.getByLabelText(EDIT));
 
     expect(againCalls()).toHaveLength(0);
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
@@ -3434,7 +3596,7 @@ describe('adjusting a ranking versus watching it again', () => {
      */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rerank'));
+    await fireEvent.press(view.getByLabelText(EDIT));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
     // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
@@ -3459,7 +3621,7 @@ describe('adjusting a ranking versus watching it again', () => {
    * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
    * halves are asserted together so that neither can drift toward the other.
    */
-  it('goes straight into the comparisons, and records no watch, from Rerank', async () => {
+  it('goes straight into the comparisons, and records no watch, from Edit ranking', async () => {
     const view = await openMenu();
 
     await correctTheRating(view);
@@ -3482,9 +3644,9 @@ describe('adjusting a ranking versus watching it again', () => {
    */
   it('records a watch, then asks How was it? afresh and ranks in the band chosen', async () => {
     mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
-    const view = await openMenu();
+    const view = await open();
 
-    await fireEvent.press(view.getByLabelText('Log another watch'));
+    await logRewatch(view);
 
     // The log sheet's layout: How was it? on top, nothing preselected, then the same
     // optional rows as the ordinary log, all closed.
@@ -3814,35 +3976,85 @@ describe('a title in the collection that is not ranked', () => {
   });
 
   const openMenu = async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
+    const view = await openTitleMenu(await open());
     await waitFor(() => expect(view.getByLabelText('Remove from collection')).toBeTruthy());
     return view;
   };
 
-  it('offers the menu for an imported title that was never ranked', async () => {
+  it('offers the ⋯ on the row for an imported title that was never ranked', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
     // The Rank control is still the page's primary act, and still leads to the log.
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
+    expect(view.queryByTestId('title-more')).toBeNull();
   });
 
-  it('offers the menu for a title logged here with no date and no rating', async () => {
+  it('offers the same menu for a title logged here with no date and no rating', async () => {
     tableRows.user_media = [{ ...importedRow, bucket: null, watched_on: null }];
-    const view = await open();
-
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-  });
-
-  it('holds Remove from collection and nothing that acts on a ranking', async () => {
     const view = await openMenu();
 
-    for (const label of ['Rerank', 'Log another watch', 'Who I watched with', 'Add a note']) {
+    expect(view.getByLabelText('Edit log / Add note')).toBeTruthy();
+  });
+
+  /**
+   * **Edit log, never Edit ranking, where no ranking exists** (2026-11-21). The menu's
+   * editing row names what is there — a log — and Remove keeps its place at the foot,
+   * behind its rule, which is the door the Letterboxd import needed.
+   */
+  it('says Edit log and holds Remove from collection, and nothing that implies a ranking', async () => {
+    const view = await openMenu();
+
+    expect(menuRows(view)).toEqual([
+      'Recommend to a friend',
+      'Share off bingd',
+      'Add to list',
+      'Edit log / Add note',
+      'Remove from collection',
+    ]);
+    expect(view.getByTestId('title-menu-destructive-rule')).toBeTruthy();
+    for (const label of [
+      'Rerank',
+      'Log another watch',
+      'Who I watched with',
+      'Add a note',
+      'Edit ranking / Add note',
+    ]) {
       expect(view.queryByLabelText(label)).toBeNull();
     }
-    expect(view.queryByText('Ranking')).toBeNull();
+    expect(view.queryByText(/^Edit ranking/)).toBeNull();
+  });
+
+  it('names the note an import or an earlier log already carries', async () => {
+    tableRows.user_media = [{ ...importedRow, note: 'Saw it at the Prince Charles.' }];
+    const view = await openMenu();
+
+    expect(view.getByLabelText('Edit log / note')).toBeTruthy();
+  });
+
+  /**
+   * **A note without a comparison.** Edit log opens the log sheet on the log that is
+   * there; adding a note or a companion from it ranks nothing, and closing it writes
+   * nothing. The bands at its foot are still a first ranking, offered, never forced.
+   */
+  it('opens the log sheet without starting a ranking, and closing it writes nothing', async () => {
+    const view = await openMenu();
+    const before = writesSent().length;
+
+    await fireEvent.press(view.getByLabelText('Edit log / Add note'));
+
+    await waitFor(() => expect(view.getByTestId('log-sheet-scroll')).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Note' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Who I watched with' })).toBeTruthy();
+    expect(writesSent().slice(before)).toEqual([]);
+
+    await fireEvent.press(
+      within(view.getByTestId('log-sheet-scroll')).getByRole('button', { name: 'Close' }),
+    );
+    await waitFor(() => expect(view.queryByTestId('log-sheet-scroll')).toBeNull());
+    expect(writesSent().slice(before)).toEqual([]);
+    // Still unranked, still Rank.
+    expect(view.getByTestId('title-action-rank')).toBeTruthy();
   });
 
   it('asks with the same destructive confirmation before it removes anything', async () => {
@@ -3893,11 +4105,9 @@ describe('a title in the collection that is not ranked', () => {
         bucket: 'loved',
       },
     ];
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    // The full ranked menu, unchanged.
-    await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
+    const view = await openTitleMenu(await open());
+    // The ranked menu: the same rows, with Edit ranking for Edit log.
+    await waitFor(() => expect(view.getByLabelText('Edit ranking / Add note')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Remove from collection'));
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
 
@@ -3914,12 +4124,13 @@ describe('a title in the collection that is not ranked', () => {
 });
 
 /**
- * **Add to List is one tap on the action row** (founder QA, 2026-09-21), beside Watchlist
- * and Share — it used to live only behind the page's ⋯ (lists-prd.md §R).
+ * **Add to list is a ⋯ row** (founder's final specification, 2026-11-21). It was one tap
+ * on the action row beside Watchlist (founder QA, 2026-09-21); the row is three controls
+ * now, and Add to list is the menu's third row, after Recommend to a friend and Share off
+ * bingd, for every title.
  *
- * What is pinned: every title has it, it opens the Add-to-list sheet directly (no menu,
- * so no presentation to serialise), the ⋯ no longer carries a duplicate row, and a title
- * with nothing else in its menu no longer draws a ⋯ at all.
+ * What is pinned: every title has it, it opens the Add-to-list sheet only once the menu
+ * has finished leaving (iOS), it appears once, and the ⋯ that carries it is on every title.
  */
 describe('Add to list', () => {
   beforeEach(() => {
@@ -3941,47 +4152,56 @@ describe('Add to list', () => {
     ];
   };
 
-  it('is a one-tap action on a title that is neither ranked nor logged', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+  it('is a ⋯ row on a title that is neither ranked nor logged', async () => {
+    const view = await openTitleMenu(await open());
+    expect(view.getByLabelText('Add to list')).toBeTruthy();
   });
 
-  it('sits between Watchlist and Share on the action row', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
-    const ids = view
-      .getAllByTestId(/^title-action-(save|list|recommend)$/)
-      .map((node) => node.props.testID as string);
-    expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
-    expect(ids.indexOf('title-action-list')).toBeLessThan(
-      ids.indexOf('title-action-recommend'),
-    );
+  it('sits third in the menu, after Recommend and Share', async () => {
+    const view = await openTitleMenu(await open());
+    expect(menuRows(view).indexOf('Add to list')).toBe(2);
   });
 
-  it('opens the Add-to-list sheet directly, with nothing refused', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+  it('opens the Add-to-list sheet once the menu has gone, with nothing refused', async () => {
+    const view = await openTitleMenu(await open());
 
-    await fireEvent.press(view.getByTestId('title-action-list'));
+    await fireEvent.press(view.getByLabelText('Add to list'));
 
     await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
+    expect(view.queryByTestId('title-menu')).toBeNull();
     const shows = (globalThis as unknown as { __modalShows: { refused: number } }).__modalShows;
     expect(shows.refused).toBe(0);
   });
 
-  it('draws no ⋯ on a title with nothing else to manage', async () => {
+  it('waits for the menu to finish leaving before it presents, on iOS', async () => {
+    type Held = { hold: boolean; pending: (() => void)[] };
+    const dismissals = (globalThis as unknown as { __modalDismissals: Held }).__modalDismissals;
+    const view = await openTitleMenu(await open());
+
+    dismissals.hold = true;
+    await fireEvent.press(view.getByLabelText('Add to list'));
+    await waitFor(() => expect(dismissals.pending.length).toBeGreaterThan(0));
+    expect(view.queryByLabelText('New list')).toBeNull();
+
+    dismissals.hold = false;
+    await act(async () => {
+      for (const finish of dismissals.pending.splice(0)) finish();
+    });
+    await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
+  });
+
+  it('draws the ⋯ on a title with nothing else to manage', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
     expect(view.queryByTestId('title-more')).toBeNull();
   });
 
-  it('no longer duplicates Add to list in the menu of a title in the collection', async () => {
+  it('appears once in the menu of a title in the collection', async () => {
     inCollection();
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
+    const view = await openTitleMenu(await open());
 
     await waitFor(() => expect(view.getByLabelText('Remove from collection')).toBeTruthy());
+    expect(view.getAllByLabelText('Add to list')).toHaveLength(1);
     expect(view.queryByLabelText('Add to list…')).toBeNull();
   });
 });
@@ -4737,7 +4957,7 @@ describe('the immersive title page (experiment)', () => {
       expect(label.props.adjustsFontSizeToFit).toBe(true);
       expect(label.props.maxFontSizeMultiplier).toBe(1.5);
       const cluster = within(view.getByTestId('title-actions'));
-      for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+      for (const id of ['title-action-save', 'title-action-more']) {
         expect(cluster.getByTestId(id)).toBeTruthy();
       }
     });
@@ -4925,15 +5145,14 @@ describe('the immersive title page (experiment)', () => {
         expect(rewatchCalls()).toHaveLength(1);
       });
 
-      it('keeps Rerank in the menu, as a correction that records no watch', async () => {
+      it('keeps Edit ranking in the ⋯, as a correction that records no watch', async () => {
         ranked();
-        const view = await open();
-        await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-        await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
-        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+        const view = await openTitleMenu(await open());
+        await waitFor(() => expect(view.getByLabelText('Edit ranking / Add note')).toBeTruthy());
+        // A rewatch is Log rewatch on the row, never a menu row.
+        expect(view.queryByLabelText('Log another watch')).toBeNull();
 
-        await fireEvent.press(view.getByLabelText('Rerank'));
+        await fireEvent.press(view.getByLabelText('Edit ranking / Add note'));
         await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
         await fireEvent.press(view.getByText('I liked it'));
 
@@ -4945,7 +5164,7 @@ describe('the immersive title page (experiment)', () => {
       /**
        * **No second, prominent Edit ranking** (founder decision, 2026-11-11). Log rewatch is
        * the page's one ranking control; correcting the ranking stays where it was — ⋯ →
-       * *Edit ranking* on this page, and the same *Edit ranking* in an expanded watch on
+       * *Edit ranking / Add note* on this page (2026-11-21), and the same *Edit ranking* in an expanded watch on
        * Watch History (#258), which this page's Watch history row opens. One label for the
        * one correction since 2026-11-11 (it read *Update your rating* in ⋯ before).
        */
@@ -4967,10 +5186,9 @@ describe('the immersive title page (experiment)', () => {
         expect(view.queryByTestId('title-action-rank')).toBeNull();
         expect(view.getAllByTestId('title-action-ranked')).toHaveLength(1);
 
-        // The way to it: ⋯ holds the correction, beside Log another watch.
-        await fireEvent.press(view.getByTestId('title-more'));
-        await waitFor(() => expect(view.getByLabelText('Rerank')).toBeTruthy());
-        expect(view.getByLabelText('Log another watch')).toBeTruthy();
+        // The way to it: the row's ⋯ holds the correction.
+        await openTitleMenu(view);
+        await waitFor(() => expect(view.getByLabelText('Edit ranking / Add note')).toBeTruthy());
         expect(rewatchCalls()).toHaveLength(0);
         expect(againCalls()).toHaveLength(0);
       });
@@ -4989,22 +5207,14 @@ describe('the immersive title page (experiment)', () => {
         ranked();
         const first = await open();
         await waitFor(() => expect(first.getByTestId('title-action-ranked')).toBeTruthy());
-        // The cluster is exactly Log rewatch and the three icon controls.
+        // The cluster is exactly Log rewatch, the bookmark and the ⋯ (2026-11-21).
         const cluster = within(first.getByTestId('title-actions'));
         expect(
           cluster
             .getAllByRole('button')
             .map((node) => node.props.testID as string | undefined)
-            .filter(Boolean)
-            .sort(),
-        ).toEqual(
-          [
-            'title-action-list',
-            'title-action-ranked',
-            'title-action-recommend',
-            'title-action-save',
-          ].sort(),
-        );
+            .filter(Boolean),
+        ).toEqual(['title-action-ranked', 'title-action-save', 'title-action-more']);
         const count = first.getAllByRole('button').length;
         expect(count).toBeGreaterThan(3);
         await first.unmount();
@@ -5106,21 +5316,17 @@ describe('the immersive title page (experiment)', () => {
       );
     });
 
-    it('opens Add to list and Recommend from the same cluster', async () => {
-      const view = await open();
-      await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    it('opens Add to list from the cluster’s ⋯', async () => {
+      const view = await openTitleMenu(await open());
 
-      await fireEvent.press(view.getByTestId('title-action-list'));
+      await fireEvent.press(view.getByLabelText('Add to list'));
       await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
     });
 
-    it('opens the recommendation sheet from Share', async () => {
-      const view = await open();
-      await waitFor(() =>
-        expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy(),
-      );
+    it('opens the recommendation sheet from the cluster’s ⋯', async () => {
+      const view = await openTitleMenu(await open());
 
-      await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+      await fireEvent.press(view.getByLabelText('Recommend to a friend'));
       await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
     });
 
@@ -5813,4 +6019,137 @@ describe("a series' count of seasons", () => {
       await setTitleLayout('original');
     }
   });
+});
+
+/**
+ * **The row and the menu, on both layouts, for every kind and both states** (founder's
+ * final specification, 2026-11-21).
+ *
+ *   unranked   Rank Movie / Rank Show / Rank Season · bookmark · ⋯
+ *   ranked     Log rewatch · bookmark · ⋯
+ *
+ * The ⋯ is always on the row and never in the top bar, which keeps Back alone. The menu is
+ * Recommend to a friend, Share off bingd, Add to list, then the editing row and Remove from
+ * collection where there is a log.
+ */
+describe('the three-control row, on both layouts and every kind', () => {
+  const kinds = {
+    movie: { id: 'film-1', category: 'movies', word: 'Rank Movie', name: 'Inception' },
+    series: { id: 'series-1', category: 'tv_shows', word: 'Rank Show', name: 'Breaking Bad' },
+    season: { id: 'season-1', category: 'tv_seasons', word: 'Rank Season', name: 'Breaking Bad' },
+  } as const;
+
+  const seed = (kind: keyof typeof kinds, isRanked: boolean) => {
+    const { id, category } = kinds[kind];
+    mockOpenId = id;
+    tableRows.media_items = [
+      kind === 'movie'
+        ? film
+        : kind === 'series'
+          ? { ...film, id, kind: 'series', title: 'Breaking Bad', runtime_minutes: null }
+          : {
+              ...film,
+              id,
+              kind: 'season',
+              title: 'Season 1',
+              season_number: 1,
+              release_date: '2023-04-01',
+              runtime_minutes: null,
+              parent: {
+                id: 'series-1',
+                title: 'Breaking Bad',
+                poster_path: null,
+                backdrop_path: null,
+              },
+            },
+    ];
+    tableRows.rankings = isRanked
+      ? [{ user_id: 'user-1', media_item_id: id, position: 1, category, bucket: 'loved' }]
+      : [];
+    tableRows.user_media = isRanked
+      ? [
+          {
+            user_id: 'user-1',
+            media_item_id: id,
+            bucket: 'loved',
+            watched_on: null,
+            note: null,
+            note_visibility: 'private',
+            note_has_spoilers: false,
+          },
+        ]
+      : [];
+  };
+
+  afterEach(async () => {
+    await setTitleLayout('original');
+  });
+
+  const cases = (['original', 'immersive'] as const).flatMap((layout) =>
+    (['movie', 'series', 'season'] as const).flatMap((kind) =>
+      [false, true].map((isRanked) => [layout, kind, isRanked] as const),
+    ),
+  );
+
+  it.each(cases)('%s page, %s, ranked=%s: three controls and the ⋯ menu', async (layout, kind, isRanked) => {
+    await setTitleLayout(layout);
+    seed(kind, isRanked);
+    const view = await renderWithProviders(<TitleScreen />);
+    const lead = await waitFor(() =>
+      view.getByTestId(isRanked ? 'title-action-ranked' : 'title-action-rank'),
+    );
+
+    const cluster = within(view.getByTestId('title-actions'));
+    expect(cluster.getAllByRole('button').map((node) => node.props.testID)).toEqual([
+      isRanked ? 'title-action-ranked' : 'title-action-rank',
+      'title-action-save',
+      'title-action-more',
+    ]);
+    expect(within(lead).getByText(isRanked ? 'Log rewatch' : kinds[kind].word)).toBeTruthy();
+    // The bar keeps Back alone.
+    expect(view.getByTestId('title-back')).toBeTruthy();
+    expect(view.queryByTestId('title-more')).toBeNull();
+    // Spoken names, in reading order.
+    expect(cluster.getAllByRole('button').map((node) => node.props.accessibilityLabel)).toEqual([
+      expect.stringMatching(isRanked ? /^Log a rewatch of / : /^Rank /),
+      expect.stringMatching(/^Add .+ to your watchlist$/),
+      expect.stringMatching(/^More options for /),
+    ]);
+
+    await openTitleMenu(view);
+    expect(menuRows(view)).toEqual(
+      isRanked
+        ? [
+            'Recommend to a friend',
+            'Share off bingd',
+            'Add to list',
+            'Edit ranking / Add note',
+            'Remove from collection',
+          ]
+        : ['Recommend to a friend', 'Share off bingd', 'Add to list'],
+    );
+  });
+
+  /**
+   * **The bookmark stays one tap, outside the menu.** It toggles the watchlist from the
+   * row, and the ⋯ carries no watchlist row of its own.
+   */
+  it('toggles the watchlist from the row, on the Cinematic page too', async () => {
+    await setTitleLayout('immersive');
+    seed('movie', false);
+    const view = await renderWithProviders(<TitleScreen />);
+    const save = await waitFor(() => view.getByTestId('title-action-save'));
+
+    await fireEvent.press(save);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'set_watchlist',
+        expect.objectContaining({ p_present: true, p_media_item_id: 'film-1' }),
+      ),
+    );
+    await openTitleMenu(view);
+    expect(menuRows(view).some((label) => /watchlist/i.test(label))).toBe(false);
+  });
+
 });

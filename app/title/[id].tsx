@@ -29,7 +29,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCurrentProfile } from '@/features/auth';
 import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
-import { BUCKET_IDS } from '@/features/collection/use-log-state';
 import { heroRankFor } from '@/features/collection/hero-rank';
 import {
   useRankedCollection,
@@ -61,18 +60,24 @@ import {
   type UpdateShowLink,
 } from '@/features/ranking/RankingSheet';
 import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
-import { RERANK_ICON, RERANK_LABEL } from '@/features/watch-history/rerank';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { AddToListSheet } from '@/features/lists/AddToListSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
+import { shareTitleOffBingd } from '@/features/recommendations/share-title';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
-import { RANK_LABEL, TitleActions, titleActionsFit } from '@/features/title/TitleActions';
+import {
+  RANK_LABEL,
+  TitleActions,
+  titleActionsFit,
+  titleEditLabel,
+  type RankAction,
+} from '@/features/title/TitleActions';
 import { ImmersiveHero } from '@/features/title/ImmersiveHero';
 import { directedBy } from '@/features/title/directors';
 import { ImmersiveScores } from '@/features/title/ImmersiveScores';
@@ -128,6 +133,7 @@ import {
   Avatar,
   CastStrip,
   DismissFooter,
+  EDIT_ICON_NAME,
   EmptyState,
   LoadingScreen,
   Poster,
@@ -344,17 +350,13 @@ export default function TitleScreen() {
    * until the reader says otherwise. A note that already exists ignores this entirely.
    */
   const [logIntent, setLogIntent] = useState<'note' | 'review'>('note');
-  /** Which composer the log sheet should already be showing when it appears, if any. */
-  const [openWriting, setOpenWriting] = useState<'public' | 'private' | null>(null);
   /**
-   * Which stacked row the log sheet should arrive with open, if any.
-   *
-   * Set by *Who I watched with* and by nothing else. Its sibling `openWriting` names a
-   * piece of writing; this names a field, and both exist so a menu row that promises one
-   * thing lands the reader on that thing rather than on a sheet where they have to find
-   * the row again.
+   * The log sheet opens with no row expanded from this page (2026-11-21). The old ranking
+   * menu's *Edit your note* and *Who I watched with* rows opened it straight into the
+   * composer or the companion picker; the one *Edit ranking / Add note* row that replaced
+   * them opens it plain, so every detail is one tap away and none is forced. `LogSheet`'s
+   * `openWriting` and `openSection` stay for any caller that names one field.
    */
-  const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   /**
    * **Update Show in progress** (founder brief §5, 2026-11-14): the show whose correction a
@@ -407,24 +409,26 @@ export default function TitleScreen() {
   const pendingReviewWrite = useRef(false);
   const [recommending, setRecommending] = useState(false);
   /**
-   * The ⋯ menu: add to a list, change the rating, drop it, or remove the title.
+   * The ⋯ menu, on the action row since 2026-11-21: Recommend to a friend, Share off
+   * bingd, Add to list, the one *Edit ranking / Add note* door into the log sheet, and
+   * Remove from collection set apart at the foot.
    *
-   * It opens for **every** title since Lists v1 (§P.4) — `Add to list…` is the one row
-   * that applies whether or not this account has ever touched the thing.
+   * It opens for **every** title: the first three rows apply whether or not this account
+   * has ever touched the thing. The last two are gated on what is there to edit.
    */
   const [managing, setManaging] = useState(false);
-  /** `Add to list…`, opened from the menu above. */
+  /** `Add to list`, opened from the menu above. */
   const [addingToList, setAddingToList] = useState(false);
   /**
    * Where the ⋯ menu was closed on its way to, or null for an ordinary close.
    *
    * A ref rather than state, so remembering the destination costs no render — see the
    * `onDismissed` on the menu's `Sheet` for why the hand-off is serialised on iOS at
-   * all. **Two destinations now**: `Add to list…` (Lists §P.4) and *Log another watch*
-   * (§J.3), which is why this is a named destination rather than one boolean each. A
-   * second boolean is how two of these come to be set at once.
+   * all. **Every row leaves the menu for something presented** — a sheet, the native
+   * share sheet, or the removal `Alert` — so every row is a named destination here rather
+   * than one boolean each. A second boolean is how two of these come to be set at once.
    */
-  const menuHandoff = useRef<'list' | 'rewatch' | null>(null);
+  const menuHandoff = useRef<MenuDestination | null>(null);
   /**
    * The menu is closed but still on screen, on its way to another sheet.
    *
@@ -432,8 +436,8 @@ export default function TitleScreen() {
    * `Modal` callback and this menu is mounted conditionally, so closing it by dropping
    * `managing` to false tore the modal out of the tree and took the hand-off waiting on
    * that callback with it. Measured rather than reasoned about: with the menu unmounted on
-   * the tap, `Add to list…` opened **nothing at all** on iOS, and so did *Log another
-   * watch*. Keeping it mounted and merely invisible for the length of the slide-out is
+   * the tap, `Add to list…` opened **nothing at all** on iOS, and so did the rewatch row
+   * it used to carry. Keeping it mounted and merely invisible for the length of the slide-out is
    * what lets the callback arrive; `Sheet` renders no modal host once `visible` is false
    * and the dismissal has finished.
    */
@@ -1017,12 +1021,11 @@ export default function TitleScreen() {
   /**
    * Which of the two the writing on this title currently is, or neither.
    *
-   * One column stores both, so these are mutually exclusive by construction and the
-   * Ranked menu names the state it is actually in rather than offering two Adds for one
-   * slot. Both false while the read is in flight, which is the safe way round: the menu
-   * says Write rather than Edit, and Write on an existing note opens it for editing
-   * anyway — the sheet resolves visibility from what is stored, not from which door was
-   * used.
+   * One column stores both, so these are mutually exclusive by construction and the ⋯
+   * menu's editing row names the state it is actually in (`titleEditLabel`). Both false
+   * while the read is in flight, which is the safe way round: the row says Add note, and
+   * the sheet opens an existing note for editing anyway — it resolves visibility from what
+   * is stored, not from which door was used.
    */
   // Ranked, unfinished (a bucket chosen here, comparisons never completed) or neither —
   // the same `rankingStateOf` Search, Collection and list rows ask. Internal only: the page
@@ -1031,9 +1034,6 @@ export default function TitleScreen() {
   const noteText = (data.logged?.note ?? '').trim();
   const hasReview = Boolean(noteText) && data.logged?.note_visibility === 'public';
   const hasPrivateNote = Boolean(noteText) && data.logged?.note_visibility !== 'public';
-
-  /** The band this title is already in, in the chips' spelling. Null until the read lands. */
-  const rankedBucket = data.ranked?.bucket ? (BUCKET_IDS[data.ranked.bucket] ?? null) : null;
 
   const rankCategoryLabel = CATEGORY_NAME[rankCategory];
   // One line only, chosen by the founder's rule: top ten overall, else the
@@ -1336,25 +1336,13 @@ export default function TitleScreen() {
     seasonNumber: title.season_number ?? null,
   };
 
-  const openLog = (
-    intent: 'note' | 'review' = 'note',
-    // Set by the Ranked menu's two writing rows, which name a piece of writing and so
-    // should land the reader inside it rather than in a sheet where they have to find
-    // the row again. Null everywhere else, which is the sheet's ordinary behaviour.
-    writing: 'public' | 'private' | null = null,
-    // The same idea for a row that is not writing: Who I watched with opens the
-    // companion picker. Mutually exclusive with `writing` in practice — one sheet has
-    // one row open — and `LogSheet` resolves the pair if a caller ever passes both.
-    section: 'who' | null = null,
-  ) => {
+  const openLog = (intent: 'note' | 'review' = 'note') => {
     if (!rankable) return;
     setActionError(null);
     // Any other log sheet is not the Update Show it may have been left from: the link
     // must never ride along into an unrelated correction.
     setPendingShowLink(null);
     setLogIntent(intent);
-    setOpenWriting(writing);
-    setOpenSection(section);
     setPlacement(null);
     setLoggingTitle(loggable);
   };
@@ -1418,8 +1406,6 @@ export default function TitleScreen() {
       return;
     }
     setLogIntent('note');
-    setOpenWriting(null);
-    setOpenSection(null);
     setLoggingTitle(seasonTitle);
   };
 
@@ -1447,8 +1433,6 @@ export default function TitleScreen() {
     if (!show) return;
     setPendingShowLink({ showId: link.showId, linkedPlacementId: link.linkedPlacementId });
     setLogIntent('note');
-    setOpenWriting(null);
-    setOpenSection(null);
     setPlacement(null);
     setLoggingTitle(show);
   };
@@ -1565,7 +1549,6 @@ export default function TitleScreen() {
   };
 
   const confirmRemoval = () => {
-    setManaging(false);
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
       'This removes your rating, watch date, review or private note, and related activity. You can log it again later.\n\nIt also removes any reactions and comments on that activity.',
@@ -1603,25 +1586,99 @@ export default function TitleScreen() {
   };
 
   /**
+   * **Share off bingd, from the ⋯** (title actions menu, 2026-11-21): the native share
+   * sheet with this title's link, the same message the Recommend sheet's *Share off bingd*
+   * sends (`share-title.ts`). No note, because the menu has no field for one, and no
+   * write: sharing outside the app records nothing on bingd.
+   */
+  const shareOffBingd = async () => {
+    try {
+      await shareTitleOffBingd({
+        mediaItemId: title.id,
+        kind: title.kind,
+        title: displayTitle ?? title.title,
+        seriesTitle: parent?.title ?? null,
+        seasonNumber: title.season_number ?? null,
+      });
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : 'Sharing failed.');
+    }
+  };
+
+  /** Where each ⋯ row goes once the menu has gone. */
+  const openMenuDestination = (to: MenuDestination) => {
+    switch (to) {
+      case 'recommend':
+        setRecommendedTo(null);
+        setRecommending(true);
+        return;
+      case 'share':
+        void shareOffBingd();
+        return;
+      case 'list':
+        setAddingToList(true);
+        return;
+      case 'edit':
+        // The existing log sheet on the existing log: its band chooser is the ranking
+        // correction (`rank_rebucket`, or `rank_again` with `p_new_watch: false`), and its
+        // rows are the note or review, who it was watched with and the watch date. Opening
+        // it writes nothing, and nothing in it records a viewing.
+        openLog();
+        return;
+      case 'remove':
+        confirmRemoval();
+        return;
+    }
+  };
+
+  /**
+   * **Every ⋯ row leaves the menu the same way.** On iOS the next presentation waits for
+   * the menu's own dismissal (`onDismissed` on its `Sheet`); Android has no presentation
+   * to serialise against and goes straight across — the rule the rewatch hand-off and the
+   * Recommenders sheet already follow.
+   */
+  const leaveMenuFor = (to: MenuDestination) => {
+    setActionError(null);
+    if (Platform.OS === 'ios') {
+      menuHandoff.current = to;
+      setMenuLeaving(true);
+      setManaging(false);
+      return;
+    }
+    setManaging(false);
+    openMenuDestination(to);
+  };
+
+  /** The one editing row's words for this title's state, or null when there is nothing to edit. */
+  const editLabel = rankable
+    ? titleEditLabel({
+        ranked: Boolean(data.ranked),
+        logged: Boolean(data.logged),
+        hasReview,
+        hasPrivateNote,
+      })
+    : null;
+
+  /**
    * **There was a third door into `rerank`, and it is gone** (founder, 2026-09-08).
    *
    * `adjustPlacement` opened a `mode: 'rerank'` session straight from the menu, behind a
-   * row called *Rank it again*. The mode is untouched and still reachable — *Update your
-   * rating* re-choosing the band it already has is the same `rankAgain(newWatch: false)`
-   * call, made by `LogSheet` — but the menu no longer offers two rows for it. See the
-   * `Ranking` group below for why one entry point is the whole of the change.
+   * row called *Rank it again*. The mode is untouched and still reachable — the log
+   * sheet's band chooser re-choosing the band it already has is the same
+   * `rankAgain(newWatch: false)` call — and since 2026-11-21 the menu reaches that sheet
+   * through its one *Edit ranking / Add note* row.
    */
 
 
   /**
-   * **Rank, Save, List, Recommend: beside the poster where they fit, under it where they do
-   * not** (founder, Growth UX sprint, 2026-11-02).
+   * **Rank, Save, ⋯: beside the poster where they fit, under it where they do not**
+   * (founder, Growth UX sprint, 2026-11-02; three controls since 2026-11-21).
    *
    * Decided from the viewport rather than left to `flexWrap`, which on a 375pt phone put the
-   * last glyph on a line of its own under the other three. The controls, their order and
-   * their sizes do not change, only which row they sit in. Measured against the column this
-   * title actually has, and at the reader's text size, so a larger setting moves the row
-   * instead of breaking it.
+   * last glyph on a line of its own. The controls, their order and their sizes do not
+   * change, only which row they sit in. Measured against the column this title actually
+   * has, and at the reader's text size, so a larger setting moves the row instead of
+   * breaking it.
    */
   const identityColumn =
     screenWidth -
@@ -1632,26 +1689,42 @@ export default function TitleScreen() {
   const rankLabel = RANK_LABEL[title.kind as keyof typeof RANK_LABEL] ?? 'Rank';
   const actionsBesidePoster = titleActionsFit(identityColumn, fontScale, {
     rank: rankable,
-    icons: rankable ? 3 : 2,
-    label: data.ranked ? 'Ranked' : rankLabel,
+    icons: 2,
+    label: data.ranked ? 'Log rewatch' : rankLabel,
   });
+  /**
+   * **Rank, or Log rewatch once ranked, on both layouts** (founder's final specification,
+   * 2026-11-21). An unranked or unfinished title keeps Rank exactly as it was. A ranked one
+   * shows the smaller *Log rewatch*, which opens *Log another watch* directly and records
+   * a new viewing; it is never replaced by Rerank or Edit ranking. Correcting the ranking
+   * that exists — band, position, note, review, companions, watch date — is the ⋯ menu's
+   * *Edit ranking / Add note*, which records no viewing.
+   *
+   * The original page's *Ranked* pill, which opened the old ranking menu, is gone with
+   * that menu: the immersive page's Log rewatch is the one ranked control on both.
+   */
+  const rankAction: RankAction | null = rankable
+    ? data.ranked
+      ? {
+          ranked: true,
+          label: 'Log rewatch',
+          icon: 'repeat-outline',
+          compact: true,
+          accessibilityLabel: `Log a rewatch of ${displayTitle ?? title.title}`,
+          accessibilityHint: 'Opens a sheet to record another viewing',
+          onPress: openRewatch,
+        }
+      : {
+          ranked: false,
+          label: rankLabel,
+          accessibilityLabel: `Rank ${displayTitle ?? title.title}`,
+          accessibilityHint: 'Opens the rating sheet',
+          onPress: rank,
+        }
+    : null;
   const actions = (
     <TitleActions
-      rank={
-        rankable
-          ? {
-              ranked: Boolean(data.ranked),
-              label: data.ranked ? undefined : rankLabel,
-              accessibilityLabel: data.ranked
-                ? 'Ranked. Change or remove this.'
-                : `Rank ${displayTitle ?? title.title}`,
-              accessibilityHint: data.ranked
-                ? 'Opens rating and collection options'
-                : 'Opens the rating sheet',
-              onPress: () => (data.ranked ? setManaging(true) : rank()),
-            }
-          : null
-      }
+      rank={rankAction}
       save={{
         selected: isWatchlisted,
         // The sentences the labelled control used, unchanged: a screen reader's
@@ -1662,24 +1735,15 @@ export default function TitleScreen() {
         onPress: () => void toggleWatchlist(),
         disabled: watchlistBusy,
       }}
-      // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
-      // when this is pressed, so there is nothing to serialise against.
-      list={{
-        accessibilityLabel: `Add ${title.title} to a list`,
-        onPress: () => setAddingToList(true),
+      // The page's menu, moved here from the top bar (2026-11-21). No sheet is open when
+      // this is pressed, so there is nothing to serialise against on the way in.
+      more={{
+        accessibilityLabel: `More options for ${displayTitle ?? title.title}`,
+        onPress: () => {
+          setActionError(null);
+          setManaging(true);
+        },
       }}
-      recommend={
-        rankable
-          ? {
-              accessibilityLabel: `Recommend ${title.title} to a friend`,
-              onPress: () => {
-                setActionError(null);
-                setRecommendedTo(null);
-                setRecommending(true);
-              },
-            }
-          : null
-      }
     />
   );
 
@@ -2124,37 +2188,20 @@ export default function TitleScreen() {
     </Text>
   );
   /**
-   * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
-   * Rank exactly as it was; a ranked one shows the smaller *Log rewatch* (founder,
-   * 2026-11-10), which opens *Log another watch* directly — its score is the emphasis, in
-   * the score row. *Edit ranking*, the same-watch correction this button used to
-   * open, is still the ⋯ menu's first Ranking row.
+   * The same cluster as the original page, on Paper: Rank or Log rewatch, the bookmark,
+   * and the ⋯ (2026-11-21). The one difference is that the card is the full width less
+   * 12pt a side, so Rank Season and Log rewatch are never cut there: the whole cluster
+   * stays on one row, and past 1.5x text the word fits itself to the row rather than
+   * wrapping the icons (2026-11-14).
    *
    * **No second, prominent Edit ranking beside it** (founder decision, 2026-11-11). Log
-   * rewatch stays the primary action; the ranking correction is reached from ⋯ here and
-   * from *Edit ranking* in an expanded watch on Watch History (the Watch history row
-   * below opens it). Both open the same correction flow, which records no viewing.
+   * rewatch stays the primary action; the ranking correction is the ⋯ menu's *Edit
+   * ranking / Add note* here, and *Edit ranking* in an expanded watch on Watch History
+   * (the Watch history row below opens it). Both open the same correction flow, which
+   * records no viewing.
    */
   const immersiveActions = cloneElement(actions, {
-    rank: rankable
-      ? {
-          ranked: Boolean(data.ranked),
-          label: data.ranked ? 'Log rewatch' : rankLabel,
-          icon: data.ranked ? 'repeat-outline' : undefined,
-          compact: Boolean(data.ranked),
-          // The card is the full width less 12pt a side. Rank Season and Log rewatch are
-          // never cut there: the whole cluster stays on one row, and past 1.5x text the
-          // word fits itself to the row rather than wrapping the icons (2026-11-14).
-          unclamped: true,
-          accessibilityLabel: data.ranked
-            ? `Log a rewatch of ${displayTitle ?? title.title}`
-            : `Rank ${displayTitle ?? title.title}`,
-          accessibilityHint: data.ranked
-            ? 'Opens a sheet to record another viewing'
-            : 'Opens the rating sheet',
-          onPress: () => (data.ranked ? openRewatch() : rank()),
-        }
-      : null,
+    rank: rankAction ? { ...rankAction, unclamped: true } : null,
   });
   /**
    * The module's metadata line: `2023 · R · 125m`, `Season 1 · 9 episodes · 2023 ·
@@ -2689,25 +2736,9 @@ export default function TitleScreen() {
         // this, so a title opened from Search returns to Search and one opened from the
         // feed returns to the feed — the route stack decides, not this screen.
         onBack={() => router.back()}
-        /**
-         * The menu, where the Ranked control used to keep it.
-         *
-         * **It is now on every title** (lists-prd.md §P.4, 2026-09-19). It used to be
-         * present only where there was something to manage — a ranked title, and since
-         * 2026-09-18 a film or season that is logged but unranked, so that a wrongly
-         * imported film could be taken out without being ranked first. `Add to list…`
-         * applies to **every movie, season and whole series**, ranked or not, logged or
-         * not, which is the one thing that could be true of a title with nothing else in
-         * its menu — including a series, which has never had one.
-         *
-         * Nothing below it changed: the ranking rows and Remove from collection keep
-         * their place and their conditions, and a title with neither simply gets a menu
-         * whose only row is the list one. No hero control, no fourth `TitleActions`
-         * button, no permanent list button anywhere (§D).
-         */
-        // Only when the menu has something in it: Add to list moved to the action row,
-        // so a title that is neither ranked nor logged has no menu rows left.
-        onMore={data.ranked || data.logged ? () => setManaging(true) : undefined}
+        // **No ⋯ here since 2026-11-21.** The bar keeps Back alone; the page's menu is the
+        // last control on the action row under the title, on both layouts, for every
+        // title — the founder's final specification for the title actions.
         title={displayTitle ?? title.title}
         subtitle={parent?.title ?? null}
       />
@@ -3149,8 +3180,6 @@ export default function TitleScreen() {
         title={loggingTitle}
         surface="title"
         noteIntent={logIntent}
-        openWriting={openWriting}
-        openSection={openSection}
         postRank={placement}
         /* Both exits end the post-ranking flow, so both drain the celebration queue.
            This is the half the founder physically hit: a reader who takes *Add details*
@@ -3258,22 +3287,9 @@ export default function TitleScreen() {
           setRankingSubject(null);
           if (!rankedTitle) return;
           setLogIntent('note');
-          /**
-           * **Cleared, and it is the founder's "Add more details opens only the Note".**
-           *
-           * `openWriting` is set by the Ranked menu's writing row and is not reset by
-           * anything else on this screen, so a reader who came in that way, changed the
-           * rating from inside the sheet and finished the comparison arrived back at a
-           * log sheet already expanded into the note composer — with the companions and
-           * the watch date pushed under a keyboard.
-           *
-           * `LogSheet` also refuses to auto-expand in the post-rank state, which is the
-           * load-bearing half because there are two callers. This is the other half:
-           * the intent belonged to a visit that has ended, and carrying it forward would
-           * be wrong even if nothing read it.
-           */
-          setOpenWriting(null);
-          setOpenSection(null);
+          // The founder's "Add more details opens only the Note": nothing on this page
+          // pre-expands the sheet any more, and `LogSheet` refuses to auto-expand in the
+          // post-rank state for its other callers.
           setPlacement(result);
           // WS-TVC: Add details does not resolve the show; the decision rides along.
           setPendingShowDecision(result.showDecision ?? null);
@@ -3318,14 +3334,15 @@ export default function TitleScreen() {
           onClose={() => setManaging(false)}
           label={`Options for ${displayTitle ?? title.title}`}
           /**
-           * The serialised handover to the Add-to-list sheet, on iOS only.
+           * The serialised handover to whatever the row chose, on iOS only.
            *
            * UIKit refuses a presentation issued while it is still dismissing another
            * from the same presenter, React believes it succeeded, and what is left is a
            * transparent window that swallows every touch — the reproduced 2026-09-10
-           * freeze (`Sheet.onDismissed`). This menu is on the audit's own list of
-           * unserialised swaps, and both rows that leave it for another sheet are new —
-           * `Add to list…` (Lists §P.4) and *Log another watch* (§J.3) — so both wait.
+           * freeze (`Sheet.onDismissed`). Every row in this menu leaves it for something
+           * presented — the Recommend sheet, the native share sheet, the Add-to-list
+           * sheet, the log sheet, or the removal `Alert`, which is a `UIAlertController`
+           * from the same presenter — so every row waits (`leaveMenuFor`).
            *
            * **Do not "simplify" this back into a pair of `setState` calls.** That is
            * exactly the shape of the bug, and the screen renders perfectly while it has
@@ -3335,246 +3352,80 @@ export default function TitleScreen() {
             const to = menuHandoff.current;
             menuHandoff.current = null;
             setMenuLeaving(false);
-            if (to === 'list') setAddingToList(true);
-            if (to === 'rewatch') setRewatchPhase('open');
+            if (to) openMenuDestination(to);
           }}
         >
-          <View style={styles.menu}>
-
+          <View style={styles.menu} testID="title-menu">
             {/**
-             * **Three groups, because seven undifferentiated rows is a list rather than
-             * a menu.**
+             * **The founder's final menu, in this order** (2026-11-21):
              *
-             * Your log is what you wrote about it, ranking is where it sits, collection
-             * is whether you keep it at all — and the destructive one is last and on its
-             * own, which is the only ordering that never puts Remove under a thumb
-             * reaching for something else.
+             *   Recommend to a friend   the in-app recommendation (`RecommendSheet`)
+             *   Share off bingd         the native share sheet, outside the app
+             *   Add to list             `AddToListSheet`
+             *   Edit ranking / Add note the log sheet, on the log that is already there
+             *   ─────
+             *   Remove from collection  the existing confirmation, set apart
              *
-             * **A logged title that is not ranked gets the last group only** (Android beta
-             * report, 2026-09-18). A Letterboxd import had put the wrong film on somebody's
-             * shelf, logged and unranked, and this sheet — the only door to Remove — opened
-             * only for a ranked title, so the way out was to rank a film they had not seen.
-             * Anything in the collection can now leave it without being ranked first.
-             * `removeFromCollection` already skips `rank_unrank` when there is no ranking,
-             * and `unlog` has always accepted an unranked title.
+             * Recommend and Share are two rows rather than one, because they go to
+             * different people by different routes: a bingd friend, who gets it in Sent to
+             * you, versus anybody at all through another app. The Recommend sheet still
+             * carries its own *Share off bingd* button as well; both send the same message.
              *
-             * The two upper groups stay ranked-only: both rows under Ranking act on a
-             * position, and for an unranked title the Rank control is already the door to
-             * the log. This adds a way out, not a second way in.
+             * **One editing row, not four.** The rows this replaces — the note or review,
+             * Who I watched with, Rerank and Log another watch — were four doors, three of
+             * them into the same sheet. The log sheet is where the band (the ranking
+             * correction, which records no viewing), the note or review, the companions
+             * and the watch date already live, each one tap from its top, so the menu opens
+             * it with nothing pre-expanded and the reader goes straight to the detail they
+             * came for. A rewatch is the action row's *Log rewatch*, never a menu row.
              */}
-            {data.ranked ? (
-              <>
-                <MenuGroup title="Your log" />
-                {/**
-                 * **One field, one row (founder simplification, 2026-08-27).**
-                 *
-                 * `user_media` holds one `note` under one `note_visibility`, and the sheet
-                 * now shows it as one thing: a note, with "Share as a review" as a state it
-                 * can be in. The two rows this replaces — Review and Private note, each
-                 * offering the conversion the other way — asked the reader to choose
-                 * between two names for one piece of writing before opening it, which was
-                 * the founder's exact complaint about the sheet itself. The label still
-                 * says which state the writing is in, because "Edit your review" is a
-                 * promise about where the text is visible; the conversion controls live in
-                 * the composer, beside the text they describe.
-                 *
-                 * **The founder's device pass: every `value` in this menu is gone.**
-                 * `SheetRow` draws the label and the secondary sentence on one line, so at
-                 * the width of a phone every explanation truncated — rows of clipped grey
-                 * text under clear labels, worse than no explanation at all.
-                 */}
-                <SheetRow
-                  icon="chatbubble-ellipses-outline"
-                  label={
-                    hasReview
-                      ? 'Edit your review'
-                      : hasPrivateNote
-                        ? 'Edit your note'
-                        : 'Add a note'
-                  }
-                  onPress={() => {
-                    setManaging(false);
-                    openLog('note', hasReview ? 'public' : 'private');
-                  }}
-                />
-
-                {/**
-                 * **Directly under the writing row, because it is the other half of the
-                 * same log** (founder, 2026-08-29).
-                 *
-                 * Companions were reachable only through *Change your rating*, which opens
-                 * the bucket chooser — so the way to correct who you watched something with
-                 * ran through a control that offers to re-rate it. The founder's device pass
-                 * called that hidden, and it is: the row a reader is looking for is named
-                 * "Who I watched with" and the row they had to press was named something
-                 * else entirely.
-                 *
-                 * **It edits the log occurrence that is already there.** `openLog` opens
-                 * the same sheet every other entry point opens, on the same `user_media`
-                 * row, with the companion picker expanded — `section`, not `writing`, so
-                 * the note composer stays closed and the keyboard stays down. It starts no
-                 * ranking, writes no bucket, creates no second log and posts no activity;
-                 * `useSetCompanions` remains the only writer, so watched-with notification
-                 * is exactly as once-only as it was from every other door.
-                 *
-                 * In *Your log* rather than in *Ranking* for the same reason the note is:
-                 * this group is what you recorded about watching it, and the group below is
-                 * where it sits against everything else.
-                 */}
-                <SheetRow
-                  icon="people-outline"
-                  label="Who I watched with"
-                  onPress={() => {
-                    setManaging(false);
-                    openLog('note', null, 'who');
-                  }}
-                />
-
-                <MenuGroup title="Ranking" />
-                {/**
-                 * **Two rows, because there were only ever two acts** (founder, physical QA,
-                 * 2026-09-08).
-                 *
-                 * ---------------------------------------------------------------------------
-                 * WHAT WAS HERE, AND WHY THREE WAS ONE TOO MANY
-                 *
-                 * The menu offered *Rank it again*, *Log another watch* and *Change your
-                 * rating*. The middle one is a real, separate act — a second viewing — and the
-                 * outer two were **two doors into the same correction**, named so similarly
-                 * that no ordinary reader could say which one they wanted. "Rank it again"
-                 * and "Change your rating" describe the same intent in two vocabularies; the
-                 * only difference was mechanical, and mechanical differences are exactly what
-                 * the 2026-09-07 pass had already decided this menu must stop exposing.
-                 *
-                 * (That pass is worth keeping in the record: the founder ranked a season,
-                 * adjusted it a minute later, and saw two "ranked" rows in the feed for one
-                 * watch. Nothing was broken underneath — `_rank_finalize` has posted
-                 * `title_ranked` only `if p_new_watch or not v_replaced` since
-                 * 20260826000500 — the row named *Rank again* simply meant "another viewing"
-                 * and read like "redo my ranking". Renaming it to *Rank it again* fixed the
-                 * misfire and left two correction rows behind. This removes one.)
-                 *
-                 * ---------------------------------------------------------------------------
-                 * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
-                 *
-                 * **`Edit ranking` is the single same-watch correction path, and it can
-                 * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
-                 * has had three branches since 2026-08-15 and keeps all of them:
-                 *
-                 *   a *different* band   → `rank_rebucket`. The band moves and the comparisons
-                 *                          are re-run, because a band change cannot be
-                 *                          estimated (PRD §10).
-                 *   the *same* band      → `rankAgain(newWatch: false)` — which is precisely
-                 *                          what *Rank it again* called. Re-opening a rating you
-                 *                          already gave means the *position* is wrong, and this
-                 *                          is how a reader says so.
-                 *   neither, then close  → nothing at all. Since 20260826000500 the session
-                 *                          runs over the position the title holds, so opening
-                 *                          this and changing your mind costs nothing.
-                 *
-                 * So placement can still be corrected for the same watch, and nobody is made
-                 * to log a viewing they did not have in order to do it. The one extra tap is
-                 * the band chooser, which is also the screen that tells the reader which of
-                 * the two things they meant.
-                 *
-                 * ---------------------------------------------------------------------------
-                 * THE SEMANTICS ARE UNTOUCHED
-                 *
-                 *   Edit ranking         corrects the current watch. `p_new_watch` false, no
-                 *                        new watch record, no timestamp heuristic anywhere.
-                 *                        No feed activity for a film; for a show or season
-                 *                        (20261114000300), one "updated their ranking of"
-                 *                        post only when the correction moved it.
-                 *   Log another watch    an explicit second viewing. `p_new_watch` true, and
-                 *                        exactly one `title_ranked` on completion.
-                 *
-                 * No RPC, argument, migration or piece of ranking maths changes in this pass,
-                 * and no historical activity is rewritten or de-duplicated. `rerank` still
-                 * exists and is still reached; it is reached through one row instead of two.
-                 *
-                 * The labels carry the whole distinction and there is no secondary line: a
-                 * `value` on a `SheetRow` sets beside the label and truncates at phone width,
-                 * which is a founder decision this menu already carries.
-                 */}
-                {/* **Rerank** (founder spec §5, 2026-11-13; it was *Edit ranking*), with the
-                    left/right arrows — the star is the initial Rank's alone. Behaviour kept:
-                    straight into the log sheet, where the band chooser is, and no watch is
-                    recorded. Leads the group because correcting a rating is the common act
-                    and logging a second viewing is the rare one. */}
-                <SheetRow
-                  icon={RERANK_ICON}
-                  label={RERANK_LABEL}
-                  onPress={() => {
-                    setManaging(false);
-                    openLog();
-                  }}
-                />
-                {/**
-                 * The explicit rewatch, and the only row in the app that declares one.
-                 *
-                 * ---------------------------------------------------------------------------
-                 * **IT RECORDS A WATCH NOW, AND THAT IS THE WHOLE CHANGE** (§J.3, T3b)
-                 *
-                 * It used to open the ranking sheet directly in `mode: 'again'`: a forced
-                 * full re-rank that recorded **no watch and no date** (§C.3.2). A reader
-                 * saying "I watched Heat again last night" was made to answer six
-                 * comparisons, and at the end of it the app knew nothing about the viewing.
-                 *
-                 * Now it opens a sheet whose first act is the watch — Today in one tap,
-                 * *Earlier* if they do not remember when — and which offers the re-check
-                 * afterwards. Save and close, and the rewatch is recorded and posted; tap
-                 * *Re-check placement*, and `rank_again` runs over the position the title
-                 * already holds with the new §F.2 policy, which costs about two comparisons
-                 * when nothing has changed.
-                 *
-                 * **One viewing still produces exactly one feed activity**, which is what
-                 * the label has always promised. The sheet posts it; the re-check enriches
-                 * that same post with the new score rather than writing a second one (§K).
-                 * Two genuine rewatches are still two activities; that is not a duplicate.
-                 */}
-                <SheetRow
-                  icon="repeat-outline"
-                  label="Log another watch"
-                  onPress={
-                    rankedBucket
-                      ? () => {
-                          setActionError(null);
-                          // Serialised the same way `Add to list…` is: this row leaves
-                          // the menu for another modal, and on iOS the presentation
-                          // waits for this one's dismissal to finish.
-                          if (Platform.OS === 'ios') {
-                            menuHandoff.current = 'rewatch';
-                            setMenuLeaving(true);
-                            setManaging(false);
-                          } else {
-                            setManaging(false);
-                            setRewatchPhase('open');
-                          }
-                        }
-                      : undefined
-                  }
-                  disabledReason={rankedBucket ? undefined : 'Loading'}
-                />
-              </>
+            <SheetRow
+              icon="paper-plane-outline"
+              label="Recommend to a friend"
+              onPress={() => leaveMenuFor('recommend')}
+            />
+            <SheetRow
+              icon={SHARE_ICON}
+              label="Share off bingd"
+              onPress={() => leaveMenuFor('share')}
+            />
+            <SheetRow
+              icon="list-outline"
+              label="Add to list"
+              onPress={() => leaveMenuFor('list')}
+            />
+            {/**
+             * The label says what exists (`titleEditLabel`): *Edit ranking* once ranked,
+             * *Edit log* for a title logged or imported but not ranked — whose bands in the
+             * sheet are a first ranking, and whose Rank control resumes an unfinished one —
+             * and nothing at all for a title with no log, whose Rank is already the door to
+             * the same sheet. The second half names the writing that is there: *Add note*,
+             * *note* or *review*.
+             */}
+            {editLabel ? (
+              <SheetRow
+                icon={EDIT_ICON_NAME}
+                label={editLabel}
+                onPress={() => leaveMenuFor('edit')}
+              />
             ) : null}
 
             {/**
-             * **Gated on the title actually being in the collection**, which it was
-             * not obliged to be until this menu opened on every title (§P.4).
-             *
-             * It used to be unconditional, and that was correct while `onMore` itself
-             * carried the condition — the sheet could not open for a title that was
-             * neither ranked nor logged. Now that it can, an ungated Remove would offer
-             * to take a film off a shelf it has never been on, and the confirmation
-             * would be the first place anybody found out.
+             * **Gated on the title actually being in the collection.** Anything logged can
+             * leave it without being ranked first (Android beta report, 2026-09-18): a
+             * Letterboxd import had put the wrong film on somebody's shelf, logged and
+             * unranked, and this menu was the only door to Remove. `removeFromCollection`
+             * already skips `rank_unrank` when there is no ranking, and `unlog` has always
+             * accepted an unranked title. Last, and behind a rule, so it is never under a
+             * thumb reaching for something else; its confirmation is unchanged.
              */}
             {data.ranked || data.logged ? (
               <>
-                <MenuGroup title="Collection" />
+                <View style={styles.menuRule} testID="title-menu-destructive-rule" />
                 <SheetRow
                   icon="trash-outline"
                   label="Remove from collection"
-                  onPress={confirmRemoval}
+                  onPress={() => leaveMenuFor('remove')}
                 />
               </>
             ) : null}
@@ -3662,28 +3513,6 @@ export default function TitleScreen() {
         />
       ) : null}
     </Screen>
-  );
-}
-
-/**
- * A heading inside an action sheet.
- *
- * The Ranked menu grew from two rows to five across three different kinds of act —
- * what you wrote, where it sits, whether you keep it — and five rows in one column
- * with no structure is a list you read rather than a menu you use. Deliberately not
- * `SectionHeader`: that one carries the page gutter and a `title3`, which inside a
- * sheet is the same size as the rows it is meant to be subordinate to.
- *
- * `header` rather than plain text, so a screen reader can jump between the groups
- * instead of hearing five sibling buttons.
- */
-function MenuGroup({ title }: { title: string }) {
-  return (
-    <View style={styles.menuGroup} accessibilityRole="header">
-      <Text variant="caption" tone="tertiary">
-        {title.toUpperCase()}
-      </Text>
-    </View>
   );
 }
 
@@ -3839,6 +3668,18 @@ function formatDate(date: string | null) {
  * Four points rather than a measurement, because the leading is a property of the type
  * token and not of the string: it is the same on every title in the catalogue.
  */
+/** Where a ⋯ row goes once the menu has gone (`leaveMenuFor`). */
+type MenuDestination = 'recommend' | 'share' | 'list' | 'edit' | 'remove';
+
+/**
+ * Share off bingd's glyph: each platform's own share symbol, so the row reads as "through
+ * another app" rather than as a second Recommend.
+ */
+const SHARE_ICON = Platform.select({
+  android: 'share-social-outline',
+  default: 'share-outline',
+}) as 'share-outline';
+
 /** A stable empty list, so "nobody recommended this" is the same value every render. */
 const NO_RECOMMENDATIONS: TitleRecommendation[] = [];
 
@@ -3969,12 +3810,12 @@ const styles = StyleSheet.create({
     ...theme.elevation.e2,
   },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
-  // Enough air above to separate the group from the rows before it, and none below:
-  // the heading belongs to what follows it.
-  menuGroup: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
-    paddingBottom: theme.space[1],
+  // The rule that sets Remove from collection apart from the rows above it.
+  menuRule: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.border.hairline,
+    marginHorizontal: theme.layout.gutter,
+    marginVertical: theme.space[2],
   },
   block: {
     paddingHorizontal: theme.layout.gutter,

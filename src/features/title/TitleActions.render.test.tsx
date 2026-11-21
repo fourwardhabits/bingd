@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { within } from '@testing-library/react-native';
+import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -15,8 +15,8 @@ import {
 } from './TitleActions';
 
 /**
- * **One row: Rank / Log rewatch · Watchlist · Add to List · Recommend** (TV show & season
- * ranking, founder brief §3, 2026-11-14).
+ * **One row: Rank / Log rewatch · Watchlist · ⋯** (TV show & season ranking, founder brief
+ * §3, 2026-11-14; three controls since the founder's final specification, 2026-11-21).
  *
  * A layout cannot be measured here, so what is pinned is the contract that makes one row
  * hold at the narrowest phone and the largest text: the cluster never wraps; the labelled
@@ -36,20 +36,19 @@ const action = (label: string, ranked = false) => (
       onPress: jest.fn(),
     }}
     save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
-    list={{ accessibilityLabel: 'List', onPress: jest.fn() }}
-    recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
+    more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
   />
 );
 
 describe('the title action cluster', () => {
   it.each([RANK_LABEL.movie, RANK_LABEL.series, RANK_LABEL.season])(
-    'keeps "%s" and all three icons on one row',
+    'keeps "%s" and both icons on one row',
     async (label) => {
       const view = await renderWithProviders(action(label));
       const cluster = view.getByTestId('title-actions');
       expect(StyleSheet.flatten(cluster.props.style).flexWrap).toBe('nowrap');
       expect(StyleSheet.flatten(cluster.props.style).flexDirection).toBe('row');
-      for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+      for (const id of ['title-action-save', 'title-action-more']) {
         expect(within(cluster).getByTestId(id)).toBeTruthy();
       }
     },
@@ -80,7 +79,7 @@ describe('the title action cluster', () => {
 
   it('keeps each icon a fixed box whose slop clears 44pt', async () => {
     const view = await renderWithProviders(action(RANK_LABEL.season));
-    for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+    for (const id of ['title-action-save', 'title-action-more']) {
       const icon = view.getByTestId(id);
       const style = StyleSheet.flatten(
         typeof icon.props.style === 'function'
@@ -115,8 +114,7 @@ describe('the filled Rank control', () => {
         onPress: jest.fn(),
       }}
       save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
-      list={{ accessibilityLabel: 'List', onPress: jest.fn() }}
-      recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
+      more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
     />
   );
   const flat = (node: { props: Record<string, unknown> }) =>
@@ -182,7 +180,7 @@ describe('the filled Rank control', () => {
 
   it('keeps the icon controls beside it at a 44pt target', async () => {
     const view = await renderWithProviders(unranked(RANK_LABEL.movie));
-    for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+    for (const id of ['title-action-save', 'title-action-more']) {
       const icon = view.getByTestId(id);
       const style = flat(icon);
       expect(
@@ -197,7 +195,7 @@ describe('the filled Rank control', () => {
       <TitleActions
         rank={{ ranked: true, accessibilityLabel: 'Ranked', onPress: jest.fn() }}
         save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
-        recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
+        more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
       />,
     );
     const control = view.getByTestId('title-action-ranked');
@@ -230,13 +228,83 @@ describe('the filled Rank control', () => {
    * cluster never wraps.
    */
   it.each(Object.values(RANK_LABEL))(
-    'holds "%s" and three icons on one row at 320pt',
+    'holds "%s" and both icons on one row at 320pt',
     async (label) => {
       const narrow = 320 - theme.layout.gutter * 2;
-      expect(titleActionsFit(narrow, 1, { rank: true, icons: 3, label })).toBe(true);
+      expect(titleActionsFit(narrow, 1, { rank: true, icons: 2, label })).toBe(true);
       const view = await renderWithProviders(unranked(label));
       const cluster = StyleSheet.flatten(view.getByTestId('title-actions').props.style);
       expect(cluster.flexWrap).toBe('nowrap');
     },
   );
+});
+
+/**
+ * **Exactly three controls, in the founder's order** (final specification, 2026-11-21):
+ * the labelled rank control, the one-tap bookmark, and the ⋯ that used to be the top bar's.
+ * Recommend and Add to List are menu rows now, and nothing else is on the row.
+ */
+describe('the three-control row', () => {
+  const row = (ranked: boolean, tone: 'paper' | 'artwork', onMore = jest.fn()) => (
+    <TitleActions
+      tone={tone}
+      rank={{
+        ranked,
+        label: ranked ? 'Log rewatch' : RANK_LABEL.movie,
+        icon: ranked ? 'repeat-outline' : undefined,
+        compact: ranked,
+        accessibilityLabel: ranked ? 'Log a rewatch of Heat' : 'Rank Heat',
+        onPress: jest.fn(),
+      }}
+      save={{ accessibilityLabel: 'Add Heat to your watchlist', onPress: jest.fn() }}
+      more={{ accessibilityLabel: 'More options for Heat', onPress: onMore }}
+    />
+  );
+
+  it.each([
+    [false, 'paper'],
+    [true, 'paper'],
+    [false, 'artwork'],
+    [true, 'artwork'],
+  ] as const)('ranked=%s on %s: rank, bookmark, ⋯ and nothing else', async (ranked, tone) => {
+    const view = await renderWithProviders(row(ranked, tone));
+    const cluster = view.getByTestId('title-actions');
+    const buttons = within(cluster)
+      .getAllByRole('button')
+      .map((node) => node.props.testID as string);
+    expect(buttons).toEqual([
+      ranked ? 'title-action-ranked' : 'title-action-rank',
+      'title-action-save',
+      'title-action-more',
+    ]);
+    expect(within(cluster).queryByTestId('title-action-list')).toBeNull();
+    expect(within(cluster).queryByTestId('title-action-recommend')).toBeNull();
+  });
+
+  it('names every control for a screen reader, in reading order', async () => {
+    const view = await renderWithProviders(row(true, 'paper'));
+    const labels = within(view.getByTestId('title-actions'))
+      .getAllByRole('button')
+      .map((node) => node.props.accessibilityLabel as string);
+    expect(labels).toEqual([
+      'Log a rewatch of Heat',
+      'Add Heat to your watchlist',
+      'More options for Heat',
+    ]);
+  });
+
+  it('draws the ⋯ as the horizontal ellipsis and opens it on one tap', async () => {
+    const onMore = jest.fn();
+    const view = await renderWithProviders(row(false, 'artwork', onMore));
+    const more = view.getByTestId('title-action-more');
+    expect(
+      within(more).getByText(
+        String.fromCodePoint(Ionicons.glyphMap['ellipsis-horizontal'] as number),
+      ),
+    ).toBeTruthy();
+    // Never a toggle: it has no selected state to announce.
+    expect(more.props.accessibilityState).toMatchObject({ selected: false, disabled: false });
+    await fireEvent.press(more);
+    expect(onMore).toHaveBeenCalledTimes(1);
+  });
 });

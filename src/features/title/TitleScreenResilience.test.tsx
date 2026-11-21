@@ -353,15 +353,16 @@ describe('the three kinds of title', () => {
     );
   });
 
-  it('renders a series with the same actions as a film: Rank Show, save, list, recommend', async () => {
+  it('renders a series with the same actions as a film: Rank Show, save, ⋯', async () => {
     const view = await openOn(completeSeries, 'The Last of Us');
 
     // A whole show is ranked in its own pool since 2026-11-14, so its page carries the
     // film page's capabilities and a score row about the show alone.
     expect(view.getByTestId('scores-section')).toBeTruthy();
     expect(within(view.getByTestId('title-action-rank')).getByText('Rank Show')).toBeTruthy();
-    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
+    expect(view.getByTestId('title-action-more')).toBeTruthy();
+    expect(view.queryByTestId('title-action-recommend')).toBeNull();
   });
 });
 
@@ -923,26 +924,31 @@ describe('the personal score', () => {
 });
 
 describe('the action group', () => {
-  it('reads Ranked, Save and Recommend for a ranked title', async () => {
+  it('reads Log rewatch, Save and ⋯ for a ranked title', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
     // The rank control keeps its **word** in both states, at every width. There is no
     // responsive switch to a glyph: a control that is a word on one phone and a symbol
-    // on another is two controls.
+    // on another is two controls. Ranked, the word is Log rewatch on both layouts since
+    // the founder's final specification (2026-11-21); the original page's Ranked pill
+    // and the ranking menu it opened are gone.
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
-    expect(view.getByText('Ranked')).toBeTruthy();
+    expect(within(view.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
+    expect(view.queryByText('Ranked')).toBeNull();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
-    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
+    expect(view.getByTestId('title-action-more')).toBeTruthy();
+    expect(view.queryByTestId('title-action-recommend')).toBeNull();
     expect(view.queryByTestId('title-action-rank')).toBeNull();
   });
 
-  it('opens the ranking-options menu from Ranked, and decides no intent itself', async () => {
+  it('opens the rewatch sheet from Log rewatch, and decides no ranking itself', async () => {
     /**
-     * **The interaction contract, unchanged.** Ranked opens the menu, and the menu is
-     * where the reader says which of the two things they mean. A control that went
-     * straight to a correction — or straight to a rewatch — would be the founder's
-     * Terrace House bug rebuilt in a different shape: two intents behind one press.
+     * **One intent per control.** Log rewatch records a new viewing and nothing else; the
+     * correction of the ranking that exists is the ⋯ menu's *Edit ranking / Add note*. A
+     * control that went straight to a correction — or offered both — would be the
+     * founder's Terrace House bug rebuilt in a different shape: two intents behind one
+     * press.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
@@ -950,26 +956,24 @@ describe('the action group', () => {
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
-    // Both intents offered, and neither of them taken by the press itself.
-    expect(view.getByText('Rerank')).toBeTruthy();
-    expect(view.getByText('Log another watch')).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('enters the same-watch rerank from Rerank, declaring no new watch', async () => {
+  it('enters the same-watch rerank from ⋯ → Edit ranking, declaring no new watch', async () => {
     /**
      * **The capability the 2026-09-08 consolidation had to keep.** *Rank it again* used
-     * to make this call in one tap and is gone; *Edit ranking* opens the log
+     * to make this call in one tap and is gone; *Edit ranking / Add note* opens the log
      * sheet's band chooser, and re-choosing the band the title already has is the same
      * `rankAgain(newWatch: false)`. The fixture is Loved, so `I liked it` is that band.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('Rerank'));
+    await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-more'));
+    await fireEvent.press(view.getByText(/^Edit ranking \//));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     // One tap, straight into the comparisons (founder QA, 2026-09-21): the band is the
     // decision, and the "Rank <title> again? [Re-rank]" card that sat here is gone.
@@ -993,22 +997,19 @@ describe('the action group', () => {
   });
 
   /**
-   * **The rewatch row records the viewing, and ranks nothing** (T3b, epic §J.3).
+   * **Log rewatch records the viewing, and ranks nothing** (T3b, epic §J.3).
    *
-   * It used to call `rank_again(p_new_watch: true)` on the tap: a forced full re-rank
-   * that recorded no watch and no date. The viewing comes first now, and the re-check is
-   * offered after it is saved — so the assertion is that the row opens the watch and
-   * declares nothing yet. The test directly above still pins `p_new_watch: false` for
-   * the correction row, which is the other half of the distinction and the half that did
-   * not move.
+   * The viewing comes first, and the re-check is offered after it is saved — so the
+   * assertion is that the control opens the watch and declares nothing yet. The test
+   * directly above still pins `p_new_watch: false` for the correction, which is the other
+   * half of the distinction and the half that did not move.
    */
-  it('records a watch, and ranks nothing, from the rewatch row', async () => {
+  it('records a watch, and ranks nothing, from Log rewatch', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('Log another watch'));
 
     // The log sheet in rewatch mode opens on its bands; nothing ranks until one is chosen.
     await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
@@ -1074,31 +1075,26 @@ describe('navigation', () => {
   // mounted tree in one document, so a second render inside one test is a second copy of
   // the screen and every query becomes ambiguous.
   /**
-   * **The menu is on every title now** (`docs/product/lists-prd.md` §P.4, 2026-09-19).
-   *
-   * This test asserted the opposite, and the change is deliberate rather than a
-   * regression. `onMore` was conditional — a ranked title, and since 2026-09-18 a film
-   * or season that is logged but unranked — because until Lists there was nothing in
-   * the sheet that applied to a title the account had never touched. `Add to list…` is
-   * exactly that: it applies to every movie, season and whole series, ranked or not,
-   * logged or not, and a series has never had a menu at all.
-   *
-   * What protected the old behaviour is one level down rather than gone: the Collection
-   * group is now gated on `data.ranked || data.logged`, so a title in nobody's
-   * collection is never offered Remove from it.
+   * **The ⋯ is on the action row, for every title, and the bar has none** (founder's final
+   * specification, 2026-11-21). The bar keeps Back alone; the page's menu is the last
+   * control under the title, on a title nobody has touched as much as on a ranked one,
+   * because Recommend, Share off bingd and Add to list apply to every movie, season and
+   * whole show.
    */
-  it('offers Add to list on a title nobody has touched, on the action row rather than a menu', async () => {
+  it('offers the ⋯ on a title nobody has touched, on the action row and not in the bar', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
     expect(view.queryByTestId('title-more')).toBeNull();
   });
 
-  it('offers the menu on a ranked title, where the Ranked chip used to keep it', async () => {
+  it('offers it on a ranked title too, still never in the bar', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    expect(view.getByTestId('title-action-more')).toBeTruthy();
+    expect(view.queryByTestId('title-more')).toBeNull();
   });
 
   it('catches a render error on the route without navigating anywhere', async () => {
@@ -1272,8 +1268,20 @@ describe('where the action row lives', () => {
     ).toBeNull();
   });
 
-  it('stays beside the poster on a standard 390pt phone', async () => {
-    setViewport(390);
+  it('stays beside the poster on a standard phone, measured by the word it says', async () => {
+    // Rank Movie, Save and ⋯ fit a 393pt column; the longer Log rewatch needs a 402.
+    setViewport(393);
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+
+    expect(
+      within(view.getByTestId('title-identity-copy')).getByTestId('title-actions'),
+    ).toBeTruthy();
+    expect(view.queryByTestId('title-actions-full-width')).toBeNull();
+  });
+
+  it('keeps a ranked title’s Log rewatch beside the poster on a 402pt phone', async () => {
+    setViewport(402);
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
@@ -1291,6 +1299,39 @@ describe('where the action row lives', () => {
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
 
     expect(view.getByTestId('title-actions-full-width')).toBeTruthy();
+  });
+
+  /**
+   * **The three-control row at its hardest** (2026-11-21): a 320pt phone at the largest
+   * accessibility text size. The row moves under the poster, stays one row that never
+   * wraps, the word fits itself rather than being cut, and the bookmark and the ⋯ keep
+   * their 44pt targets.
+   */
+  it('keeps Log rewatch, the bookmark and the ⋯ on one row at 320pt and 3.1x text', async () => {
+    setViewport(320, 3.1);
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+
+    expect(
+      within(view.getByTestId('title-actions-full-width')).getByTestId('title-actions'),
+    ).toBeTruthy();
+    expect(flat(view.getByTestId('title-actions').props.style)).toMatchObject({
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+    });
+    const label = within(control).getByText('Log rewatch');
+    expect(label.props.numberOfLines).toBe(1);
+    expect(label.props.adjustsFontSizeToFit).toBe(true);
+    expect(label.props.maxFontSizeMultiplier).toBe(1.5);
+    for (const id of ['title-action-save', 'title-action-more']) {
+      const icon = view.getByTestId(id);
+      const style = flat(icon.props.style);
+      expect(
+        (style.width as number) + icon.props.hitSlop.left + icon.props.hitSlop.right,
+      ).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      expect(style.height as number).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+    }
   });
 
   it('reserves no fixed height for the identity row', async () => {
@@ -1410,48 +1451,58 @@ describe('where the action row lives', () => {
     // Capped inside the founder's 150–170 range, which is the guard at 130% type.
     expect(button.maxWidth as number).toBeLessThanOrEqual(170);
     expect(button.maxWidth as number).toBeGreaterThanOrEqual(150);
-    // Still 44pt tall, so it shares a centre line with the two icon boxes beside it.
-    expect(button.minHeight).toBe(theme.layout.minTapTarget);
+    // The compact Log rewatch: drawn 36pt, its slop returns the 44pt target, so it shares a
+    // centre line with the two icon boxes beside it.
+    const slop = view.getByTestId('title-action-ranked').props.hitSlop;
+    expect((button.minHeight as number) + slop.top + slop.bottom).toBe(
+      theme.layout.minTapTarget,
+    );
     // And it keeps its word in both states: no responsive switch to a glyph.
-    expect(view.getByText('Ranked')).toBeTruthy();
+    expect(view.getByText('Log rewatch')).toBeTruthy();
   });
 });
 
-describe('the ranking menu, in the founder’s words', () => {
-  it('names the two intents Rerank and Log another watch, and nothing else', async () => {
+describe('the ⋯ menu, in the founder’s words', () => {
+  it('names one editing row, and none of the rows it replaced', async () => {
     /**
-     * **The founder's menu, 2026-09-08.** It was three rows for a day: *Rank it again*,
-     * *Log another watch* and *Change your rating*. The first and third were two doors
-     * into one act — both correct a rating already given, both leave `p_new_watch` false,
-     * both write no activity — separated only by whether the band chooser was skipped,
-     * which is a mechanism, and naming mechanisms is what the 2026-09-07 rename had
-     * already decided this menu must stop doing.
-     *
-     * Copy only, again. The rows' modes, RPCs and `p_new_watch` are pinned unchanged by
-     * the tests in "the action group" above, and `rerank` is still reached — through one
-     * row instead of two.
+     * **The founder's final menu, 2026-11-21**: Recommend to a friend, Share off bingd,
+     * Add to list, Edit ranking / Add note, and Remove from collection set apart. The four
+     * rows the editing one replaces — the note, Who I watched with, Rerank and Log another
+     * watch — are gone from it; a rewatch is the row's Log rewatch.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-action-ranked'));
+    await waitFor(() => expect(view.getByTestId('title-action-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-more'));
 
-    expect(view.getByText('Rerank')).toBeTruthy();
-    expect(view.getByText('Log another watch')).toBeTruthy();
-    // **Rerank's left/right arrows, never the star** (founder spec §5, 2026-11-13): the
-    // star is the initial Rank's. The jest renderer prints an Ionicons glyph, not its name.
-    const glyph = (name: 'star-outline' | 'swap-horizontal-outline') =>
+    const menu = within(view.getByTestId('title-menu'));
+    expect(menu.getAllByRole('button').map((node) => node.props.accessibilityLabel)).toEqual([
+      'Recommend to a friend',
+      'Share off bingd',
+      'Add to list',
+      expect.stringMatching(/^Edit ranking \//),
+      'Remove from collection',
+    ]);
+    // The editing row's glyph is the app's edit pencil, never the initial Rank's star.
+    const glyph = (name: 'star-outline' | 'create-outline') =>
       String.fromCodePoint(Ionicons.glyphMap[name] as number);
-    const rerankRow = view.getByRole('button', { name: 'Rerank' });
-    expect(within(rerankRow).getByText(glyph('swap-horizontal-outline'))).toBeTruthy();
-    expect(within(rerankRow).queryByText(glyph('star-outline'))).toBeNull();
-    expect(view.queryByText('Edit ranking')).toBeNull();
-    expect(view.queryByText('Recompare')).toBeNull();
-    // Every label this group has ever carried and no longer does.
-    expect(view.queryByText('Rank it again')).toBeNull();
-    expect(view.queryByText('Change your rating')).toBeNull();
-    expect(view.queryByText('Adjust placement')).toBeNull();
-    expect(view.queryByText('I watched it again')).toBeNull();
+    const editRow = menu.getByRole('button', { name: /^Edit ranking/ });
+    expect(within(editRow).getByText(glyph('create-outline'))).toBeTruthy();
+    expect(within(editRow).queryByText(glyph('star-outline'))).toBeNull();
+    // Every label this menu has carried and no longer does.
+    for (const gone of [
+      'Rerank',
+      'Log another watch',
+      'Who I watched with',
+      'Edit your note',
+      'Rank it again',
+      'Change your rating',
+      'Adjust placement',
+      'I watched it again',
+      'Recompare',
+    ]) {
+      expect(menu.queryByText(gone)).toBeNull();
+    }
   });
 });
