@@ -177,6 +177,29 @@ export type FeedItem = {
    * first title and counts the rest.
    */
   watchlistCount: number | null;
+  /**
+   * **An activity session** (20261130000900), or null for every other post, a legacy group
+   * included. A session post's row names its newest title (`mediaItemId`, `title`), and this
+   * says what was done to it and how the rest divide, so the sentence never claims every
+   * title was ranked, or every title saved. Only on a post of two or more titles.
+   */
+  session: FeedSession | null;
+  /**
+   * The time the card prints: a session's latest activity, else `createdAt`. A session moves
+   * to its latest activity in the Feed (its `causal_at`), so this is the time that matches
+   * its place.
+   */
+  activityAt: string;
+};
+
+export type FeedSession = {
+  /** What was done to the newest title, which the sentence names. */
+  leadAction: 'ranked' | 'saved';
+  total: number;
+  ranked: number;
+  saved: number;
+  /** Changes whenever the session gains a member, even when the count does not. */
+  version: string;
 };
 
 /** One person named by a follow story. Identity only: this is a discovery list. */
@@ -254,6 +277,17 @@ type FeedRow = {
      */
     count?: number;
     sitting?: string;
+    /**
+     * An activity session (20261130000900): a grouped post whose rankings and saves share one
+     * fixed half hour. `lead_action` is what was done to the newest title (the row's own
+     * `media_item_id`), `ranked` / `saved` split `count`, and `last_activity_at` is the time
+     * the card prints. Absent on every post written before sessions.
+     */
+    session?: boolean;
+    lead_action?: 'ranked' | 'saved';
+    ranked?: number;
+    saved?: number;
+    last_activity_at?: string;
     /** award_earned rows only (20260828000100). */
     award?: string;
     tier?: string;
@@ -779,6 +813,35 @@ function award(row: FeedRow): FeedItem['award'] {
   };
 }
 
+/**
+ * A session post's summary (20261130000900), from the row alone, so the sentence is right on
+ * the first frame and never waits for the rail. Null for a single title and for any post the
+ * server did not write as a session, which keeps its legacy treatment.
+ */
+export function sessionOf(row: Pick<FeedRow, 'type' | 'payload' | 'created_at'>): FeedSession | null {
+  const payload = row.payload;
+  if (row.type !== 'ranking_batch' && row.type !== 'watchlist_added') return null;
+  if (payload?.session !== true || typeof payload.count !== 'number') return null;
+  const total = Math.trunc(payload.count);
+  if (!(total > 1)) return null;
+  const ranked = typeof payload.ranked === 'number' ? Math.trunc(payload.ranked) : null;
+  const saved = typeof payload.saved === 'number' ? Math.trunc(payload.saved) : null;
+  const leadAction =
+    payload.lead_action === 'saved' || payload.lead_action === 'ranked'
+      ? payload.lead_action
+      : row.type === 'watchlist_added'
+        ? 'saved'
+        : 'ranked';
+  return {
+    leadAction,
+    total,
+    // A row that predates the split is one family, by its type.
+    ranked: ranked ?? (row.type === 'ranking_batch' ? total : 0),
+    saved: saved ?? (row.type === 'watchlist_added' ? total : 0),
+    version: `${total}:${payload.last_activity_at ?? row.created_at}`,
+  };
+}
+
 /** Rows to items: the actor rule, the season naming, the notes and the companions. */
 async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
   const items: FeedItem[] = [];
@@ -874,6 +937,11 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
         row.type === 'watchlist_added' && typeof row.payload?.count === 'number'
           ? row.payload.count
           : null,
+      session: sessionOf(row),
+      activityAt:
+        row.payload?.session === true && typeof row.payload?.last_activity_at === 'string'
+          ? row.payload.last_activity_at
+          : row.created_at,
       award: award(row),
       goal:
         row.type === 'goal_completed' &&

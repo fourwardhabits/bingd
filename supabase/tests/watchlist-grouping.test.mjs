@@ -66,12 +66,16 @@ describe('a watchlist session is one post', () => {
       )
     ).rows.map((row) => row.media_item_id);
 
-  /** Moves a group's start back, as the clock would. */
+  /** Moves a group's start back, as the clock would: its times and (20261130000900) its window. */
   const age = (eventId, minutes) =>
     t.sql(
       `update feed_events
           set causal_at = causal_at - make_interval(mins => $2),
-              created_at = created_at - make_interval(mins => $2)
+              created_at = created_at - make_interval(mins => $2),
+              payload = case when payload ? 'started_at'
+                             then jsonb_set(payload, '{started_at}',
+                                    to_jsonb((payload ->> 'started_at')::timestamptz - make_interval(mins => $2)))
+                             else payload end
         where id = $1`,
       [eventId, minutes],
     );
@@ -96,7 +100,7 @@ describe('a watchlist session is one post', () => {
       assert.deepEqual(await members(post.id), [dune]);
     });
 
-    it('titles saved inside the window join that same post, in order, without moving it', async () => {
+    it('titles saved inside the window join that same post, which moves to the newest save and names it', async () => {
       const me = await actor();
       const [a, b, c] = [await film('Arrival'), await film('Sicario'), await film('Enemy')];
       await add(a);
@@ -110,11 +114,16 @@ describe('a watchlist session is one post', () => {
       const after = await posts(me);
       assert.equal(after.length, 1, 'still one post');
       assert.equal(after[0].id, first.id, 'the same event id');
-      assert.equal(after[0].media_item_id, a, 'the representative is still the first title');
+      // 20261130000900: the newest title leads, and the post moves to the newest save.
+      assert.equal(after[0].media_item_id, c, 'the representative is the newest title');
+      assert.ok(
+        after[0].causal_at.getTime() > before10.causal_at.getTime(),
+        'causal_at moved forward to the latest save',
+      );
       assert.equal(
-        after[0].causal_at.getTime(),
-        before10.causal_at.getTime(),
-        'causal_at is never bumped, so the post keeps its place in the Feed',
+        after[0].created_at.getTime(),
+        before10.created_at.getTime(),
+        'created_at never moves',
       );
       assert.equal(after[0].payload.count, 3);
       assert.deepEqual(await members(first.id), [a, b, c]);
@@ -283,7 +292,7 @@ describe('a watchlist session is one post', () => {
   });
 
   describe('the member list', () => {
-    it('returns every member in saved order, matching the count', async () => {
+    it('returns every member newest first, matching the count', async () => {
       const me = await actor();
       const ids = [
         await film('One'),
@@ -297,14 +306,14 @@ describe('a watchlist session is one post', () => {
       const rows = await readMembers(follower, post.id);
       assert.deepEqual(
         rows.map((row) => row.media_item_id),
-        ids,
+        [...ids].reverse(),
       );
       assert.deepEqual(
         rows.map((row) => row.ordinal),
         [1, 2, 3, 4],
       );
       assert.equal(rows.length, post.payload.count);
-      assert.equal(rows[0].title, 'One');
+      assert.equal(rows[0].title, 'Four');
       assert.equal(rows[0].kind, 'movie');
     });
 

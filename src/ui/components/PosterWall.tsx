@@ -59,6 +59,13 @@ export type PosterTile = {
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
   /**
+   * **The author saved this title to their watchlist** (Feed rail only, 20261130000900). An
+   * activity session holds rankings and saves on one post, so each poster says which it is:
+   * a ranked title carries its score, a saved one this quiet bookmark in the same corner.
+   * It is the author's act, not the viewer's state (`saved` above), and it is not a control.
+   */
+  addedToWatchlist?: boolean;
+  /**
    * **The author published a review of this title** (Feed rail only, 20261130000800). A
    * reviewed first ranking now joins its half-hour group instead of posting a card of its
    * own, so the rail marks the poster with a quiet "Review" label in the corner the rank
@@ -599,7 +606,17 @@ function Tile({
             </Text>
           </View>
         ) : null}
-        {score != null && average && tile.season == null ? (
+        {tile.addedToWatchlist && score == null ? (
+          <View
+            style={styles.savedChip}
+            testID="poster-saved-mark"
+            // In the tile's own label ("…, added to watchlist"), like the score chip.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Ionicons name="bookmark" size={12} color={theme.semantic.action} />
+          </View>
+        ) : score != null && average && tile.season == null ? (
           // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
           <SeasonAverageBadge score={score} style={styles.chipPosition} testID="poster-average-pill" />
         ) : score != null ? (
@@ -817,6 +834,7 @@ const labelFor = (tile: PosterTile) => {
   // Announced on the tile as well as on its own control, because "Saved" is state a
   // sighted reader gets from a filled glyph they can see without touching anything.
   if (tile.saved) parts.push('saved');
+  if (tile.addedToWatchlist && tile.score == null) parts.push('added to watchlist');
   if (tile.reviewed) parts.push('reviewed');
   return parts.join(', ');
 };
@@ -887,6 +905,24 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     alignItems: 'center',
     backgroundColor: theme.semantic.action,
+  },
+  /**
+   * The author's save on a session rail (20261130000900): a Maroon bookmark on the raised
+   * surface, in the score's corner, the same height as a score chip. Outlined rather than
+   * filled so it never reads as a number, and never as the viewer's own Save control.
+   */
+  savedChip: {
+    position: 'absolute',
+    right: theme.space[1],
+    bottom: theme.space[1],
+    minWidth: 24,
+    paddingHorizontal: theme.space[1],
+    paddingVertical: 3,
+    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    backgroundColor: theme.surface.raised,
+    borderWidth: 1,
+    borderColor: theme.semantic.score,
   },
   /** A season's pill: Parchment ground, Maroon border and text (existing tokens only). */
   seasonChip: {

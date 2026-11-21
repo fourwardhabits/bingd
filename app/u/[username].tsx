@@ -21,13 +21,11 @@ import { useLoggedCollection } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
   activityMetadata,
-  tailFor,
-  verbFor,
-  watchlistTailAction,
+  activitySentence,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { feedItems, useActorActivity } from '@/features/feed/use-feed';
+import { feedItems, useActorActivity, type FeedItem } from '@/features/feed/use-feed';
 import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
 import { activityLead } from '@/features/feed/ActivityLead';
 import { isNearEnd } from '@/features/feed/near-end';
@@ -220,6 +218,18 @@ export default function PublicProfileScreen() {
   // reader scrolls. `feedItems` rather than a `flatMap`, so a page read after the list
   // has moved cannot produce a duplicated React key.
   const recent = useMemo(() => feedItems(activity.data?.pages), [activity.data]);
+
+  /** One post's sentence, the rule every surface shares (`activitySentence`). */
+  const sentenceOf = (event: FeedItem) =>
+    activitySentence(event, {
+      ranking: () =>
+        setRankingBatchFor({
+          id: event.id,
+          medium: batchMedium(event.kind),
+          actorId: event.actorId,
+        }),
+      watchlist: setWatchlistGroupFor,
+    });
   const eventIds = useMemo(() => recent.map((event) => event.id), [recent]);
   // Comments reach this page as well as the Feed, because this is where somebody
   // arrives after finding a person in Search — the Feed only carries activity by
@@ -698,23 +708,11 @@ export default function PublicProfileScreen() {
                   key={event.id}
                   actorName={event.actorName}
                   actorAvatarUri={event.actorAvatarUri}
-                  verb={verbFor(event.type)}
-                  tail={tailFor(event.type, event.title)}
-                  /* A grouped sitting reads "ranked Sheroes and 2 more" (20261023000100). */
-                  tailAction={
-                    event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
-                      ? {
-                          connector: 'and',
-                          label: `${(event.rankedCount ?? 1) - 1} more`,
-                          onPress: () =>
-                            setRankingBatchFor({
-                              id: event.id,
-                              medium: batchMedium(event.kind),
-                              actorId: event.actorId,
-                            }),
-                        }
-                      : watchlistTailAction(event, setWatchlistGroupFor)
-                  }
+                  verb={sentenceOf(event).verb}
+                  tail={sentenceOf(event).tail}
+                  /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
+                     Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
+                  tailAction={sentenceOf(event).tailAction}
                   companions={event.companions}
                   title={event.title}
                   year={event.year}
@@ -741,7 +739,7 @@ export default function PublicProfileScreen() {
                     authorId: event.actorId,
                     watched: watched.data,
                   })}
-                  timeLabel={new Date(event.createdAt).toLocaleDateString()}
+                  timeLabel={new Date(event.activityAt).toLocaleDateString()}
                   onPressTitle={() =>
                     event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
                   }

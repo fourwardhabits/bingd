@@ -243,7 +243,7 @@ describe('ranking activity is not a watch', () => {
 });
 
 describe('the expanded list', () => {
-  it('returns every title in the order it was placed, with its current score', async () => {
+  it('returns every title newest placement first, with its current score', async () => {
     const s = await sitting();
     const heat = await ranked('Heat');
     const ronin = await ranked('Ronin');
@@ -255,7 +255,9 @@ describe('the expanded list', () => {
     const { rows } = await t.sql(`select * from ranking_batch_titles($1)`, [event.id]);
 
     assert.equal(rows.length, 2);
-    assert.equal(rows[0].media_item_id, heat, 'placement order, not alphabetical');
+    // Newest first since 20261130000900: placement order, reversed, not alphabetical.
+    assert.equal(rows[0].media_item_id, ronin, 'the latest placement leads');
+    assert.ok(rows.every((row) => row.action === 'ranked'));
     for (const row of rows) {
       assert.ok(row.position > 0, 'a canonical position');
       assert.ok(Number(row.score) > 0, 'and the score it holds now');

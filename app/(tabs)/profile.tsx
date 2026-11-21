@@ -19,9 +19,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
   activityMetadata,
-  tailFor,
-  verbFor,
-  watchlistTailAction,
+  activitySentence,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
@@ -32,6 +30,7 @@ import {
   feedItems,
   trimActorActivityToFirstPage,
   useActorActivity,
+  type FeedItem,
 } from '@/features/feed/use-feed';
 import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
 import { activityLead } from '@/features/feed/ActivityLead';
@@ -206,6 +205,18 @@ export default function ProfileScreen() {
    * first page that has moved.
    */
   const recent = useMemo(() => feedItems(feed.data?.pages), [feed.data]);
+
+  /** One post's sentence, the rule every surface shares (`activitySentence`). */
+  const sentenceOf = (event: FeedItem) =>
+    activitySentence(event, {
+      ranking: () =>
+        setRankingBatchFor({
+          id: event.id,
+          medium: batchMedium(event.kind),
+          actorId: event.actorId,
+        }),
+      watchlist: setWatchlistGroupFor,
+    });
   const eventIds = useMemo(() => recent.map((event) => event.id), [recent]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
@@ -535,23 +546,11 @@ export default function ProfileScreen() {
                 // `type === 'title_logged' ? 'watched' : 'ranked'`, which called a
                 // finished season "ranked" here and "finished" in the feed — one
                 // event saying two things on two screens.
-                verb={verbFor(event.type)}
-                tail={tailFor(event.type, event.title)}
-                /* A grouped sitting reads "ranked Sheroes and 2 more" (20261023000100). */
-                tailAction={
-                  event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
-                    ? {
-                        connector: 'and',
-                        label: `${(event.rankedCount ?? 1) - 1} more`,
-                        onPress: () =>
-                          setRankingBatchFor({
-                            id: event.id,
-                            medium: batchMedium(event.kind),
-                            actorId: event.actorId,
-                          }),
-                      }
-                    : watchlistTailAction(event, setWatchlistGroupFor)
-                }
+                verb={sentenceOf(event).verb}
+                tail={sentenceOf(event).tail}
+                /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
+                   Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
+                tailAction={sentenceOf(event).tailAction}
                 companions={event.companions}
                 title={event.title}
                 year={event.year}
@@ -584,7 +583,7 @@ export default function ProfileScreen() {
                   authorId: event.actorId,
                   watched: watched.data,
                 })}
-                timeLabel={new Date(event.createdAt).toLocaleDateString()}
+                timeLabel={new Date(event.activityAt).toLocaleDateString()}
                 onPressTitle={() =>
                   event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
                 }

@@ -106,12 +106,14 @@ describe('joining the open group', () => {
     assert.equal(all[0].id, group.id);
     assert.equal(all[0].type, 'ranking_batch');
     assert.equal(all[0].payload.count, 4);
-    assert.equal(all[0].media_item_id, group.media_item_id, 'the representative is unchanged');
-    assert.equal(
-      all[0].causal_at.getTime(),
-      group.causal_at.getTime(),
-      'causal_at unchanged, so the post keeps its place',
+    // 20261130000900: the post names its newest title and moves to its newest activity,
+    // keeping its id; it never moves backwards.
+    assert.equal(all[0].media_item_id, thief, 'the newest title leads');
+    assert.ok(
+      all[0].causal_at.getTime() >= group.causal_at.getTime(),
+      'causal_at moved forward, never back',
     );
+    assert.equal(all[0].payload.last_activity_at !== undefined, true);
     assert.deepEqual(await members(group.id), [heat, ronin, collateral, thief]);
     assert.equal(first.result.status, 'ok');
   });
@@ -140,7 +142,7 @@ describe('joining the open group', () => {
     const all = await posts();
     assert.equal(all.length, 1, 'no invisible draft is left that nothing will ever finalise');
     assert.equal(all[0].payload.count, 3);
-    assert.equal(all[0].media_item_id, group.media_item_id, 'the representative is unchanged');
+    assert.equal(all[0].media_item_id, late, 'the late title is the newest, so it leads');
     assert.deepEqual((await members(group.id)).at(-1), late);
 
     // And it is idempotent: the same title again adds nothing.
@@ -208,7 +210,7 @@ describe('joining the open group', () => {
     assert.equal(all[0].payload.count, 3);
   });
 
-  it('the member list reads the joined titles in placed order, matching the count', async () => {
+  it('the member list reads the joined titles newest first, matching the count', async () => {
     const a = await rankedMovie('First');
     await sitting([a]);
     const b = await rankedMovie('Second');
@@ -222,7 +224,7 @@ describe('joining the open group', () => {
     await t.actAs(user);
     assert.deepEqual(
       rows.map((row) => row.media_item_id),
-      [a, b],
+      [b, a],
     );
     assert.equal(rows.length, group.payload.count);
   });
@@ -344,21 +346,49 @@ describe('publishing on its own', () => {
     assert.ok(all.some((row) => row.id === note1.event_id && row.type === 'ranking_batch'));
   });
 
-  it('never joins anything but a published grouped ranking post', async () => {
-    // A watchlist post carrying a start in its payload is still not a candidate.
+  it('joins the watchlist session of its half hour, which becomes a ranking group in place (20261130000900)', async () => {
+    const saved = await t.createMovie(`Saved ${seq}`, (tmdb += 1));
+    await t.sql(`select set_watchlist($1, $2, true)`, [await uuid(), saved]);
+    const { rows: [w] } = await t.sql(
+      `select id from feed_events where actor_id = $1 and type = 'watchlist_added'`,
+      [user],
+    );
+    const ranked = await rankedMovie('Ranked');
+    const result = await sitting([ranked]);
+    assert.equal(result.result.joined, true);
+    assert.equal(result.result.event_id, w.id, 'the same post: its id, its conversation');
+    const [post] = await posts();
+    assert.equal(post.id, w.id);
+    assert.equal(post.type, 'ranking_batch');
+    assert.equal(post.payload.count, 2);
+    assert.equal(post.payload.ranked, 1);
+    assert.equal(post.payload.saved, 1);
+    assert.equal(post.media_item_id, ranked, 'the newest title leads');
+  });
+
+  it('never joins a history group or a watchlist post with no count', async () => {
     const film = await rankedMovie('Saved');
     await t.sql(
       `insert into feed_events (actor_id, type, media_item_id, payload)
-       values ($1, 'watchlist_added', $2, jsonb_build_object('count', 3, 'started_at', now()))`,
+       values ($1, 'watchlist_added', $2,
+               jsonb_build_object('count', 3, 'started_at', now(), 'consolidation_batch', 'h1'))`,
       [user, film],
+    );
+    const other = await t.createMovie(`Legacy ${seq}`, (tmdb += 1));
+    await t.sql(
+      `insert into feed_events (actor_id, type, media_item_id, payload)
+       values ($1, 'watchlist_added', $2, '{}'::jsonb)`,
+      [user, other],
     );
     const result = await sitting([await rankedMovie('Ranked')]);
     assert.notEqual(result.result.joined, true);
     const { rows } = await t.sql(
-      `select payload from feed_events where actor_id = $1 and type = 'watchlist_added'`,
+      `select payload from feed_events where actor_id = $1 and type = 'watchlist_added'
+        order by payload ? 'count' desc`,
       [user],
     );
-    assert.equal(rows[0].payload.count, 3, 'the watchlist post is untouched');
+    assert.equal(rows.length, 2, 'both stay watchlist posts');
+    assert.equal(rows[0].payload.count, 3, 'the history post is untouched');
   });
 });
 

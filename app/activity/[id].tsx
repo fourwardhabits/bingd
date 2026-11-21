@@ -10,14 +10,10 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
-import {
-  metadataFor,
-  tailFor,
-  verbFor,
-  watchLabel,
-  watchlistTailAction,
-} from '@/features/feed/activity';
+import { activitySentence, metadataFor, watchLabel } from '@/features/feed/activity';
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { WatchlistGroupSheet } from '@/features/feed/WatchlistGroupSheet';
+import { batchMedium } from '@/features/ranking/RankedSummary';
 import { useActivityEvent } from '@/features/feed/use-feed';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
@@ -150,6 +146,14 @@ export default function ActivityScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
+  /** A ranking group's or a session's list (20261130000900), the Feed's own sheet. */
+  const [rankingBatchFor, setRankingBatchFor] = useState<string | null>(null);
+  const sentence = event
+    ? activitySentence(event, {
+        ranking: () => setRankingBatchFor(event.id),
+        watchlist: setWatchlistGroupFor,
+      })
+    : null;
   const reactions = useReactions(event && viewerId ? [event.id] : [], viewerId ?? '');
   const { setReaction } = useSetReaction(viewerId ?? '');
   const summary = event ? (reactions.data?.get(event.id) ?? null) : null;
@@ -279,12 +283,13 @@ export default function ActivityScreen() {
                 ? undefined
                 : () => router.push(`/u/${event.actorUsername}`)
             }
-            verb={verbFor(event.type, event)}
-            tail={tailFor(event.type, event.title)}
-            // "added Dune and 4 others to their watchlist", as the Feed draws it
-            // (20261125000100). The conversation on this page is the post's, never a
-            // member's.
-            tailAction={watchlistTailAction(event, setWatchlistGroupFor)}
+            // The Feed's sentence, from the same rule (`activitySentence`): "added Dune and
+            // 4 others to their watchlist" (20261125000100), a session's "ranked Kaiju No. 8
+            // + 15 more" (20261130000900). The conversation on this page is the post's,
+            // never a member's.
+            verb={sentence?.verb ?? ''}
+            tail={sentence?.tail ?? null}
+            tailAction={sentence?.tailAction ?? null}
             companions={event.companions}
             title={event.title}
             year={event.year}
@@ -323,7 +328,7 @@ export default function ActivityScreen() {
               authorId: event.actorId,
               watched: watched.data,
             })}
-            timeLabel={relativeTime(event.createdAt)}
+            timeLabel={relativeTime(event.activityAt)}
             // An award row opens the earner's Awards rather than a title (§5).
             onPressTitle={() => {
               if (event.mediaItemId) {
@@ -411,6 +416,15 @@ export default function ActivityScreen() {
               for that profile and closes this behind it. */}
           {/* The titles one grouped watchlist post holds (20261125000100), the Feed's
               own sheet. A title closes the sheet and opens. */}
+          {rankingBatchFor ? (
+            <RankingBatchSheet
+              eventId={rankingBatchFor}
+              medium={batchMedium(event.kind)}
+              actorId={event.actorId}
+              viewerId={viewerId ?? undefined}
+              onClose={() => setRankingBatchFor(null)}
+            />
+          ) : null}
           {watchlistGroupFor ? (
             <WatchlistGroupSheet
               eventId={watchlistGroupFor}

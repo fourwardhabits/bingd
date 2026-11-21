@@ -106,10 +106,11 @@ describe('title-page first rankings', () => {
     const members = posts.filter((p) => p.type === 'title_ranked');
     assert.equal(members.length, 2, 'both rankings still exist');
     assert.ok(members.every((m) => m.presented_in === g.id));
+    // 20261130000900: the group stands where its newest activity did.
     assert.equal(
       g.causal_at.getTime(),
-      members[0].causal_at.getTime(),
-      'the group stands where the first did',
+      Math.max(...members.map((m) => m.causal_at.getTime())),
+      'the group stands where the latest did',
     );
 
     const seen = await visibleTo(friend);

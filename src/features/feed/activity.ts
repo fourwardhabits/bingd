@@ -401,3 +401,111 @@ export function relativeTime(value: string): string {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
 }
+
+// ---------------------------------------------------------------------------
+// An activity session's sentence (20261130000900)
+// ---------------------------------------------------------------------------
+
+/** What a session post needs to be described: the server's summary of it. */
+export type SessionSubject = {
+  session: {
+    leadAction: 'ranked' | 'saved';
+    total: number;
+    ranked: number;
+    saved: number;
+  } | null;
+};
+
+export type SessionSentence = {
+  verb: string;
+  tail: string | null;
+  more: number;
+  moreLabel: string;
+  breakdown: string | null;
+};
+
+/**
+ * **How a session post reads** (founder spec, 2026-11-21).
+ *
+ *     Suraj ranked Kaiju No. 8 + 15 more             12m ago · 9 ranked · 7 saved
+ *     Suraj saved Dune + 3 more                      4m ago · 2 ranked · 2 saved
+ *     Suraj ranked Kaiju No. 8 + 6 more              12m ago
+ *     Suraj added Dune + 4 more to their watchlist   3m ago
+ *
+ * The verb is the newest action's, and it governs only the title it names, which is the
+ * newest title. "+ 15 more" is a count, not a second verb, so the sentence makes no claim
+ * about what was done to the others; a mixed session states the split exactly on the line
+ * under it, and every poster carries its own mark (a score when ranked, a bookmark when
+ * saved). The count is the link to the complete list.
+ *
+ * A session of saves alone keeps its established tail, "to their watchlist", because there
+ * every title was. A mixed session whose newest title was saved says "saved": "added Dune to
+ * their watchlist + 3 more" would split the sentence around the count and say "watchlist"
+ * of titles that were ranked.
+ *
+ * Null for anything that is not a session of two or more titles; those keep their own
+ * sentences.
+ */
+export function sessionSentence(event: SessionSubject): SessionSentence | null {
+  const session = event.session;
+  if (!session || session.total < 2) return null;
+  const onlySaves = session.saved >= session.total;
+  const mixed = session.ranked > 0 && session.saved > 0;
+  const more = session.total - 1;
+  return {
+    verb: session.leadAction === 'ranked' ? 'ranked' : onlySaves ? 'added' : 'saved',
+    tail: onlySaves ? 'to their watchlist' : null,
+    more,
+    moreLabel: `${more} more`,
+    breakdown: mixed ? `${session.ranked} ranked · ${session.saved} saved` : null,
+  };
+}
+
+export type TailAction = { connector: string; label: string; onPress: () => void };
+
+/**
+ * **The whole sentence of one activity, for every surface that draws a post** (Feed, own
+ * profile, somebody's profile, the conversation page), so the four cannot disagree about how
+ * a session reads or when a post is a group.
+ *
+ *   * a session (20261130000900): `sessionSentence`, with "+ N more" opening the post's
+ *     list: the ranking sheet for a ranking group, the watchlist sheet for saves alone;
+ *   * a legacy ranking group: "ranked Sheroes and 2 more" (20261023000100);
+ *   * a legacy watchlist group: "added Dune and 4 others to their watchlist";
+ *   * anything else: its verb and tail, as before.
+ *
+ * `openRanking` may be absent on a surface with no ranking sheet; the count is then plain.
+ */
+export function activitySentence(
+  event: SessionSubject & {
+    id: string;
+    type: ActivityType;
+    update?: boolean;
+    title?: string | null;
+    rankedCount?: number | null;
+    watchlistCount?: number | null;
+  },
+  open: { ranking?: () => void; watchlist: (eventId: string) => void },
+): { verb: string; tail: string | null; tailAction: TailAction | null; breakdown: string | null } {
+  const session = sessionSentence(event);
+  if (session) {
+    const onPress =
+      event.type === 'ranking_batch' ? open.ranking : () => open.watchlist(event.id);
+    return {
+      verb: session.verb,
+      tail: onPress ? session.tail : [`+ ${session.moreLabel}`, session.tail].filter(Boolean).join(' '),
+      tailAction: onPress ? { connector: '+', label: session.moreLabel, onPress } : null,
+      breakdown: session.breakdown,
+    };
+  }
+  const batchMore = event.type === 'ranking_batch' ? Math.trunc(event.rankedCount ?? 1) - 1 : 0;
+  return {
+    verb: verbFor(event.type, event),
+    tail: tailFor(event.type, event.title),
+    tailAction:
+      batchMore > 0 && open.ranking
+        ? { connector: 'and', label: `${batchMore} more`, onPress: open.ranking }
+        : watchlistTailAction(event, open.watchlist),
+    breakdown: null,
+  };
+}
