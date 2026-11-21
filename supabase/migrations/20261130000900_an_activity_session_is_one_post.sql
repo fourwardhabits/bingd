@@ -1262,9 +1262,13 @@ grant execute on function feed_group_previews(uuid[], integer) to authenticated;
 -- ---------------------------------------------------------------------------
 
 /**
- * `_watchlist_group_keeps_its_post` (20261125000100) counting a post's members the way
- * every reader now does (`_group_members`), so a session post holding rankings and saves is
- * not recounted from its saves alone. Same locks, same representative rule.
+ * `_watchlist_group_keeps_its_post` (20261125000100) for every grouped post, not only a
+ * watchlist one (Codex, PR 354): a session's representative is its newest title, which may be
+ * a ranking with no watchlist membership, and `feed_events.media_item_id` cascades, so
+ * deleting that title from the catalogue would take the whole post and its conversation. The
+ * posts are found by representative as well as by watchlist membership; each takes its newest
+ * surviving member as representative and is counted the way every reader counts it
+ * (`_group_members`). A post with no surviving member is left to the cascade, as before.
  */
 create or replace function _watchlist_group_keeps_its_post()
 returns trigger
@@ -1277,9 +1281,14 @@ declare
   v_next  uuid;
 begin
   for v_group in
-    select distinct wt.event_id, wt.actor_id
+    select wt.event_id, wt.actor_id
       from feed_watchlist_titles wt
      where wt.media_item_id = old.id
+    union
+    select fe.id, fe.actor_id
+      from feed_events fe
+     where fe.media_item_id = old.id
+       and fe.type in ('ranking_batch', 'watchlist_added')
   loop
     perform _lock_activity_session(v_group.actor_id);
     perform 1 from feed_events where id = v_group.event_id for update;

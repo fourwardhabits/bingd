@@ -547,6 +547,31 @@ describe('engagement, privacy and links', () => {
   });
 });
 
+describe('a catalogue delete', () => {
+  it('of a session’s ranked representative keeps the post and its conversation (Codex, PR 354)', async () => {
+    const saved = await save('Kept');
+    const ranked = await rank('Deleted');
+    const [post] = await visibleTo(friend);
+    assert.equal(post.media_item_id, ranked.id, 'the ranking leads');
+    await t.actAs(friend);
+    await t.sql(`select add_comment($1, $2, 'keep this', false)`, [await uuid(), post.id]);
+    await t.actAs(user);
+
+    await t.sql(`delete from media_items where id = $1`, [ranked.id]);
+
+    const after = await posts();
+    const kept = after.find((p) => p.id === post.id);
+    assert.ok(kept, 'the post survived');
+    assert.equal(kept.media_item_id, saved, 'its surviving title leads');
+    assert.equal(kept.payload.count, 1);
+    const { rows } = await t.sql(
+      `select count(*)::int as n from comments where feed_event_id = $1`,
+      [post.id],
+    );
+    assert.equal(rows[0].n, 1, 'and its conversation');
+  });
+});
+
 describe('recency and pagination', () => {
   /** The Feed's own keyset, as `activityRows` sends it, for `viewer`. */
   const page = (viewer, actors, cursor, limit) =>
