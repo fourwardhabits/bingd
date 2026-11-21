@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { render, screen, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { theme } from '../tokens';
@@ -130,5 +131,59 @@ describe('Button size="sm" slop', () => {
       top: 6,
       bottom: 2,
     });
+  });
+});
+
+/**
+ * **A glyph before the label** (title actions polish, 2026-11-21): the small icon,
+ * `space[2]` before the word, in the label's own ink. Absent, nothing changes.
+ */
+describe('Button icon', () => {
+  const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+    String.fromCodePoint(Ionicons.glyphMap[name] as number);
+
+  it('draws the icon before the word, at the small size, in the fill’s ink', async () => {
+    await render(<Button label="Recommend" icon="paper-plane-outline" onPress={() => {}} />);
+    const icon = screen.getByText(glyph('paper-plane-outline'), { includeHiddenElements: true });
+    expect(StyleSheet.flatten(icon.props.style)).toMatchObject({
+      fontSize: theme.layout.icon.sm,
+      color: theme.text.inverse,
+    });
+    // The nearest row above the glyph is the icon-and-word line.
+    let node = icon.parent;
+    while (node && StyleSheet.flatten(node.props.style)?.flexDirection !== 'row') node = node.parent;
+    expect(StyleSheet.flatten(node?.props.style)).toMatchObject({
+      flexDirection: 'row',
+      gap: theme.space[2],
+    });
+    expect(node && within(node).getByText('Recommend')).toBeTruthy();
+    // The word alone is the spoken name; the glyph is hidden from assistive technology.
+    expect(screen.getByRole('button', { name: 'Recommend' }).props.accessibilityLabel).toBe(
+      'Recommend',
+    );
+    expect(icon.props.accessibilityElementsHidden).toBe(true);
+  });
+
+  it('inks the icon as the label for a secondary button', async () => {
+    await render(
+      <Button label="Share off bingd" kind="secondary" icon="share-outline" onPress={() => {}} />,
+    );
+    expect(StyleSheet.flatten(screen.getByText(glyph('share-outline'), { includeHiddenElements: true }).props.style)).toMatchObject({
+      color: theme.text.primary,
+    });
+  });
+
+  it('keeps the label’s fit rules with an icon beside it', async () => {
+    await render(<Button label="Share off bingd" icon="share-outline" fit onPress={() => {}} />);
+    const word = screen.getByText('Share off bingd');
+    expect(word.props.numberOfLines).toBe(1);
+    expect(word.props.adjustsFontSizeToFit).toBe(true);
+    expect(word.props.minimumFontScale).toBe(0.85);
+    expect(StyleSheet.flatten(word.props.style)).toMatchObject({ flexShrink: 1 });
+  });
+
+  it('draws no icon when none is asked for', async () => {
+    await render(<Button label="Done" onPress={() => {}} />);
+    expect(screen.queryByText(glyph('paper-plane-outline'), { includeHiddenElements: true })).toBeNull();
   });
 });

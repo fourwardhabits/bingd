@@ -1,4 +1,6 @@
-import { Share } from 'react-native';
+import type { Ionicons } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
+import { Platform, Share } from 'react-native';
 
 import { compactName, type MediaKind } from '@/lib/titles';
 
@@ -11,6 +13,14 @@ export type ShareableTitle = {
   seriesTitle?: string | null;
   seasonNumber?: number | null;
 };
+
+/**
+ * **Share off bingd's glyph**: each platform's own share symbol, so the control reads as
+ * "through another app" rather than as a second Recommend. Drawn on the Recommend sheet's
+ * Share off bingd button (it was the title page's ⋯ row in #350).
+ */
+export const SHARE_ICON: ComponentProps<typeof Ionicons>['name'] =
+  Platform.OS === 'android' ? 'share-social-outline' : 'share-outline';
 
 /**
  * The link an off-platform title share carries: one segment, `media_items.id`.
@@ -43,9 +53,8 @@ export function titleShareMessage(subject: ShareableTitle, note?: string | null)
 /**
  * **Share off bingd**: the native share sheet, carrying the title's link.
  *
- * One implementation for both doors into it — the Recommend sheet's secondary button and
- * the title page's ⋯ menu (title actions menu, 2026-11-21) — so the two can never send
- * different messages. Rejects when the operating system could not open the sheet; the
+ * Its one door is the Recommend sheet's secondary button; the title page's ⋯ row that
+ * also called it (#350) was removed on the founder's review of the live build. Rejects when the operating system could not open the sheet; the
  * caller decides where that is said.
  */
 export async function shareTitleOffBingd(

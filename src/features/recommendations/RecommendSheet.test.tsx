@@ -1,12 +1,13 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Share, useWindowDimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Share, StyleSheet, useWindowDimensions } from 'react-native';
 
 import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { ANDROID_NAV_INSET, renderWithProviders } from '@/test-utils/render';
-import { StyleSheet } from 'react-native';
 import { theme } from '@/ui/tokens';
 
 import { RecommendSheet } from './RecommendSheet';
+import { SHARE_ICON } from './share-title';
 import { filterRecipients, type Recipient } from './use-recommend';
 
 // A fresh id every call, so a module-level constant cannot pass for a generator — and so
@@ -673,14 +674,18 @@ describe('the footer at different widths', () => {
     expect(layout(view).flexDirection).toBe('row');
   });
 
-  // 360 is the narrowest width in ordinary use — a small Android, an iPhone 12 mini.
-  // The pair still fits there, and must, or the common device gets the taller layout.
-  it('still fits the pair on the narrowest ordinary Android', async () => {
-    setViewport(360);
+  /**
+   * **Each action carries its glyph since 2026-11-21**, and a glyph does not shrink, so
+   * the pair needs about 400pt to sit side by side. 360 and 390 stack: two full-width
+   * buttons, each word at its own size, rather than `Share off bingd` squeezed under
+   * `fit`'s 85% floor beside its icon, which is where it would clip.
+   */
+  it.each([360, 375, 390, 393])('stacks the pair, icons and all, at %ipt', async (width) => {
+    setViewport(width);
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    expect(layout(view).flexDirection).toBe('row');
+    expect(layout(view).flexDirection).toBe('column');
   });
 
   it('stacks them on a 320-class screen rather than crushing either', async () => {
@@ -717,9 +722,9 @@ describe('the footer at different widths', () => {
   });
 
   it('still pairs a large phone at a slightly larger type size', async () => {
-    // 412 at 1.15 has room for both at their scaled width, so the pair survives — the
+    // 430 at 1.05 has room for both at their scaled width, so the pair survives — the
     // rule is a measurement, not a blanket refusal above default type.
-    setViewport(412, 1.15);
+    setViewport(430, 1.05);
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
@@ -756,6 +761,54 @@ describe('the footer at different widths', () => {
     for (const label of ['Recommend', 'Share off bingd']) {
       expect(view.getByText(label).props.numberOfLines).toBe(1);
     }
+  });
+
+  /**
+   * **A glyph beside each word** (title actions polish, 2026-11-21): Recommend's paper
+   * plane and the platform's share symbol on Share off bingd — `Button`'s icon, the small
+   * size in the label's own ink, before the word.
+   */
+  it('draws the paper plane on Recommend and the share symbol on Share off bingd', async () => {
+    setViewport(412);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+      String.fromCodePoint(Ionicons.glyphMap[name] as number);
+
+    const send = view.getByTestId('recommend-send');
+    const share = view.getByTestId('recommend-share');
+    expect(within(send).getByText(glyph('paper-plane-outline'), { includeHiddenElements: true })).toBeTruthy();
+    expect(within(share).getByText(glyph(SHARE_ICON), { includeHiddenElements: true })).toBeTruthy();
+    // The word is still there, and still what the button is called.
+    expect(within(send).getByText('Recommend')).toBeTruthy();
+    expect(within(share).getByText('Share off bingd')).toBeTruthy();
+    // The icon is the label's ink and the small icon size.
+    const flat = (node: { props: { style?: unknown } }) =>
+      StyleSheet.flatten(node.props.style as never) as { color?: unknown; fontSize?: unknown };
+    expect(flat(within(send).getByText(glyph('paper-plane-outline'), { includeHiddenElements: true }))).toMatchObject({
+      fontSize: theme.layout.icon.sm,
+      color: theme.text.inverse,
+    });
+    expect(flat(within(share).getByText(glyph(SHARE_ICON), { includeHiddenElements: true }))).toMatchObject({
+      fontSize: theme.layout.icon.sm,
+      color: theme.text.primary,
+    });
+  });
+
+  it('keeps both icons through the disabled and loading states', async () => {
+    setViewport(412);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    // Nobody chosen: Recommend is disabled with its reason, and still shows its glyph.
+    const send = view.getByTestId('recommend-send');
+    expect(send.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(send.props.accessibilityHint).toBe('Choose somebody to recommend to.');
+    expect(
+      within(send).getByText(String.fromCodePoint(Ionicons.glyphMap['paper-plane-outline'] as number), {
+        includeHiddenElements: true,
+      }),
+    ).toBeTruthy();
   });
 
   it('offers Share off bingd whatever the selection is', async () => {

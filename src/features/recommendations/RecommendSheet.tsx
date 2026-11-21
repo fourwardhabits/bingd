@@ -15,7 +15,7 @@ import {
   useRecommendTitle,
   type Recipient,
 } from './use-recommend';
-import { shareTitleOffBingd } from './share-title';
+import { SHARE_ICON, shareTitleOffBingd } from './share-title';
 
 /** The counter appears only this close to the limit, so an ordinary note shows no number. */
 const NOTE_COUNTER_FROM = 20;
@@ -46,7 +46,17 @@ export type RecommendSheetProps = {
  * label shrunk toward `fit`'s 85% floor beside a short one is the imbalance this
  * constant exists to prevent, not a smaller version of a working layout.
  */
-const ACTION_MIN_WIDTH = 150;
+const ACTION_LABEL_MIN_WIDTH = 150;
+/**
+ * **The glyph each action carries before its word** (title actions polish, 2026-11-21): the
+ * paper plane on Recommend, the platform's share symbol on Share off bingd. `Button`
+ * draws it at the small icon size, `space[2]` before the label, and it never shrinks, so
+ * it is added to the floor at full size rather than scaled with the type. The pair now
+ * sits side by side from about 400pt (a 412pt Android, a Plus or Max iPhone) and stacks
+ * below that: two full-width rows rather than labels pushed under `fit`'s 85% floor,
+ * which is where `Share off bingd` would clip.
+ */
+const ACTION_ICON_WIDTH = theme.layout.icon.sm + theme.space[2];
 
 /** "Ada", "Ada and Bo", "Ada, Bo and Cy" — names the way a sentence holds them. */
 const listNames = (names: string[]): string =>
@@ -122,7 +132,8 @@ export function RecommendSheet({
    */
   const { width, fontScale } = useWindowDimensions();
   const sideBySide =
-    width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * fontScale * 2 + theme.space[3];
+    width - theme.layout.gutter * 2 >=
+    (ACTION_LABEL_MIN_WIDTH * fontScale + ACTION_ICON_WIDTH) * 2 + theme.space[3];
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /**
@@ -289,8 +300,7 @@ export function RecommendSheet({
      * The link is one segment, `media_items.id` (it used to be `/title/<kind>/<id>`, which
      * no route serves), and a typed note leads the message (20260929000100): it was written
      * for this title and this sheet, and sending the title without it would drop words the
-     * person just typed. Both live in `share-title.ts` since 2026-11-21, so the title page's
-     * ⋯ → Share off bingd sends exactly this message.
+     * person just typed. Both live in `share-title.ts` since 2026-11-21.
      */
     try {
       await shareTitleOffBingd({ mediaItemId, kind, title, seriesTitle, seasonNumber }, note);
@@ -444,6 +454,8 @@ export function RecommendSheet({
           <View style={sideBySide ? styles.half : undefined}>
             <Button
               label={sending ? 'Sending…' : 'Recommend'}
+              icon="paper-plane-outline"
+              testID="recommend-send"
               fit
               onPress={() => void recommendSelected()}
               disabled={sending || selected.size === 0}
@@ -457,6 +469,8 @@ export function RecommendSheet({
           <Button
             label={sharing ? 'Opening…' : 'Share off bingd'}
             kind="secondary"
+            icon={SHARE_ICON}
+            testID="recommend-share"
             fit
             onPress={() => void shareOffPlatform()}
             disabled={sharing}

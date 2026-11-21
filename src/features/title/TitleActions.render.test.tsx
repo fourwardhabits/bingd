@@ -8,6 +8,7 @@ import { paperAlpha, theme } from '@/ui/tokens';
 import {
   RANK_LABEL,
   RANK_LABEL_MAX_SCALE,
+  RANK_LABEL_MIN_FIT,
   RANK_SLOP,
   RANK_VISIBLE_HEIGHT,
   TitleActions,
@@ -36,19 +37,20 @@ const action = (label: string, ranked = false) => (
       onPress: jest.fn(),
     }}
     save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
+    recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
     more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
   />
 );
 
 describe('the title action cluster', () => {
   it.each([RANK_LABEL.movie, RANK_LABEL.series, RANK_LABEL.season])(
-    'keeps "%s" and both icons on one row',
+    'keeps "%s" and all three icons on one row',
     async (label) => {
       const view = await renderWithProviders(action(label));
       const cluster = view.getByTestId('title-actions');
       expect(StyleSheet.flatten(cluster.props.style).flexWrap).toBe('nowrap');
       expect(StyleSheet.flatten(cluster.props.style).flexDirection).toBe('row');
-      for (const id of ['title-action-save', 'title-action-more']) {
+      for (const id of ['title-action-save', 'title-action-recommend', 'title-action-more']) {
         expect(within(cluster).getByTestId(id)).toBeTruthy();
       }
     },
@@ -61,7 +63,9 @@ describe('the title action cluster', () => {
     expect(label.props.numberOfLines).toBe(1);
     expect(label.props.adjustsFontSizeToFit).toBe(true);
     expect(label.props.maxFontSizeMultiplier).toBe(RANK_LABEL_MAX_SCALE);
-    expect(label.props.minimumFontScale).toBeGreaterThanOrEqual(0.7);
+    // The floor is 0.7 of the *default* size (2026-11-21): expressed against the 1.5x the
+    // label is drawn at under this runner's 2x text, and never smaller than that.
+    expect(label.props.minimumFontScale * RANK_LABEL_MAX_SCALE).toBeCloseTo(RANK_LABEL_MIN_FIT);
   });
 
   it('lets only the labelled control give width back', async () => {
@@ -79,7 +83,7 @@ describe('the title action cluster', () => {
 
   it('keeps each icon a fixed box whose slop clears 44pt', async () => {
     const view = await renderWithProviders(action(RANK_LABEL.season));
-    for (const id of ['title-action-save', 'title-action-more']) {
+    for (const id of ['title-action-save', 'title-action-recommend', 'title-action-more']) {
       const icon = view.getByTestId(id);
       const style = StyleSheet.flatten(
         typeof icon.props.style === 'function'
@@ -114,6 +118,7 @@ describe('the filled Rank control', () => {
         onPress: jest.fn(),
       }}
       save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
+      recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
       more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
     />
   );
@@ -180,7 +185,7 @@ describe('the filled Rank control', () => {
 
   it('keeps the icon controls beside it at a 44pt target', async () => {
     const view = await renderWithProviders(unranked(RANK_LABEL.movie));
-    for (const id of ['title-action-save', 'title-action-more']) {
+    for (const id of ['title-action-save', 'title-action-recommend', 'title-action-more']) {
       const icon = view.getByTestId(id);
       const style = flat(icon);
       expect(
@@ -195,6 +200,7 @@ describe('the filled Rank control', () => {
       <TitleActions
         rank={{ ranked: true, accessibilityLabel: 'Ranked', onPress: jest.fn() }}
         save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
+        recommend={{ accessibilityLabel: 'Recommend', onPress: jest.fn() }}
         more={{ accessibilityLabel: 'More options', onPress: jest.fn() }}
       />,
     );
@@ -228,10 +234,10 @@ describe('the filled Rank control', () => {
    * cluster never wraps.
    */
   it.each(Object.values(RANK_LABEL))(
-    'holds "%s" and both icons on one row at 320pt',
+    'holds "%s" and all three icons on one row at 320pt',
     async (label) => {
       const narrow = 320 - theme.layout.gutter * 2;
-      expect(titleActionsFit(narrow, 1, { rank: true, icons: 2, label })).toBe(true);
+      expect(titleActionsFit(narrow, 1, { rank: true, icons: 3, label })).toBe(true);
       const view = await renderWithProviders(unranked(label));
       const cluster = StyleSheet.flatten(view.getByTestId('title-actions').props.style);
       expect(cluster.flexWrap).toBe('nowrap');
@@ -240,12 +246,16 @@ describe('the filled Rank control', () => {
 });
 
 /**
- * **Exactly three controls, in the founder's order** (final specification, 2026-11-21):
- * the labelled rank control, the one-tap bookmark, and the ⋯ that used to be the top bar's.
- * Recommend and Add to List are menu rows now, and nothing else is on the row.
+ * **Exactly four controls, in the founder's order** (review of the live build, 2026-11-21):
+ * the labelled rank control, the one-tap bookmark, Recommend's paper plane, and the ⋯.
+ * Add to List stays a menu row, and nothing else is on the row.
  */
-describe('the three-control row', () => {
-  const row = (ranked: boolean, tone: 'paper' | 'artwork', onMore = jest.fn()) => (
+describe('the four-control row', () => {
+  const row = (
+    ranked: boolean,
+    tone: 'paper' | 'artwork',
+    { onMore = jest.fn(), onRecommend = jest.fn() } = {},
+  ) => (
     <TitleActions
       tone={tone}
       rank={{
@@ -257,16 +267,19 @@ describe('the three-control row', () => {
         onPress: jest.fn(),
       }}
       save={{ accessibilityLabel: 'Add Heat to your watchlist', onPress: jest.fn() }}
+      recommend={{ accessibilityLabel: 'Recommend Heat to a friend', onPress: onRecommend }}
       more={{ accessibilityLabel: 'More options for Heat', onPress: onMore }}
     />
   );
+  const glyph = (name: keyof typeof Ionicons.glyphMap) =>
+    String.fromCodePoint(Ionicons.glyphMap[name] as number);
 
   it.each([
     [false, 'paper'],
     [true, 'paper'],
     [false, 'artwork'],
     [true, 'artwork'],
-  ] as const)('ranked=%s on %s: rank, bookmark, ⋯ and nothing else', async (ranked, tone) => {
+  ] as const)('ranked=%s on %s: rank, bookmark, Recommend, ⋯ and nothing else', async (ranked, tone) => {
     const view = await renderWithProviders(row(ranked, tone));
     const cluster = view.getByTestId('title-actions');
     const buttons = within(cluster)
@@ -275,10 +288,10 @@ describe('the three-control row', () => {
     expect(buttons).toEqual([
       ranked ? 'title-action-ranked' : 'title-action-rank',
       'title-action-save',
+      'title-action-recommend',
       'title-action-more',
     ]);
     expect(within(cluster).queryByTestId('title-action-list')).toBeNull();
-    expect(within(cluster).queryByTestId('title-action-recommend')).toBeNull();
   });
 
   it('names every control for a screen reader, in reading order', async () => {
@@ -289,22 +302,49 @@ describe('the three-control row', () => {
     expect(labels).toEqual([
       'Log a rewatch of Heat',
       'Add Heat to your watchlist',
+      'Recommend Heat to a friend',
       'More options for Heat',
     ]);
   });
 
+  it('draws Recommend as the paper plane, the pre-#350 control, and sends on one tap', async () => {
+    const onRecommend = jest.fn();
+    const view = await renderWithProviders(row(false, 'paper', { onRecommend }));
+    const recommend = view.getByTestId('title-action-recommend');
+    expect(within(recommend).getByText(glyph('paper-plane-outline'))).toBeTruthy();
+    // No selected state: sending is not a toggle.
+    expect(recommend.props.accessibilityState).toMatchObject({ selected: false, disabled: false });
+    // The same fixed box and slop as the bookmark beside it: a 44pt target.
+    const style = StyleSheet.flatten(
+      typeof recommend.props.style === 'function'
+        ? recommend.props.style({ pressed: false })
+        : recommend.props.style,
+    );
+    expect(style.width + recommend.props.hitSlop.left + recommend.props.hitSlop.right).toBeGreaterThanOrEqual(44);
+    expect(style.height).toBe(theme.layout.minTapTarget);
+    await fireEvent.press(recommend);
+    expect(onRecommend).toHaveBeenCalledTimes(1);
+  });
+
   it('draws the ⋯ as the horizontal ellipsis and opens it on one tap', async () => {
     const onMore = jest.fn();
-    const view = await renderWithProviders(row(false, 'artwork', onMore));
+    const view = await renderWithProviders(row(false, 'artwork', { onMore }));
     const more = view.getByTestId('title-action-more');
-    expect(
-      within(more).getByText(
-        String.fromCodePoint(Ionicons.glyphMap['ellipsis-horizontal'] as number),
-      ),
-    ).toBeTruthy();
+    expect(within(more).getByText(glyph('ellipsis-horizontal'))).toBeTruthy();
     // Never a toggle: it has no selected state to announce.
     expect(more.props.accessibilityState).toMatchObject({ selected: false, disabled: false });
     await fireEvent.press(more);
     expect(onMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no Recommend when the screen passes none', async () => {
+    const view = await renderWithProviders(
+      <TitleActions
+        rank={null}
+        save={{ accessibilityLabel: 'Save', onPress: jest.fn() }}
+        more={{ accessibilityLabel: 'More', onPress: jest.fn() }}
+      />,
+    );
+    expect(view.queryByTestId('title-action-recommend')).toBeNull();
   });
 });

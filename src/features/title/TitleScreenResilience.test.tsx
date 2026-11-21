@@ -353,7 +353,7 @@ describe('the three kinds of title', () => {
     );
   });
 
-  it('renders a series with the same actions as a film: Rank Show, save, ⋯', async () => {
+  it('renders a series with the same actions as a film: Rank Show, save, Recommend, ⋯', async () => {
     const view = await openOn(completeSeries, 'The Last of Us');
 
     // A whole show is ranked in its own pool since 2026-11-14, so its page carries the
@@ -361,8 +361,8 @@ describe('the three kinds of title', () => {
     expect(view.getByTestId('scores-section')).toBeTruthy();
     expect(within(view.getByTestId('title-action-rank')).getByText('Rank Show')).toBeTruthy();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
+    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
     expect(view.getByTestId('title-action-more')).toBeTruthy();
-    expect(view.queryByTestId('title-action-recommend')).toBeNull();
   });
 });
 
@@ -924,7 +924,7 @@ describe('the personal score', () => {
 });
 
 describe('the action group', () => {
-  it('reads Log rewatch, Save and ⋯ for a ranked title', async () => {
+  it('reads Log rewatch, Save, Recommend and ⋯ for a ranked title', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
@@ -937,8 +937,8 @@ describe('the action group', () => {
     expect(within(view.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
     expect(view.queryByText('Ranked')).toBeNull();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
+    expect(view.getByTestId('title-action-recommend')).toBeTruthy();
     expect(view.getByTestId('title-action-more')).toBeTruthy();
-    expect(view.queryByTestId('title-action-recommend')).toBeNull();
     expect(view.queryByTestId('title-action-rank')).toBeNull();
   });
 
@@ -1268,9 +1268,14 @@ describe('where the action row lives', () => {
     ).toBeNull();
   });
 
-  it('stays beside the poster on a standard phone, measured by the word it says', async () => {
-    // Rank Movie, Save and ⋯ fit a 393pt column; the longer Log rewatch needs a 402.
-    setViewport(393);
+  /**
+   * **Four controls fit beside the poster only on the widest phones** (2026-11-21). Rank
+   * Movie, Save, Recommend and ⋯ need a 430pt column at default text; every narrower
+   * phone, and every ranked title (Log rewatch is the longer word), takes the existing
+   * full-width row under the poster instead of crowding the column.
+   */
+  it('stays beside the poster on a 430pt phone, measured by the word it says', async () => {
+    setViewport(430);
     const view = await openOn(completeFilm, 'Inception');
     await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
 
@@ -1280,16 +1285,55 @@ describe('where the action row lives', () => {
     expect(view.queryByTestId('title-actions-full-width')).toBeNull();
   });
 
-  it('keeps a ranked title’s Log rewatch beside the poster on a 402pt phone', async () => {
-    setViewport(402);
-    rankIt('film-1', 'movies');
+  it.each([
+    [360, 'unranked'],
+    [390, 'unranked'],
+    [412, 'unranked'],
+    [360, 'ranked'],
+    [390, 'ranked'],
+    [412, 'ranked'],
+    [430, 'ranked'],
+    [360, 'logged'],
+    [390, 'logged'],
+    [412, 'logged'],
+  ] as const)('takes the full-width row at %ipt for a %s title', async (width, state) => {
+    setViewport(width);
+    if (state === 'ranked') rankIt('film-1', 'movies');
+    if (state === 'logged') {
+      tableRows.user_media = [
+        {
+          user_id: 'user-1',
+          media_item_id: 'film-1',
+          bucket: null,
+          watched_on: '2026-08-30',
+          note: null,
+          note_visibility: 'private',
+          note_has_spoilers: false,
+        },
+      ];
+    }
     const view = await openOn(completeFilm, 'Inception');
-    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        view.getByTestId(state === 'ranked' ? 'title-action-ranked' : 'title-action-rank'),
+      ).toBeTruthy(),
+    );
 
+    const below = view.getByTestId('title-actions-full-width');
     expect(
-      within(view.getByTestId('title-identity-copy')).getByTestId('title-actions'),
-    ).toBeTruthy();
-    expect(view.queryByTestId('title-actions-full-width')).toBeNull();
+      within(below)
+        .getAllByRole('button')
+        .map((node) => node.props.testID),
+    ).toEqual([
+      state === 'ranked' ? 'title-action-ranked' : 'title-action-rank',
+      'title-action-save',
+      'title-action-recommend',
+      'title-action-more',
+    ]);
+    expect(
+      within(view.getByTestId('title-identity-copy')).queryByTestId('title-actions'),
+    ).toBeNull();
+    expect(flat(view.getByTestId('title-actions').props.style).flexWrap).toBe('nowrap');
   });
 
   it('moves at a larger text size on that same phone', async () => {
@@ -1302,12 +1346,12 @@ describe('where the action row lives', () => {
   });
 
   /**
-   * **The three-control row at its hardest** (2026-11-21): a 320pt phone at the largest
+   * **The four-control row at its hardest** (2026-11-21): a 320pt phone at the largest
    * accessibility text size. The row moves under the poster, stays one row that never
-   * wraps, the word fits itself rather than being cut, and the bookmark and the ⋯ keep
-   * their 44pt targets.
+   * wraps, the word fits itself down to its floor (0.7 of its default size, never less)
+   * rather than being cut, and the bookmark, Recommend and the ⋯ keep their 44pt targets.
    */
-  it('keeps Log rewatch, the bookmark and the ⋯ on one row at 320pt and 3.1x text', async () => {
+  it('keeps Log rewatch, the bookmark, Recommend and the ⋯ on one row at 320pt and 3.1x text', async () => {
     setViewport(320, 3.1);
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
@@ -1324,7 +1368,20 @@ describe('where the action row lives', () => {
     expect(label.props.numberOfLines).toBe(1);
     expect(label.props.adjustsFontSizeToFit).toBe(true);
     expect(label.props.maxFontSizeMultiplier).toBe(1.5);
-    for (const id of ['title-action-save', 'title-action-more']) {
+    // The floor is absolute: 0.7 of the default size, expressed against the 1.5x drawn.
+    expect(label.props.minimumFontScale * 1.5).toBeCloseTo(0.7);
+    // Read in the order it is drawn.
+    expect(
+      within(view.getByTestId('title-actions'))
+        .getAllByRole('button')
+        .map((node) => node.props.accessibilityLabel),
+    ).toEqual([
+      'Log a rewatch of Inception',
+      'Add Inception to your watchlist',
+      'Recommend Inception to a friend',
+      'More options for Inception',
+    ]);
+    for (const id of ['title-action-save', 'title-action-recommend', 'title-action-more']) {
       const icon = view.getByTestId(id);
       const style = flat(icon.props.style);
       expect(
@@ -1465,10 +1522,11 @@ describe('where the action row lives', () => {
 describe('the ⋯ menu, in the founder’s words', () => {
   it('names one editing row, and none of the rows it replaced', async () => {
     /**
-     * **The founder's final menu, 2026-11-21**: Recommend to a friend, Share off bingd,
-     * Add to list, Edit ranking / Add note, and Remove from collection set apart. The four
-     * rows the editing one replaces — the note, Who I watched with, Rerank and Log another
-     * watch — are gone from it; a rewatch is the row's Log rewatch.
+     * **The founder's menu, 2026-11-21** (review of the live build): Add to list, Edit
+     * ranking / Add note, and Remove from collection. Recommend and Share off bingd are not
+     * in it (the row's paper plane opens the sheet that has both). The four rows the editing
+     * one replaced — the note, Who I watched with, Rerank and Log another watch — are gone;
+     * a rewatch is the row's Log rewatch.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
@@ -1478,8 +1536,6 @@ describe('the ⋯ menu, in the founder’s words', () => {
 
     const menu = within(view.getByTestId('title-menu'));
     expect(menu.getAllByRole('button').map((node) => node.props.accessibilityLabel)).toEqual([
-      'Recommend to a friend',
-      'Share off bingd',
       'Add to list',
       expect.stringMatching(/^Edit ranking \//),
       'Remove from collection',
@@ -1501,6 +1557,8 @@ describe('the ⋯ menu, in the founder’s words', () => {
       'Adjust placement',
       'I watched it again',
       'Recompare',
+      'Recommend to a friend',
+      'Share off bingd',
     ]) {
       expect(menu.queryByText(gone)).toBeNull();
     }

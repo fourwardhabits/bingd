@@ -64,7 +64,6 @@ import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { AddToListSheet } from '@/features/lists/AddToListSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
-import { shareTitleOffBingd } from '@/features/recommendations/share-title';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
@@ -409,12 +408,11 @@ export default function TitleScreen() {
   const pendingReviewWrite = useRef(false);
   const [recommending, setRecommending] = useState(false);
   /**
-   * The ⋯ menu, on the action row since 2026-11-21: Recommend to a friend, Share off
-   * bingd, Add to list, the one *Edit ranking / Add note* door into the log sheet, and
-   * Remove from collection set apart at the foot.
+   * The ⋯ menu, last on the action row since 2026-11-21: Add to list, the one *Edit
+   * ranking / Add note* door into the log sheet, and Remove from collection.
    *
-   * It opens for **every** title: the first three rows apply whether or not this account
-   * has ever touched the thing. The last two are gated on what is there to edit.
+   * It opens for **every** title: Add to list applies whether or not this account has
+   * ever touched the thing. The other two are gated on what is there to edit.
    */
   const [managing, setManaging] = useState(false);
   /** `Add to list`, opened from the menu above. */
@@ -1585,36 +1583,9 @@ export default function TitleScreen() {
     );
   };
 
-  /**
-   * **Share off bingd, from the ⋯** (title actions menu, 2026-11-21): the native share
-   * sheet with this title's link, the same message the Recommend sheet's *Share off bingd*
-   * sends (`share-title.ts`). No note, because the menu has no field for one, and no
-   * write: sharing outside the app records nothing on bingd.
-   */
-  const shareOffBingd = async () => {
-    try {
-      await shareTitleOffBingd({
-        mediaItemId: title.id,
-        kind: title.kind,
-        title: displayTitle ?? title.title,
-        seriesTitle: parent?.title ?? null,
-        seasonNumber: title.season_number ?? null,
-      });
-    } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : 'Sharing failed.');
-    }
-  };
-
   /** Where each ⋯ row goes once the menu has gone. */
   const openMenuDestination = (to: MenuDestination) => {
     switch (to) {
-      case 'recommend':
-        setRecommendedTo(null);
-        setRecommending(true);
-        return;
-      case 'share':
-        void shareOffBingd();
-        return;
       case 'list':
         setAddingToList(true);
         return;
@@ -1671,8 +1642,8 @@ export default function TitleScreen() {
 
 
   /**
-   * **Rank, Save, ⋯: beside the poster where they fit, under it where they do not**
-   * (founder, Growth UX sprint, 2026-11-02; three controls since 2026-11-21).
+   * **Rank, Save, Recommend, ⋯: beside the poster where they fit, under it where they do
+   * not** (founder, Growth UX sprint, 2026-11-02; four controls again since 2026-11-21).
    *
    * Decided from the viewport rather than left to `flexWrap`, which on a 375pt phone put the
    * last glyph on a line of its own. The controls, their order and their sizes do not
@@ -1689,7 +1660,8 @@ export default function TitleScreen() {
   const rankLabel = RANK_LABEL[title.kind as keyof typeof RANK_LABEL] ?? 'Rank';
   const actionsBesidePoster = titleActionsFit(identityColumn, fontScale, {
     rank: rankable,
-    icons: 2,
+    // Bookmark, Recommend and the ⋯ (2026-11-21).
+    icons: 3,
     label: data.ranked ? 'Log rewatch' : rankLabel,
   });
   /**
@@ -1735,8 +1707,24 @@ export default function TitleScreen() {
         onPress: () => void toggleWatchlist(),
         disabled: watchlistBusy,
       }}
-      // The page's menu, moved here from the top bar (2026-11-21). No sheet is open when
-      // this is pressed, so there is nothing to serialise against on the way in.
+      // **Recommend, back on the row** (founder's review of the live build, 2026-11-21):
+      // the pre-#350 control and handler, unchanged. The Recommend sheet it opens also
+      // carries Share off bingd. No sheet is open when this is pressed, so there is
+      // nothing to serialise against.
+      recommend={
+        rankable
+          ? {
+              accessibilityLabel: `Recommend ${title.title} to a friend`,
+              onPress: () => {
+                setActionError(null);
+                setRecommendedTo(null);
+                setRecommending(true);
+              },
+            }
+          : null
+      }
+      // The page's menu, last on the row (2026-11-21). No sheet is open when this is
+      // pressed, so there is nothing to serialise against on the way in.
       more={{
         accessibilityLabel: `More options for ${displayTitle ?? title.title}`,
         onPress: () => {
@@ -3340,9 +3328,9 @@ export default function TitleScreen() {
            * from the same presenter, React believes it succeeded, and what is left is a
            * transparent window that swallows every touch — the reproduced 2026-09-10
            * freeze (`Sheet.onDismissed`). Every row in this menu leaves it for something
-           * presented — the Recommend sheet, the native share sheet, the Add-to-list
-           * sheet, the log sheet, or the removal `Alert`, which is a `UIAlertController`
-           * from the same presenter — so every row waits (`leaveMenuFor`).
+           * presented — the Add-to-list sheet, the log sheet, or the removal `Alert`, which
+           * is a `UIAlertController` from the same presenter — so every row waits
+           * (`leaveMenuFor`).
            *
            * **Do not "simplify" this back into a pair of `setState` calls.** That is
            * exactly the shape of the bug, and the screen renders perfectly while it has
@@ -3357,38 +3345,22 @@ export default function TitleScreen() {
         >
           <View style={styles.menu} testID="title-menu">
             {/**
-             * **The founder's final menu, in this order** (2026-11-21):
+             * **The menu, in this order** (founder's review of the live build, 2026-11-21):
              *
-             *   Recommend to a friend   the in-app recommendation (`RecommendSheet`)
-             *   Share off bingd         the native share sheet, outside the app
              *   Add to list             `AddToListSheet`
              *   Edit ranking / Add note the log sheet, on the log that is already there
-             *   ─────
-             *   Remove from collection  the existing confirmation, set apart
+             *   Remove from collection  the existing confirmation
              *
-             * Recommend and Share are two rows rather than one, because they go to
-             * different people by different routes: a bingd friend, who gets it in Sent to
-             * you, versus anybody at all through another app. The Recommend sheet still
-             * carries its own *Share off bingd* button as well; both send the same message.
+             * Recommend to a friend and Share off bingd, which #350 put here, are gone: the
+             * row's paper plane opens the Recommend sheet, which carries both.
              *
-             * **One editing row, not four.** The rows this replaces — the note or review,
+             * **One editing row, not four.** The rows it replaced — the note or review,
              * Who I watched with, Rerank and Log another watch — were four doors, three of
              * them into the same sheet. The log sheet is where the band (the ranking
              * correction, which records no viewing), the note or review, the companions
              * and the watch date already live, each one tap from its top, so the menu opens
-             * it with nothing pre-expanded and the reader goes straight to the detail they
-             * came for. A rewatch is the action row's *Log rewatch*, never a menu row.
+             * it with nothing pre-expanded. A rewatch is the action row's *Log rewatch*.
              */}
-            <SheetRow
-              icon="paper-plane-outline"
-              label="Recommend to a friend"
-              onPress={() => leaveMenuFor('recommend')}
-            />
-            <SheetRow
-              icon={SHARE_ICON}
-              label="Share off bingd"
-              onPress={() => leaveMenuFor('share')}
-            />
             <SheetRow
               icon="list-outline"
               label="Add to list"
@@ -3416,18 +3388,16 @@ export default function TitleScreen() {
              * Letterboxd import had put the wrong film on somebody's shelf, logged and
              * unranked, and this menu was the only door to Remove. `removeFromCollection`
              * already skips `rank_unrank` when there is no ranking, and `unlog` has always
-             * accepted an unranked title. Last, and behind a rule, so it is never under a
-             * thumb reaching for something else; its confirmation is unchanged.
+             * accepted an unranked title. Last, so it is never under a thumb reaching for
+             * something else; its glyph and confirmation are unchanged. (#350's hairline
+             * rule above it is gone on the founder's review.)
              */}
             {data.ranked || data.logged ? (
-              <>
-                <View style={styles.menuRule} testID="title-menu-destructive-rule" />
-                <SheetRow
-                  icon="trash-outline"
-                  label="Remove from collection"
-                  onPress={() => leaveMenuFor('remove')}
-                />
-              </>
+              <SheetRow
+                icon="trash-outline"
+                label="Remove from collection"
+                onPress={() => leaveMenuFor('remove')}
+              />
             ) : null}
           </View>
         </Sheet>
@@ -3669,16 +3639,7 @@ function formatDate(date: string | null) {
  * token and not of the string: it is the same on every title in the catalogue.
  */
 /** Where a ⋯ row goes once the menu has gone (`leaveMenuFor`). */
-type MenuDestination = 'recommend' | 'share' | 'list' | 'edit' | 'remove';
-
-/**
- * Share off bingd's glyph: each platform's own share symbol, so the row reads as "through
- * another app" rather than as a second Recommend.
- */
-const SHARE_ICON = Platform.select({
-  android: 'share-social-outline',
-  default: 'share-outline',
-}) as 'share-outline';
+type MenuDestination = 'list' | 'edit' | 'remove';
 
 /** A stable empty list, so "nobody recommended this" is the same value every render. */
 const NO_RECOMMENDATIONS: TitleRecommendation[] = [];
@@ -3810,13 +3771,6 @@ const styles = StyleSheet.create({
     ...theme.elevation.e2,
   },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
-  // The rule that sets Remove from collection apart from the rows above it.
-  menuRule: {
-    height: StyleSheet.hairlineWidth * 2,
-    backgroundColor: theme.border.hairline,
-    marginHorizontal: theme.layout.gutter,
-    marginVertical: theme.space[2],
-  },
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],

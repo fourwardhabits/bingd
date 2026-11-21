@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { Text } from '@/ui/components';
 import { hapticSelection } from '@/ui/haptics';
@@ -9,8 +9,8 @@ import { brand, paperAlpha, theme } from '@/ui/tokens';
 /**
  * The icon controls' own width; `hitSlop` makes up the rest of the 44pt target.
  *
- * 32 since the fourth control (Add to List, founder QA 2026-09-21), and kept at 32 now the
- * row is three again (2026-11-21) so the bookmark's target is unchanged. The cluster still wraps
+ * 32 since the fourth control (Add to List, founder QA 2026-09-21), and four again since
+ * 2026-11-21 (Recommend back beside the ⋯). The cluster still wraps
  * as a last resort rather than truncate the one word the row exists to say, but the screen
  * moves it before that happens: see {@link titleActionsFit}.
  */
@@ -32,10 +32,32 @@ const HEADLINE_CHAR = RANKED_LABEL / 'Ranked'.length;
  * row** (TV show & season ranking, 2026-11-14). `Rank Season` and `Log rewatch` are twice
  * `Rank`, and the cluster is one row at every width now: beyond 1.5x the label is scaled
  * down to fit rather than wrapping the icons under it or being cut. 1.5x of `headline` is
- * still a 25pt word; the floor below keeps it at least 0.7 of that.
+ * still a 25pt word.
  */
 export const RANK_LABEL_MAX_SCALE = 1.5;
-const RANK_LABEL_MIN_FIT = 0.7;
+/**
+ * **The smallest the word ever draws, as a share of its default size** (title actions
+ * polish, 2026-11-21): 0.7, the floor this control has always had at the default text
+ * size — about 12pt for `Rank Season`, 10.5pt for the compact `Log rewatch`.
+ *
+ * It used to be 0.7 *of the scaled size*, which at 1.5x is 1.05x the default: with four
+ * controls on a 320pt phone at the largest text sizes the word could not shrink to the row
+ * and ellipsized (`Rank Sea…`). The floor is held in absolute terms instead (see
+ * {@link rankLabelMinimumScale}), so the word fits itself down to what it already draws at
+ * its tightest by default, and never below. At every width this app runs at the row needs
+ * no more than that (`TitleActions.test.ts`, "the four-control row").
+ */
+export const RANK_LABEL_MIN_FIT = 0.7;
+
+/**
+ * `minimumFontScale` for the word at this text size: {@link RANK_LABEL_MIN_FIT} of the
+ * *default* size, expressed against the size the label is drawn at (capped at
+ * {@link RANK_LABEL_MAX_SCALE}). At or below 1x this is 0.7, exactly as before.
+ */
+export function rankLabelMinimumScale(fontScale: number): number {
+  const drawn = Math.min(Math.max(fontScale, 1), RANK_LABEL_MAX_SCALE);
+  return RANK_LABEL_MIN_FIT / drawn;
+}
 
 /** The words this control can say, unranked, by kind (brief §8). */
 export const RANK_LABEL = {
@@ -178,11 +200,18 @@ export type TitleActionsProps = {
   /** The watchlist bookmark. Every kind of title has one, and it stays one tap. */
   save: IconAction;
   /**
-   * **The page's ⋯, on the row** (title actions menu, 2026-11-21). It used to be the top
-   * bar's right-hand control; the bar keeps Back alone now. Every title has it, ranked or
-   * not, because Recommend, Share off bingd and Add to list apply to every movie, season
-   * and whole show. Never selected, and it opens a menu rather than adding anything, so it
-   * takes the press and the haptic but not the bookmark's pulse.
+   * **Recommend, back on the row** (founder's review of the live build, 2026-11-21): the
+   * paper plane, between the bookmark and the ⋯, opening the Recommend sheet — where
+   * Share off bingd also lives. The pre-#350 control unchanged: label, haptic, pulse on
+   * every press (sending is always an addition) and style. Null hides it.
+   */
+  recommend?: IconAction | null;
+  /**
+   * **The page's ⋯, last on the row** (title actions menu, 2026-11-21). It used to be the
+   * top bar's right-hand control; the bar keeps Back alone. Every title has it, because
+   * Add to list applies to every movie, season and whole show. Never selected, and it
+   * opens a menu rather than adding anything, so it takes the press and the haptic but
+   * not the bookmark's pulse.
    */
   more: IconAction;
   /**
@@ -194,18 +223,17 @@ export type TitleActionsProps = {
 };
 
 /**
- * **`[ ★ Rank Movie ] [ 🔖 ] [ ⋯ ]`, or `[ ↻ Log rewatch ] [ 🔖 ] [ ⋯ ]` once ranked — one
- * compact cluster, and one design at every width.**
+ * **`[ ★ Rank Movie ] [ 🔖 ] [ ➤ ] [ ⋯ ]`, or `[ ↻ Log rewatch ] [ 🔖 ] [ ➤ ] [ ⋯ ]` once
+ * ranked — one compact cluster, and one design at every width.**
  *
  * ---------------------------------------------------------------------------
- * THREE CONTROLS, AND THE FOUNDER'S FINAL SPECIFICATION (2026-11-21)
+ * FOUR CONTROLS (founder's review of the live build, 2026-11-21)
  *
- * Exactly three: the labelled rank control, the one-tap watchlist bookmark, and the page's
- * ⋯. Recommend and Add to List left the row for the menu, and the ⋯ left the top bar for
- * the row, so everything this title can do is in one place under its name. The menu
- * holds Recommend to a friend, Share off bingd, Add to list, one *Edit ranking / Add
- * note* door into the existing log sheet, and Remove from collection set apart at the
- * foot (`app/title/[id].tsx`).
+ * The labelled rank control, the one-tap watchlist bookmark, Recommend's paper plane, and
+ * the page's ⋯, in that order. #350 had taken Recommend into the menu; it is back on the
+ * row, opening the Recommend sheet where Share off bingd also lives. Add to List stays in
+ * the ⋯, which holds Add to list, one *Edit ranking / Add note* door into the existing log
+ * sheet, and Remove from collection (`app/title/[id].tsx`). The ⋯ stays off the top bar.
  *
  * ---------------------------------------------------------------------------
  * WHAT THE FOUNDER LOCKED, AND WHAT IT REPLACES
@@ -243,15 +271,23 @@ export type TitleActionsProps = {
  * WHY ONLY THE FIRST ONE IS LABELLED
  *
  * Because only one of them is the primary act. A bookmark is a bookmark on every screen
- * in this app and in every other, and a ⋯ is a menu on every platform. Both keep their full spoken names,
- * which is where a screen reader gets them, and both clear 44pt through their own box
+ * in this app and in every other; a paper plane beside it is not ambiguous once the thing
+ * beside it says Rank; and a ⋯ is a menu on every platform. Each keeps its full spoken
+ * name, which is where a screen reader gets it, and each clears 44pt through its own box
  * rather than through slop, so the cluster's height is the target's height.
  *
  * Unranked draws filled Maroon — it is an invitation, and the page's one primary action.
  * Ranked draws outlined — it is a fact you may edit. That pair is the app's standing
  * button hierarchy (design-system.md §8) and is unchanged from before this redesign.
  */
-export function TitleActions({ rank, save, more, tone = 'paper' }: TitleActionsProps) {
+export function TitleActions({
+  rank,
+  save,
+  recommend = null,
+  more,
+  tone = 'paper',
+}: TitleActionsProps) {
+  const { fontScale } = useWindowDimensions();
   /**
    * **The page's primary act gives under a thumb** (founder premium pass, 2026-09-08).
    *
@@ -307,7 +343,7 @@ export function TitleActions({ rank, save, more, tone = 'paper' }: TitleActionsP
               variant={rank.compact ? 'subhead' : 'headline'}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={RANK_LABEL_MIN_FIT}
+              minimumFontScale={rankLabelMinimumScale(fontScale)}
               maxFontSizeMultiplier={RANK_LABEL_MAX_SCALE}
               style={styles.rankLabel}
               testID="title-action-rank-label"
@@ -325,6 +361,15 @@ export function TitleActions({ rank, save, more, tone = 'paper' }: TitleActionsP
         icon={save.selected ? 'bookmark' : 'bookmark-outline'}
         action={save}
       />
+
+      {recommend ? (
+        <IconControl
+          onArtwork={onArtwork}
+          testID="title-action-recommend"
+          icon="paper-plane-outline"
+          action={recommend}
+        />
+      ) : null}
 
       <IconControl
         onArtwork={onArtwork}
@@ -373,15 +418,16 @@ function IconControl({
         /**
          * **Selection, and a pulse on the way on** (founder premium pass, 2026-09-08).
          *
-         * The bookmark is the reader saving, which is the `selection` class in
-         * `ui/haptics.ts`: light, and the same word every other bookmark in the app now
-         * speaks. The ⋯ takes the same light tick for opening its menu.
+         * The bookmark and Recommend are the reader saving or sending, which is the
+         * `selection` class in `ui/haptics.ts`: light, and the same word every other
+         * bookmark in the app now speaks. The ⋯ takes the same light tick.
          *
          * The pulse fires only when the control is turning *on*. `action.selected` is the
          * state before the press, so `!action.selected` is the press that adds something —
          * and un-saving gets no celebration, because a flourish for undoing is the app
-         * disagreeing with the reader. The ⋯ passes `pulse={false}`: opening a menu adds
-         * nothing.
+         * disagreeing with the reader. Recommend has no selected state, so it pulses on
+         * every press, which is correct: sending is always an addition. The ⋯ passes
+         * `pulse={false}`: opening a menu adds nothing.
          */
         onPress={() => {
           hapticSelection();
@@ -428,7 +474,7 @@ const styles = StyleSheet.create({
    */
   /**
    * **One row, at every width and text size** (TV show & season ranking, 2026-11-14):
-   * Rank / Log rewatch · Watchlist · ⋯ (2026-11-21). The icons keep their fixed
+   * Rank / Log rewatch · Watchlist · Recommend · ⋯ (2026-11-21). The icons keep their fixed
    * boxes, so their targets never shrink; the labelled control is the one that gives,
    * by fitting its word (above), never by pushing a glyph onto a second line.
    */
