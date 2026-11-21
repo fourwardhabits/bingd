@@ -388,7 +388,14 @@ export default function suite() {
       }
     });
 
-    it('RG9: a review published while a grouping is in flight still gets its card back (Codex, PR 313)', async () => {
+    /**
+     * RG9, revised by 20261130000800. Until then a review published while a grouping was in
+     * flight waited on `ranking_story:<actor>` and then gave the ranking its card back
+     * (Codex, PR 313). A review is no longer a reason for a card of its own: the review
+     * neither waits for the grouping nor undoes it, the ranking stays shown through its
+     * group, and the review is readable.
+     */
+    it('RG9: a review published while a grouping is in flight neither waits for it nor undoes it (20261130000800)', async () => {
       const { db } = ctx;
       // One backfill ranking already marked, a second about to pair with it.
       const { me } = await backfillGroup(1);
@@ -406,11 +413,6 @@ export default function suite() {
         `insert into user_media (user_id, media_item_id) values ($1, $2) on conflict do nothing`,
         [me, second],
       );
-      const storyKey = (
-        await db.rows(`select hashtextextended('ranking_story:' || $1::text, 0)::text as k`, [
-          me,
-        ])
-      )[0].k;
       const tg = await db.session('grouping');
       const tr = await db.session('review');
       try {
@@ -419,20 +421,28 @@ export default function suite() {
         await tg.begin();
         const grouped = await call(tg, `rank_group_note($1, $2)`, [await newOp(db), second]);
         assert.equal(grouped.status, 'grouped');
-        const pr = fire(
+        // Not blocked: no lock of the grouping's is taken by a review any more.
+        const saved = await call(
           tr,
           `save_note($1, $2, 'Written while it grouped.', null, 'public', false)`,
           [await newOp(db), second],
         );
-        await tr.awaitBlocked({ on: 'advisory', advisoryKey: storyKey });
+        assert.equal(saved.status, 'ok', 'RG9: the review committed without waiting');
         await tg.commit();
-        await pr;
-        const [{ presented }] = await db.rows(
-          `select presented_in as presented from feed_events
-            where actor_id = $1 and media_item_id = $2 and type = 'title_ranked'`,
+        const [{ presented, visible }] = await db.rows(
+          `select (select presented_in from feed_events
+                    where actor_id = $1 and media_item_id = $2 and type = 'title_ranked') as presented,
+                  (select count(*)::int from feed_events
+                    where actor_id = $1 and presented_in is null) as visible`,
           [me, second],
         );
-        assert.equal(presented, null, 'RG9: the reviewed ranking is not left hidden');
+        assert.equal(presented, grouped.event_id, 'RG9: the reviewed ranking stays in its group');
+        assert.equal(visible, 1, 'RG9: one post, no second one for the review');
+        const [{ note }] = await db.rows(
+          `select note from user_media where user_id = $1 and media_item_id = $2`,
+          [me, second],
+        );
+        assert.equal(note, 'Written while it grouped.');
       } finally {
         await tg.rollback().catch(() => {});
         await tg.end().catch(() => {});
