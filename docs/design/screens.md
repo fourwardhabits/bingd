@@ -365,6 +365,62 @@ glyph on a line of its own. The decision is made from the viewport by `titleActi
 always measured against `Ranked`, the wider word, so a title does not change layout at the
 moment it is ranked, and only the word scales with the text size. The controls, their order and their sizes do not change.
 
+### As built — 2026-11-21: three actions, and the ⋯ moves to the row
+
+The founder's final specification for the title actions. It supersedes the action-row and
+top-bar descriptions in the notes below wherever they disagree (four controls, Recommend and
+Add to List on the row, the ⋯ in the top bar, the original page's Ranked pill, the grouped
+ranking menu).
+
+**The row is exactly three controls, on both layouts and for every kind** (movie, whole
+show, season):
+
+| State | 1 | 2 | 3 |
+|---|---|---|---|
+| Unranked (no log, a log, an import, an unfinished ranking) | Rank Movie / Rank Show / Rank Season | Bookmark | ⋯ |
+| Ranked | Log rewatch | Bookmark | ⋯ |
+
+Rank and Log rewatch keep their words, styling and behaviour: Rank opens the log sheet (or
+resumes an unfinished ranking), and Log rewatch opens *Log another watch* and records a new
+viewing. The original page's outlined *Ranked* pill is gone with the menu it opened, so Log
+rewatch is the ranked control on both layouts. The bookmark stays a one-tap watchlist toggle.
+The ⋯ is the last control on the row, for every title; **the top bar keeps Back only**.
+`titleActionsFit` measures two glyphs now, so the original page's row sits beside the poster
+on a 393pt phone (402pt for Log rewatch) and moves under it on narrower phones and at large
+text sizes. Every control keeps a 44pt target.
+
+**The ⋯ menu, in order:**
+
+| Row | Opens | Shown |
+|---|---|---|
+| Recommend to a friend | The existing Recommend sheet (bingd friends) | Always |
+| Share off bingd | The native share sheet, with the same message as the Recommend sheet's *Share off bingd* | Always |
+| Add to list | The existing Add-to-list sheet | Always |
+| Edit ranking / … or Edit log / … | The existing log sheet, on the existing log | When there is a log or a ranking |
+| ─ rule ─ Remove from collection | The existing confirmation | When there is a log or a ranking |
+
+Recommend and Share are two rows because they go to different people by different routes,
+a bingd friend's Sent to you versus anybody through another app. The Recommend sheet keeps
+its own Share off bingd button; both use `share-title.ts`.
+
+**One editing row.** It replaces four: the note or review row, *Who I watched with*,
+*Rerank* and *Log another watch*. It opens the log sheet with nothing pre-expanded, where the
+band chooser corrects the ranking (`rank_rebucket`, or `rank_again` with `p_new_watch: false`:
+no viewing recorded), and the note or review, the companions and the watch date are each one
+tap away. Opening and closing it writes nothing. Its label says what exists:
+
+| State | Label |
+|---|---|
+| Ranked | Edit ranking / Add note, / note or / review, by the writing that is there |
+| Logged or imported, not ranked | Edit log / Add note, / note or / review |
+| No log (including a show scored only by its seasons' average) | No row; Rank is already the door to the log sheet |
+
+**Every row waits for the menu to leave on iOS** (`leaveMenuFor`): each one presents
+something (a sheet, the share sheet or the removal `Alert`), and UIKit refuses a
+presentation issued while another is dismissing. Android goes straight across.
+
+Tapping *Your score* on a ranked title still opens this menu, as it opened the old one.
+
 ### As built — 2026-09-05: where to watch, under the scores and over the tabs
 
 One compact row, and its size is the decision. Label on the left with `via JustWatch` beneath

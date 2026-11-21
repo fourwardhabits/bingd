@@ -58,6 +58,14 @@ The record is `production-2026-11-20-340-341-342.md`.
 - **#341:** `bingd-ops-health` is live. Ticks run in 445–699 ms. A rolled-back production probe opened exactly one alert and closed it on recovery; nothing was committed. It is still pull-only; delivery is proposed in draft #343, Healthchecks.io, and waits for founder approval.
 - **#342:** the Feed-order index is live. The real Feed plan uses it with no sort. The first real calls ran at 0.1–33.9 ms, against means of 141–366 ms before. The sample is small; re-read before deciding on the `can_i_view` rewrite.
 
+### Shipped 2026-11-21: #350 title-page actions (founder-approved OTA)
+
+The record is `production-2026-11-21-350.md`.
+
+- **#350** (`1101b029`): the title row is Rank/Log rewatch · bookmark · ⋯, and the ⋯ menu is Recommend to a friend · Share off bingd · Add to list · Edit ranking / Add note · Remove from collection. Client-only.
+- Production OTA run `01a1ff80`: Android `01a1ff85-256f-706d-9254-a09a0feee08c`, iOS `01a1ff85-256f-7790-a86a-3c35ddd7b5ec`. Runtimes equal the 1.1.0 (15) binaries; the live manifest serves `1101b029`. Migrations unchanged at `20261130000600` (211).
+- #346 closed as superseded. #347, #348 and #322 are not in production.
+
 ### Security (register: `docs/security/findings-register-2026-11-20.md`)
 - **No critical or high finding is open, and none was found.**
 - Production checks (read-only):
@@ -104,6 +112,7 @@ The record is `production-2026-11-20-340-341-342.md`.
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-21 ~19:15Z: **Shipped.** #350 (OTA `1101b029`) with founder approval. PR CI, Codex, `main` CI and the release gate green; migration guard agrees at 211; fingerprints equal the store runtimes; live manifest verified. #346 closed as superseded.
 - 2026-11-20 ~19:20Z: **Shipped.** #340, #341 (`20261130000500`) and #342 (`20261130000600`), with founder approval. Every gate on `d2803274` was green, the migration record was regenerated, the guard was validated, the alert probe passed and was rolled back, and the Feed plan uses the new index. No OTA.
 - 2026-11-20 ~14:40Z: **Shipped.** #333, #334 (`20261130000400`) and #336 (OTA `e86596f2`), all with founder approval. Every gate on `e86596f2` was green. The live manifest is verified, and prune runs measured 8–24 ms after the apply. Next engineering work: job-failure alerting, a migration-order safeguard, then the Feed query long tail.
 - 2026-11-20 ~08:00Z: overnight closeout recorded above. Merged: #325, #332, #317, #335, #337 (all docs). Ready for founder approval: #333, #334 (staging), #336. Production changed only by the approved #331 migration.
