@@ -772,7 +772,7 @@ revoke all on function _watchlist_group_keeps_its_post() from public, anon, auth
 drop function if exists consolidate_feed_sessions(text, timestamptz, timestamptz, boolean, uuid, boolean, integer, integer);
 drop function if exists revert_feed_session_consolidation(text);
 drop function if exists _session_consolidation_plan(timestamptz, timestamptz, uuid, boolean, integer);
-drop function if exists _session_refresh(uuid);
+drop function if exists _session_refresh(uuid, uuid);
 drop function if exists _open_session(uuid, timestamptz, text, boolean);
 drop function if exists _lock_activity_session(uuid);
 drop function if exists _activity_session_window();

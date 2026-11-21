@@ -234,9 +234,14 @@ revoke execute on function _group_titles(uuid) from public, anon, authenticated;
  *     `causal_step` 0. Never backwards, which is what keeps keyset pagination free of
  *     duplicates (docs/feed/activity-sessions.md).
  *
+ * `p_excluding` names a title that is leaving the catalogue (the delete trigger, which runs
+ * before its cascades); it, and any member whose title is already gone, is not counted.
+ *
  * Callers hold the actor's session keys or the post's row lock. Internal.
  */
-create or replace function _session_refresh(p_event_id uuid)
+-- One signature only (an earlier draft of this migration, applied on staging, took one argument).
+drop function if exists _session_refresh(uuid);
+create or replace function _session_refresh(p_event_id uuid, p_excluding uuid default null)
 returns void
 language plpgsql
 security definer
@@ -267,7 +272,9 @@ begin
          (count(*) filter (where m.action = 'saved'))::integer,
          max(m.acted_at)
     into v_count, v_ranked, v_saved, v_last
-    from _group_members(p_event_id) m;
+    from _group_members(p_event_id) m
+   where m.media_item_id is distinct from p_excluding
+     and exists (select 1 from media_items mi where mi.id = m.media_item_id);
 
   if coalesce(v_count, 0) = 0 then
     return;
@@ -276,6 +283,8 @@ begin
   select m.media_item_id, m.action
     into v_lead, v_action
     from _group_members(p_event_id) m
+   where m.media_item_id is distinct from p_excluding
+     and exists (select 1 from media_items mi where mi.id = m.media_item_id)
    order by m.acted_at desc, m.last_tiebreak desc, m.media_item_id
    limit 1;
 
@@ -314,7 +323,7 @@ begin
 end;
 $$;
 
-revoke execute on function _session_refresh(uuid) from public, anon, authenticated;
+revoke execute on function _session_refresh(uuid, uuid) from public, anon, authenticated;
 
 /**
  * The actor's open session for an event at `p_at`: their latest visible post that can
@@ -1302,6 +1311,14 @@ begin
      limit 1;
 
     if v_next is null then
+      continue;
+    end if;
+
+    -- A session post's whole summary (Codex, PR 354): newest title, its action, the split,
+    -- the kind, from the surviving members.
+    if exists (select 1 from feed_events
+                where id = v_group.event_id and coalesce((payload ->> 'session')::boolean, false)) then
+      perform _session_refresh(v_group.event_id, old.id);
       continue;
     end if;
 

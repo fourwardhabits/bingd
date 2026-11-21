@@ -572,6 +572,24 @@ describe('a catalogue delete', () => {
   });
 });
 
+describe('a catalogue delete of the newest title', () => {
+  it('recomputes the whole summary from the survivors (Codex, PR 354)', async () => {
+    await save('A');
+    const b = await rank('B');
+    const c = await save('C');
+    const [post] = await visibleTo(friend);
+    assert.equal(post.payload.lead_action, 'saved');
+    await t.sql(`delete from media_items where id = $1`, [c]);
+    const kept = (await posts()).find((p) => p.id === post.id);
+    assert.equal(kept.media_item_id, b.id, 'the ranking leads now');
+    assert.equal(kept.payload.lead_action, 'ranked');
+    assert.equal(kept.payload.count, 2);
+    assert.equal(kept.payload.ranked, 1);
+    assert.equal(kept.payload.saved, 1);
+    assert.equal(kept.type, 'ranking_batch');
+  });
+});
+
 describe('recency and pagination', () => {
   /** The Feed's own keyset, as `activityRows` sends it, for `viewer`. */
   const page = (viewer, actors, cursor, limit) =>
