@@ -572,12 +572,15 @@ export default function TitleScreen() {
    * relabelling somebody else's user-generated content as critic writing — was never
    * on the table.
    *
-   * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
+   * **Every kind, a whole show included** (title/series-reviews, 2026-11-21). This used to
+   * skip a series on the reasoning that a show could not be ranked and so could not be
+   * reviewed. Since 20261114000200 a show is ranked in its own `tv_shows` pool, and since
+   * #319 an SN AVG poster can be promoted to an explicit show ranking, so a show page asks
+   * for its own reviews exactly as a film or a season does. They are the public notes on
+   * this exact series row, never its seasons' (`title_reviews_v2` keys on the one
+   * `media_item_id`).
    */
-  const reviews = useTitleReviews(
-    data?.title?.kind === 'series' ? null : titleId,
-    serverSortOf(reviewSort),
-  );
+  const reviews = useTitleReviews(titleId, serverSortOf(reviewSort));
   /**
    * The Most Helpful list, for the Cinematic Editorial page's Reviews preview and for the
    * sheet's Rating order, which re-orders it (post-QA sprint 2, 2026-11-05).
@@ -588,20 +591,12 @@ export default function TitleScreen() {
    * "From your circle" read: the preview supersedes that line, and Following stays a
    * filter inside the sheet.
    */
-  const helpfulReviews = useTitleReviews(
-    immersive && data?.title?.kind !== 'series' ? titleId : null,
-    'top_desc',
-  );
+  const helpfulReviews = useTitleReviews(immersive ? titleId : null, 'top_desc');
   /**
-   * The number on the tab, read separately from the list.
-   *
-   * A series has no reviews of its own -- it cannot be ranked, so nobody has a score to
-   * review it with -- and passing null keeps the read from being issued at all rather
-   * than issuing one that is guaranteed to answer zero.
+   * The number on the tab, read separately from the list. Asked of every kind, a whole
+   * show included, for the reason the list above gives.
    */
-  const reviewCount = useTitleReviewCount(
-    data?.title?.kind === 'series' ? null : titleId,
-  );
+  const reviewCount = useTitleReviewCount(titleId);
   const setHelpful = useSetReviewHelpful(titleId);
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
@@ -763,8 +758,8 @@ export default function TitleScreen() {
    */
   // Also gates the series-only reads below (`rankedSeasons`, `myScores`, ...).
   const isSeriesTitle = data?.title?.kind === 'series';
-  // The title whose reviews a pull reloads: none on a series, which has no reviews.
-  const refreshReviews = useRefreshTitleReviews(isSeriesTitle ? null : titleId);
+  // The title whose reviews a pull reloads: this one, of any kind (a whole show too).
+  const refreshReviews = useRefreshTitleReviews(titleId);
   const pull = usePullRefresh(
     // Memoised, because the hook's callback depends on it: a new array-builder every
     // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
@@ -1047,6 +1042,8 @@ export default function TitleScreen() {
   const rankable = title.kind === 'movie' || title.kind === 'season' || title.kind === 'series';
   const isSeries = title.kind === 'series';
   const isSeason = title.kind === 'season';
+  /** What the Reviews copy calls this title: "this movie", "this season", "this show". */
+  const reviewNoun = isSeries ? 'show' : isSeason ? 'season' : 'movie';
   const year = yearOf(title.release_date);
 
   /**
@@ -1267,7 +1264,7 @@ export default function TitleScreen() {
      *
      *   film     Similar · Cast · Reviews · Videos · Details
      *   season   Episodes · Similar · Cast · Reviews · Videos · Details
-     *   series   Seasons · Similar · Cast · Videos · Details
+     *   series   Seasons · Similar · Cast · Reviews · Videos · Details
      *
      * The title page is where somebody explores from, and on a film nothing else on the
      * page answers "what next" — so the exploration tab leads. On a season and a series
@@ -1291,8 +1288,8 @@ export default function TitleScreen() {
      * the invitation to. Removing it until somebody else has written would mean the
      * only way to leave the first review of a film is to already have left it.
      *
-     * A series is the exception and is excluded below: a series cannot be ranked, so
-     * nobody can have a score to review it with.
+     * A whole show has it too (title/series-reviews, 2026-11-21): it is ranked in its own
+     * pool now, so it is reviewed like a film or a season. It used to be excluded here.
      */
     /**
      * The count sits in the label, which is the smallest honest fix for the founder's
@@ -1302,16 +1299,12 @@ export default function TitleScreen() {
      * say no, and it is also the state most titles are in -- the tab still appears,
      * because it is the invitation to write the first one.
      */
-    ...(isSeries
-      ? []
-      : [
-          {
-            id: 'reviews' as const,
-            // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
-            // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
-            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
-          },
-        ]),
+    {
+      id: 'reviews' as const,
+      // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
+      // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
+      label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
+    },
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
   ];
@@ -1816,7 +1809,7 @@ export default function TitleScreen() {
           // spoiler flag and the visibility are chosen beside it; a second one here
           // would be a second content model wearing a different button.
           onWrite={inSheet ? writeFromSheet : () => openLog('review')}
-          noun={title.kind === 'season' ? 'season' : 'movie'}
+          noun={reviewNoun}
           // So the reporting control is absent from the viewer's own review, which
           // the server would refuse anyway.
           viewerId={profile.id}
@@ -2464,46 +2457,44 @@ export default function TitleScreen() {
       {/**
        * **Reviews, after Trailers** (post-QA sprint 2, 2026-11-05; moved after Trailers in the
        * final title refinement, 2026-11-06): one or two on the page,
-       * yours first, and every review behind See all. Not for a series, which nobody can
-       * rank and so nobody can review.
+       * yours first, and every review behind See all. On every kind, a whole show included
+       * (title/series-reviews, 2026-11-21): after Cast and Trailers, before Similar.
        */}
-      {!isSeries
-        ? immersiveSection(
-            'reviews',
-            'Reviews',
-            <ReviewsPreview
-              reviews={helpfulReviews.data ?? []}
-              loading={helpfulReviews.isPending}
-              failed={helpfulReviews.isError && !helpfulReviews.data}
-              onRetry={() => void helpfulReviews.refetch()}
-              maskedFor={reviewMasked}
-              viewerId={profile.id}
-              viewerRanked={Boolean(data.ranked)}
-              ownReview={ownPublishedReview}
-              onWrite={() => openLog('review')}
-              onSeeAll={openReviews}
-              noun={title.kind === 'season' ? 'season' : 'movie'}
-              // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
-              // own name and picture on your review, and the same thumbs-up the sheet offers
-              // under everybody else's. Your review carries your score too, as everybody
-              // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
-              onToggleHelpful={toggleHelpful}
-              helpfulPendingId={helpfulPendingId}
-              viewer={reviewViewer}
-            />,
-            {
-              action:
-                reviewTotal > 0
-                  ? {
-                      label: 'See all',
-                      accessibilityLabel:
-                        reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
-                      onPress: openReviews,
-                    }
-                  : undefined,
-            },
-          )
-        : null}
+      {immersiveSection(
+        'reviews',
+        'Reviews',
+        <ReviewsPreview
+          reviews={helpfulReviews.data ?? []}
+          loading={helpfulReviews.isPending}
+          failed={helpfulReviews.isError && !helpfulReviews.data}
+          onRetry={() => void helpfulReviews.refetch()}
+          maskedFor={reviewMasked}
+          viewerId={profile.id}
+          viewerRanked={Boolean(data.ranked)}
+          ownReview={ownPublishedReview}
+          onWrite={() => openLog('review')}
+          onSeeAll={openReviews}
+          noun={reviewNoun}
+          // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
+          // own name and picture on your review, and the same thumbs-up the sheet offers
+          // under everybody else's. Your review carries your score too, as everybody
+          // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
+          onToggleHelpful={toggleHelpful}
+          helpfulPendingId={helpfulPendingId}
+          viewer={reviewViewer}
+        />,
+        {
+          action:
+            reviewTotal > 0
+              ? {
+                  label: 'See all',
+                  accessibilityLabel:
+                    reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
+                  onPress: openReviews,
+                }
+              : undefined,
+        },
+      )}
 
       {/**
        * **Similar, six at first** (final title refinement, 2026-11-06): two rows of three,
