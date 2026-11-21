@@ -112,6 +112,7 @@ The record is `production-2026-11-21-350.md`.
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-21 ~22:00Z: **Shipped.** #347 migration `20261130000800` applied to production under the founder's Feed fast-track approval, from a clean checkout of `f821c463` (CI, races, release gate green). Production 212 versions; bodies match staging; the review-unpresent trigger is gone; no rows written. Record: `production-2026-11-21-347-352.md`. #352 (title polish) merged as `6e940127`; its OTA follows this record.
 - 2026-11-21 ~19:15Z: **Shipped.** #350 (OTA `1101b029`) with founder approval. PR CI, Codex, `main` CI and the release gate green; migration guard agrees at 211; fingerprints equal the store runtimes; live manifest verified. #346 closed as superseded.
 - 2026-11-20 ~19:20Z: **Shipped.** #340, #341 (`20261130000500`) and #342 (`20261130000600`), with founder approval. Every gate on `d2803274` was green, the migration record was regenerated, the guard was validated, the alert probe passed and was rolled back, and the Feed plan uses the new index. No OTA.
 - 2026-11-20 ~14:40Z: **Shipped.** #333, #334 (`20261130000400`) and #336 (OTA `e86596f2`), all with founder approval. Every gate on `e86596f2` was green. The live manifest is verified, and prune runs measured 8–24 ms after the apply. Next engineering work: job-failure alerting, a migration-order safeguard, then the Feed query long tail.
