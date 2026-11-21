@@ -96,7 +96,12 @@ export default function ProfileScreen() {
   const [detailFor, setDetailFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
   const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
-  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+  const [rankingBatchFor, setRankingBatchFor] = useState<{
+    id: string;
+    medium: string;
+    /** Whose group it is, so the sheet can show their reviews of its titles. */
+    actorId?: string;
+  } | null>(
     null,
   );
   /**
@@ -542,6 +547,7 @@ export default function ProfileScreen() {
                           setRankingBatchFor({
                             id: event.id,
                             medium: batchMedium(event.kind),
+                            actorId: event.actorId,
                           }),
                       }
                     : watchlistTailAction(event, setWatchlistGroupFor)
@@ -613,6 +619,8 @@ export default function ProfileScreen() {
         <RankingBatchSheet
           eventId={rankingBatchFor.id}
           medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          actorId={rankingBatchFor.actorId}
+          viewerId={profile.id}
           onClose={() => setRankingBatchFor(null)}
         />
       ) : null}

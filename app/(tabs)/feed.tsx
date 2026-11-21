@@ -30,7 +30,13 @@ import {
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
-import { groupCount, previewKey, useGroupPreviews } from '@/features/feed/use-group-previews';
+import {
+  groupCount,
+  previewKey,
+  reviewKey,
+  useGroupPreviews,
+  useGroupReviews,
+} from '@/features/feed/use-group-previews';
 import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -446,7 +452,12 @@ export default function FeedScreen() {
   const [followStoryFor, setFollowStoryFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
   const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
-  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+  const [rankingBatchFor, setRankingBatchFor] = useState<{
+    id: string;
+    medium: string;
+    /** Whose group it is, so the sheet can show their reviews of its titles. */
+    actorId?: string;
+  } | null>(
     null,
   );
   /**
@@ -478,6 +489,9 @@ export default function FeedScreen() {
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
   const groupPreviews = useGroupPreviews(events, profile.id);
+  // Which rail posters carry the author's review (20261130000800): a reviewed first ranking
+  // joins its group, so the poster is marked and the sheet shows the text.
+  const groupReviews = useGroupReviews(events, groupPreviews.data, profile.id);
 
   /**
    * **A grouped post's rail, or null for the cinematic card** (Feed poster rails).
@@ -494,7 +508,11 @@ export default function FeedScreen() {
     const rows = groupPreviews.data?.get(previewKey(event, total));
     const openAll = () =>
       event.type === 'ranking_batch'
-        ? setRankingBatchFor({ id: event.id, medium: batchMedium(event.kind) })
+        ? setRankingBatchFor({
+            id: event.id,
+            medium: batchMedium(event.kind),
+            actorId: event.actorId,
+          })
         : setWatchlistGroupFor(event.id);
     if (rows === undefined) {
       if (groupPreviews.isError) return null;
@@ -510,6 +528,9 @@ export default function FeedScreen() {
         posterUri: posterUri(row.posterPath, 'card'),
         score: row.score,
         season: row.seasonNumber,
+        reviewed:
+          event.type === 'ranking_batch' &&
+          groupReviews.data?.has(reviewKey(event.actorId, row.mediaItemId)) === true,
       })),
       onPressTile: (tile: { id: string }) => router.push(`/title/${tile.id}`),
       onPressAll: openAll,
@@ -1015,6 +1036,7 @@ export default function FeedScreen() {
                               setRankingBatchFor({
                                 id: event.id,
                                 medium: batchMedium(event.kind),
+                                actorId: event.actorId,
                               }),
                           }
                         : watchlistTailAction(event, setWatchlistGroupFor)
@@ -1090,6 +1112,7 @@ export default function FeedScreen() {
                             setRankingBatchFor({
                               id: event.id,
                               medium: batchMedium(event.kind),
+                              actorId: event.actorId,
                             }),
                         }
                       : watchlistTailAction(event, setWatchlistGroupFor)
@@ -1278,6 +1301,8 @@ export default function FeedScreen() {
         <RankingBatchSheet
           eventId={rankingBatchFor.id}
           medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          actorId={rankingBatchFor.actorId}
+          viewerId={profile.id}
           onClose={() => setRankingBatchFor(null)}
         />
       ) : null}

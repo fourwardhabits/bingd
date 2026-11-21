@@ -9,7 +9,8 @@ import { createTestDb } from './harness.mjs';
  * Title-page backfill rankings group within a fixed window, across ladders; an Unranked
  * sitting joins the same group; a historical burst can be consolidated and reverted. In
  * every case a member is hidden from client reads rather than deleted, and nothing that a
- * person has reacted to, commented on, been notified about or reviewed is ever hidden.
+ * person has reacted to, commented on or been notified about is ever hidden. (A reviewed
+ * title was kept apart too until 20261130000800; its review is now read inside the group.)
  */
 let t;
 let user;
@@ -145,7 +146,7 @@ describe('title-page first rankings', () => {
     assert.equal((await groupNote(d)).status, 'solo', 'a closed window takes nothing');
   });
 
-  it('the watch date no longer decides (20261130000200); a reviewed ranking stays standalone', async () => {
+  it('the watch date no longer decides (20261130000200), and neither does a review (20261130000800)', async () => {
     // "Today", a recent date and no watch at all were refused by 20261128000100's
     // historical test. Under the founder's half-hour rule they group like any other.
     const today = await ranked('movie', 'Today', { basis: 'today_default', daysAgo: 0 });
@@ -159,7 +160,7 @@ describe('title-page first rankings', () => {
         where user_id = $1 and media_item_id = $2`,
       [user, reviewed],
     );
-    assert.equal((await groupNote(reviewed)).reason, 'reviewed');
+    assert.equal((await groupNote(reviewed)).status, 'joined', 'a review is no obstacle either');
 
     const noWatch = await t.createMovie(`No watch ${seq}`, (tmdb += 1));
     await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [
@@ -174,11 +175,11 @@ describe('title-page first rankings', () => {
     assert.equal((await groupNote(noWatch)).status, 'joined', 'no watch event is no obstacle');
     const posts = await allPosts();
     const g = posts.find((p) => p.type === 'ranking_batch');
-    assert.equal(g.payload.count, 3);
+    assert.equal(g.payload.count, 4);
     assert.equal(
       posts.find((p) => p.media_item_id === reviewed && p.type === 'title_ranked').presented_in,
-      null,
-      'the review keeps its own card',
+      g.id,
+      'the reviewed ranking is shown through the group, not as a post of its own',
     );
   });
 
@@ -216,7 +217,7 @@ describe('title-page first rankings', () => {
   });
 });
 
-describe('a hidden member that gains a conversation or a review (Codex, PR 313)', () => {
+describe('a hidden member that gains a conversation (Codex, PR 313), or a review (20261130000800)', () => {
   const groupOfThree = async () => {
     for (const name of ['M1', 'M2', 'M3']) await groupNote(await ranked('movie', name));
     const posts = await allPosts();
@@ -287,7 +288,7 @@ describe('a hidden member that gains a conversation or a review (Codex, PR 313)'
     assert.equal((await allPosts()).find((p) => p.id === members[0].id).presented_in, null);
   });
 
-  it('publishing a review of a grouped title gives its ranking its own card again', async () => {
+  it('publishing a review of a grouped title leaves it in its group (20261130000800)', async () => {
     const { g, members } = await groupOfThree();
     await t.sql(
       `update user_media set note = 'Written later.', note_visibility = 'public'
@@ -295,8 +296,12 @@ describe('a hidden member that gains a conversation or a review (Codex, PR 313)'
       [user, members[2].media_item_id],
     );
     const after = await allPosts();
-    assert.equal(after.find((p) => p.id === members[2].id).presented_in, null);
-    assert.equal(after.find((p) => p.id === g.id).payload.count, 2);
+    assert.equal(
+      after.find((p) => p.id === members[2].id).presented_in,
+      g.id,
+      'no card of its own: the review is no second post',
+    );
+    assert.equal(after.find((p) => p.id === g.id).payload.count, 3);
   });
 
   it('a private note changes nothing', async () => {

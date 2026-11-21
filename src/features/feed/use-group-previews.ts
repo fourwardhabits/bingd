@@ -115,3 +115,57 @@ export function useGroupPreviews(events: FeedItem[], viewerId: string) {
     readGroupPreviews,
   );
 }
+
+/**
+ * **Which previewed titles of a ranking group carry the author's review**
+ * (20261130000800).
+ *
+ * A reviewed first ranking joins its half-hour group rather than posting a card of its own,
+ * so the review is no longer on a card in the Feed. The rail marks the poster instead, and
+ * the group's sheet shows the text. This is that mark's read: `public_notes`, the only
+ * cross-user path to a note, which answers only for reviews this reader may read
+ * (`can_view_profile`: blocks, private accounts, suspension), so a mark never says more
+ * than the text would.
+ *
+ * Keyed by `author:title` pair, chunked like the previews; a chunk's authors and titles are
+ * each at most `ID_CHUNK`, inside the function's 50-id limits. A failure is swallowed into
+ * "no marks": the mark is an enrichment, and the sheet still shows every review.
+ */
+export const reviewKey = (actorId: string, mediaItemId: string) => `${actorId}:${mediaItemId}`;
+
+export async function readGroupReviews(pairs: string[]): Promise<Map<string, true>> {
+  const out = new Map<string, true>();
+  const wanted = new Set(pairs);
+  const actors = [...new Set(pairs.map((pair) => pair.split(':')[0]))];
+  const titles = [...new Set(pairs.map((pair) => pair.split(':')[1]))];
+  if (!actors.length || !titles.length) return out;
+  const { data, error } = await supabase.rpc('public_notes', {
+    p_user_ids: actors,
+    p_media_item_ids: titles,
+    p_limit: 100,
+  });
+  if (error || !Array.isArray(data)) return out;
+  for (const row of data as { user_id: string; media_item_id: string }[]) {
+    const key = reviewKey(row.user_id, row.media_item_id);
+    if (wanted.has(key)) out.set(key, true);
+  }
+  return out;
+}
+
+export function useGroupReviews(
+  events: FeedItem[],
+  previews: Map<string, GroupPreviewTitle[]> | undefined,
+  viewerId: string,
+) {
+  const pairs = useMemo(() => {
+    const keys = new Set<string>();
+    for (const event of events) {
+      if (event.type !== 'ranking_batch') continue;
+      const count = groupCount(event);
+      const rows = count ? previews?.get(previewKey(event, count)) : undefined;
+      for (const row of rows ?? []) keys.add(reviewKey(event.actorId, row.mediaItemId));
+    }
+    return [...keys].sort();
+  }, [events, previews]);
+  return useChunkedById<true>(['feed-group-reviews', viewerId], pairs, readGroupReviews);
+}
