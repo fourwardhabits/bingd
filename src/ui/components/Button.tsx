@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View, type PressableProps } from 'react-native';
 
 import { theme } from '../tokens';
@@ -105,7 +106,25 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
    * type, never sets a line cap. Default `standard` is exactly what every caller gets.
    */
   inset?: 'standard' | 'snug';
+  /**
+   * **A glyph before the label** (title actions polish, 2026-11-21). The arrangement the
+   * title page's Rank control already draws beside the same `headline` word: the small
+   * icon, `space[2]` before the label, centred on its line, in the label's own ink. The
+   * icon never shrinks; under `fit` only the word gives width back. Absent everywhere
+   * else, so every other button is unchanged.
+   */
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
 };
+
+/** The label's ink, by kind and tone: the colour `Text` resolves for the tone it is given. */
+const labelTone = (kind: Kind, tone: Tone) =>
+  kind === 'primary'
+    ? 'inverse'
+    : kind === 'outline'
+      ? 'action'
+      : tone === 'secondary'
+        ? 'secondary'
+        : 'primary';
 
 export function Button({
   label,
@@ -116,8 +135,10 @@ export function Button({
   disabledReason,
   fit = false,
   inset = 'standard',
+  icon,
   ...rest
 }: ButtonProps) {
+  const ink = labelTone(kind, tone);
   if (disabled && !disabledReason && __DEV__) {
     console.warn(`Button "${label}" is disabled without a disabledReason.`);
   }
@@ -130,6 +151,9 @@ export function Button({
       // disabled reason and state outright (design-system v3 A.2 #10). The caller's state
       // is merged, not dropped; its hint is kept unless the button is disabled with a reason.
       {...rest}
+      // With a glyph beside the word, the word alone is the name: an icon font's code point
+      // is not something a screen reader should try to say.
+      accessibilityLabel={icon ? (rest.accessibilityLabel ?? label) : rest.accessibilityLabel}
       accessibilityState={{ ...rest.accessibilityState, disabled: Boolean(disabled) }}
       accessibilityHint={
         disabled ? (disabledReason ?? rest.accessibilityHint) : rest.accessibilityHint
@@ -146,21 +170,23 @@ export function Button({
         disabled && styles.disabled,
       ]}
     >
-      <View pointerEvents="none">
+      <View pointerEvents="none" style={icon ? styles.withIcon : undefined}>
+        {icon ? (
+          <Ionicons
+            name={icon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            size={theme.layout.icon.sm}
+            color={ink === 'action' ? theme.semantic.action : theme.text[ink]}
+          />
+        ) : null}
         <Text
           numberOfLines={fit ? 1 : undefined}
           adjustsFontSizeToFit={fit}
           minimumFontScale={fit ? 0.85 : undefined}
           variant={size === 'sm' ? 'callout' : 'headline'}
-          tone={
-            kind === 'primary'
-              ? 'inverse'
-              : kind === 'outline'
-                ? 'action'
-                : tone === 'secondary'
-                  ? 'secondary'
-                  : 'primary'
-          }
+          tone={ink}
+          style={icon ? styles.iconLabel : undefined}
         >
           {label}
         </Text>
@@ -200,4 +226,12 @@ const styles = StyleSheet.create({
   snug: { paddingHorizontal: theme.space[2] },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
+  withIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.space[2],
+    maxWidth: '100%',
+  },
+  iconLabel: { flexShrink: 1 },
 });

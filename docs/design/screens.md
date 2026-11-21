@@ -421,6 +421,46 @@ presentation issued while another is dismissing. Android goes straight across.
 
 Tapping *Your score* on a ranked title still opens this menu, as it opened the old one.
 
+### As built — 2026-11-21, polish: Recommend back on the row, a three-row menu
+
+The founder's review of the live Android build. This amends the note above: the row is
+four controls and the menu three rows. Everything else in that note stands, including the
+single editing row, its labels and the iOS hand-off.
+
+**The row, on both layouts and for every kind:**
+
+| State | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| Unranked (no log, a log, an import, an unfinished ranking) | Rank Movie / Rank Show / Rank Season | Bookmark | Recommend ➤ | ⋯ |
+| Ranked | Log rewatch | Bookmark | Recommend ➤ | ⋯ |
+
+Recommend is the pre-#350 paper-plane control, unchanged: label, haptic, pulse and the same
+handler, opening the Recommend sheet. Add to List does not return to the row.
+
+**The ⋯ menu, in order:** Add to list (always); Edit ranking / … or Edit log / … (when there
+is a log or a ranking); Remove from collection (when there is a log or a ranking), with its
+trash glyph and confirmation and no rule above it. The Recommend to a friend and Share off
+bingd rows are gone, along with the menu's share path. Both live in the Recommend sheet.
+
+**The Recommend sheet's two buttons carry glyphs.** Recommend has the paper plane and Share
+off bingd has the platform's share symbol (`share-social-outline` on Android, `share-outline`
+on iOS). They use `Button`'s new `icon`, which follows the Rank control's pattern: the small
+icon, `space[2]` before the word, in the label's ink, hidden from screen readers so the word
+alone is the button's name. The icon never shrinks, so the pair sits side by side from about
+400pt (412pt Android, Plus/Max iPhones) and stacks as two full-width buttons below that, rather
+than pushing *Share off bingd* under `fit`'s 85% floor. States and behaviour are unchanged.
+
+**Where the row sits.** `titleActionsFit` measures three glyphs. On the original page the
+row is beside the poster only where it fits at the reader's text size: a 430pt phone at
+default text for Rank Movie and Rank Show. Everywhere else it takes the existing full-width
+row under the poster. That covers every 320–412pt phone and every ranked title, since Log
+rewatch is the longer word. The Cinematic card is always the card's width. The row never wraps
+or scrolls. The word fits itself rather than being cut, down to an **absolute floor of 0.7
+of its default size** (`rankLabelMinimumScale`), the smallest it already drew at default
+text. It used to be 0.7 of the scaled size, which at the largest text settings left four
+controls no room at 320pt and would have ellipsized *Rank Season*. Every control keeps a
+44pt target.
+
 ### As built — 2026-09-05: where to watch, under the scores and over the tabs
 
 One compact row, and its size is the decision. Label on the left with `via JustWatch` beneath

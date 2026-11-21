@@ -280,11 +280,11 @@ describe('the action cluster on artwork', () => {
       return find(view.toJSON() as Node, false);
     };
     const onArtwork = await render(
-      <TitleActions tone="artwork" rank={null} save={icon} more={icon} />,
+      <TitleActions tone="artwork" rank={null} save={icon} recommend={icon} more={icon} />,
     );
-    const onPaper = await render(<TitleActions rank={null} save={icon} more={icon} />);
+    const onPaper = await render(<TitleActions rank={null} save={icon} recommend={icon} more={icon} />);
 
-    for (const id of ['title-action-save', 'title-action-more']) {
+    for (const id of ['title-action-save', 'title-action-recommend', 'title-action-more']) {
       expect(glyphColor(onArtwork, id)).toBe(brand.parchment);
       expect(glyphColor(onPaper, id)).not.toBe(brand.parchment);
     }

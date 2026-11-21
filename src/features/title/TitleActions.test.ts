@@ -3,6 +3,8 @@ import { theme } from '@/ui/tokens';
 import {
   RANK_LABEL,
   RANK_LABEL_MAX_SCALE,
+  RANK_LABEL_MIN_FIT,
+  rankLabelMinimumScale,
   titleActionsFit,
   titleEditLabel,
 } from './TitleActions';
@@ -82,46 +84,79 @@ describe('titleActionsFit', () => {
 });
 
 /**
- * **The three-control row** (founder's final specification, 2026-11-21): the labelled
- * control, the bookmark and the ⋯ — two glyphs where there were three. What the screen
- * passes is `icons: 2` and the word the control will say, so the narrow phones and the
- * large text sizes still move the row under the poster rather than crowd it.
+ * **The four-control row** (founder's review of the live build, 2026-11-21): the labelled
+ * control, the bookmark, Recommend and the ⋯ — three glyphs. What the screen passes is
+ * `icons: 3` and the word the control will say.
+ *
+ * Where it sits:
+ *   - the original page puts it beside the poster only where it fits at the reader's text
+ *     size — a 430pt phone at default text for Rank Movie and Rank Show — and otherwise
+ *     in the existing full-width row under the poster (every 320–412pt phone);
+ *   - the Cinematic card is always the card's full width.
+ * In both, at the word's floor (`RANK_LABEL_MIN_FIT` of its default size) the row fits at
+ * every width this app runs at, so nothing wraps, clips or scrolls.
  */
-describe('titleActionsFit, for Rank / Log rewatch · bookmark · ⋯', () => {
-  const row = (label: string) => ({ rank: true, icons: 2, label });
+describe('titleActionsFit, for Rank / Log rewatch · bookmark · Recommend · ⋯', () => {
+  const row = (label: string) => ({ rank: true, icons: 3, label });
   const words = [...Object.values(RANK_LABEL), 'Log rewatch'];
+  /** The original page's full-width row: the screen less two gutters. */
+  const fullWidth = (screen: number) => screen - theme.layout.gutter * 2;
+  /** The Cinematic card's content: the screen less the sheet's inset and padding a side. */
+  const card = (screen: number) => screen - (theme.space[3] + theme.space[4]) * 2;
 
-  it.each(words)('keeps "%s" beside the poster on a 412pt and a 430pt phone', (label) => {
-    expect(titleActionsFit(column(412), 1, row(label))).toBe(true);
-    expect(titleActionsFit(column(430), 1, row(label))).toBe(true);
+  it('keeps Rank Movie and Rank Show beside the poster on a 430pt phone', () => {
+    expect(titleActionsFit(column(430), 1, row(RANK_LABEL.movie))).toBe(true);
+    expect(titleActionsFit(column(430), 1, row(RANK_LABEL.series))).toBe(true);
   });
 
-  it.each(words)('moves "%s" under the poster on the narrow phones', (label) => {
-    for (const width of [320, 360, 375]) {
+  it.each(words)('moves "%s" under the poster on the 320–412pt phones', (label) => {
+    for (const width of [320, 360, 375, 390, 393, 412]) {
       expect(titleActionsFit(column(width), 1, row(label))).toBe(false);
     }
   });
 
-  it.each(words)('moves "%s" under the poster at the largest text sizes', (label) => {
-    for (const scale of [1.5, 2, 3.1]) {
-      expect(titleActionsFit(column(412), scale, row(label))).toBe(false);
+  it.each(words)('moves "%s" under the poster at large text sizes, even at 430pt', (label) => {
+    for (const scale of [1.3, 1.5, 2, 3.1]) {
+      expect(titleActionsFit(column(430), scale, row(label))).toBe(false);
     }
   });
 
-  it.each(words)('always fits "%s" in the full-width row at 320pt and default text', (label) => {
-    expect(titleActionsFit(320 - theme.layout.gutter * 2, 1, row(label))).toBe(true);
+  it.each(words)('fits "%s" in the full-width row at its own size from 320pt', (label) => {
+    for (const width of [320, 360, 390, 412]) {
+      expect(titleActionsFit(fullWidth(width), 1, row(label))).toBe(true);
+    }
   });
 
-  it('never needs more room than the four-control row it replaces', () => {
-    for (const label of words) {
-      for (const width of [320, 360, 375, 390, 393, 402, 412, 430]) {
-        for (const scale of [0.9, 1, 1.3, 2]) {
-          if (titleActionsFit(column(width), scale, { rank: true, icons: 3, label })) {
-            expect(titleActionsFit(column(width), scale, row(label))).toBe(true);
-          }
-        }
-      }
+  it.each(words)('fits "%s" on the Cinematic card at its own size from 360pt', (label) => {
+    for (const width of [360, 390, 412]) {
+      expect(titleActionsFit(card(width), 1, row(label))).toBe(true);
     }
+  });
+
+  /**
+   * **No clipping at the extreme.** At 320pt and any text size, both placements hold the
+   * row with the word at no less than its floor, so `adjustsFontSizeToFit` always has
+   * room to land on a size the reader can read.
+   */
+  it.each(words)('holds "%s" at its floor in both placements at 320pt', (label) => {
+    expect(titleActionsFit(fullWidth(320), RANK_LABEL_MIN_FIT, row(label))).toBe(true);
+    expect(titleActionsFit(card(320), RANK_LABEL_MIN_FIT, row(label))).toBe(true);
+  });
+});
+
+/**
+ * **The word's floor is absolute** (2026-11-21): never smaller than 0.7 of its default
+ * size, whatever the reader's text setting.
+ */
+describe('rankLabelMinimumScale', () => {
+  it('is 0.7 at and below the default text size, as it always was', () => {
+    expect(rankLabelMinimumScale(1)).toBeCloseTo(0.7);
+    expect(rankLabelMinimumScale(0.85)).toBeCloseTo(0.7);
+  });
+
+  it.each([1.15, 1.3, 1.5, 2, 3.1])('lands on 0.7 of the default size at %fx text', (scale) => {
+    const drawn = Math.min(scale, RANK_LABEL_MAX_SCALE);
+    expect(rankLabelMinimumScale(scale) * drawn).toBeCloseTo(RANK_LABEL_MIN_FIT);
   });
 });
 
