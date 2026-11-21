@@ -590,6 +590,28 @@ describe('a catalogue delete of the newest title', () => {
   });
 });
 
+describe('a catalogue delete of a member that does not lead', () => {
+  it('refreshes the session too (Codex, PR 354)', async () => {
+    await save('A');
+    const b = await rank('B');
+    await save('C');
+    const [post] = await visibleTo(friend);
+    assert.equal(post.payload.count, 3);
+    await t.sql(`delete from media_items where id = $1`, [b.id]);
+    const kept = (await posts()).find((p) => p.id === post.id);
+    assert.equal(kept.payload.count, 2);
+    assert.equal(kept.payload.ranked, 0);
+    assert.equal(kept.payload.saved, 2);
+    assert.equal(kept.type, 'watchlist_added', 'saves alone again');
+    const members = await as(
+      friend,
+      async () =>
+        (await t.sql(`select media_item_id from watchlist_group_titles($1)`, [post.id])).rows,
+    );
+    assert.equal(members.length, 2, 'the readers agree with the count');
+  });
+});
+
 describe('recency and pagination', () => {
   /** The Feed's own keyset, as `activityRows` sends it, for `viewer`. */
   const page = (viewer, actors, cursor, limit) =>

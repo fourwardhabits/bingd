@@ -1274,10 +1274,13 @@ grant execute on function feed_group_previews(uuid[], integer) to authenticated;
  * `_watchlist_group_keeps_its_post` (20261125000100) for every grouped post, not only a
  * watchlist one (Codex, PR 354): a session's representative is its newest title, which may be
  * a ranking with no watchlist membership, and `feed_events.media_item_id` cascades, so
- * deleting that title from the catalogue would take the whole post and its conversation. The
- * posts are found by representative as well as by watchlist membership; each takes its newest
- * surviving member as representative and is counted the way every reader counts it
- * (`_group_members`). A post with no surviving member is left to the cascade, as before.
+ * deleting that title from the catalogue would take the whole post and its conversation. Every
+ * post the title is a member of is found, by every path `_group_members` reads (watchlist and
+ * ranking membership, its own or a presented post's, a presented ranking, and the
+ * representative), and each is put right before the cascades run: a session post is
+ * refreshed from its surviving members (`_session_refresh(post, old.id)`), any other group
+ * takes its first surviving member as representative and is recounted. A post with no
+ * surviving member is left to the cascade, as before.
  */
 create or replace function _watchlist_group_keeps_its_post()
 returns trigger
@@ -1290,14 +1293,28 @@ declare
   v_next  uuid;
 begin
   for v_group in
-    select wt.event_id, wt.actor_id
-      from feed_watchlist_titles wt
-     where wt.media_item_id = old.id
-    union
-    select fe.id, fe.actor_id
-      from feed_events fe
-     where fe.media_item_id = old.id
-       and fe.type in ('ranking_batch', 'watchlist_added')
+    with touched as (
+      select wt.event_id from feed_watchlist_titles wt where wt.media_item_id = old.id
+      union
+      select frt.event_id from feed_ranking_titles frt where frt.media_item_id = old.id
+      union
+      select fe.id from feed_events fe where fe.media_item_id = old.id
+      union
+      -- A presented post (or ranking) holding the title: its group.
+      select fe.presented_in from feed_events fe
+       where fe.presented_in is not null
+         and (fe.media_item_id = old.id
+              or exists (select 1 from feed_watchlist_titles wt
+                          where wt.event_id = fe.id and wt.media_item_id = old.id)
+              or exists (select 1 from feed_ranking_titles frt
+                          where frt.event_id = fe.id and frt.media_item_id = old.id))
+    )
+    select g.id as event_id, g.actor_id
+      from touched t
+      join feed_events g on g.id = t.event_id
+     where g.type in ('ranking_batch', 'watchlist_added')
+       and g.presented_in is null
+     order by g.id
   loop
     perform _lock_activity_session(v_group.actor_id);
     perform 1 from feed_events where id = v_group.event_id for update;
