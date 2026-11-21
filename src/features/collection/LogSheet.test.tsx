@@ -2673,6 +2673,105 @@ describe('the one Note row', () => {
 });
 
 /**
+ * **A whole show's review is written, edited and refreshed like a film's**
+ * (title/series-reviews, 2026-11-21).
+ *
+ * The show page's Write a review opens this sheet on the series itself, so every write
+ * must name the series row (never one of its seasons) and must refresh that series'
+ * Reviews list and count, by the same prefix keys a film's do.
+ */
+describe('a review of a whole show', () => {
+  const show: LoggableTitle = {
+    id: 'series-yugioh',
+    title: 'Yu-Gi-Oh! Duel Monsters',
+    year: 2000,
+    posterUri: null,
+    kind: 'series',
+  };
+  const shareChip = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Share this note as a public review');
+  const invalidatedFor = (spy: jest.SpyInstance, id: string) => {
+    const keys = spy.mock.calls.map(([filters]) =>
+      JSON.stringify((filters as { queryKey?: unknown })?.queryKey),
+    );
+    return {
+      list: keys.includes(JSON.stringify(['title-reviews', id])),
+      count: keys.includes(JSON.stringify(['title-review-count', id])),
+    };
+  };
+
+  it('creates a first public review on the series row, and refreshes its Reviews', async () => {
+    const sheet = await open(show, { noteIntent: 'review' });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'Heart of the cards.');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note_visibility: 'public',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+
+  it('edits a published show review in place, on the series row', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'Heart of the cards.',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(show);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('Heart of the cards.'));
+    await fireEvent.changeText(sheet.note(), 'Heart of the cards, edited.');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note: 'Heart of the cards, edited.',
+      p_note_visibility: 'public',
+      p_base_updated_at: 'v1',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+
+  it('publishes a private show note on one tap of the chip', async () => {
+    stubReads(
+      {
+        bucket: 'liked',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(show);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    await fireEvent.press(shareChip(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note_visibility: 'public',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+});
+
+/**
  * **The state a finished ranking returns to.**
  *
  * The founder's central complaint about the log flow: tap a bucket, answer the
