@@ -651,6 +651,39 @@ describe('a catalogue delete inside a presented post', () => {
   });
 });
 
+describe('a delayed ranking note (Codex, PR 354)', () => {
+  it('joins as the session’s first event and moves the start back, so the window still ends 30 minutes after it', async () => {
+    const r = await rank('Ranked first, noted late', { note: false });
+    await t.sql(
+      `update feed_events set created_at = created_at - interval '5 minutes',
+              causal_at = causal_at - interval '5 minutes'
+        where actor_id = $1 and type = 'title_ranked'`,
+      [user],
+    );
+    await save('Saved meanwhile');
+    const w = (await posts()).find((p) => p.type === 'watchlist_added');
+    const joined = await call(`rank_group_note($1, $2)`, [await uuid(), r.id]);
+    assert.equal(joined.status, 'joined');
+    assert.equal(joined.event_id, w.id);
+    const all = await posts();
+    const ranking = all.find((p) => p.type === 'title_ranked');
+    const session = all.find((p) => p.id === w.id);
+    assert.equal(
+      new Date(session.payload.started_at).getTime(),
+      ranking.created_at.getTime(),
+      'the start is the ranking, the first event',
+    );
+    // 30 minutes after the ranking, not after the save: the next save starts a new post.
+    await t.sql(
+      `update feed_events set payload = payload || jsonb_build_object('started_at',
+              now() - interval '30 minutes') where id = $1`,
+      [w.id],
+    );
+    await save('Too late');
+    assert.equal((await visibleTo(friend)).length, 2);
+  });
+});
+
 describe('recency and pagination', () => {
   /** The Feed's own keyset, as `activityRows` sends it, for `viewer`. */
   const page = (viewer, actors, cursor, limit) =>

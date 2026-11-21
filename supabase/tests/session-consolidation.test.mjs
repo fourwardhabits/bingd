@@ -316,6 +316,45 @@ describe('a first batch, one author', () => {
     await call(`revert_feed_session_consolidation($1)`, ['sc-reviewed']);
   });
 
+  it('a saves-only post whose title is deleted keeps its post when its survivor is a hidden save (Codex, PR 354)', async () => {
+    const saver = await t.createUser({ username: 'sc_saver' });
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state) values ($1, $2, 'approved')`,
+      [friend, saver],
+    );
+    await t.sql(
+      `update app_config set value = 'false'::jsonb where key = 'feed.watchlist_grouping_enabled'`,
+    );
+    let a;
+    try {
+      a = await save(saver, 'Save A');
+      await save(saver, 'Save B');
+    } finally {
+      await t.sql(
+        `update app_config set value = 'true'::jsonb where key = 'feed.watchlist_grouping_enabled'`,
+      );
+    }
+    await age(saver, 2);
+    await t.actAs(null);
+    const report = await consolidate('sc-saves', { apply: true, actor: saver });
+    assert.equal(report.applied_sessions, 1);
+    const post = report.posts[0].post;
+    await t.actAs(friend);
+    await t.sql(`select add_comment($1, $2, 'keep me', false)`, [await uuid(), post]);
+    await t.actAs(null);
+
+    await t.sql(`delete from media_items where id = $1`, [a]);
+
+    const rows = await visible(saver);
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      [post],
+      'the post and its conversation survive',
+    );
+    assert.equal(rows[0].payload.count, 1);
+    assert.notEqual(rows[0].media_item_id, a, 'never the departing title');
+  });
+
   it('a created post that gains a conversation is kept by the revert, and reported', async () => {
     const lone = await t.createUser({ username: 'sc_lone' });
     await t.sql(

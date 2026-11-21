@@ -290,15 +290,28 @@ begin
 
   v_type := case when v_ranked > 0 then 'ranking_batch' else 'watchlist_added' end;
   v_media := v_lead;
-  -- `feed_events_watchlist_once`: one watchlist_added row per (actor, title), hidden or not.
-  if v_type = 'watchlist_added' and exists (
-       select 1 from feed_events o
-        where o.actor_id = v_g.actor_id and o.type = 'watchlist_added'
-          and o.media_item_id = v_lead and o.id <> p_event_id) then
-    if v_g.type = 'ranking_batch' then
+  /**
+   * `feed_events_watchlist_once`: one watchlist_added row per (actor, title), hidden or not.
+   * A post of saves alone is named by its newest surviving title that no other watchlist
+   * post carries (a hidden post presented by this one may carry its own). If none can, the
+   * post is a ranking group, whose title is not unique (Codex, PR 354): never the departing
+   * title, so a catalogue delete never cascades the post away.
+   */
+  if v_type = 'watchlist_added' then
+    select m.media_item_id
+      into v_media
+      from _group_members(p_event_id) m
+     where m.media_item_id is distinct from p_excluding
+       and exists (select 1 from media_items mi where mi.id = m.media_item_id)
+       and not exists (
+         select 1 from feed_events o
+          where o.actor_id = v_g.actor_id and o.type = 'watchlist_added'
+            and o.media_item_id = m.media_item_id and o.id <> p_event_id)
+     order by m.acted_at desc, m.last_tiebreak desc, m.media_item_id
+     limit 1;
+    if v_media is null then
       v_type := 'ranking_batch';
-    else
-      v_media := v_g.media_item_id;
+      v_media := v_lead;
     end if;
   end if;
 
@@ -412,6 +425,7 @@ declare
   v_first   record;
   v_found   boolean := false;
   v_count   integer;
+  v_anchor  timestamptz;
 begin
   if v_me is null then
     raise exception 'unauthenticated' using errcode = '28000';
@@ -469,6 +483,27 @@ begin
   -- The open session, ranking group or (20261130000900) watchlist post, whose fixed window
   -- holds this ranking's own time.
   v_target := _open_session(v_me, v_event.created_at, 'ranking');
+
+  /**
+   * A delayed note (Codex, PR 354): the ranking happened before the session's recorded
+   * start, so it is the session's first event. It joins only if every member still lies
+   * inside one window of it, and the start moves back to it; otherwise the session could
+   * span more than 30 minutes, and the ranking looks for a peer or stays on its own.
+   */
+  if v_target is not null then
+    select coalesce((payload ->> 'started_at')::timestamptz, created_at) into v_anchor
+      from feed_events where id = v_target;
+    if v_event.created_at < v_anchor then
+      if exists (select 1 from _group_members(v_target) m
+                  where m.acted_at >= v_event.created_at + v_window) then
+        v_target := null;
+      else
+        update feed_events
+           set payload = payload || jsonb_build_object('started_at', v_event.created_at)
+         where id = v_target;
+      end if;
+    end if;
+  end if;
 
   if v_target is not null then
     update feed_events set presented_in = v_target where id = v_event.id;

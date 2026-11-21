@@ -15,7 +15,10 @@ inside one fixed 30-minute window are **one Feed post**, in whatever order they 
     3:00 rank A · 3:07 save B, C · 3:12 rank D   ->   one post, four titles, D leading
 
 - **The window** is `feed.ranking_group_minutes` (30) from the session's first eligible event,
-  recorded once as `payload.started_at`. It never slides or restarts. An event at or after
+  recorded as `payload.started_at`. It never slides or restarts. A ranking whose note arrives
+  late (the client sends it without waiting) is still the session's first event if it happened
+  first: it joins and the start moves back to it, so no session ever spans more than 30
+  minutes from its first event. An event at or after
   `started_at + 30:00` starts the next session; one at 29:59 joins.
 - **Eligible:** a first-time `title_ranked` that nothing references (noted by the ranking
   sheet's `rank_group_note`, as before), every first-ever save (`set_watchlist`), and an
@@ -46,7 +49,7 @@ save can carry a watchlist post without breaking `feed_events_watchlist_once`.
 | Key | Meaning |
 |---|---|
 | `session` | `true`: written by the session model; the new client draws the session sentence |
-| `started_at` | the window anchor, immutable |
+| `started_at` | the window anchor: the session's first eligible event. It never moves forward or slides; it moves back only when a delayed ranking note reveals an earlier first event, and only if every member still lies inside one window of it |
 | `last_activity_at` | the newest activity, the time the card prints; never moves backwards |
 | `count` | distinct titles (a saved-then-ranked title counts once) |
 | `ranked`, `saved` | the split of `count`; a saved-then-ranked title is ranked |
