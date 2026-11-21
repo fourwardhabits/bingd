@@ -76,6 +76,10 @@ export function invalidateAfterCollectionChange(
   // which is all the preview's key holds (Codex, PR 312). Cheap — only rails on screen
   // are mounted, and each refetches one bounded read.
   invalidate(['feed-group-previews']);
+  // And the rails' review marks (20261130000800), for the same reason: publishing,
+  // editing or unsharing a review keeps every group's id, count and member pairs, which is
+  // all that read's key holds (Codex, PR 347).
+  invalidate(['feed-group-reviews']);
 
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger

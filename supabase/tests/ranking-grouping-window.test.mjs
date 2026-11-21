@@ -15,8 +15,9 @@ import { createTestDb } from './harness.mjs';
  * for "historical" watch evidence and so left almost every title-page ranking standalone:
  * the log sheet offers "Today", and almost everybody keeps it. These tests hold the new
  * rule and every guard around it: the window's edges, mixed ladders, watchlist saves,
- * rewatches, reviews, corrections, manual moves and Refine, interactions and protected
- * references, privacy, and that grouping invents no notification, watch or placement.
+ * rewatches, reviews (which group since 20261130000800), corrections, manual moves and
+ * Refine, interactions and protected references, privacy, and that grouping invents no
+ * notification, watch or placement.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 let t;
@@ -347,7 +348,7 @@ describe('what may share a group, and what never does', () => {
     assert.equal((await posts()).find((p) => p.type === 'ranking_batch').payload.count, 2);
   });
 
-  it('a published review keeps its own card; a review written later restores it', async () => {
+  it('a published review no longer keeps its own card, and a review written later moves nothing (20261130000800)', async () => {
     const first = await rankFirst('movie', 'Plain');
     const reviewedId = await title('movie', 'Reviewed');
     await t.sql(
@@ -356,24 +357,26 @@ describe('what may share a group, and what never does', () => {
     );
     await t.rankToCompletion(reviewedId, 'loved', (pivot, subject) => subject);
     assert.equal(
-      (await call(`rank_group_note($1, $2)`, [await uuid(), reviewedId])).reason,
-      'reviewed',
+      (await call(`rank_group_note($1, $2)`, [await uuid(), reviewedId])).status,
+      'grouped',
     );
     const third = await rankFirst('movie', 'Third');
-    assert.equal(third.result.status, 'grouped');
+    assert.equal(third.result.status, 'joined');
     const visible = await visibleTo(friend);
-    assert.ok(visible.some((p) => p.type === 'title_ranked' && p.media_item_id === reviewedId));
+    assert.deepEqual(
+      visible.map((p) => p.type),
+      ['ranking_batch'],
+    );
 
-    // Written after grouping: the reviewed title's ranking comes back as its own card and
-    // the group, now one title, dissolves rather than pass off one card as a group.
+    // Written after grouping: the group stays exactly as it was.
     await t.sql(
       `update user_media set note = 'Later thoughts.', note_visibility = 'public'
         where user_id = $1 and media_item_id = $2`,
       [user, first.id],
     );
     const now = await visibleTo(friend);
-    assert.equal(now.filter((p) => p.type === 'ranking_batch').length, 0);
-    assert.equal(now.filter((p) => p.type === 'title_ranked').length, 3);
+    assert.deepEqual(now, visible);
+    assert.equal(now[0].payload.count, 3);
   });
 
   it('a correction, a manual move and Refine post nothing, and leave the group exactly as it was', async () => {

@@ -58,6 +58,14 @@ export type PosterTile = {
   rankedSeasonCount?: number;
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
+  /**
+   * **The author published a review of this title** (Feed rail only, 20261130000800). A
+   * reviewed first ranking now joins its half-hour group instead of posting a card of its
+   * own, so the rail marks the poster with a quiet "Review" label in the corner the rank
+   * label uses elsewhere; the text itself is one tap away, in the group's sheet. Set only
+   * from `public_notes`, so it is true exactly when this reader may read the review.
+   */
+  reviewed?: boolean;
 };
 
 /**
@@ -578,6 +586,18 @@ function Tile({
               {badge}
             </Text>
           </View>
+        ) : tile.reviewed ? (
+          <View
+            style={styles.rankBadge}
+            testID="poster-review-badge"
+            // In the tile's own label ("…, reviewed"), like the score chip.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text variant="caption" tone="inverse" allowFontScaling={false} numberOfLines={1}>
+              Review
+            </Text>
+          </View>
         ) : null}
         {score != null && average && tile.season == null ? (
           // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
@@ -797,6 +817,7 @@ const labelFor = (tile: PosterTile) => {
   // Announced on the tile as well as on its own control, because "Saved" is state a
   // sighted reader gets from a filled glyph they can see without touching anything.
   if (tile.saved) parts.push('saved');
+  if (tile.reviewed) parts.push('reviewed');
   return parts.join(', ');
 };
 
