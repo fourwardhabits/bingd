@@ -1,0 +1,290 @@
+{
+  "generated": "store-assets/listings/2026-11-19-refresh/refresh.mjs",
+  "basis": "PR #245 v3 copy and upload order (head a2500485); position 6 balanced layout and typographic apostrophe per founder, 2026-11-11",
+  "card03": {
+    "status": "approved-layer",
+    "config": "store-assets/listings/2026-11-19-refresh/inputs/card03.json",
+    "missing": "Screenshot_20261119_160109_bingd.jpg"
+  },
+  "card06": "unchanged (approved For You capture); no stronger capture available",
+  "targets": {
+    "apple-1206x2622": {
+      "slot": "iPhone with Dynamic Island, medium display (6.3\")",
+      "width": 1206,
+      "height": 2622,
+      "cards": [
+        {
+          "position": 1,
+          "card": "01-movies-tv",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/01-collection__01-movies-tv.png",
+          "headline": [
+            "Your favorites,",
+            "ranked your way"
+          ],
+          "subtitle": "Movies and TV, scored by your taste",
+          "layout": "revision",
+          "sha256": "dd356e82187b4226c430b7213bebc2b2ced8bc27f224f000dd8b491e182c2b1a",
+          "bytes": 3051759,
+          "changedFromNov11": false
+        },
+        {
+          "position": 2,
+          "card": "02-head-to-head",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/02-head-to-head__02-head-to-head.png",
+          "headline": [
+            "Pick a favorite",
+            "Build your ranking"
+          ],
+          "subtitle": "Head-to-head picks shape your list",
+          "layout": "revision",
+          "sha256": "78e9098b848a7bddf81c4b0eb87f0b5c49fca43379a6e3ce13368f92ac1a7084",
+          "bytes": 2039148,
+          "changedFromNov11": false
+        },
+        {
+          "position": 3,
+          "card": "03-friends",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/03-friends__03-friends.png",
+          "headline": [
+            "See their picks",
+            "Share your takes"
+          ],
+          "subtitle": "Follow friends, react, and send recs",
+          "layout": "revision",
+          "sha256": "54b1cf6bb4a5654fe01e715817ddf0eacef5535b481fb9c3112dd4ca63babc73",
+          "bytes": 1388870,
+          "changedFromNov11": false
+        },
+        {
+          "position": 4,
+          "card": "06-for-you",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/04-for-you__06-for-you.png",
+          "headline": [
+            "Less scrolling",
+            "More watching"
+          ],
+          "subtitle": "Discover picks shaped by your rankings",
+          "layout": "revision",
+          "sha256": "bf9a8dd62d43692a590dd8479157522ec21a93312f559c878fed1ef0b5a23238",
+          "bytes": 3003615,
+          "changedFromNov11": false
+        },
+        {
+          "position": 5,
+          "card": "04-watchlist",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/05-watchlist__04-watchlist.png",
+          "headline": [
+            "Save it now",
+            "Watch it later"
+          ],
+          "subtitle": "Keep your watchlist and friends’ picks",
+          "layout": "revision",
+          "sha256": "1b087156477b162abdb3442d8cc0aa15a03127911650d742700741d3e164cec7",
+          "bytes": 2027627,
+          "changedFromNov11": false
+        },
+        {
+          "position": 6,
+          "card": "05-your-year",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1206x2622/06-goals-awards__05-your-year_balanced.png",
+          "headline": [
+            "A little progress",
+            "A lot to celebrate"
+          ],
+          "subtitle": "Set watch goals and earn Awards",
+          "layout": "balanced",
+          "sha256": "51e6da3532f0e7441f4f5730ba667cf52d98574fc21aa053886893a4739a4e35",
+          "bytes": 774341,
+          "changedFromNov11": false
+        }
+      ]
+    },
+    "apple-1320x2868": {
+      "slot": "iPhone with Dynamic Island, large display (6.9\")",
+      "width": 1320,
+      "height": 2868,
+      "cards": [
+        {
+          "position": 1,
+          "card": "01-movies-tv",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/01-collection__01-movies-tv.png",
+          "headline": [
+            "Your favorites,",
+            "ranked your way"
+          ],
+          "subtitle": "Movies and TV, scored by your taste",
+          "layout": "revision",
+          "sha256": "9ad698b170828d7b8c6ec011912e7ec31f380f842647df88e1d7a61f8d3cf0b7",
+          "bytes": 3589018,
+          "changedFromNov11": "new size"
+        },
+        {
+          "position": 2,
+          "card": "02-head-to-head",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/02-head-to-head__02-head-to-head.png",
+          "headline": [
+            "Pick a favorite",
+            "Build your ranking"
+          ],
+          "subtitle": "Head-to-head picks shape your list",
+          "layout": "revision",
+          "sha256": "272b068b16799bc81c8bad8ace2611b06a45fb0862e4daa35c99c22f70171805",
+          "bytes": 2366429,
+          "changedFromNov11": "new size"
+        },
+        {
+          "position": 3,
+          "card": "03-friends",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/03-friends__03-friends.png",
+          "headline": [
+            "See their picks",
+            "Share your takes"
+          ],
+          "subtitle": "Follow friends, react, and send recs",
+          "layout": "revision",
+          "sha256": "9835f5fbeb40d97829ebb05953b81d82eb629bca6acb03a43f7b8e646cfec753",
+          "bytes": 1600351,
+          "changedFromNov11": "new size"
+        },
+        {
+          "position": 4,
+          "card": "06-for-you",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/04-for-you__06-for-you.png",
+          "headline": [
+            "Less scrolling",
+            "More watching"
+          ],
+          "subtitle": "Discover picks shaped by your rankings",
+          "layout": "revision",
+          "sha256": "0f1be900604c28ce7246ee3249e7fc6a2585d0b38ab529d6fc16a44ef80817aa",
+          "bytes": 3512053,
+          "changedFromNov11": "new size"
+        },
+        {
+          "position": 5,
+          "card": "04-watchlist",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/05-watchlist__04-watchlist.png",
+          "headline": [
+            "Save it now",
+            "Watch it later"
+          ],
+          "subtitle": "Keep your watchlist and friends’ picks",
+          "layout": "revision",
+          "sha256": "f74f3db96f4177b6752f261babad4779d86ef2900e6a3ec15b1a2ff3cd369ff9",
+          "bytes": 2377862,
+          "changedFromNov11": "new size"
+        },
+        {
+          "position": 6,
+          "card": "05-your-year",
+          "file": "store-assets/listings/2026-11-19-refresh/apple-1320x2868/06-goals-awards__05-your-year_balanced.png",
+          "headline": [
+            "A little progress",
+            "A lot to celebrate"
+          ],
+          "subtitle": "Set watch goals and earn Awards",
+          "layout": "balanced",
+          "sha256": "49195ab772aa05d24f5a40fbf45ecad70d596caaf7060e93059325a76962bcd4",
+          "bytes": 874274,
+          "changedFromNov11": "new size"
+        }
+      ]
+    },
+    "play-1080x1920": {
+      "slot": "Google Play phone screenshots",
+      "width": 1080,
+      "height": 1920,
+      "cards": [
+        {
+          "position": 1,
+          "card": "01-movies-tv",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/01-collection__01-movies-tv.png",
+          "headline": [
+            "Your favorites,",
+            "ranked your way"
+          ],
+          "subtitle": "Movies and TV, scored by your taste",
+          "layout": "revision",
+          "sha256": "6bd80f42274e1d2dad79bcb9e3011cbce661354ddd70c1132e3e0485a7e94092",
+          "bytes": 1742121,
+          "changedFromNov11": false
+        },
+        {
+          "position": 2,
+          "card": "02-head-to-head",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/02-head-to-head__02-head-to-head.png",
+          "headline": [
+            "Pick a favorite",
+            "Build your ranking"
+          ],
+          "subtitle": "Head-to-head picks shape your list",
+          "layout": "revision",
+          "sha256": "24d078244e8d42fb33bd9b94852aaf7fde5999ed18421d7d3f120c6665c85ea0",
+          "bytes": 1198830,
+          "changedFromNov11": false
+        },
+        {
+          "position": 3,
+          "card": "03-friends",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/03-friends__03-friends.png",
+          "headline": [
+            "See their picks",
+            "Share your takes"
+          ],
+          "subtitle": "Follow friends, react, and send recs",
+          "layout": "revision",
+          "sha256": "69688443d068ee2cfabd477dd65d6736efedd27a1d6b06c921da958cb0381b2f",
+          "bytes": 824535,
+          "changedFromNov11": false
+        },
+        {
+          "position": 4,
+          "card": "06-for-you",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/04-for-you__06-for-you.png",
+          "headline": [
+            "Less scrolling",
+            "More watching"
+          ],
+          "subtitle": "Discover picks shaped by your rankings",
+          "layout": "revision",
+          "sha256": "526d2ad930a8e84d1b3aa6753cebdfb3b1deaf1f29a388dbdf9ffdef420cf9c7",
+          "bytes": 1729207,
+          "changedFromNov11": false
+        },
+        {
+          "position": 5,
+          "card": "04-watchlist",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/05-watchlist__04-watchlist.png",
+          "headline": [
+            "Save it now",
+            "Watch it later"
+          ],
+          "subtitle": "Keep your watchlist and friends’ picks",
+          "layout": "revision",
+          "sha256": "b72428a77e315ac651b71948989ef226848453fd5d5d1c80237ee79cc1f3ef3b",
+          "bytes": 1187522,
+          "changedFromNov11": false
+        },
+        {
+          "position": 6,
+          "card": "05-your-year",
+          "file": "store-assets/listings/2026-11-19-refresh/play-1080x1920/06-goals-awards__05-your-year_balanced.png",
+          "headline": [
+            "A little progress",
+            "A lot to celebrate"
+          ],
+          "subtitle": "Set watch goals and earn Awards",
+          "layout": "balanced",
+          "sha256": "81307ab0a58cd9db491c5cc555e153cdd51cd80b57c6a59c71f31929d4f440a3",
+          "bytes": 475248,
+          "changedFromNov11": false
+        }
+      ]
+    }
+  },
+  "playFeatureGraphic": {
+    "file": "store-assets/listings/2026-11-19-refresh/play-feature-graphic-1024x500.png",
+    "sha256": "7f515943b484df1bdb37f65acbe028d5d247442a568ee6a6abffd6d170e2a084",
+    "source": "store-assets/social/social-banner-master.png"
+  }
+}
