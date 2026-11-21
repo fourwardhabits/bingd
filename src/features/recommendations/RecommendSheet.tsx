@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
 import { PeoplePicker } from '@/features/people/PeoplePicker';
@@ -15,6 +15,7 @@ import {
   useRecommendTitle,
   type Recipient,
 } from './use-recommend';
+import { shareTitleOffBingd } from './share-title';
 
 /** The counter appears only this close to the limit, so an ordinary note shows no number. */
 const NOTE_COUNTER_FROM = 20;
@@ -285,30 +286,14 @@ export function RecommendSheet({
      * and that path is where `create_invite_link` and `invite_link_created` now live
      * exclusively.
      *
-     * **The URL itself is one segment, and it used to be two.**
-     *
-     * This built `/title/<kind>/<id>`, and **no route serves that** — not
-     * `app/title/[id].tsx`, which matches a single segment, and not the web router. So
-     * every off-platform title share sent a link that opened the app onto
-     * `+not-found` for anybody who had it, and onto a 404 for anybody who did not.
-     * The kind was never needed: `media_items.id` identifies a film or a season on its
-     * own, and the screen reads the kind from the row.
-     *
-     * Not renamed to something shorter, deliberately. `/title/*` is already claimed in
-     * the Apple App Site Association file and already sits inside links people have
-     * been sent; the fix is the segment that was wrong, and nothing else.
+     * The link is one segment, `media_items.id` (it used to be `/title/<kind>/<id>`, which
+     * no route serves), and a typed note leads the message (20260929000100): it was written
+     * for this title and this sheet, and sending the title without it would drop words the
+     * person just typed. Both live in `share-title.ts` since 2026-11-21, so the title page's
+     * ⋯ → Share off bingd sends exactly this message.
      */
-    const titleUrl = `https://bingd.app/title/${mediaItemId}`;
-    /**
-     * A typed note leads the message (20260929000100). It was written for this title and
-     * this sheet; sending the title without it would drop words the person just typed,
-     * with nothing on screen saying so.
-     */
-    const typed = normaliseNote(note);
-    const message = `${typed ? `${typed}\n\n` : ''}${name} on bingd\n${titleUrl}`;
-
     try {
-      await Share.share({ message, url: titleUrl });
+      await shareTitleOffBingd({ mediaItemId, kind, title, seriesTitle, seasonNumber }, note);
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Sharing failed.');

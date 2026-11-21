@@ -251,13 +251,13 @@ describe('the action cluster on artwork', () => {
         tone="artwork"
         rank={{ ranked: true, label: 'Log rewatch', accessibilityLabel: 'Log', onPress: () => {} }}
         save={icon}
-        recommend={icon}
+        more={icon}
       />,
     );
     expect(within(edit.getByTestId('title-action-ranked')).getByText('Log rewatch')).toBeTruthy();
 
     const original = await render(
-      <TitleActions rank={{ ranked: true, accessibilityLabel: 'R', onPress: () => {} }} save={icon} recommend={icon} />,
+      <TitleActions rank={{ ranked: true, accessibilityLabel: 'R', onPress: () => {} }} save={icon} more={icon} />,
     );
     expect(within(original.getByTestId('title-action-ranked')).getByText('Ranked')).toBeTruthy();
   });
@@ -280,11 +280,11 @@ describe('the action cluster on artwork', () => {
       return find(view.toJSON() as Node, false);
     };
     const onArtwork = await render(
-      <TitleActions tone="artwork" rank={null} save={icon} list={icon} recommend={icon} />,
+      <TitleActions tone="artwork" rank={null} save={icon} more={icon} />,
     );
-    const onPaper = await render(<TitleActions rank={null} save={icon} list={icon} recommend={icon} />);
+    const onPaper = await render(<TitleActions rank={null} save={icon} more={icon} />);
 
-    for (const id of ['title-action-save', 'title-action-list', 'title-action-recommend']) {
+    for (const id of ['title-action-save', 'title-action-more']) {
       expect(glyphColor(onArtwork, id)).toBe(brand.parchment);
       expect(glyphColor(onPaper, id)).not.toBe(brand.parchment);
     }
@@ -296,7 +296,7 @@ describe('the action cluster on artwork', () => {
         tone="artwork"
         rank={{ ranked: false, accessibilityLabel: 'Rank it', onPress: () => {} }}
         save={icon}
-        recommend={icon}
+        more={icon}
       />,
     );
     const style = StyleSheet.flatten(view.getByTestId('title-action-rank').props.style);

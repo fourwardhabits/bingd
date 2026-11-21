@@ -9,7 +9,8 @@ import { brand, paperAlpha, theme } from '@/ui/tokens';
 /**
  * The icon controls' own width; `hitSlop` makes up the rest of the 44pt target.
  *
- * 32 since the fourth control (Add to List, founder QA 2026-09-21). The cluster still wraps
+ * 32 since the fourth control (Add to List, founder QA 2026-09-21), and kept at 32 now the
+ * row is three again (2026-11-21) so the bookmark's target is unchanged. The cluster still wraps
  * as a last resort rather than truncate the one word the row exists to say, but the screen
  * moves it before that happens: see {@link titleActionsFit}.
  */
@@ -90,6 +91,39 @@ export function titleActionsFit(
   return (rank ? RANK_CHROME + word * scale : 0) + glyphs <= columnWidth;
 }
 
+/**
+ * **The ⋯ menu's one editing row, worded for what exists** (founder's final specification,
+ * 2026-11-21). It opens the existing log sheet on the existing log; the label says what the
+ * reader will find there and promises nothing the data does not have.
+ *
+ *   ranked                       Edit ranking / …   the band chooser corrects the ranking
+ *                                                   (no viewing recorded)
+ *   logged or imported, unranked Edit log / …       no ranking exists to edit; the bands
+ *                                                   there are a first ranking
+ *   no log                       none               Rank is already the door to that sheet
+ *
+ * The second half names the writing that is there — `review` for a published one, `note`
+ * for a private one, `Add note` for none — because "Add note" over a review would be a
+ * promise about the wrong thing. The same rule holds for a film, a season and a whole
+ * show, each its own log; a show shown with its seasons' average and no ranking of its own
+ * is an unranked show and reads by whether the show itself is logged.
+ */
+export function titleEditLabel({
+  ranked,
+  logged,
+  hasReview,
+  hasPrivateNote,
+}: {
+  ranked: boolean;
+  logged: boolean;
+  hasReview: boolean;
+  hasPrivateNote: boolean;
+}): string | null {
+  if (!ranked && !logged) return null;
+  const writing = hasReview ? 'review' : hasPrivateNote ? 'note' : 'Add note';
+  return `${ranked ? 'Edit ranking' : 'Edit log'} / ${writing}`;
+}
+
 export type RankAction = {
   /** Whether this reader has already ranked it. Decides the word and the treatment. */
   ranked: boolean;
@@ -98,7 +132,8 @@ export type RankAction = {
   accessibilityHint?: string;
   /**
    * Unranked: the log sheet, where a band is chosen and a first ranking begins.
-   * Ranked: the ranking-options menu, or on the immersive page the rewatch sheet.
+   * Ranked: *Log rewatch*, the rewatch sheet, on both layouts since 2026-11-21. The
+   * correction of an existing ranking is the ⋯ menu's *Edit ranking / Add note*.
    *
    * **This control never chooses between the three ranking intents itself.** Adjusting a
    * placement and declaring a rewatch are different things with different consequences,
@@ -108,17 +143,17 @@ export type RankAction = {
    */
   onPress: () => void;
   /**
-   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Log
-   * rewatch* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
-   * exactly as it always has.
+   * The word and glyph the control draws. The title page passes `Rank Movie` / `Rank Show`
+   * / `Rank Season` unranked and *Log rewatch* ranked (both layouts since 2026-11-21).
+   * Absent, the control reads Rank or Ranked.
    */
   label?: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   /**
-   * The smaller, secondary form — the immersive page's *Log rewatch*, where the reader's
-   * score is the emphasis and this is the way into another viewing (Cinematic
-   * Editorial brief, §2). Visually 36pt with a quieter label; the touch target stays 44pt
-   * through its slop. Absent everywhere else, so every other Rank is unchanged.
+   * The smaller, secondary form — *Log rewatch*, where the reader's score is the emphasis
+   * and this is the way into another viewing (Cinematic Editorial brief, §2). Visually
+   * 36pt with a quieter label; the touch target stays 44pt through its slop. Absent
+   * everywhere else, so every other Rank is unchanged.
    */
   compact?: boolean;
   /**
@@ -140,16 +175,16 @@ export type IconAction = {
 export type TitleActionsProps = {
   /** Present for every kind since 2026-11-14 (a whole show is rankable in its own pool). */
   rank: RankAction | null;
-  /** The watchlist bookmark. Every kind of title has one. */
+  /** The watchlist bookmark. Every kind of title has one, and it stays one tap. */
   save: IconAction;
   /**
-   * **Add to List, one tap** (founder QA, 2026-09-21). Every movie, season and series
-   * can go on a list, so every title has it; it opens the Add-to-list sheet directly
-   * rather than sitting behind the page's ⋯.
+   * **The page's ⋯, on the row** (title actions menu, 2026-11-21). It used to be the top
+   * bar's right-hand control; the bar keeps Back alone now. Every title has it, ranked or
+   * not, because Recommend, Share off bingd and Add to list apply to every movie, season
+   * and whole show. Never selected, and it opens a menu rather than adding anything, so it
+   * takes the press and the haptic but not the bookmark's pulse.
    */
-  list?: IconAction | null;
-  /** Present for every kind since 2026-11-14, the same capabilities as a film's. */
-  recommend: IconAction | null;
+  more: IconAction;
   /**
    * `paper`, the default, is the original page: Ink glyphs on Paper. `artwork` is the
    * immersive page, where the cluster sits on the darkened artwork and the same
@@ -159,7 +194,18 @@ export type TitleActionsProps = {
 };
 
 /**
- * **`[ ✓ Ranked ] [ 🔖 ] [ ➤ ]` — one compact cluster, and one design at every width.**
+ * **`[ ★ Rank Movie ] [ 🔖 ] [ ⋯ ]`, or `[ ↻ Log rewatch ] [ 🔖 ] [ ⋯ ]` once ranked — one
+ * compact cluster, and one design at every width.**
+ *
+ * ---------------------------------------------------------------------------
+ * THREE CONTROLS, AND THE FOUNDER'S FINAL SPECIFICATION (2026-11-21)
+ *
+ * Exactly three: the labelled rank control, the one-tap watchlist bookmark, and the page's
+ * ⋯. Recommend and Add to List left the row for the menu, and the ⋯ left the top bar for
+ * the row, so everything this title can do is in one place under its name. The menu
+ * holds Recommend to a friend, Share off bingd, Add to list, one *Edit ranking / Add
+ * note* door into the existing log sheet, and Remove from collection set apart at the
+ * foot (`app/title/[id].tsx`).
  *
  * ---------------------------------------------------------------------------
  * WHAT THE FOUNDER LOCKED, AND WHAT IT REPLACES
@@ -197,8 +243,7 @@ export type TitleActionsProps = {
  * WHY ONLY THE FIRST ONE IS LABELLED
  *
  * Because only one of them is the primary act. A bookmark is a bookmark on every screen
- * in this app and in every other; a paper plane beside it, in a cluster about one title,
- * is not ambiguous once the thing beside it says Rank. Both keep their full spoken names,
+ * in this app and in every other, and a ⋯ is a menu on every platform. Both keep their full spoken names,
  * which is where a screen reader gets them, and both clear 44pt through their own box
  * rather than through slop, so the cluster's height is the target's height.
  *
@@ -206,18 +251,12 @@ export type TitleActionsProps = {
  * Ranked draws outlined — it is a fact you may edit. That pair is the app's standing
  * button hierarchy (design-system.md §8) and is unchanged from before this redesign.
  */
-export function TitleActions({
-  rank,
-  save,
-  list = null,
-  recommend,
-  tone = 'paper',
-}: TitleActionsProps) {
+export function TitleActions({ rank, save, more, tone = 'paper' }: TitleActionsProps) {
   /**
    * **The page's primary act gives under a thumb** (founder premium pass, 2026-09-08).
    *
-   * Rank is the button the whole title page is arranged around, and Ranked is the door
-   * into the ranking menu. The two icon controls beside it take the same treatment
+   * Rank is the button the whole title page is arranged around, and Log rewatch is the
+   * door into another viewing. The two icon controls beside it take the same treatment
    * through `IconControl`, so the cluster answers a thumb as one surface rather than as
    * one animated control standing next to two that do not move.
    */
@@ -287,18 +326,13 @@ export function TitleActions({
         action={save}
       />
 
-      {list ? (
-        <IconControl onArtwork={onArtwork} testID="title-action-list" icon="list-outline" badge="add" action={list} />
-      ) : null}
-
-      {recommend ? (
-        <IconControl
-          onArtwork={onArtwork}
-          testID="title-action-recommend"
-          icon="paper-plane-outline"
-          action={recommend}
-        />
-      ) : null}
+      <IconControl
+        onArtwork={onArtwork}
+        testID="title-action-more"
+        icon="ellipsis-horizontal"
+        action={more}
+        pulse={false}
+      />
     </View>
   );
 }
@@ -313,15 +347,15 @@ function IconControl({
   testID,
   icon,
   action,
-  badge,
+  pulse = true,
   onArtwork = false,
 }: {
   onArtwork?: boolean;
   testID: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
   action: IconAction;
-  /** A small `+` on the glyph's corner: Ionicons has no list-plus, so it is composed. */
-  badge?: 'add';
+  /** Whether a press that turns the control on pulses. False for the ⋯, which opens a menu. */
+  pulse?: boolean;
 }) {
   const press = usePressScale({ enabled: !action.disabled });
   const pop = usePulse();
@@ -339,19 +373,19 @@ function IconControl({
         /**
          * **Selection, and a pulse on the way on** (founder premium pass, 2026-09-08).
          *
-         * Both controls this draws — bookmark and recommend — are the reader saving or
-         * sending, which is the `selection` class in `ui/haptics.ts`: light, and the same
-         * word every other bookmark in the app now speaks.
+         * The bookmark is the reader saving, which is the `selection` class in
+         * `ui/haptics.ts`: light, and the same word every other bookmark in the app now
+         * speaks. The ⋯ takes the same light tick for opening its menu.
          *
          * The pulse fires only when the control is turning *on*. `action.selected` is the
          * state before the press, so `!action.selected` is the press that adds something —
          * and un-saving gets no celebration, because a flourish for undoing is the app
-         * disagreeing with the reader. Recommend has no selected state, so it pulses on
-         * every press, which is correct: sending is always an addition.
+         * disagreeing with the reader. The ⋯ passes `pulse={false}`: opening a menu adds
+         * nothing.
          */
         onPress={() => {
           hapticSelection();
-          if (!action.selected) pop.pulse();
+          if (pulse && !action.selected) pop.pulse();
           action.onPress();
         }}
         disabled={action.disabled}
@@ -374,11 +408,6 @@ function IconControl({
                   : theme.text.secondary
             }
           />
-          {badge ? (
-            <View style={[styles.badge, onArtwork && styles.badgeOnArtwork]} pointerEvents="none">
-              <Ionicons name="add" size={11} color={onArtwork ? brand.parchment : theme.text.secondary} />
-            </View>
-          ) : null}
         </Animated.View>
       </Pressable>
     </Animated.View>
@@ -386,13 +415,6 @@ function IconControl({
 }
 
 const styles = StyleSheet.create({
-  badge: {
-    position: 'absolute',
-    right: -4,
-    bottom: -3,
-    borderRadius: 7,
-    backgroundColor: theme.surface.base,
-  },
   /**
    * One left-aligned group inside the identity column.
    *
@@ -406,7 +428,7 @@ const styles = StyleSheet.create({
    */
   /**
    * **One row, at every width and text size** (TV show & season ranking, 2026-11-14):
-   * Rank / Log rewatch · Watchlist · Add to List · Recommend. The icons keep their fixed
+   * Rank / Log rewatch · Watchlist · ⋯ (2026-11-21). The icons keep their fixed
    * boxes, so their targets never shrink; the labelled control is the one that gives,
    * by fitting its word (above), never by pushing a glyph onto a second line.
    */
@@ -469,7 +491,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: paperAlpha(0.5),
   },
-  badgeOnArtwork: { backgroundColor: brand.ink },
   // On the artwork card the control may take the whole row, but it still gives width back
   // to the icons beside it: they stay on this line (2026-11-14).
   rankOnArtwork: { flexShrink: 1, maxWidth: '100%' },
