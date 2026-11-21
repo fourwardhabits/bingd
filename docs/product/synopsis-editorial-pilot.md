@@ -3,10 +3,10 @@
 **Status:** PROPOSAL. Nothing here is built. No migration, no catalogue change, no new
 service, no runtime model call. **Researched:** 2026-11-21 against `main` @ `2a6c2fa3`
 (211 migrations).
-**Blocked on:** a database key. The 30-title before/after set needs the stored
-`media_items.overview` texts, and this session had no database access (§6.4).
+**Sample set:** drafted 2026-11-21 from a read-only query of the production catalogue
+(§5.5). **Every rewrite in it is a draft that needs founder approval**, title by title.
 **Needs the founder:** a written answer from TMDB on derived text before anything is
-shown to a reader (§3.5). This is the gating item, ahead of the key.
+shown to a reader (§3.5). This is the gating item.
 
 The idea: some TMDB overviews read badly (press-release hype, run-on sentences, awkward
 translation). Bingd would keep TMDB's text exactly as it is, and on top of it show a short,
@@ -93,8 +93,15 @@ so there is no shared "title query" helper to change in one place.
   docs (§6.4). In Bingd, an empty string becomes null, the coalesce keeps whatever was there,
   and a never-filled row shows no synopsis.
 - Nothing in Bingd translates, detects the language of, or falls back across languages for
-  overview text. **The pilot will measure this:** the sample procedure (§5.3) records, per
-  international title, whether the stored overview is null, English, or the original language.
+  overview text.
+- **Measured on production, 2026-11-21** (27,251 catalogue rows, 2,049 with no overview).
+  Films and series with no overview, by original language: English films 69 of 13,575 (0.5%);
+  Japanese films 36 of 794; Korean films 9 of 188; Spanish series 38 of 185; French films 74 of
+  490 and French series 40 of 146; Hindi 2 of 217; Tamil 3 of 53; Telugu 1 of 41. All 18
+  international titles in the sample had an English overview. **Seasons are the real gap:**
+  970 of 2,339 seasons (41%) have no overview, and 12 seasons carry the series overview word for
+  word (Squid Game Season 1 is one). Season rows store no `original_language`; it is the
+  parent's.
 - `original_title` is not shown in the synopsis, so a rewrite that refers to a character or
   place must keep TMDB's English romanisation exactly (rubric gate G3).
 
@@ -239,7 +246,10 @@ similarity features leniently, and those replies are informal. The repo already 
 `tmdb-integration.md` "Revisit when" says *"Considering any LLM or model-training use of TMDB
 data: Read the terms again; this is restricted."*
 
-**So the pilot must not send TMDB overview text to a model until TMDB says yes in writing.**
+**So no model-drafted text may reach a reader until TMDB says yes in writing.** The sample set
+in §5.5 was drafted by a model (this session) at the coordinator's direction, for internal
+review only. That makes it a concrete example to put to TMDB with question 2. It does not
+answer the question.
 
 ### 3.5 What the founder must confirm with TMDB
 
@@ -696,6 +706,80 @@ for at least 80% of approved rows.
 - Approval is per row. A batch is applied only after every row in it has a decision, and only
   the approved rows are written.
 
+### 5.5 The sample set (2026-11-21)
+
+Read from the production catalogue with a read-only Management API query (`media_items` and
+its parent rows only; no user table read, nothing written). **Every rewrite is a draft that
+needs the founder's approval, title by title.** Nothing has been applied or shown to a reader.
+
+**Where the side-by-side lives:** TMDB's text and the proposed rewrites are on a private
+review page, <https://claude.ai/artifact/Gb9jt89bwWkFsWbqyRpLkp>. Each title there shows the
+stored TMDB overview beside the proposal, with the note, the lint result, the row id and the
+source hash. They are kept out of this file on purpose, because of §5.3 step 6: anything
+committed here stays in the repository's history beyond TMDB's six-month window. The page is
+private to its owner until it is shared, and should be deleted when the pilot closes. If the
+founder accepts that risk, the texts can be copied into this section in one commit.
+
+**Outcome:** 26 rewrites, 3 controls kept as TMDB (1, 29, 30), and 1 blank season left blank (14).
+Lint: no em or en dashes in any rewrite (their sources had 8, counting double hyphens), no
+hype words introduced, no digits lost or added, no opening repeated across the batch, and
+every rewrite 1–3 sentences.
+
+**Substitutions against §5.1:** Frieren, Vikram, Jai Bhim and Sacred Games are not in the
+catalogue. JUJUTSU KAISEN Season 1 is there but blank, so slot 18 is The Promised Neverland
+Season 1. Tamil slots are *Fight Club* (2023), which also tests the clash with the 1999 film,
+and *Visaranai* (2016), a real case with the context Jai Bhim would have tested. No Hindi
+series has stored seasons, so slot 24 is the whole series *Mirzapur*. The Telugu title is
+stored as *Bāhubali: The Beginning*, with the diacritic.
+
+**Flags for the founder** (questions the rubric says a reviewer must not settle alone):
+
+- **28, Money Heist Season 3:** the text reads like the premise of Part 3 (2019), but the row is
+  TMDB's Season 3 dated 2021. Check TMDB's season mapping before approving (G5).
+- **22, Visaranai:** TMDB says "immigrant workers". "Migrant" (from another Indian state) is
+  probably the accurate word, but changing it is a factual edit (G1).
+- **20, Bāhubali: The Beginning:** TMDB spells the hero "Shivudu" and then "Shividu". The draft
+  uses "Shivudu" throughout.
+- **16 and 17, Attack on Titan:** the series text says "Scouting Legion", Season 4 says "Survey
+  Corps". Each draft keeps its own source's term (G3).
+- **19, RRR:** the source leaves out India and British rule. Adding them would be new facts
+  (G2). Without them the cultural context is thin (G6), so it is the founder's call.
+- **Squid Game Season 1** carries the series overview word for word, one of 12 such seasons.
+  It is not in the set. It is the case for a future rule about duplicate season text.
+
+| # | Title | Kind | Lang | Outcome | Words | What changed and why |
+|---|---|---|---|---|---|---|
+| 1 | Oppenheimer (2023) | movie | en | Keep TMDB | 18 | Control. One plain sentence, no hype, nothing to fix. |
+| 2 | The Shawshank Redemption (1994) | movie | en | Rewrite | 69 → 60 | Removed the double-hyphen aside and the 'comes to be admired by' passive; every fact and name kept. |
+| 3 | Fight Club (1999) | movie | en | Rewrite | 45 → 45 | Cut the hype ('ticking-time-bomb', 'primal', 'shocking', 'toward oblivion'). No more is revealed than the source; the twist stays hidden. |
+| 4 | Barbie (2023) | movie | en | Rewrite | 43 → 40 | Light edit: dropped 'However' and 'soon'. Borderline; the founder may prefer to keep TMDB. |
+| 5 | Everything Everywhere All at Once (2022) | movie | en | Rewrite | 32 → 31 | Removed 'insane' (hype); otherwise unchanged. |
+| 6 | Dune: Part Two (2024) | movie | en | Rewrite | 55 → 45 | Dropped the marketing imperative 'Follow the mythic journey of'. Names and plot unchanged. |
+| 7 | Breaking Bad (2008) | series | en | Rewrite | 55 → 41 | Tightened 'given a prognosis of only two years left to live' and 'becomes filled with a sense of fearlessness'. Series-level text kept series-level. |
+| 8 | Breaking Bad, Season 5 (2012) | season | en | Rewrite | 71 → 64 | Untangled one long sentence; kept 'Fring' as in the source rather than adding Gus's first name (G2). No new spoilers. |
+| 9 | Severance (2022) | series | en | Rewrite | 38 → 36 | Replaced the stock 'it begins a journey to discover'. Light edit. |
+| 10 | Severance, Season 2 (2025) | season | en | Rewrite | 22 → 19 | Replaced 'leading them further down a path of woe'. 'Trifling with' became 'meddling with': close, but the founder should confirm the nuance. |
+| 11 | The Bear, Season 3 (2024) | season | en | Rewrite | 66 → 53 | Removed 'In season three', the first-person 'Our chefs' and 'we'll find out' (marketing voice). Names kept exactly. |
+| 12 | Stranger Things, Stranger Things 4 (S4) (2022) | season | en | Rewrite | 21 → 20 | Removed the em dash; 'igniting' became 'bringing'. Season text kept about the season. |
+| 13 | Attack on Titan, Specials (S0) (2013) | season | ja | Rewrite | 22 → 21 | Season 0: kept as a description of specials, not a story season (G5). Smoothed 'The complete selection of specials relating to any'. |
+| 14 | The Bear, Season 1 (2022) | season | en | Stays blank | 0 | TMDB has no overview for this season. Stays blank: never filled from the series text (G5). |
+| 15 | Spirited Away (2001) | movie | ja | Rewrite | 35 → 27 | Cut the cliché 'the courage she never knew she had'; facts unchanged. |
+| 16 | Attack on Titan (2013) | series | ja | Rewrite | 94 → 63 | Removed the en dashes, the exclamation mark and the stacked adjectives. Kept 'Scouting Legion' as written, though Season 4 says 'Survey Corps' (flag, not fixed). |
+| 17 | Attack on Titan, The Final Season (S4) (2020) | season | ja | Rewrite | 59 → 56 | Folded five short dramatic sentences into two and removed the rhetorical question. Reveals nothing the source does not. |
+| 18 | The Promised Neverland, Season 1 (2019) | season | ja | Rewrite | 69 → 60 | Replaced the rhetorical question; curly quotes made straight. Substitute for Frieren and JUJUTSU KAISEN S1 (absent or blank). |
+| 19 | RRR (2022) | movie | te | Rewrite | 21 → 23 | Fixed the awkward possessive. Did not add India or British rule, which the source leaves out (G2); the founder may want that context added from a source. |
+| 20 | Bāhubali: The Beginning (2015) | movie | te | Rewrite | 64 → 53 | The source spells the hero both 'Shivudu' and 'Shividu'; used 'Shivudu' throughout (flag). Dropped 'beautiful'. |
+| 21 | Fight Club (2023) | movie | ta | Rewrite | 38 → 38 | Fixed the run-on and 'football sports dreams'. Tamil film of 2023; must not be confused with the 1999 Fight Club (slot 3). |
+| 22 | Visaranai (2016) | movie | ta | Rewrite | 42 → 41 | Plainer phrasing; kept 'immigrant' as written. Flag: 'migrant' (from another Indian state) may be the accurate word, which is a factual change for the founder. |
+| 23 | 3 Idiots (2009) | movie | hi | Rewrite | 77 → 62 | Cut the hype opener ('Rascal. Joker. Dreamer. Genius... You've never met') and the em dash. Names and nicknames kept. |
+| 24 | Mirzapur (2018) | series | hi | Rewrite | 74 → 67 | Four sentences to two. All names, roles and the wedding-procession incident kept. Hindi series; no seasons are stored for it. |
+| 25 | Parasite (2019) | movie | ko | Rewrite | 24 → 32 | Fixed the dangling 'All unemployed'. Spoiler level unchanged. |
+| 26 | Squid Game, Season 2 (2024) | season | ko | Rewrite | 25 → 18 | Removed the hype question, 'heart-pounding' and the em dash. Season 2 only. |
+| 27 | Drive My Car (2021) | movie | ja | Rewrite | 58 → 56 | Fixed translationese ('accepts to direct', 'appointed to drive', 'will be unveiled'). |
+| 28 | Money Heist, Season 3 (2021) | season | es | Rewrite | 21 → 22 | Fixed 'paired-up in diverse locations'. Flag: this text reads like the Part 3 premise, but the row is TMDB's Season 3 dated 2021. Check the season mapping before approving (G5). |
+| 29 | Pan's Labyrinth (2006) | movie | es | Keep TMDB | 66 | Control. Clear, factual and well paced; the en dash in 'post–civil war' is correct typography. |
+| 30 | Lupin (2021) | series | fr | Keep TMDB | 25 | Control. One clean sentence that keeps the literary reference. |
+
 ---
 
 ## 6. Status
@@ -707,12 +791,13 @@ for at least 80% of approved rows.
   `package.json` and README, without installing or running anything (§2).
 - Collected TMDB's terms as far as search excerpts allow (§3).
 - Designed storage (§4) and the pilot (§5).
+- Once database access was restored, resolved the 30 rows on production (read-only), measured
+  overview coverage (§1.5) and drafted the sample set (§5.5).
 
-### 6.2 Not included: illustrative before/after examples
+### 6.2 Where the TMDB text is
 
-None. `themoviedb.org` was unreachable, and web search returns summarised text rather than a
-verifiable copy of an overview, so a "before" would not be reliably TMDB's. Committing TMDB text
-to this repo would also put it outside the six-month regime (§5.3, step 6).
+Not in this repository. The side-by-side is on the private review page linked in §5.5, for the
+reason in §5.3 step 6.
 
 ### 6.3 Decisions for the founder
 
@@ -724,13 +809,15 @@ to this repo would also put it outside the six-month regime (§5.3, step 6).
 5. Stale behaviour: this proposal falls back to TMDB as soon as TMDB's text changes. The
    alternative, keeping the edit live and only flagging it, is less safe when TMDB's change is
    a correction.
+6. Decide each of the 30 rows in §5.5 (approve, revise, keep TMDB), starting with the six flags.
+   The review page shows the texts but does not record decisions; a reply listing the slot
+   numbers is enough.
 
 ### 6.4 Blocked or unread
 
-- **Database key:** the 30-row resolution, the language-coverage measurement and the
-  before/after set all wait for it.
 - **TMDB pages:** the API Terms of Use, developer FAQ and Contribution Bible were not readable
   from this session (`www.themoviedb.org` and `developer.themoviedb.org` are outside the network).
   The quotations in §3.2 are search excerpts and need checking against the live pages.
 - **TMDB's empty-translation behaviour** for `language=en-US` is from community reports, not
-  TMDB documentation. Step 3 of §5.3 measures it.
+  TMDB documentation. Production shows it is rare for films and series in the requested
+  languages (§1.5); it does not show which of the stored English texts are machine translations.
