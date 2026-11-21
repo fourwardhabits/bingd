@@ -59,14 +59,14 @@ Before starting:
 ## 2. Title pages: Rank Movie / Show / Season, Log rewatch, Edit ranking
 | # | Step | Expected | Needs | A | i | Notes |
 |---|---|---|---|---|---|---|
-| 2.1 | Open an **unranked** movie, an unranked whole **show** and an unranked **season**. | The filled primary reads **Rank Movie**, **Rank Show** and **Rank Season**. Watchlist, Add to List and Recommend sit beside it, all on **one row**. *(changed: a show used to have no rank control)* | S3 | | | |
+| 2.1 | Open an **unranked** movie, an unranked whole **show** and an unranked **season**. | The filled primary reads **Rank Movie**, **Rank Show** and **Rank Season**. Watchlist, Recommend and Add to List sit beside it, in that order, all on **one row**. *(changed: a show used to have no rank control)* | S3 | | | |
 | 2.2 | Start a ranking on an unranked title, kill the app halfway, reopen and tap Rank again. | The half-finished ranking resumes at the same comparison. Covers movie, show and season. | S3 | | | |
 | 2.3 | Open a **ranked** movie. | The primary button is **Log rewatch** (repeat icon). There is no Rank button and no second prominent Edit ranking. | | | | |
 | 2.4 | Tap Log rewatch, then close the sheet. | "Log another watch" opened at once. After closing, the watch count, history and Feed are unchanged. | | | | |
 | 2.5 | Log rewatch → band → finish the comparisons. Separately, start one and close mid-comparison. | Finished: Watch History gains one viewing and Feed gets exactly one activity. Closed: the old score is kept. | | | | |
 | 2.6 | ⋯ menu on a ranked movie. | The Ranking group row reads **Edit ranking**; "Update your rating" appears nowhere. It changes the score without adding a watch or a Feed post. | | | | |
 | 2.7 | Repeat 2.3–2.6 on a ranked **season** and a ranked whole **show**. | The same, with one difference: an Edit ranking on a show or season that **moves** it posts one "updated their ranking of …" (see 12.2). Landing in the same place posts nothing. *(changed)* | S3 | | | |
-| 2.8 | On a ranked show and a ranked season. | The row reads **Log rewatch** · Watchlist · Add to List · Recommend, on one row. Edit ranking is in ⋯. | S3 | | | |
+| 2.8 | On a ranked show and a ranked season. | The row reads **Log rewatch** · Watchlist · Recommend · Add to List, on one row. Edit ranking is in ⋯. | S3 | | | |
 
 ## 3. Watch History: editing, dates, companions, removal, rewatch
 | # | Step | Expected | Needs | A | i | Notes |

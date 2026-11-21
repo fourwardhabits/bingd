@@ -287,10 +287,9 @@ export function TitleActions({
         action={save}
       />
 
-      {list ? (
-        <IconControl onArtwork={onArtwork} testID="title-action-list" icon="list-outline" badge="add" action={list} />
-      ) : null}
-
+      {/* Recommend before Add to List (founder, 2026-11-21): the two swap places and
+          nothing else about them changes. Children are drawn, and read by a screen
+          reader, in this order, so the spoken order follows the visual one. */}
       {recommend ? (
         <IconControl
           onArtwork={onArtwork}
@@ -298,6 +297,10 @@ export function TitleActions({
           icon="paper-plane-outline"
           action={recommend}
         />
+      ) : null}
+
+      {list ? (
+        <IconControl onArtwork={onArtwork} testID="title-action-list" icon="list-outline" badge="add" action={list} />
       ) : null}
     </View>
   );
@@ -406,7 +409,7 @@ const styles = StyleSheet.create({
    */
   /**
    * **One row, at every width and text size** (TV show & season ranking, 2026-11-14):
-   * Rank / Log rewatch · Watchlist · Add to List · Recommend. The icons keep their fixed
+   * Rank / Log rewatch · Watchlist · Recommend · Add to List. The icons keep their fixed
    * boxes, so their targets never shrink; the labelled control is the one that gives,
    * by fitting its word (above), never by pushing a glyph onto a second line.
    */

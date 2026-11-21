@@ -1614,7 +1614,7 @@ export default function TitleScreen() {
 
 
   /**
-   * **Rank, Save, List, Recommend: beside the poster where they fit, under it where they do
+   * **Rank, Save, Recommend, List: beside the poster where they fit, under it where they do
    * not** (founder, Growth UX sprint, 2026-11-02).
    *
    * Decided from the viewport rather than left to `flexWrap`, which on a 375pt phone put the

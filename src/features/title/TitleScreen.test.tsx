@@ -3946,16 +3946,18 @@ describe('Add to list', () => {
     await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
   });
 
-  it('sits between Watchlist and Share on the action row', async () => {
+  it('comes last on the action row: Rank, Watchlist, Recommend, Add to List', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
     const ids = view
-      .getAllByTestId(/^title-action-(save|list|recommend)$/)
+      .getAllByTestId(/^title-action-(rank|ranked|save|list|recommend)$/)
       .map((node) => node.props.testID as string);
-    expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
-    expect(ids.indexOf('title-action-list')).toBeLessThan(
-      ids.indexOf('title-action-recommend'),
-    );
+    expect(ids).toEqual([
+      'title-action-rank',
+      'title-action-save',
+      'title-action-recommend',
+      'title-action-list',
+    ]);
   });
 
   it('opens the Add-to-list sheet directly, with nothing refused', async () => {

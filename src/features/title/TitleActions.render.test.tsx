@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { within } from '@testing-library/react-native';
+import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -15,7 +15,7 @@ import {
 } from './TitleActions';
 
 /**
- * **One row: Rank / Log rewatch · Watchlist · Add to List · Recommend** (TV show & season
+ * **One row: Rank / Log rewatch · Watchlist · Recommend · Add to List** (TV show & season
  * ranking, founder brief §3, 2026-11-14).
  *
  * A layout cannot be measured here, so what is pinned is the contract that makes one row
@@ -54,6 +54,61 @@ describe('the title action cluster', () => {
       }
     },
   );
+
+  /**
+   * **Rank · Watchlist · Recommend · Add to List** (founder, 2026-11-21). Recommend and Add
+   * to List swapped places; nothing else moved. The buttons are read in tree order, so
+   * pinning the order of the cluster's buttons pins what a screen reader announces as
+   * well as what is drawn, on paper and on the artwork, ranked and unranked.
+   */
+  it.each([
+    ['paper', false],
+    ['paper', true],
+    ['artwork', false],
+    ['artwork', true],
+  ] as const)('on %s (ranked: %s) orders Rank, Watchlist, Recommend, Add to List', async (tone, ranked) => {
+    const view = await renderWithProviders(
+      <TitleActions
+        tone={tone}
+        rank={{ ranked, accessibilityLabel: 'Rank it', onPress: jest.fn() }}
+        save={{ accessibilityLabel: 'Save it', onPress: jest.fn() }}
+        list={{ accessibilityLabel: 'List it', onPress: jest.fn() }}
+        recommend={{ accessibilityLabel: 'Recommend it', onPress: jest.fn() }}
+      />,
+    );
+    const buttons = within(view.getByTestId('title-actions')).getAllByRole('button');
+    expect(buttons.map((node) => node.props.testID)).toEqual([
+      ranked ? 'title-action-ranked' : 'title-action-rank',
+      'title-action-save',
+      'title-action-recommend',
+      'title-action-list',
+    ]);
+    expect(buttons.map((node) => node.props.accessibilityLabel)).toEqual([
+      'Rank it',
+      'Save it',
+      'Recommend it',
+      'List it',
+    ]);
+  });
+
+  it('presses the handler that belongs to each control after the swap', async () => {
+    const onRecommend = jest.fn();
+    const onList = jest.fn();
+    const view = await renderWithProviders(
+      <TitleActions
+        rank={{ ranked: false, accessibilityLabel: 'Rank it', onPress: jest.fn() }}
+        save={{ accessibilityLabel: 'Save it', onPress: jest.fn() }}
+        list={{ accessibilityLabel: 'List it', onPress: onList }}
+        recommend={{ accessibilityLabel: 'Recommend it', onPress: onRecommend }}
+      />,
+    );
+    await fireEvent.press(view.getByLabelText('Recommend it'));
+    expect(onRecommend).toHaveBeenCalledTimes(1);
+    expect(onList).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByLabelText('List it'));
+    expect(onList).toHaveBeenCalledTimes(1);
+    expect(onRecommend).toHaveBeenCalledTimes(1);
+  });
 
   it('fits the word to the row at large text instead of cutting it or wrapping', async () => {
     const view = await renderWithProviders(action('Log rewatch', true));
