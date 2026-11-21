@@ -919,3 +919,72 @@ describe('a grouped watchlist post above the conversation', () => {
     expect(view.queryByText(/\bothers?\b/)).toBeNull();
   });
 });
+
+/**
+ * **A follow story's conversation** (Workstream C, founder 2026-11-19).
+ *
+ * A follow story's notifications open this page, so it draws the Feed's follow row, with
+ * its heart, above the shared thread. Who may see it at all is the server's: a story closed
+ * to this reader hydrates to nothing and reads as unavailable, asserted in `use-feed`.
+ */
+describe('a follow story above the conversation', () => {
+  const followStory = () =>
+    event({
+      type: 'follow_added',
+      mediaItemId: null,
+      title: null,
+      year: null,
+      kind: null,
+      score: null,
+      bucket: null,
+      followed: [
+        { id: 'ravi-id', username: 'ravi', name: 'Ravi', avatarUri: null, isPrivate: false },
+        { id: 'ben-id', username: 'ben', name: 'Ben', avatarUri: null, isPrivate: false },
+      ],
+    });
+
+  it('draws the follow row, not a title row', async () => {
+    mockEvent = followStory();
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByTestId('follow-story-row')).toBeTruthy());
+    expect(view.getByLabelText('Anna followed Ravi and 1 other')).toBeTruthy();
+    expect(view.queryByLabelText(/Sinners/)).toBeNull();
+  });
+
+  it('reacts through the shared hook, and offers no comments button above the thread', async () => {
+    mockEvent = followStory();
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByTestId('follow-story-like')).toBeTruthy());
+    expect(view.getByText('Like')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('follow-story-like'));
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
+    expect(view.queryByTestId('follow-story-comment')).toBeNull();
+  });
+
+  it('opens a named person, and the list of everyone', async () => {
+    mockEvent = followStory();
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByText('Ravi')).toBeTruthy());
+    await fireEvent.press(view.getByText('Ravi'));
+    expect(mockNav.pushed).toContain('/u/ravi');
+  });
+
+  it('offers no spoiler toggle, because there is no title to spoil', async () => {
+    mockEvent = followStory();
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByTestId('follow-story-row')).toBeTruthy());
+    expect(view.queryByLabelText('Mark this comment as containing spoilers')).toBeNull();
+  });
+
+  it('keeps the spoiler toggle under a title', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Mark this comment as containing spoilers')).toBeTruthy(),
+    );
+  });
+});
