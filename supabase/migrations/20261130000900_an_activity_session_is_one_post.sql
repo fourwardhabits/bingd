@@ -1766,6 +1766,10 @@ declare
   v_restored integer := 0;
   v_shown    integer := 0;
   v_n        integer;
+  v_cur      record;
+  v_media    uuid;
+  v_type     text;
+  v_retitled uuid[] := '{}';
 begin
   for v_g in
     select l.group_event_id, l.created_group, l.prior_payload, l.prior_type,
@@ -1793,9 +1797,28 @@ begin
       delete from feed_events where id = v_g.group_event_id;
       v_deleted := v_deleted + 1;
     else
+      /**
+       * The prior title may have left the catalogue since (Codex, PR 354): the delete trigger
+       * kept the post on a surviving member, and restoring a dangling id would abort the whole
+       * revert. Such a post keeps its current title, and keeps its current kind too when the
+       * prior kind could not carry that title (`feed_events_watchlist_once`).
+       */
+      select fe.type, fe.media_item_id into v_cur from feed_events fe where fe.id = v_g.group_event_id;
+      v_media := case when exists (select 1 from media_items mi where mi.id = v_g.prior_media_item_id)
+                      then v_g.prior_media_item_id else v_cur.media_item_id end;
+      v_type := v_g.prior_type;
+      if v_media is distinct from v_g.prior_media_item_id then
+        v_retitled := v_retitled || v_g.group_event_id;
+        if v_type = 'watchlist_added' and exists (
+             select 1 from feed_events o
+              where o.actor_id = v_g.actor_id and o.type = 'watchlist_added'
+                and o.media_item_id = v_media and o.id <> v_g.group_event_id) then
+          v_type := v_cur.type;
+        end if;
+      end if;
       update feed_events
-         set type = v_g.prior_type,
-             media_item_id = v_g.prior_media_item_id,
+         set type = v_type,
+             media_item_id = v_media,
              payload = v_g.prior_payload,
              causal_at = v_g.prior_causal_at,
              causal_step = v_g.prior_causal_step
@@ -1809,7 +1832,8 @@ begin
 
   return jsonb_build_object('batch', p_batch, 'deleted_posts', v_deleted,
                             'restored_posts', v_restored, 'rows_restored', v_shown,
-                            'kept_with_conversation', to_jsonb(v_kept));
+                            'kept_with_conversation', to_jsonb(v_kept),
+                            'restored_on_a_surviving_title', to_jsonb(v_retitled));
 end;
 $$;
 

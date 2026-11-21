@@ -355,6 +355,32 @@ describe('a first batch, one author', () => {
     assert.notEqual(rows[0].media_item_id, a, 'never the departing title');
   });
 
+  it('the revert completes when a reused post’s prior title has left the catalogue (Codex, PR 354)', async () => {
+    const report = await consolidate('sc-other', { apply: true, actor: other });
+    assert.equal(report.applied_sessions, 2);
+    const { rows } = await t.sql(
+      `select group_event_id, prior_media_item_id from feed_consolidation_log
+        where batch = 'sc-other' and member_event_id is null and not created_group
+        order by id limit 1`,
+    );
+    const [{ group_event_id: post, prior_media_item_id: prior }] = rows;
+    await t.sql(`delete from media_items where id = $1`, [prior]);
+    assert.ok(
+      (await visible(other)).some((r) => r.id === post),
+      'the post survived the delete',
+    );
+
+    const reverted = await call(`revert_feed_session_consolidation($1)`, ['sc-other']);
+    assert.deepEqual(reverted.restored_on_a_surviving_title, [post]);
+    const after = (await snapshot(other)).find((r) => r.id === post);
+    assert.ok(after, 'restored, on a surviving title');
+    assert.notEqual(after.media_item_id, prior);
+    const { rows: log } = await t.sql(
+      `select count(*)::int as n from feed_consolidation_log where batch = 'sc-other'`,
+    );
+    assert.equal(log[0].n, 0, 'the batch is gone from the log, so the rollback is not blocked');
+  });
+
   it('a created post that gains a conversation is kept by the revert, and reported', async () => {
     const lone = await t.createUser({ username: 'sc_lone' });
     await t.sql(
