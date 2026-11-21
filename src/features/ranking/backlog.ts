@@ -186,9 +186,10 @@ export async function noteBatchRanking(sitting: string, mediaItemId: string): Pr
  * half-hour rule, `20261130000200`).
  *
  * Called once after a first-time ranking from any surface but Unranked, whose sitting has
- * its own draft. The server decides everything — whether the post is a first ranking,
- * untouched and unreviewed, and whether a group is open or an earlier first ranking is
- * still on its own inside the same 30 minutes. The watch date plays no part. A ranking with
+ * its own draft. The server decides everything — whether the post is a first ranking and
+ * untouched, and whether a group is open or an earlier first ranking is still on its own
+ * inside the same 30 minutes. The watch date plays no part, and since `20261130000800`
+ * neither does a published review: the review stays the title's, read inside the group. A ranking with
  * nothing to join simply keeps its own card until a second one arrives. Fire and forget:
  * the ranking is already saved, and a grouping that did not happen is not an error anybody
  * should see.

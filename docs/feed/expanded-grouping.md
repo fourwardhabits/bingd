@@ -17,6 +17,11 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 > 2026-11-20. It needed no OTA. PR 2's historical-date test, under which a ranking logged with
 > the default *Today* stayed standalone, ran until then. No consolidation has been run under
 > the new rule. What is live: [`../release/production-state.md`](../release/production-state.md).
+>
+> **On a branch, not applied anywhere (2026-11-21):** reviewed first rankings join the half
+> hour (`feed/reviewed-rankings-group`, migration `20261130000800`). See
+> [Reviews inside a group](#reviews-inside-a-group-20261130000800) below. Not applied to
+> staging or production; nothing in this document above that section changes until it is.
 
 ## One mechanism: a group presents its members
 
@@ -25,12 +30,12 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 - **Hidden members.** A row whose `presented_in` is set is a member shown through that group. The `feed_events_read` policy adds `presented_in is null`, so every PostgREST read hides it: the Feed, Profile, the conversation page, and old store binaries alike. No client filter is needed and no duplicate cards appear.
 - **Nothing deleted or rewritten.** The member keeps its id, its timestamps, its type and payload, and its membership rows. Unhiding it is `presented_in = null`.
 - **Group titles.** A group's titles are its own membership (`feed_ranking_titles` / `feed_watchlist_titles`) plus its hidden members' titles, deduplicated by title. These readers union the children: `ranking_batch_titles`, `watchlist_group_titles` and `feed_group_previews`.
-- **Never hidden.** An event is never a member if anything references it:
+- **Never hidden.** An event is never a member if anything references it (and a hidden member that gains one of these gets its own card back, `_unpresent_on_reference`):
   - comments or reactions;
   - a notification whose `subject_type = 'feed_event'` names it (for example `recommendation_ranked`);
   - a `proactive_cluster_actors` row;
   - `feed_event_causes`.
-- **Never grouped.** An event with a public note on its title is a review and stays standalone, as does an update or a rewatch. (An after-watch ranking was excluded too until `20261130000200`; it now groups like any first ranking.)
+- **Never grouped.** An update or a rewatch stays standalone. (An after-watch ranking was excluded too until `20261130000200`, and a ranking whose title has a published review until `20261130000800`; both now group like any first ranking.)
 - **Lookup:** `feed_event_presentation(event_id)` returns the visible group for a hidden id, so a stale deep link can follow it.
 
 ## Forward: first-time rankings in one half hour (`rank_group_note`)
@@ -41,21 +46,76 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 - **Server validation.** The server refuses unless all of these hold:
   - the actor's newest `title_ranked` for the title is visible and less than 30 minutes old;
   - it is a first ranking: not `update`, not `again` (a rewatch is its own activity);
-  - nothing references it (the rule above);
-  - there is no public note on the title (a review is its own activity).
-  - The watch date, and whether there is a watch event at all, plays no part.
+  - nothing references it (the rule above).
+  - The watch date, and whether there is a watch event at all, plays no part. Nor, since `20261130000800`, does a published review on the title.
 - **Under `ranking_story:<actor>`** (the lock `rank_batch_finalize` and `rank_batch_note` hold), with the window measured from the ranking's own post time:
   - **An open group exists** (the actor's latest visible `ranking_batch` with `payload.started_at`, and the ranking's time `< started_at + window`): the title joins it. Membership is added, the event is hidden, and the count grows. The group keeps its id, place and conversation. The window is fixed from the group's first title; it does not slide.
-  - **Otherwise a peer exists** (the earliest visible `title_ranked` marked `payload.groupable` by an earlier note, or `backfill` by PR 2, within one window of this ranking, re-checked under its row lock for references and reviews): a new `ranking_batch` group is created at the earlier title's `causal_at`, with `started_at` its `created_at`. Both events become members. No notification is written.
+  - **Otherwise a peer exists** (the earliest visible `title_ranked` marked `payload.groupable` by an earlier note, or `backfill` by PR 2, within one window of this ranking, re-checked under its row lock for references): a new `ranking_batch` group is created at the earlier title's `causal_at`, with `started_at` its `created_at`. Both events become members. No notification is written.
   - **Otherwise** the event is marked `payload.groupable = true` and stays a single card until a second ranking joins its window.
 - **An Unranked sitting in the same half hour.** `rank_batch_finalize` joins an open group as before. With none open, the sitting's post now also presents the title-page first rankings marked `groupable` inside one window of the sitting's start (fixed from the earliest title), re-checked under lock. A title-page ranking after the sitting joins its post through `started_at`.
 - **Cross-ladder.** Movies, shows and seasons share one social group. Each title keeps its own ladder:
   - `ranking_batch_titles` returns `category` per row;
   - the sheet labels each row by its own ladder;
   - every poster shows the author's current score from its own `band_bounds`, in its kind's pill.
-- **Never in a ranking group:** watchlist saves (a different family), rewatches, reviews, and anything referenced. Corrections, manual moves, reranks and Refine post nothing at all (`20261129000300`), so there is nothing of theirs to group.
+- **Never in a ranking group:** watchlist saves (a different family), rewatches, and anything referenced. Corrections, manual moves, reranks and Refine post nothing at all (`20261129000300`), so there is nothing of theirs to group.
 - **Flag:** `feed.ranking_backfill_grouping_enabled` (the kill switch keeps its name).
 - **Rollback:** `docs/release/ranking-grouping-window/rollback-20261130000200.sql`, rehearsed by `supabase/tests/ranking-grouping-window-rollback.test.mjs`.
+
+## Reviews inside a group (`20261130000800`)
+
+**Founder rule, 2026-11-21**, from a live Android report: a group read "ranked 7 titles", and a
+reviewed first ranking of *Invincible* four minutes later stood beside it as a post of its own.
+A published review no longer disqualifies an otherwise eligible first-time ranking from the
+fixed 30-minute group.
+
+- **What a review is.** Not a Feed event: `user_media.note` with `note_visibility = 'public'`.
+  The Feed reads it live, by (author, title), through `public_notes`, and attaches it to the
+  author's card about that title. So the only thing that ever made a review "a second post" was
+  the ranking card it rode on, kept standalone by `_feed_title_reviewed` (in `rank_group_note`,
+  for the ranking and for peers, and in `rank_batch_finalize`'s adoption) and restored by
+  `_unpresent_on_review` whenever a grouped title gained a review.
+- **What changed.**
+  - `rank_group_note` and `rank_batch_finalize` no longer test for a review. A reviewed first
+    ranking joins an open group, forms one with another eligible first ranking (in either
+    order), or stays a single card marked `groupable` when it is alone, exactly as an
+    unreviewed one does. A whole-show (`tv_shows`) ranking is no different.
+  - `_unpresent_on_review` and its trigger are removed. Adding, editing, sharing or unsharing a
+    review of a grouped title leaves the Feed exactly as it is: no card back, no new post.
+- **Where the review is read now.**
+  - **The group's sheet** ("N titles"): each title's published review sits under its own row,
+    through `public_notes` for the group's author and the sheet's titles, with the same spoiler
+    mask the Feed card uses (`shouldMask`). The Feed, Profile and a person's page all pass the
+    author to the sheet.
+  - **The rail**: a reviewed title's poster carries a quiet "Review" label (and "reviewed" in its
+    spoken name), from the same `public_notes` read, so it shows only where the text would.
+  - **Unchanged:** the title page's Reviews tab (`title_reviews_v2`, Helpful), a profile's
+    reviews, the Leaderboard's Reviews metric (`note_first_published_at`), and reports on a
+    review (`user_media.id`).
+  - **Old binaries** show the group and its sheet without the review; the review is still on the
+    title page and the profile.
+- **Who may read it.** Exactly who could before: `public_notes` gates on `can_view_profile` and
+  the note's own visibility, and the group's readers (`ranking_batch_titles`,
+  `feed_group_previews`) gate on the same predicate, so a private author's review reaches
+  approved followers only and a blocked reader gets neither the group nor the text.
+- **Engagement.** A reaction, comment, notification or proactive item still keeps a ranking out
+  of a group, and still gives a hidden member its card back, reviewed or not. A comment on a
+  group is about the group; there is no comment thread of a review's own (there never was: a
+  standalone card's thread was the ranking post's). Helpful is the review's own and lives on the
+  title page, unaffected.
+- **Not changed, deliberately.** `consolidate_feed_history` and
+  `docs/feed/consolidation-candidates.sql` keep their review exclusion, and `_feed_title_reviewed`
+  stays for them: the rule is forward-only, and a reviewed post already on its own is never
+  folded by this change or a later operator run. No migration touches an existing post. A
+  reviewed post written before `20261130000800` was refused before it could be marked
+  `groupable`, so it is never a peer.
+- **Rollback:** `docs/release/reviewed-rankings-group/rollback-20261130000800.sql`, rehearsed by
+  `supabase/tests/reviewed-rankings-group-rollback.test.mjs`. It restores the two functions and
+  the trigger; it unhides nothing, so a group formed meanwhile stays one card until a later
+  review write on one of its reviewed members restores that member's card.
+- **Tests:** `supabase/tests/reviewed-rankings-group.test.mjs` (the reported case, later and
+  edited reviews, pairing, a lone review, the window's edges, rewatches and reranks, engagement,
+  privacy and blocks), the races RRG1–RRG3 and the revised RG9, and
+  `src/features/feed/ReviewedRankingGroup.test.tsx`.
 
 ## Retrospective consolidation (one-time, bounded, reversible)
 
@@ -70,4 +130,4 @@ Founder spec 2026-11-16, §5–§7. Builds on PR 312 (poster rails). Branch `fee
 
 ## Not changed
 
-Scores, ladders, community scores, Watch History, Collection, the review publication path, notifications, and the Unranked draft lifecycle.
+Scores, ladders, community scores, Watch History, Collection, the review publication path (`log_watched`, `save_note`: neither writes a Feed post for the review itself; an award a review earns is announced as it always was), notifications, and the Unranked draft lifecycle.
