@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, Text } from '@/ui/components';
+import { Avatar, EngagementRow, ReactionSummary, Text, type ActivityReaction } from '@/ui/components';
+import { ENGAGEMENT_EDGE } from '@/ui/components/EngagementRow';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { followTail, relativeTime, verbFor } from './activity';
@@ -14,6 +15,14 @@ export type FollowStoryRowProps = {
   onPressPerson: (username: string) => void;
   /** Opens the list of everybody this story is about. Only called when there is more than one. */
   onOpenList: () => void;
+  /**
+   * **Reactions and comments** (Workstream C, founder 2026-11-19). Both optional: absent,
+   * the row is exactly the compact row it always was (the activity page's header, an older
+   * caller). The server decides who may engage (`_follow_story_open_to`); the row only draws.
+   */
+  reaction?: ActivityReaction;
+  onPressComments?: () => void;
+  commentCount?: number;
 };
 
 /**
@@ -58,15 +67,25 @@ export type FollowStoryRowProps = {
  * inert outside the two names; that is deliberate rather than an omission, because a sheet
  * containing one row the reader can already see is a modal that says nothing.
  *
- * No reactions and no comments. §A9's instruction is that follow activity is social
- * discovery content and not an audit log, and a follow you can react to and comment under
- * is neither.
+ * ---------------------------------------------------------------------------
+ * REACTIONS AND COMMENTS (founder decision, 2026-11-19; replaces §A9's exclusion)
+ *
+ * The Feed's one labelled engagement row (`EngagementRow`, founder 2026-11-19): Like and
+ * Comment, in the same equal 44pt columns every other post uses, under the sentence and
+ * outside the text column that opens the list, so neither can open it. No Save and no
+ * Share: there is no title to save, and nothing to link to. No "who reacted" sentence line,
+ * which keeps the row compact. One shared conversation per story, grouped or not. Who may
+ * engage, and when a story stops being open to somebody, is the server's single predicate
+ * (20261201000100).
  */
 export function FollowStoryRow({
   event,
   onPressActor,
   onPressPerson,
   onOpenList,
+  reaction,
+  onPressComments,
+  commentCount = 0,
 }: FollowStoryRowProps) {
   const [first, ...rest] = event.followed;
   // `hydrate` drops a follow story with nobody in it, so this is a guard against a caller
@@ -80,62 +99,105 @@ export function FollowStoryRow({
     .filter(Boolean)
     .join(' ');
 
+  const reacts = Boolean(reaction && reaction.canReact !== false);
+  const engages = reacts || Boolean(onPressComments);
+  // "React to Abi's activity about following Ravi", in EngagementRow's own grammar.
+  const subject = `following ${first.name}${tail ? ` ${tail}` : ''}`;
+
   return (
-    <View style={styles.row} testID="follow-story-row">
-      {/**
-       * The actor's face, and at `sm` rather than as the 22pt chip `ActivityRow` stamps on a
-       * poster. There is no artwork here for a chip to sit on, so the avatar *is* the
-       * leading object — which is the shape `LeaderboardView` and `PeopleView` already use
-       * for a row about a person, and this row is one.
-       */}
-      <Pressable
-        accessibilityRole={onPressActor ? 'button' : 'none'}
-        accessibilityLabel={onPressActor ? `${event.actorName}'s profile` : undefined}
-        disabled={!onPressActor}
-        onPress={onPressActor}
-        style={({ pressed }) => pressed && styles.pressed}
-      >
-        <Avatar size="sm" uri={event.actorAvatarUri} name={event.actorName} />
-      </Pressable>
+    <View style={styles.frame} testID="follow-story-row">
+      <View style={styles.row}>
+        {/**
+         * The actor's face, and at `sm` rather than as the 22pt chip `ActivityRow` stamps on a
+         * poster. There is no artwork here for a chip to sit on, so the avatar *is* the
+         * leading object — which is the shape `LeaderboardView` and `PeopleView` already use
+         * for a row about a person, and this row is one.
+         */}
+        <Pressable
+          accessibilityRole={onPressActor ? 'button' : 'none'}
+          accessibilityLabel={onPressActor ? `${event.actorName}'s profile` : undefined}
+          disabled={!onPressActor}
+          onPress={onPressActor}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <Avatar size="sm" uri={event.actorAvatarUri} name={event.actorName} />
+        </Pressable>
 
-      {/**
-       * The whole text column opens the list, with the two names winning their own touches
-       * inside it — the nested-press arrangement `PeopleView`'s mutual line uses, and it
-       * works the same way: React Native hands the touch to the innermost responder.
-       *
-       * `accessibilityRole="none"` and no label when there is nothing to open, so a
-       * single-person story does not announce a button that does nothing.
-       */}
-      <Pressable
-        accessibilityRole={aggregated ? 'button' : 'none'}
-        accessibilityLabel={aggregated ? sentence : undefined}
-        accessibilityHint={aggregated ? 'Opens everyone in this' : undefined}
-        disabled={!aggregated}
-        onPress={onOpenList}
-        style={styles.copy}
-      >
-        <Text variant="subhead" tone="secondary" numberOfLines={3}>
-          <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
-            {event.actorName}
+        {/**
+         * The whole text column opens the list, with the two names winning their own touches
+         * inside it — the nested-press arrangement `PeopleView`'s mutual line uses, and it
+         * works the same way: React Native hands the touch to the innermost responder.
+         *
+         * `accessibilityRole="none"` and no label when there is nothing to open, so a
+         * single-person story does not announce a button that does nothing.
+         */}
+        <Pressable
+          accessibilityRole={aggregated ? 'button' : 'none'}
+          accessibilityLabel={aggregated ? sentence : undefined}
+          accessibilityHint={aggregated ? 'Opens everyone in this' : undefined}
+          disabled={!aggregated}
+          onPress={onOpenList}
+          style={styles.copy}
+        >
+          <Text variant="subhead" tone="secondary" numberOfLines={3}>
+            <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
+              {event.actorName}
+            </Text>
+            {` ${verbFor(event.type)} `}
+            <Text
+              variant="subhead"
+              style={styles.entity}
+              onPress={() => onPressPerson(first.username)}
+            >
+              {first.name}
+            </Text>
+            {tail ? ` ${tail}` : null}
           </Text>
-          {` ${verbFor(event.type)} `}
-          <Text
-            variant="subhead"
-            style={styles.entity}
-            onPress={() => onPressPerson(first.username)}
-          >
-            {first.name}
-          </Text>
-          {tail ? ` ${tail}` : null}
-        </Text>
 
-        {/* The row's second line, in the slot an activity row spends on `PG-13 · 148m`.
+          {/* The row's second line, in the slot an activity row spends on `PG-13 · 148m`.
             One thing, and it is the only thing a follow story has to say beyond its
             sentence. */}
-        <Text variant="caption" tone="tertiary" numberOfLines={1}>
-          {relativeTime(event.createdAt)}
-        </Text>
-      </Pressable>
+          <Text variant="caption" tone="tertiary" numberOfLines={1}>
+            {relativeTime(event.createdAt)}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/**
+       * **The Feed's engagement, exactly as award, goal and grouped rows draw it**
+       * (founder, 2026-11-19). The same three pieces in the same order as `ActivityRow`'s
+       * `labelledActions`: who reacted as a sentence on its own line ("Priya and 3 others
+       * like this", opening the same "who reacted" sheet, for every reader, the author
+       * included), the picker above the heart it belongs to, then `EngagementRow`'s
+       * labelled Like · Comment at the card's edge. No Save and no Share: there is no title
+       * to save and no public link for a follow story.
+       */}
+      {reaction && reaction.count > 0 ? (
+        <ReactionSummary
+          glyphs={reaction.summaryGlyphs ?? reaction.glyphs ?? []}
+          forms={
+            reaction.summaryForms?.length
+              ? reaction.summaryForms
+              : [`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}`]
+          }
+          onPress={reaction.onPressSummary}
+          testID="follow-story-reactions"
+        />
+      ) : null}
+
+      {reaction?.picker && reacts ? <View>{reaction.picker}</View> : null}
+
+      {engages ? (
+        <EngagementRow
+          actorName={event.actorName}
+          subject={subject}
+          reaction={reaction}
+          onPressComments={onPressComments}
+          commentCount={commentCount}
+          style={styles.actions}
+          testID="follow-story"
+        />
+      ) : null}
     </View>
   );
 }
@@ -146,10 +208,7 @@ const styles = StyleSheet.create({
    * the same wherever it is drawn, and this one sits in a list of rows about titles that
    * are deliberately taller.
    */
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[3],
+  frame: {
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],
     /**
@@ -169,7 +228,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
     borderBottomColor: theme.border.hairline,
   },
+  row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   copy: { flex: 1, gap: 1 },
+  /**
+   * The labelled row reaches past the row's gutter to the card's, as `ActivityRow`'s
+   * `labelledActions` does, so its columns line up with every other post's.
+   */
+  actions: { marginTop: theme.space[1], marginHorizontal: ENGAGEMENT_EDGE - theme.layout.gutter },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
   // name reads the same weight here as it does two rows up.
   entity: { color: theme.text.primary, fontFamily: fontFamily.sansSemibold },

@@ -8,6 +8,8 @@ import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
 import { goalAchievement } from '@/features/goals/goals';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
+import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
+import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import {
@@ -150,6 +152,8 @@ export default function ActivityScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
+  /** A follow story's list of people, the Feed's own sheet (Workstream C). */
+  const [followListOpen, setFollowListOpen] = useState(false);
   const reactions = useReactions(event && viewerId ? [event.id] : [], viewerId ?? '');
   const { setReaction } = useSetReaction(viewerId ?? '');
   const summary = event ? (reactions.data?.get(event.id) ?? null) : null;
@@ -220,6 +224,24 @@ export default function ActivityScreen() {
   // Nothing to draw and nothing to ask for until it is known who is asking.
   if (!viewerId) return <LoadingScreen />;
 
+  // The reaction control the header carries, for a title post and a follow story alike.
+  const headerReaction = reactionsResolved
+    ? activityReaction({
+        summary,
+        viewerId,
+        onToggle: () => void toggleDefault(),
+        onOpenPicker: () => setPickerOpen(true),
+        onOpenDetail: () => setDetailOpen(true),
+        picker: pickerOpen ? (
+          <ReactionPill
+            current={summary?.mine ?? null}
+            onChoose={(kind) => void choose(kind)}
+            onDismiss={() => setPickerOpen(false)}
+          />
+        ) : null,
+      })
+    : undefined;
+
   return (
     /**
      * **No top edge** (founder QA, 2026-11-12), the Settings root's fix for the same reason
@@ -271,107 +293,110 @@ export default function ActivityScreen() {
           {/* The canonical feed card, and the same component the Feed draws. Not a
               reduced copy: a reader arriving here from a notification should recognise
               the post as the one they would have scrolled past. */}
-          <ActivityRow
-            actorName={event.actorName}
-            actorAvatarUri={event.actorAvatarUri}
-            onPressActor={
-              event.actorId === viewerId || !event.actorUsername
-                ? undefined
-                : () => router.push(`/u/${event.actorUsername}`)
-            }
-            verb={verbFor(event.type, event)}
-            tail={tailFor(event.type, event.title)}
-            // "added Dune and 4 others to their watchlist", as the Feed draws it
-            // (20261125000100). The conversation on this page is the post's, never a
-            // member's.
-            tailAction={watchlistTailAction(event, setWatchlistGroupFor)}
-            companions={event.companions}
-            title={event.title}
-            year={event.year}
-            posterUri={posterUri(event.posterPath)}
-            // The badge leads an award row, exactly as the feed draws it.
-            lead={
-              event.award ? (
-                <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
-              ) : event.goal ? (
-                // The feed's own lead for a goal row. This page draws the same activity,
-                // and a goal row here with an empty poster box was the one place the two
-                // surfaces disagreed about what a goal looks like.
-                <GoalActivityLead />
-              ) : undefined
-            }
-            // The same second line the feed draws, from the same two functions — see
-            // `app/(tabs)/feed.tsx`. A conversation page reached from a notification
-            // shows the activity it is about, so a metal here would be the same
-            // non-explanation in a second place.
-            metadata={
-              event.award
-                ? event.award.achievement
-                : event.goal
-                  ? goalAchievement(event.goal.category, event.goal.target)
-                  : metadataFor(event)
-            }
-            watchLabel={watchLabel(event.watchNumber)}
-            score={event.score}
-            bucket={event.bucket}
-            note={event.note?.text ?? null}
-            noteHasSpoilers={event.note?.hasSpoilers ?? false}
-            noteMasked={shouldMask({
-              hasSpoilers: event.note?.hasSpoilers ?? false,
-              mediaItemId: event.mediaItemId,
-              viewerId: viewerId,
-              authorId: event.actorId,
-              watched: watched.data,
-            })}
-            timeLabel={relativeTime(event.createdAt)}
-            // An award row opens the earner's Awards rather than a title (§5).
-            onPressTitle={() => {
-              if (event.mediaItemId) {
-                router.push(`/title/${event.mediaItemId}`);
-              } else if (event.award) {
-                if (event.actorId === viewerId) {
-                  router.push({ pathname: '/profile', params: { awards: '1' } });
-                } else if (event.actorUsername) {
-                  router.push({
-                    pathname: '/u/[username]',
-                    params: { username: event.actorUsername, awards: '1' },
-                  });
-                }
-              }
-            }}
+          {event.type === 'follow_added' ? (
             /**
-             * **Reactions, and nothing else.**
-             *
-             * No comments control: the conversation is directly below, and a button that
-             * scrolls you six points down the screen you are already on is noise. No
-             * watchlist and no recommend: this screen exists because somebody was told
-             * something and came to read it, and a row of *actions* at the top of it
-             * turns a message into a post to be worked on. Both are on the Feed, on the
-             * same card, one tap away.
-             *
-             * Reactions were omitted alongside them until 2026-08-29 and should not have
-             * been — see the hook above for the founder's report and why this one is a
-             * different kind of thing. Every value here comes from the shared summary.
+             * **A follow story's conversation** (Workstream C, 2026-11-19). The Feed's
+             * compact row, with its heart: the thread is directly below, so no comment
+             * button, for the reason the title row has none. The names open profiles and an
+             * aggregated story opens its list, exactly as on the Feed.
              */
-            reaction={
-              reactionsResolved
-                ? activityReaction({
-                    summary,
-                    viewerId,
-                    onToggle: () => void toggleDefault(),
-                    onOpenPicker: () => setPickerOpen(true),
-                    onOpenDetail: () => setDetailOpen(true),
-                    picker: pickerOpen ? (
-                      <ReactionPill
-                        current={summary?.mine ?? null}
-                        onChoose={(kind) => void choose(kind)}
-                        onDismiss={() => setPickerOpen(false)}
-                      />
-                    ) : null,
-                  })
-                : undefined
-            }
-          />
+            <FollowStoryRow
+              event={event}
+              onPressActor={
+                event.actorId === viewerId || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
+              }
+              onPressPerson={(username) => router.push(`/u/${username}`)}
+              onOpenList={() => setFollowListOpen(true)}
+              reaction={headerReaction}
+            />
+          ) : (
+            <ActivityRow
+              actorName={event.actorName}
+              actorAvatarUri={event.actorAvatarUri}
+              onPressActor={
+                event.actorId === viewerId || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
+              }
+              verb={verbFor(event.type, event)}
+              tail={tailFor(event.type, event.title)}
+              // "added Dune and 4 others to their watchlist", as the Feed draws it
+              // (20261125000100). The conversation on this page is the post's, never a
+              // member's.
+              tailAction={watchlistTailAction(event, setWatchlistGroupFor)}
+              companions={event.companions}
+              title={event.title}
+              year={event.year}
+              posterUri={posterUri(event.posterPath)}
+              // The badge leads an award row, exactly as the feed draws it.
+              lead={
+                event.award ? (
+                  <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+                ) : event.goal ? (
+                  // The feed's own lead for a goal row. This page draws the same activity,
+                  // and a goal row here with an empty poster box was the one place the two
+                  // surfaces disagreed about what a goal looks like.
+                  <GoalActivityLead />
+                ) : undefined
+              }
+              // The same second line the feed draws, from the same two functions — see
+              // `app/(tabs)/feed.tsx`. A conversation page reached from a notification
+              // shows the activity it is about, so a metal here would be the same
+              // non-explanation in a second place.
+              metadata={
+                event.award
+                  ? event.award.achievement
+                  : event.goal
+                    ? goalAchievement(event.goal.category, event.goal.target)
+                    : metadataFor(event)
+              }
+              watchLabel={watchLabel(event.watchNumber)}
+              score={event.score}
+              bucket={event.bucket}
+              note={event.note?.text ?? null}
+              noteHasSpoilers={event.note?.hasSpoilers ?? false}
+              noteMasked={shouldMask({
+                hasSpoilers: event.note?.hasSpoilers ?? false,
+                mediaItemId: event.mediaItemId,
+                viewerId: viewerId,
+                authorId: event.actorId,
+                watched: watched.data,
+              })}
+              timeLabel={relativeTime(event.createdAt)}
+              // An award row opens the earner's Awards rather than a title (§5).
+              onPressTitle={() => {
+                if (event.mediaItemId) {
+                  router.push(`/title/${event.mediaItemId}`);
+                } else if (event.award) {
+                  if (event.actorId === viewerId) {
+                    router.push({ pathname: '/profile', params: { awards: '1' } });
+                  } else if (event.actorUsername) {
+                    router.push({
+                      pathname: '/u/[username]',
+                      params: { username: event.actorUsername, awards: '1' },
+                    });
+                  }
+                }
+              }}
+              /**
+               * **Reactions, and nothing else.**
+               *
+               * No comments control: the conversation is directly below, and a button that
+               * scrolls you six points down the screen you are already on is noise. No
+               * watchlist and no recommend: this screen exists because somebody was told
+               * something and came to read it, and a row of *actions* at the top of it
+               * turns a message into a post to be worked on. Both are on the Feed, on the
+               * same card, one tap away.
+               *
+               * Reactions were omitted alongside them until 2026-08-29 and should not have
+               * been — see the hook above for the founder's report and why this one is a
+               * different kind of thing. Every value here comes from the shared summary.
+               */
+              reaction={headerReaction}
+            />
+          )}
 
           {/**
             * **No divider here, and that is the fix** (founder physical report,
@@ -400,6 +425,7 @@ export default function ActivityScreen() {
             // series. Masking is decided against this and nothing else.
             mediaItemId={event.mediaItemId}
             title={event.title}
+            allowSpoilers={event.type !== 'follow_added'}
             viewerId={viewerId}
             watched={watched.data}
             onPressPerson={(username) => router.push(`/u/${username}`)}
@@ -419,6 +445,18 @@ export default function ActivityScreen() {
                 router.push(`/title/${mediaItemId}`);
               }}
               onClose={() => setWatchlistGroupFor(null)}
+            />
+          ) : null}
+
+          {followListOpen && event.type === 'follow_added' ? (
+            <FollowStorySheet
+              event={event}
+              viewerId={viewerId}
+              onPressPerson={(username) => {
+                setFollowListOpen(false);
+                router.push(`/u/${username}`);
+              }}
+              onClose={() => setFollowListOpen(false)}
             />
           ) : null}
 
