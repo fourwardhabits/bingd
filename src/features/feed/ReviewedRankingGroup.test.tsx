@@ -196,6 +196,39 @@ describe("the rail's review mark", () => {
     expect([...marks.keys()]).toEqual([reviewKey('author', 'invincible')]);
   });
 
+  it('asks one author at a time, so one author’s reviews never crowd out another’s', async () => {
+    // public_notes filters authors and titles independently and caps by recency (Codex,
+    // PR 347): asked together, A's review of B's title would be a row nobody wanted.
+    mockRpc.mockImplementation((_name: string, args: { p_user_ids: string[] }) =>
+      Promise.resolve({
+        data:
+          args.p_user_ids[0] === 'a'
+            ? [{ user_id: 'a', media_item_id: 'heat' }]
+            : [{ user_id: 'b', media_item_id: 'dune' }],
+        error: null,
+      }),
+    );
+    const marks = await readGroupReviews([
+      reviewKey('a', 'heat'),
+      reviewKey('a', 'alien'),
+      reviewKey('b', 'dune'),
+    ]);
+    expect(mockRpc).toHaveBeenCalledTimes(2);
+    expect(mockRpc).toHaveBeenCalledWith('public_notes', {
+      p_user_ids: ['a'],
+      p_media_item_ids: ['heat', 'alien'],
+      p_limit: 100,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('public_notes', {
+      p_user_ids: ['b'],
+      p_media_item_ids: ['dune'],
+      p_limit: 100,
+    });
+    expect(new Set(marks.keys())).toEqual(
+      new Set([reviewKey('a', 'heat'), reviewKey('b', 'dune')]),
+    );
+  });
+
   it('a failed read is no marks, not an error', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'down' } });
     const marks = await readGroupReviews([reviewKey('author', 'invincible')]);

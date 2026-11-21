@@ -127,28 +127,40 @@ export function useGroupPreviews(events: FeedItem[], viewerId: string) {
  * (`can_view_profile`: blocks, private accounts, suspension), so a mark never says more
  * than the text would.
  *
- * Keyed by `author:title` pair, chunked like the previews; a chunk's authors and titles are
- * each at most `ID_CHUNK`, inside the function's 50-id limits. A failure is swallowed into
- * "no marks": the mark is an enrichment, and the sheet still shows every review.
+ * Keyed by `author:title` pair, chunked like the previews, and asked **one author at a
+ * time** (Codex, PR 347): `public_notes` filters authors and titles independently and caps
+ * its answer at 100 by recency, so several authors in one call could be answered with
+ * reviews of pairs nobody asked about and crowd out the ones that were. Per author, a
+ * chunk's titles (at most `ID_CHUNK`) bound the answer well under that cap. A failure is
+ * swallowed into "no marks": the mark is an enrichment, and the sheet still shows every
+ * review.
  */
 export const reviewKey = (actorId: string, mediaItemId: string) => `${actorId}:${mediaItemId}`;
 
 export async function readGroupReviews(pairs: string[]): Promise<Map<string, true>> {
   const out = new Map<string, true>();
-  const wanted = new Set(pairs);
-  const actors = [...new Set(pairs.map((pair) => pair.split(':')[0]))];
-  const titles = [...new Set(pairs.map((pair) => pair.split(':')[1]))];
-  if (!actors.length || !titles.length) return out;
-  const { data, error } = await supabase.rpc('public_notes', {
-    p_user_ids: actors,
-    p_media_item_ids: titles,
-    p_limit: 100,
-  });
-  if (error || !Array.isArray(data)) return out;
-  for (const row of data as { user_id: string; media_item_id: string }[]) {
-    const key = reviewKey(row.user_id, row.media_item_id);
-    if (wanted.has(key)) out.set(key, true);
+  const byActor = new Map<string, string[]>();
+  for (const pair of new Set(pairs)) {
+    const [actor, title] = pair.split(':');
+    if (!actor || !title) continue;
+    byActor.set(actor, [...(byActor.get(actor) ?? []), title]);
   }
+  await Promise.all(
+    [...byActor].map(async ([actor, titles]) => {
+      const { data, error } = await supabase.rpc('public_notes', {
+        p_user_ids: [actor],
+        p_media_item_ids: titles,
+        p_limit: 100,
+      });
+      if (error || !Array.isArray(data)) return;
+      const wanted = new Set(titles);
+      for (const row of data as { user_id: string; media_item_id: string }[]) {
+        if (row.user_id === actor && wanted.has(row.media_item_id)) {
+          out.set(reviewKey(actor, row.media_item_id), true);
+        }
+      }
+    }),
+  );
   return out;
 }
 

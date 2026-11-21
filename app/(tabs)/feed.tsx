@@ -759,6 +759,9 @@ export default function FeedScreen() {
               // and count, so its preview key does not move, and only a refetch here
               // brings a poster's score up to what the member sheet already shows.
               void groupPreviews.refetch();
+              // And their review marks (Codex, PR 347): a review published or unshared
+              // since keeps the same author and title pairs, so the key does not move.
+              void groupReviews.refetch();
               // The bell is on this screen, so a reader pulling to see what is new is
               // asking about it too. Leaving it out meant the one deliberate "refresh
               // this page" gesture in the app refreshed everything on it except the
