@@ -612,6 +612,45 @@ describe('a catalogue delete of a member that does not lead', () => {
   });
 });
 
+describe('a catalogue delete inside a presented post', () => {
+  it('keeps the hidden watchlist post and its surviving save (Codex, PR 354)', async () => {
+    const s = await uuid();
+    const film = await title('movie', 'Backlog');
+    await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [
+      user,
+      film,
+    ]);
+    await t.rankToCompletion(film, 'loved', (pivot, subject) => subject);
+    await call(`rank_batch_note($1, $2, $3)`, [await uuid(), s, film]);
+    await t.sql(
+      `update feed_ranking_titles set placed_at = placed_at - interval '2 minutes'
+        where event_id = (select id from feed_events where actor_id = $1 and type = 'ranking_batch_draft')`,
+      [user],
+    );
+    const a = await save('Kept save');
+    const b = await save('Deleted save');
+    await call(`rank_batch_finalize($1, $2)`, [await uuid(), s]);
+    const [post] = await visibleTo(friend);
+    assert.equal(post.payload.count, 3);
+    const hidden = (await posts()).find((p) => p.type === 'watchlist_added');
+    assert.equal(hidden.presented_in, post.id);
+    assert.equal(hidden.media_item_id, b, 'the hidden post leads with the title to delete');
+
+    await t.sql(`delete from media_items where id = $1`, [b]);
+
+    const after = await posts();
+    const child = after.find((p) => p.id === hidden.id);
+    assert.ok(child, 'the hidden post survived');
+    assert.equal(child.media_item_id, a);
+    assert.equal(child.presented_in, post.id, 'still shown through its session');
+    const session = after.find((p) => p.id === post.id);
+    assert.equal(session.payload.count, 2);
+    const sheet = await sheetAs(friend, post.id);
+    assert.equal(sheet.length, 2, 'the readers agree with the count');
+    assert.ok(sheet.some((r) => r.media_item_id === a));
+  });
+});
+
 describe('recency and pagination', () => {
   /** The Feed's own keyset, as `activityRows` sends it, for `viewer`. */
   const page = (viewer, actors, cursor, limit) =>

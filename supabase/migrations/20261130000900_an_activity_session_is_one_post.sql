@@ -1277,7 +1277,8 @@ grant execute on function feed_group_previews(uuid[], integer) to authenticated;
  * deleting that title from the catalogue would take the whole post and its conversation. Every
  * post the title is a member of is found, by every path `_group_members` reads (watchlist and
  * ranking membership, its own or a presented post's, a presented ranking, and the
- * representative), and each is put right before the cascades run: a session post is
+ * representative), hidden ones included, and each is put right before the cascades run,
+ * hidden ones before the sessions that present them: a session post is
  * refreshed from its surviving members (`_session_refresh(post, old.id)`), any other group
  * takes its first surviving member as representative and is recounted. A post with no
  * surviving member is left to the cascade, as before.
@@ -1313,8 +1314,10 @@ begin
       from touched t
       join feed_events g on g.id = t.event_id
      where g.type in ('ranking_batch', 'watchlist_added')
-       and g.presented_in is null
-     order by g.id
+     -- Hidden posts first (Codex, PR 354): a post presented by a session owns its own
+     -- membership, so it keeps its surviving members (and its row) through the cascade, and
+     -- its visible session is then refreshed over them.
+     order by (g.presented_in is null), g.id
   loop
     perform _lock_activity_session(v_group.actor_id);
     perform 1 from feed_events where id = v_group.event_id for update;
