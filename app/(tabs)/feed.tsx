@@ -28,6 +28,7 @@ import {
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
+import { FeedHeading } from '@/features/feed/FeedHeading';
 import {
   groupCount,
   previewKey,
@@ -85,7 +86,6 @@ import {
   HeaderBoundary,
   IconToggle,
   Screen,
-  SectionHeader,
   SkeletonRow,
   Text,
   usePullRefresh,
@@ -809,39 +809,32 @@ export default function FeedScreen() {
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode, LEADERBOARD in Leaderboard mode (whose time range has been a
-         * filter under its categories since 2026-11-06), and since
-         * 2026-09-08 (§A3) the People heading in People mode, in the same slot with the
-         * same treatment — `DISCOVER PEOPLE` since the UI consistency sprint (founder,
-         * 2026-11-10), `PEOPLE YOU MAY KNOW` before it. In Feed mode it is drawn only when the shelf will actually
+         * name in Feed mode, LEADERBOARD in Leaderboard mode, and since 2026-09-08 (§A3)
+         * the People heading in People mode, in the same slot with the same treatment. In
+         * Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
          * absent shelf would be a label for nothing. `useTrending` is called here purely
          * to know that, and costs no request — it is the same query key the shelf itself
          * uses, so React Query answers both from one fetch.
          *
-         * **People's heading is a `SectionHeader` and not a `MediumSelector`**, which is
-         * the founder's "do not add a fake chevron": there is no header-level choice on
-         * People yet, and a chevron that opens nothing is a control that lies. The two
-         * components draw the same words the same way — `sectionHeader`, uppercase, Maroon
-         * — so the row does not move if a second list ever makes it a selector.
+         * **Every heading on this tab is `FeedHeading`** (header consistency, founder spec
+         * 2026-11-22): one component, one token and one text-size ceiling for TRENDING NOW,
+         * LEADERBOARD, DISCOVER PEOPLE and RECENT ACTIVITY below, so the row does not change
+         * size when the mode does. None is a dropdown: the board's filters are the icon under
+         * it, in `LeaderboardView`, and People's Mutuals / Match switch is in `PeopleView`.
          */}
         <View style={styles.contentHeader}>
-          {/* Every occupant is a `SectionHeader`, which pads itself to the gutter. */}
+          {/* Every occupant is a `FeedHeading`, which pads itself to the gutter. */}
           <View style={styles.contentHeaderLeft}>
             {showingBoard ? (
-              // The section, named like TRENDING NOW (nav cohesion sprint, 2026-11-06). The
-              // time range is a filter under the categories now, in `LeaderboardView`.
-              <SectionHeader title="Leaderboard" size="large" fit />
+              <FeedHeading title="Leaderboard" />
             ) : showingPeople ? (
-              // The Feed's label size, as LEADERBOARD and TRENDING NOW (marquee cohesion
-              // sprint); it shrinks to fit beside the toggle on a narrow phone. DISCOVER
-              // PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint, 2026-11-10):
-              // the list is discovery, and most suggestions are not people the reader knows.
-              <SectionHeader title="Discover people" size="large" fit />
+              // DISCOVER PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint,
+              // 2026-11-10): the list is discovery, and most suggestions are not people the
+              // reader knows.
+              <FeedHeading title="Discover people" />
             ) : trendingHasItems ? (
-              // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
-              // heading keeps the standard 12pt, which is what fits beside the toggle.
-              <SectionHeader title="Trending now" size="large" />
+              <FeedHeading title="Trending now" />
             ) : null}
           </View>
 
@@ -912,7 +905,7 @@ export default function FeedScreen() {
              */}
             <View style={styles.activityStart} testID="feed-activity-start">
               {trendingHasItems ? <View style={styles.activityRule} /> : null}
-              <SectionHeader title="Recent activity" size="large" tight />
+              <FeedHeading title="Recent activity" tight />
             </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
@@ -1388,7 +1381,7 @@ const styles = StyleSheet.create({
   /**
    * The content header row: a heading on the left, the mode toggle on the right.
    *
-   * The right gutter lives here; the left one is the `SectionHeader`'s own, which every
+   * The right gutter lives here; the left one is the `FeedHeading`'s own, which every
    * mode's heading is.
    */
   contentHeader: {

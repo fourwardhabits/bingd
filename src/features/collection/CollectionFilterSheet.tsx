@@ -212,34 +212,64 @@ export function CollectionFilterSheet<Axis extends string = string>({
  * One facet's heading and its options, on the gutter. Exported for the person page's
  * Filmography sheet (FU1113-C), so its Decade section is this one rather than a copy.
  */
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({
+  title,
+  children,
+  radio = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  /** Its options are `kind="radio"`: the row is announced as one group named by the title. */
+  radio?: boolean;
+}) {
   return (
     <View style={styles.section}>
       <Text variant="sectionHeader" tone="action">
         {title.toUpperCase()}
       </Text>
-      <View style={styles.options}>{children}</View>
+      <View
+        style={styles.options}
+        accessibilityRole={radio ? 'radiogroup' : undefined}
+        accessibilityLabel={radio ? title : undefined}
+      >
+        {children}
+      </View>
     </View>
   );
 }
 
-/** One option in a facet: a hairline chip, filled Maroon when chosen. Shared as `Section`. */
+/**
+ * One option in a facet: a hairline chip, filled Maroon when chosen. Shared as `Section`.
+ *
+ * `checkbox` (the default, and every Collection facet): one of several that may be on
+ * together. `radio`: exactly one of its section is on — the Leaderboard's type and time
+ * period (`LeaderboardFilterSheet`). The chip is drawn the same either way; what changes is
+ * what a screen reader is told (`radio`, `selected`) and the target, which takes the slop
+ * `SortMenu`'s radio chips use (`chipHitSlop`) so the 32pt chip answers 44pt.
+ */
 export function Option({
   label,
   count,
   selected,
   onPress,
+  kind = 'checkbox',
+  testID,
 }: {
   label: string;
   count?: number;
   selected: boolean;
   onPress: () => void;
+  kind?: 'checkbox' | 'radio';
+  testID?: string;
 }) {
+  const radio = kind === 'radio';
   return (
     <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected }}
+      accessibilityRole={kind}
+      accessibilityState={radio ? { selected } : { checked: selected }}
       accessibilityLabel={count == null ? label : `${label}, ${count}`}
+      hitSlop={radio ? theme.layout.chipHitSlop : undefined}
+      testID={testID}
       onPress={onPress}
       style={({ pressed }) => [styles.option, selected && styles.selected, pressed && styles.pressed]}
     >

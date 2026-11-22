@@ -1,18 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import {
   Avatar,
+  BrowseControlsRow,
   Divider,
   EmptyState,
-  MediumSelector,
+  FilterIconButton,
   SkeletonRow,
   Text,
 } from '@/ui/components';
 import { fontFamily, medal, theme } from '@/ui/tokens';
 
+import { LeaderboardFilterSheet } from './LeaderboardFilterSheet';
 import {
   countLabel,
+  DEFAULT_METRIC,
+  DEFAULT_TIMEFRAME,
   emptyCopy,
   LEADERBOARD_METRICS,
   LEADERBOARD_TIMEFRAMES,
@@ -51,7 +56,7 @@ export type LeaderboardViewProps = {
  * thing to add to a leaderboard — so the absence has to be a decision somebody can read,
  * or it will be filled in by the next person who thinks the screen looks bare.
  *
- * What is left is a heading, four chips and a list. The restraint is the design.
+ * What is left is a heading, one filter icon and a list. The restraint is the design.
  *
  * ---------------------------------------------------------------------------
  * THE TOP THREE, AND WHY THE TREATMENT IS A COLOUR RATHER THAN A MEDAL
@@ -92,6 +97,16 @@ export function LeaderboardView({
   const rows = entries ?? [];
   const youAreListed = rows.some((entry) => entry.isYou);
   const empty = emptyCopy(metric, timeframe);
+  // The filter sheet, mounted only while open.
+  const [filtering, setFiltering] = useState(false);
+  const metricLabel =
+    LEADERBOARD_METRICS.find((option) => option.value === metric)?.label ?? '';
+  const timeframeLabel =
+    LEADERBOARD_TIMEFRAMES.find((option) => option.id === timeframe)?.label ?? '';
+  // Changed from the board's defaults, which is what the badge counts and the Maroon marks.
+  const metricChanged = metric !== DEFAULT_METRIC;
+  const timeframeChanged = timeframe !== DEFAULT_TIMEFRAME;
+  const changedCount = Number(metricChanged) + Number(timeframeChanged);
 
   return (
     <View style={styles.body}>
@@ -99,38 +114,63 @@ export function LeaderboardView({
           `app/(tabs)/feed.tsx`. This component draws the board beneath it. */}
 
       {/**
-       * **What and when, as two dropdowns side by side** (founder Preview QA, 2026-11-07).
+       * **What and when, behind one filter icon** (header consistency, founder spec
+       * 2026-11-22).
        *
-       *     All Titles ▾    This month ▾
+       *     All Titles · This month                              ⚙
+       *     Movies · All time                                    ⚙²
        *
-       * They replaced a four-segment control over a separate time dropdown: the content type
-       * and the period are the board's two filters and now read as a pair, in the same
-       * compact text-and-chevron control, each a 44pt target opening the small anchored
-       * menu. The names are whole (All Titles, TV Shows), so nothing is abbreviated for
-       * a screen reader or on screen. Re-choosing the value already chosen is not a change,
-       * as before, and the time range is the same remembered preference. On a narrow phone
-       * at a large text size the second wraps under the first rather than clipping.
+       * It replaced two text-and-chevron dropdowns, All Titles ▾ and This month ▾, which
+       * were the bulkiest thing under the heading. The icon is the app's one filter control
+       * (`FilterIconButton`, as on Collection and For You) and opens one sheet holding both
+       * filters (`LeaderboardFilterSheet`). The board is never filtered invisibly: the line
+       * beside the icon always names both choices, and when either is not the default the
+       * icon turns Maroon and carries how many are changed, and the changed word turns
+       * Maroon too. The values, the handlers and so the query are the dropdowns' own.
        */}
       <View style={styles.filters} testID="leaderboard-filters">
-        <MediumSelector
-          size="filter"
-          value={metric}
-          onChange={(next) => {
-            if (next !== metric) onChangeMetric(next);
-          }}
-          options={LEADERBOARD_METRICS.map((option) => ({ id: option.value, label: option.label }))}
-          accessibilityHint="Choose what the board counts"
-          testID="leaderboard-metric"
-        />
-        <MediumSelector
-          size="filter"
-          value={timeframe}
-          onChange={onChangeTimeframe}
-          options={LEADERBOARD_TIMEFRAMES}
-          accessibilityHint="Choose a time range"
-          testID="leaderboard-timeframe"
+        <BrowseControlsRow
+          leading={
+            <Text
+              variant="footnote"
+              numberOfLines={2}
+              testID="leaderboard-filter-summary"
+              // The icon's spoken name says the same; heard twice it would be noise.
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Text variant="footnote" tone={metricChanged ? 'action' : 'secondary'}>
+                {metricLabel}
+              </Text>
+              <Text variant="footnote" tone="tertiary">
+                {'  ·  '}
+              </Text>
+              <Text variant="footnote" tone={timeframeChanged ? 'action' : 'secondary'}>
+                {timeframeLabel}
+              </Text>
+            </Text>
+          }
+          trailing={
+            <FilterIconButton
+              activeCount={changedCount}
+              accessibilityLabel={`Leaderboard filters: ${metricLabel}, ${timeframeLabel}`}
+              accessibilityHint="Opens the title type and time period"
+              onPress={() => setFiltering(true)}
+              testID="leaderboard-filter-button"
+            />
+          }
         />
       </View>
+
+      {filtering ? (
+        <LeaderboardFilterSheet
+          metric={metric}
+          onChangeMetric={onChangeMetric}
+          timeframe={timeframe}
+          onChangeTimeframe={onChangeTimeframe}
+          onClose={() => setFiltering(false)}
+        />
+      ) : null}
 
       {/**
         * **One content container for every state and every metric** (founder physical QA,
@@ -418,17 +458,9 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
-  heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
-  // The two dropdowns on the gutter, side by side; the second wraps under the first only
-  // when the row cannot hold both.
-  filters: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: theme.space[5],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[1],
-  },
+  // The filter line under the heading row. `BrowseControlsRow` puts it on the gutters, the
+  // icon's right edge under the mode toggle's; this only spaces it from the heading.
+  filters: { paddingBottom: theme.space[1] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

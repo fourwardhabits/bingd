@@ -10,7 +10,6 @@ import { memberSearch } from '@/lib/routes';
 import {
   Avatar,
   Button,
-  Chip,
   Divider,
   EmptyState,
   Sheet,
@@ -18,6 +17,7 @@ import {
   Text,
   UserRow,
 } from '@/ui/components';
+import { CompactSwitch } from '@/ui/components/CompactSwitch';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import {
@@ -129,7 +129,7 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
   const people = active.data ?? [];
 
   /**
-   * Only a genuine change, and the same rule the Leaderboard's metric chips follow:
+   * Only a genuine change, and the same rule the Leaderboard's filters follow:
    * re-tapping the chip you are on would measure fidgeting rather than a decision.
    */
   const changeMode = (next: PeopleSuggestionMode) => {
@@ -143,7 +143,7 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
    *
    * The control has to know where the reader already stands with each person —
    * `Follow`, `Requested`, `Following` — and `follow_state_with` answers for a set.
-   * Both modes at once, so switching chips redraws instantly instead of refetching.
+   * Both modes at once, so switching modes redraws instantly instead of refetching.
    * Nothing here infers the relationship from the fact that somebody was suggested:
    * both server functions exclude accounts the caller already follows, but the list is
    * cached and a follow made from it must redraw as Following rather than vanish
@@ -189,16 +189,16 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
     matches.data?.length === 0
   ) {
     /**
-     * One sentence, said once, and no chips over it: both suggestion sources are empty
+     * One sentence, said once, and no switch over it: both suggestion sources are empty
      * for the same reason on a new account — no follows to walk, and not enough shared
-     * rankings for a match — and two chips switching between two empty states would be
+     * rankings for a match — and a switch between two empty states would be
      * a control for choosing which nothing to look at. The founder's instruction was to
      * be concise and not to nag, so there is no call to action and no second attempt at
      * it further down the screen.
      *
      * Both reads must have *succeeded* to say it (review 60): `.data?.length` is
      * undefined for a failed source, so one error plus one genuine empty falls through
-     * to the chips, where the errored mode shows its retry and the other its truth.
+     * to the switch, where the errored mode shows its retry and the other its truth.
      * `isError` is checked as well (review 60b), because a failed *refetch* keeps the
      * cached array while flagging the error — cached emptiness plus a failure is still
      * a failure, not a quiet nothing.
@@ -234,18 +234,22 @@ export function PeopleView({ viewerId }: { viewerId: string }) {
           row rather than here — see `app/(tabs)/feed.tsx`, exactly as the Leaderboard's
           timeframe does. This component draws the list beneath it. */}
 
-      {/* The Leaderboard's own metric row, in the same place with the same component, so a
-          reader who has met one has met both. Two short words fit on one line at every
-          text size this app supports. */}
-      <View style={styles.chips}>
-        {MODES.map((option) => (
-          <Chip
-            key={option.id}
-            label={option.label}
-            selected={option.id === mode}
-            onPress={() => changeMode(option.id)}
-          />
-        ))}
+      {/**
+       * **Mutuals | Match, as the app's compact segmented control** (header consistency,
+       * founder spec 2026-11-22). Two loose chips until then; now `CompactSwitch`, the
+       * outline For You and Collection draw for Movies | TV, in the slot under the heading
+       * where the Leaderboard's filter line sits. It stays a switch rather than going into a
+       * sheet: the two lists answer different questions, and choosing between them is the
+       * first thing on the screen, not a refinement of it. A radio group of two, each half a
+       * 44pt press; re-choosing the half already on is not a change.
+       */}
+      <View style={styles.modes} testID="people-modes">
+        <CompactSwitch
+          accessibilityLabel="Suggestions"
+          options={MODES}
+          value={mode}
+          onChange={changeMode}
+        />
       </View>
 
       {people.length === 0 ? (
@@ -508,14 +512,9 @@ const styles = StyleSheet.create({
   // `LeaderboardView`'s own body padding, so the two modes end the same distance above
   // the tab bar.
   body: { paddingBottom: theme.space[6] },
-  chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
+  // On the gutter under the heading row, as the Leaderboard's filter line is. The switch is
+  // its own 44pt height; this only spaces it from the heading and the first row.
+  modes: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[1] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
   // Compact and near the top: a heading, one line and the action, not a screen-high block.
   empty: {
