@@ -69,7 +69,12 @@ export default function suite() {
       await ctx.db.sql(
         `insert into app_config (key, value) values
            ('proactive.push_enabled', 'true'::jsonb),
-           ('proactive.generation_enabled', 'true'::jsonb)
+           ('proactive.generation_enabled', 'true'::jsonb),
+           -- 20261130001100: the type switches, and a threshold every mutual friend
+           -- passes (these races are about locks, not about who qualifies).
+           ('proactive.social_enabled', 'true'::jsonb),
+           ('proactive.theatrical_enabled', 'true'::jsonb),
+           ('proactive.friend_min_affinity', '0'::jsonb)
          on conflict (key) do update set value = excluded.value`,
       );
     });

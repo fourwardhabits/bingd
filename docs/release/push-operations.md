@@ -470,6 +470,14 @@ select push_drain_status() -> 'healthy';                    -- still true: react
 collectors):
 `update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
 
+**Social or theatrical alone** (`20261130001100`). Each type now has its own switch, re-checked at
+selection and at the claim, so off also drops one already selected tonight (`social_disabled`,
+`theatrical_disabled`):
+`update app_config set value = 'false'::jsonb where key = 'proactive.social_enabled';`
+A non-empty `proactive.pilot_recipients` limits every proactive type to the listed accounts;
+never empty it while generation is on. The pilot runbook is
+[`../product/proactive-pilot-2026-11-22.md`](../product/proactive-pilot-2026-11-22.md) §9.
+
 **All four switches ship `false`** (`generation_enabled`, `resurface_enabled`, `push_enabled`,
 and `season_enabled` since `20261031000100`). Applying `20261028000100`/`200`/`20261031000100`
 creates no proactive row and sends no proactive push. Enabling is deliberate and ordered:

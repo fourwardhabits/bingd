@@ -1,5 +1,15 @@
 # Proactive notifications v1
 
+> **2026-11-22: pilot-ready, still dark.** Migration `20261130001100` (staging only so far) makes a
+> friend count toward `watchlist_social` only above an affinity threshold
+> (`proactive.friend_min_affinity`, 1.5), gives social and theatrical their own switches
+> (`proactive.social_enabled`, `proactive.theatrical_enabled`, both false) so `generation_enabled`
+> no longer starts theatrical, and adds a per-recipient allowlist (`proactive.pilot_recipients`).
+> Audit, production estimates, staging validation and the pilot runbook:
+> [`proactive-pilot-2026-11-22.md`](./proactive-pilot-2026-11-22.md). The §K warning below still
+> holds for a **general** rollout: the trigger's write-path fan-out (B2) is bounded only by the
+> allowlist.
+>
 > **Current state (2026-11-19): shipped dark.** The migrations below are applied in production
 > (they were among the twelve that reached production with the 2026-11-12 release; production
 > is at 207, head `20261130000200`, read 2026-11-20). Its switches are seeded off and no

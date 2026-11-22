@@ -171,22 +171,30 @@ describe('_proactive_affinity: a block ends it', () => {
   // would pass without the guard too (independent review of B1, 2026-11-11). The guard's own
   // effect is pinned by the tests above.
   it('the social path still ranks friends through it, and still drops a blocked friend', async () => {
-    const { r, a } = await closePair();
-    const candidate = await clusterWith(r, a);
-    const ranked = async () =>
-      (
-        await t.sql(
-          `select actor_id, affinity from _proactive_ranked_social_actors($1, $2, $3::timestamptz)`,
-          [candidate, r, at(NOW)],
-        )
-      ).rows;
-    const before = await ranked();
-    assert.equal(before.length, 1);
-    assert.ok(Number(before[0].affinity) > 0);
-    // The ranking already drops a blocked friend (can_view_profile in _proactive_social_actors);
-    // the guard is what keeps the score itself honest for any caller that does not.
-    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [a, r]);
-    assert.equal((await ranked()).length, 0);
+    // 20261130001100: a cluster member counts only while they qualify by affinity at the
+    // database's now(), so this pair's history is dated from the real clock.
+    const pinned = NOW;
+    NOW = new Date().toISOString();
+    try {
+      const { r, a } = await closePair();
+      const candidate = await clusterWith(r, a);
+      const ranked = async () =>
+        (
+          await t.sql(
+            `select actor_id, affinity from _proactive_ranked_social_actors($1, $2, $3::timestamptz)`,
+            [candidate, r, at(NOW)],
+          )
+        ).rows;
+      const before = await ranked();
+      assert.equal(before.length, 1);
+      assert.ok(Number(before[0].affinity) > 1.5, 'a qualifying friend');
+      // The ranking already drops a blocked friend (can_view_profile in _proactive_social_actors);
+      // the guard is what keeps the score itself honest for any caller that does not.
+      await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [a, r]);
+      assert.equal((await ranked()).length, 0);
+    } finally {
+      NOW = pinned;
+    }
   });
 });
 

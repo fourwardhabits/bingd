@@ -216,6 +216,12 @@ beforeEach(async () => {
   await setConfig('proactive.generation_enabled', true);
   await setConfig('proactive.resurface_enabled', false);
   await setConfig('proactive.season_enabled', true);
+  // 20261130001100: the social and theatrical switches, and an affinity threshold every
+  // mutual friend passes, so the ordering and naming tests below see every friend. The
+  // threshold itself is pinned in proactive-pilot.test.mjs.
+  await setConfig('proactive.social_enabled', true);
+  await setConfig('proactive.theatrical_enabled', true);
+  await setConfig('proactive.friend_min_affinity', 0);
 });
 
 // ===========================================================================
