@@ -11,7 +11,7 @@ import { createTestDbBefore } from './harness.mjs';
  *
  * A database migrated to just before 20261130001100 is the reference. The migration is
  * applied, the pilot runs (a listed reader, two qualifying friends, a cluster), the
- * rollback refuses while generation is on, then runs, and then: every restored function's
+ * rollback refuses while generation or push is on, then runs, and then: every restored function's
  * body, settings, comment and grants are the reference's again; the new helpers, the
  * ledger trigger and the four settings are gone; the reasons vocabulary keeps its three
  * extra words (rows carry them); the cluster made meanwhile is untouched; and the
@@ -179,7 +179,22 @@ describe('rollback-20261130001100.sql', () => {
     assert.deepEqual(await bodies(RESTORED), migrated, 'and changed nothing');
     assert.equal(await trigger(), 1);
 
+    // Refused while push is on, too: the restored functions drop the gates holding the
+    // candidates that already exist (Codex review).
     await setConfig('proactive.generation_enabled', false);
+    await setConfig('proactive.push_enabled', true);
+    refused = null;
+    try {
+      await t.exec(await readFile(ROLLBACK, 'utf8'));
+    } catch (error) {
+      refused = error;
+      await t.exec('rollback');
+    }
+    assert.ok(refused, 'the rollback refuses while push is on');
+    assert.match(String(refused.message), /push_enabled is true/);
+    assert.deepEqual(await bodies(RESTORED), migrated, 'and changed nothing');
+
+    await setConfig('proactive.push_enabled', false);
     await t.exec(await readFile(ROLLBACK, 'utf8'));
 
     assert.deepEqual(

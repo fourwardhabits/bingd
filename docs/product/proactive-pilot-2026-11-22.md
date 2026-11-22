@@ -421,7 +421,8 @@ Never clear the allowlist before generation is off: an empty list with generatio
 general rollout.
 
 **Schema**, only if the founder decides the migration itself must go: with
-`proactive.generation_enabled` false (the script refuses otherwise), run
+`proactive.generation_enabled` and `proactive.push_enabled` both false (the script refuses
+otherwise: the restored functions drop the gates that hold existing candidates), run
 `docs/release/proactive-pilot/rollback-20261130001100.sql`, and in the same transaction delete
 the `supabase_migrations.schema_migrations` row for `20261130001100`. It restores the five
 rebuilt functions verbatim, drops the helpers, the ledger trigger and the four settings, keeps the

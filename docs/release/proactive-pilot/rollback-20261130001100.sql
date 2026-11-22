@@ -25,10 +25,14 @@
 -- removing the words would make those rows fail their own check on their next update. A
 -- superset vocabulary changes no behaviour.
 --
--- REFUSES while `proactive.generation_enabled` is true. The restored trigger qualifies a friend
--- on mutual follow alone, has no allowlist and no social switch, and the restored tick starts
--- theatrical with generation: rolling back with generation on would turn a pilot into exactly
--- the general rollout the doctrine forbids. Turn generation off first.
+-- REFUSES while `proactive.generation_enabled` or `proactive.push_enabled` is true. The restored
+-- trigger qualifies a friend on mutual follow alone, has no allowlist and no social switch, and
+-- the restored tick starts theatrical with generation: rolling back with generation on would turn
+-- a pilot into exactly the general rollout the doctrine forbids. And the restored
+-- `_proactive_invalid` and cluster membership drop the type switches, the allowlist and the
+-- affinity qualification, while the arbiter and the claim do not read generation at all: with
+-- push on, a pending or selected candidate those gates were holding could be sent (Codex
+-- review). Turn both off first.
 --
 -- Data: nothing is deleted. Candidates, inbox rows and clusters stay as they are; pending ones
 -- are judged by the restored functions from the next tick.
@@ -47,6 +51,11 @@ begin
     raise exception 'proactive pilot rollback refused: proactive.generation_enabled is true'
       using errcode = '55000',
             hint = 'Set proactive.generation_enabled to false first; the restored trigger would qualify friends on mutual follow alone.';
+  end if;
+  if (select value from app_config where key = 'proactive.push_enabled') = 'true'::jsonb then
+    raise exception 'proactive pilot rollback refused: proactive.push_enabled is true'
+      using errcode = '55000',
+            hint = 'Set proactive.push_enabled to false first; the restored functions drop the pilot, type and affinity gates that hold existing candidates.';
   end if;
 end;
 $guard$;
