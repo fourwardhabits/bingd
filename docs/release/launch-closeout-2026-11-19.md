@@ -74,6 +74,13 @@ The record is `production-2026-11-21-350.md`.
 - Production is at 213 versions. OTAs `55db8b2b` and `8e66e9ca`.
 - Historical consolidation: 11 sessions, 41 → 11 cards. Records: `production-2026-11-21-347-352.md`, `production-2026-11-21-354.md`.
 
+### Shipped 2026-11-22: #357, #358, #359 (founder-approved fast-track)
+
+- **#357/#358** (`20261130001000`): two Feed posts per shared 30-minute window, one for rankings and one for saves. Reviews play no part in grouping. The reader's own bookmark is on every Feed title poster.
+- **#358** fixed a two-device save race that the main race suite caught (WG1). **#359** is a test-only timing fix.
+- Production is at 214 versions. OTA `42236e5f`.
+- Historical split: 7 mixed posts became 14, with 0 exceptions and 0 protected posts. Record: `production-2026-11-22-357.md`.
+
 ### Security (register: `docs/security/findings-register-2026-11-20.md`)
 - **No critical or high finding is open, and none was found.**
 - Production checks (read-only):
@@ -120,6 +127,7 @@ The record is `production-2026-11-21-350.md`.
 Add dated, one-line entries that link the evidence (PR, Resend message id, ASC state).
 Newest entries go first.
 
+- 2026-11-22 ~04:30Z: **Shipped.** `20261130001000` applied (214) from a clean checkout of `98f55fa0`; functions match staging; OTA `42236e5f` live. Historical split `split-20261122-f01` (founder: 5 posts) then `-w01` (2 posts): 0 mixed posts remain, engagement unchanged, links one hop, 0 exceptions. Record: `production-2026-11-22-357.md`.
 - 2026-11-22 ~00:45Z: **Shipped.** OTA `8e66e9ca` (#354 client), verified live. Historical session consolidation, founder-approved with reviewed rankings included: `sessions-20261122-f01` (founder first: 7 sessions, 23 → 7 cards), then `sessions-20261122-w01` (4 sessions, 18 → 4). In total 11 sessions, 41 → 11 cards. Engagement counts unchanged, links one hop, nothing protected hidden. Record: `production-2026-11-21-354.md`.
 - 2026-11-21 ~23:45Z: **Shipped.** #354 migration `20261130000900` applied to production (213 versions) from a clean checkout of `704a683f` (CI, races, release gate green); functions match staging; no rows written. Earlier, OTA `55db8b2b` (#347 client and #352) published and verified. Records: `production-2026-11-21-354.md`, `production-2026-11-21-347-352.md`.
 - 2026-11-21 ~22:00Z: **Shipped.** #347 migration `20261130000800` applied to production under the founder's Feed fast-track approval, from a clean checkout of `f821c463` (CI, races, release gate green). Production 212 versions; bodies match staging; the review-unpresent trigger is gone; no rows written. Record: `production-2026-11-21-347-352.md`. #352 (title polish) merged as `6e940127`; its OTA follows this record.
