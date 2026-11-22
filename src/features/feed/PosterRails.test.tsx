@@ -489,8 +489,12 @@ describe('degrading safely', () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = new Error('nope');
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByText('3 others')).toBeTruthy());
-    expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    // "3 others" is also the rail's headline while its previews load, so wait for the
+    // state only the representative card reaches: the headline with no rail.
+    await waitFor(() => {
+      expect(view.getByText('3 others')).toBeTruthy();
+      expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    });
     expect(view.getByTestId('feed-card-artwork')).toBeTruthy();
     expect(view.getAllByTestId('feed-card-like')).toHaveLength(1);
     expect(view.getAllByTestId('feed-card-comment')).toHaveLength(1);
@@ -500,8 +504,12 @@ describe('degrading safely', () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = answer(WATCHLIST_MEMBERS.slice(0, 1));
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByText('3 others')).toBeTruthy());
-    expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    // "3 others" is also the rail's headline while its previews load, so wait for the
+    // state only the representative card reaches: the headline with no rail.
+    await waitFor(() => {
+      expect(view.getByText('3 others')).toBeTruthy();
+      expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    });
   });
 
   it('names the whole group even when the preview shows fewer posters than it holds', async () => {

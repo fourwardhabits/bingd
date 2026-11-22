@@ -269,8 +269,13 @@ describe('A. the same engagement row on every post', () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = new Error('nope');
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByText('3 others')).toBeTruthy());
-    expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    // Since 2026-11-22 the rail's headline also reads "3 others", including while its
+    // previews are still loading (placeholders), so "3 others" alone no longer means the
+    // preview failed. Only the fallback card shows it with no rail.
+    await waitFor(() => {
+      expect(view.getByText('3 others')).toBeTruthy();
+      expect(view.queryByTestId('feed-card-rail')).toBeNull();
+    });
     expect(actionsIn(view.getByTestId('feed-card-actions'), 'feed-card')).toEqual([
       'like',
       'comment',
