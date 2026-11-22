@@ -185,6 +185,27 @@ before(async () => {
 
 after(async () => t?.close());
 
+/**
+ * 20261130001000 retired the session consolidation (a window has one post per category
+ * now): it refuses to apply unless an operator opts in. These tests opt in, because the
+ * batches it already applied in production must still revert exactly; the refusal itself
+ * is the first assertion.
+ */
+describe('retired by 20261130001000', () => {
+  it('refuses to apply without the operator flag; its dry run still answers', async () => {
+    await assert.rejects(consolidate('sc-retired', { apply: true, actor: user }), /retired/);
+    const dry = await consolidate('sc-retired-dry');
+    assert.equal(dry.applied, false);
+    const { rows } = await t.sql(
+      `select count(*)::int as n from feed_consolidation_log where batch like 'sc-retired%'`,
+    );
+    assert.equal(rows[0].n, 0);
+    await t.sql(
+      `update app_config set value = 'true'::jsonb where key = 'feed.session_consolidation_enabled'`,
+    );
+  });
+});
+
 describe('the dry run', () => {
   it('the read-only SQL and the function plan the same sessions', async () => {
     const sql = await dryRun();

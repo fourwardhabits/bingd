@@ -4,28 +4,32 @@ import { after, before, describe, it } from 'node:test';
 import { call, fire, newOp, raceContext } from './_shared.mjs';
 
 /**
- * An activity session is one post (20261130000900), under several connections.
+ * Two posts per shared window (20261130001000), under several connections.
  *
  * Every session writer (`rank_group_note`, `set_watchlist`'s `_post_watchlist_activity`,
  * `rank_batch_note`, `rank_batch_finalize`) takes the actor's two keys in one order,
- * `ranking_story` then `watchlist_story`, before it reads anything.
+ * `ranking_story` then `watchlist_story`, before it reads anything. The keys now guard the
+ * window's ANCHOR, which both kinds share: whichever writer decides second must see the
+ * first one's window.
  *
- * **RS1. A ranking on one device and a save on another, at once, are one post.** The
- * ranking's note runs uncommitted (it marks the ranking `groupable`); the save must block on
- * `ranking_story:<actor>`, and once the note commits it pairs with the ranking: one visible
- * post holding both, nobody notified. Without the shared key the save would read no session
- * and no marked ranking, and start a second post.
+ * **RS1. A ranking on one device and a save on another, at once, share one window.** The
+ * ranking's note runs uncommitted (it marks the ranking and records its anchor); the save
+ * must block on `ranking_story:<actor>`, and once the note commits it opens its watchlist
+ * post on the ranking's window: two posts (one per kind), one anchor, nobody notified.
+ * Without the shared key the save would read no window and anchor a second one on itself.
  *
- * **RS2. Saves and a ranking from three devices into an open session.** All three commit
- * into the one post; its count and members agree, and it moved forward, never back.
+ * **RS2. Saves and a ranking from three devices into an open window.** The saves commit into
+ * the one watchlist post, the ranking stays its own card on the same window, and the
+ * watchlist post moved forward, never back.
  *
  * **RS3. A reaction in flight on the would-be peer is waited for and seen.** A friend's
- * reaction on a single first ranking is open; the save locks that ranking row, waits, and on
- * the reaction's commit finds it referenced and leaves it alone: two posts, the liked one
- * still its own card.
+ * reaction on a single first ranking is open; a second ranking's note locks that row, waits,
+ * and on the reaction's commit finds it referenced and leaves it alone: two cards, the liked
+ * one still its own.
  *
  * **RS4. A sitting ending while a save lands.** The finaliser holds both keys; the save waits,
- * then joins the post the sitting published: one post.
+ * then opens its watchlist post on the window the sitting's post carries: two posts, one
+ * anchor.
  */
 export default function suite() {
   const rc = raceContext();
@@ -63,17 +67,23 @@ export default function suite() {
         await ctx.db.rows(
           `select (select count(*)::int from feed_events where actor_id = $1 and presented_in is null
                       and type <> 'ranking_batch_draft') as visible,
-                  (select count(*)::int from notifications where recipient_id = $1 or actor_id = $1) as notes,
-                  (select max((payload ->> 'count')::int) from feed_events
+                  (select array_agg(type order by type) from feed_events
                     where actor_id = $1 and presented_in is null
-                      and type in ('ranking_batch', 'watchlist_added')) as count`,
+                      and type <> 'ranking_batch_draft') as types,
+                  (select count(distinct payload ->> 'started_at')::int from feed_events
+                    where actor_id = $1 and presented_in is null
+                      and type <> 'ranking_batch_draft') as anchors,
+                  (select count(*)::int from notifications where recipient_id = $1 or actor_id = $1) as notes,
+                  (select (payload ->> 'count')::int from feed_events
+                    where actor_id = $1 and presented_in is null and type = 'watchlist_added'
+                    order by causal_at desc limit 1) as saves`,
           [user],
         )
       )[0];
 
     const save = `set_watchlist($1, $2, true)`;
 
-    it('RS1: a ranking on one device and a save on another, at once, are one post', async () => {
+    it('RS1: a ranking on one device and a save on another, at once, share one window', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
       const film = await loggedToday(me, await fx.createMovie('RS1 ranked', (base += 1)));
@@ -91,12 +101,15 @@ export default function suite() {
         const p2 = fire(t2, save, [await newOp(db), saved]);
         await t2.awaitBlocked({ on: 'advisory', advisoryKey: await key('ranking_story', me) });
         await t1.commit();
-        const r2 = (await p2).rows[0].r;
-        assert.equal(r2.status, 'ok');
+        assert.equal((await p2).rows[0].r.status, 'ok');
 
         const s = await shape(me);
-        assert.equal(s.visible, 1, 'RS1: one post for the half hour');
-        assert.equal(s.count, 2);
+        assert.deepEqual(
+          s.types,
+          ['title_ranked', 'watchlist_added'],
+          'RS1: one post per kind',
+        );
+        assert.equal(s.anchors, 1, 'RS1: one window');
         assert.equal(s.notes, 0, 'nobody notified');
       } finally {
         await t1.rollback().catch(() => {});
@@ -105,7 +118,7 @@ export default function suite() {
       }
     });
 
-    it('RS2: saves and a ranking from three devices into an open session are one post', async () => {
+    it('RS2: saves and a ranking from three devices into an open window', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
       const t0 = await db.session('setup');
@@ -135,19 +148,19 @@ export default function suite() {
           call(sessions[1], save, [await newOp(db), b]),
           call(sessions[2], `rank_group_note($1, $2)`, [await newOp(db), season]),
         ]);
-        assert.equal(results[2].status, 'joined');
-        assert.equal(results[2].event_id, id);
+        assert.equal(results[2].status, 'solo', 'a ranking never joins the watchlist post');
 
         const s = await shape(me);
-        assert.equal(s.visible, 1, 'RS2: one post');
-        assert.equal(s.count, 4);
+        assert.deepEqual(s.types, ['title_ranked', 'watchlist_added'], 'RS2: two posts');
+        assert.equal(s.anchors, 1, 'one window');
+        assert.equal(s.saves, 3);
         const [{ members, type, causal_at: after }] = await db.rows(
           `select (select count(*)::int from _group_members($1)) as members, type, causal_at
              from feed_events where id = $1`,
           [id],
         );
-        assert.equal(members, 4, 'the count matches the members');
-        assert.equal(type, 'ranking_batch', 'a ranking made it a ranking group in place');
+        assert.equal(members, 3, 'the count matches the members');
+        assert.equal(type, 'watchlist_added', 'still a watchlist post');
         assert.ok(after >= before, 'it moved forward, never back');
       } finally {
         for (const s of sessions) await s.end().catch(() => {});
@@ -163,6 +176,11 @@ export default function suite() {
         [friend, me],
       );
       const film = await loggedToday(me, await fx.createMovie('RS3 ranked', (base += 1)));
+      // Another ladder, so it ranks without a comparison.
+      const second = await loggedToday(
+        me,
+        await fx.createSeason(await fx.createSeries('RS3 show', (base += 1)), 1),
+      );
       const t0 = await db.session('setup');
       await t0.actAs(me);
       assert.equal((await call(t0, `rank_start($1, 'loved')`, [film])).done, true);
@@ -170,34 +188,32 @@ export default function suite() {
         (await call(t0, `rank_group_note($1, $2)`, [await newOp(db), film])).status,
         'solo',
       );
+      assert.equal((await call(t0, `rank_start($1, 'loved')`, [second])).done, true);
       await t0.end();
       const [{ id: ranking }] = await db.rows(
-        `select id from feed_events where actor_id = $1 and type = 'title_ranked'`,
-        [me],
+        `select id from feed_events where actor_id = $1 and type = 'title_ranked' and media_item_id = $2`,
+        [me, film],
       );
 
       const liker = await db.session('friend');
-      const saver = await db.session('saver');
+      const noter = await db.session('noter');
       try {
         await liker.actAs(friend);
-        await saver.actAs(me);
+        await noter.actAs(me);
         await liker.begin();
         await call(liker, `set_reaction($1, $2, 'love')`, [await newOp(db), ranking]);
 
-        const p = fire(saver, save, [
-          await newOp(db),
-          await fx.createMovie('RS3 saved', (base += 1)),
-        ]);
-        // The reaction's key-share lock on the ranking's row: the save's `for update` waits.
-        await saver.awaitBlocked({});
+        const p = fire(noter, `rank_group_note($1, $2)`, [await newOp(db), second]);
+        // The reaction's key-share lock on the peer's row: the note's `for update` waits.
+        await noter.awaitBlocked({});
         await liker.commit();
-        assert.equal((await p).rows[0].r.status, 'ok');
+        assert.equal((await p).rows[0].r.status, 'solo');
 
         const rows = await db.rows(
-          `select id, type, presented_in from feed_events where actor_id = $1 order by causal_at`,
+          `select id, presented_in from feed_events where actor_id = $1 order by causal_at`,
           [me],
         );
-        assert.equal(rows.length, 2, 'RS3: two posts');
+        assert.equal(rows.length, 2, 'RS3: two cards');
         assert.equal(
           rows.find((r) => r.id === ranking).presented_in,
           null,
@@ -206,11 +222,11 @@ export default function suite() {
       } finally {
         await liker.rollback().catch(() => {});
         await liker.end().catch(() => {});
-        await saver.end().catch(() => {});
+        await noter.end().catch(() => {});
       }
     });
 
-    it('RS4: a sitting ending while a save lands leaves one post', async () => {
+    it('RS4: a sitting ending while a save lands leaves two posts on one window', async () => {
       const { db, fx } = ctx;
       const me = await fx.createUser();
       const film = await loggedToday(me, await fx.createMovie('RS4 ranked', (base += 1)));
@@ -235,8 +251,12 @@ export default function suite() {
         assert.equal((await p2).rows[0].r.status, 'ok');
 
         const s = await shape(me);
-        assert.equal(s.visible, 1, 'RS4: the save joined the post the sitting published');
-        assert.equal(s.count, 2);
+        assert.deepEqual(
+          s.types,
+          ['ranking_batch', 'watchlist_added'],
+          'RS4: one post per kind',
+        );
+        assert.equal(s.anchors, 1, 'on the sitting’s window');
       } finally {
         await t1.rollback().catch(() => {});
         await t1.end().catch(() => {});

@@ -263,7 +263,12 @@ describe('publishing on its own', () => {
     assert.equal(all.filter((row) => row.type === 'ranking_batch').length, 2);
   });
 
-  it('two sittings ended out of start order are two posts', async () => {
+  /**
+   * 20261130001000: one window per author, anchored at its first event. The sitting that
+   * started first is that event, so the post the later one published takes its start, and
+   * the two are one ranking post (both still inside 30 minutes of it).
+   */
+  it('two sittings ended out of start order are one post, anchored at the first', async () => {
     const first = await uuid();
     await note(first, await rankedMovie('Started first'));
     await t.sql(
@@ -276,9 +281,11 @@ describe('publishing on its own', () => {
     await note(second, await rankedMovie('Started second'));
 
     await finalize(second); // publishes, starting the group
-    const result = await finalize(first); // began before that group: its own post
-    assert.notEqual(result.joined, true);
-    assert.equal((await posts()).length, 2);
+    const result = await finalize(first); // began first: the window's first event
+    assert.equal(result.joined, true);
+    const all = await posts();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].payload.count, 2);
   });
 
   /**
@@ -346,24 +353,29 @@ describe('publishing on its own', () => {
     assert.ok(all.some((row) => row.id === note1.event_id && row.type === 'ranking_batch'));
   });
 
-  it('joins the watchlist session of its half hour, which becomes a ranking group in place (20261130000900)', async () => {
+  it('never joins the watchlist post of its half hour: the window has one post per kind (20261130001000)', async () => {
     const saved = await t.createMovie(`Saved ${seq}`, (tmdb += 1));
     await t.sql(`select set_watchlist($1, $2, true)`, [await uuid(), saved]);
-    const { rows: [w] } = await t.sql(
-      `select id from feed_events where actor_id = $1 and type = 'watchlist_added'`,
+    const {
+      rows: [w],
+    } = await t.sql(
+      `select id, payload from feed_events where actor_id = $1 and type = 'watchlist_added'`,
       [user],
     );
     const ranked = await rankedMovie('Ranked');
     const result = await sitting([ranked]);
-    assert.equal(result.result.joined, true);
-    assert.equal(result.result.event_id, w.id, 'the same post: its id, its conversation');
-    const [post] = await posts();
-    assert.equal(post.id, w.id);
-    assert.equal(post.type, 'ranking_batch');
-    assert.equal(post.payload.count, 2);
-    assert.equal(post.payload.ranked, 1);
-    assert.equal(post.payload.saved, 1);
-    assert.equal(post.media_item_id, ranked, 'the newest title leads');
+    assert.notEqual(result.result.joined, true);
+    assert.notEqual(result.result.event_id, w.id);
+    const { rows } = await t.sql(
+      `select id, type, payload from feed_events
+        where actor_id = $1 and presented_in is null order by type`,
+      [user],
+    );
+    assert.deepEqual(
+      rows.map((r) => r.type),
+      ['ranking_batch', 'watchlist_added'],
+    );
+    assert.equal(rows[0].payload.started_at, w.payload.started_at, 'one shared window');
   });
 
   it('never joins a history group or a watchlist post with no count', async () => {

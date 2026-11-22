@@ -316,7 +316,7 @@ describe('what may share a group, and what never does', () => {
     );
   });
 
-  it('a watchlist save in the same minutes is the same session post (20261130000900)', async () => {
+  it('a watchlist save in the same minutes opens the window but keeps its own post (20261130001000)', async () => {
     const saved = await title('movie', 'Saved');
     await call(`set_watchlist($1, $2, true)`, [await uuid(), saved]);
     const [w] = await visibleTo(friend);
@@ -324,16 +324,16 @@ describe('what may share a group, and what never does', () => {
     await rankFirst('movie', 'R1');
     await rankFirst('movie', 'R2');
     const visible = await visibleTo(friend);
+    const group = visible.find((p) => p.type === 'ranking_batch');
     assert.deepEqual(
-      visible.map((p) => [p.id, p.type]),
-      [[w.id, 'ranking_batch']],
-      'the save started the session; its post took the rankings and became a ranking group',
+      visible.map((p) => p.type).sort(),
+      ['ranking_batch', 'watchlist_added'],
+      'two posts: the rankings and the save',
     );
-    const rail = await previewsAs(friend, w.id);
-    const save = rail.find((r) => r.media_item_id === saved);
-    assert.equal(save.action, 'saved');
-    assert.equal(save.score, null, 'a save carries no score');
-    assert.equal(visible[0].payload.count, 3);
+    assert.equal(visible.find((p) => p.type === 'watchlist_added').id, w.id);
+    assert.equal(group.payload.count, 2);
+    const rail = await previewsAs(friend, group.id);
+    assert.ok(rail.every((r) => r.action === 'ranked' && r.media_item_id !== saved));
   });
 
   it('a rewatch keeps its own card and is never a peer', async () => {

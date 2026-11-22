@@ -277,7 +277,11 @@ describe('A. the same engagement row on every post', () => {
     ]);
   });
 
-  it('an individual title keeps all four; the reader’s own keeps all but Save', async () => {
+  /**
+   * Changed on 2026-11-22 (founder): the reader's bookmark moved onto the artwork, on every
+   * title post including their own, so the row under it is Like, Comment and Share.
+   */
+  it('an individual title keeps Like, Comment and Share; the bookmark is on the artwork', async () => {
     mockRows = [
       event('e1', 'title_ranked', DUNE),
       event('e2', 'title_ranked', DUNE, { actor: 'user-1', username: 'sai', name: 'Sai' }),
@@ -288,11 +292,12 @@ describe('A. the same engagement row on every post', () => {
       expect(found).toHaveLength(2);
       return found;
     });
-    expect(actionsIn(rows[0]!, 'feed-card')).toEqual(['like', 'comment', 'save', 'share']);
+    expect(actionsIn(rows[0]!, 'feed-card')).toEqual(['like', 'comment', 'share']);
     expect(actionsIn(rows[1]!, 'feed-card')).toEqual(['like', 'comment', 'share']);
-    for (const label of ['Like', 'Comment', 'Save', 'Share']) {
+    for (const label of ['Like', 'Comment', 'Share']) {
       expect(within(rows[0]!).getByText(label)).toBeTruthy();
     }
+    expect(view.getAllByTestId('feed-card-save')).toHaveLength(2);
   });
 });
 
@@ -343,14 +348,16 @@ describe('B. "and others" links', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('"4 titles" over a rail is a link to the complete list', async () => {
+  it('"3 others" over a rail is a link to the complete list, and no bare count is drawn', async () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = answer(
       members('w1', ['Dune', 'Arrival', 'Sicario', 'Enemy']),
     );
     const view = await renderWithProviders(<FeedScreen />);
-    const link = await waitFor(() => view.getByTestId('feed-card-group-link'));
-    expect(link.props.children).toBe('4 titles');
+    await waitFor(() => view.getByTestId('feed-card-rail'));
+    const link = view.getByTestId('feed-card-tail-link');
+    expect(link.props.children).toBe('3 others');
+    expect(view.queryByText('4 titles')).toBeNull();
     expect(style(link)).toMatchObject(entity);
 
     await fireEvent.press(link);

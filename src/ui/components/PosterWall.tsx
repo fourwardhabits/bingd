@@ -58,21 +58,6 @@ export type PosterTile = {
   rankedSeasonCount?: number;
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
-  /**
-   * **The author saved this title to their watchlist** (Feed rail only, 20261130000900). An
-   * activity session holds rankings and saves on one post, so each poster says which it is:
-   * a ranked title carries its score, a saved one this quiet bookmark in the same corner.
-   * It is the author's act, not the viewer's state (`saved` above), and it is not a control.
-   */
-  addedToWatchlist?: boolean;
-  /**
-   * **The author published a review of this title** (Feed rail only, 20261130000800). A
-   * reviewed first ranking now joins its half-hour group instead of posting a card of its
-   * own, so the rail marks the poster with a quiet "Review" label in the corner the rank
-   * label uses elsewhere; the text itself is one tap away, in the group's sheet. Set only
-   * from `public_notes`, so it is true exactly when this reader may read the review.
-   */
-  reviewed?: boolean;
 };
 
 /**
@@ -172,6 +157,13 @@ export type PosterRailProps = {
   width: number;
   /** Placeholder frames while the members load, instead of tiles. */
   loadingCount?: number;
+  /**
+   * **The reader's own watchlist control on every poster** (founder, 2026-11-22): the For
+   * You tile's bookmark, top-right, reflecting `tile.saved`, which is the READER's state and
+   * never the author's. A tap toggles it without opening the title; the rest of the poster
+   * opens the title.
+   */
+  onToggleSave?: (tile: PosterTile) => void;
   testID?: string;
 };
 
@@ -196,6 +188,7 @@ export function PosterRail({
   onPressTile,
   width,
   loadingCount = 0,
+  onToggleSave,
   testID,
 }: PosterRailProps) {
   const { gap, peek } = theme.layout.posterShelf;
@@ -213,7 +206,14 @@ export function PosterRail({
     >
       {tiles.length
         ? tiles.map((tile) => (
-            <Tile key={tile.id} tile={tile} width={cardWidth} onPress={() => onPressTile(tile)} />
+            <Tile
+              key={tile.id}
+              tile={tile}
+              width={cardWidth}
+              onPress={() => onPressTile(tile)}
+              onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
+              saveLabels={onToggleSave ? FEED_SAVE_LABELS : undefined}
+            />
           ))
         : Array.from({ length: loadingCount }, (_, index) => (
             <View
@@ -532,6 +532,7 @@ function Tile({
   onAccessibilityAction,
   accessibilityHint,
   badge,
+  saveLabels,
 }: {
   tile: PosterTile;
   width: number;
@@ -545,6 +546,8 @@ function Tile({
   accessibilityHint?: string;
   /** A rank label on the top-left corner (#318's pool editor). */
   badge?: string | null;
+  /** The bookmark's words, where they differ from For You's (the Feed's rails). */
+  saveLabels?: SaveLabels;
 }) {
   const { score } = tile;
   const average = tile.scoreSource === 'average';
@@ -557,13 +560,16 @@ function Tile({
    * that was pushed.
    */
   const press = usePressScale();
-  const bookmark = usePulse();
 
   return (
     <Animated.View style={press.pressStyle}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={badge ? `${badge}, ${labelFor(tile)}` : labelFor(tile)}
+        accessibilityLabel={
+          badge
+            ? `${badge}, ${labelFor(tile, saveLabels?.state)}`
+            : labelFor(tile, saveLabels?.state)
+        }
         accessibilityHint={accessibilityHint}
         accessibilityActions={accessibilityActions}
         onAccessibilityAction={onAccessibilityAction}
@@ -593,30 +599,8 @@ function Tile({
               {badge}
             </Text>
           </View>
-        ) : tile.reviewed ? (
-          <View
-            style={styles.rankBadge}
-            testID="poster-review-badge"
-            // In the tile's own label ("…, reviewed"), like the score chip.
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <Text variant="caption" tone="inverse" allowFontScaling={false} numberOfLines={1}>
-              Review
-            </Text>
-          </View>
         ) : null}
-        {tile.addedToWatchlist && score == null ? (
-          <View
-            style={styles.savedChip}
-            testID="poster-saved-mark"
-            // In the tile's own label ("…, added to watchlist"), like the score chip.
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <Ionicons name="bookmark" size={12} color={theme.semantic.action} />
-          </View>
-        ) : score != null && average && tile.season == null ? (
+        {score != null && average && tile.season == null ? (
           // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
           <SeasonAverageBadge score={score} style={styles.chipPosition} testID="poster-average-pill" />
         ) : score != null ? (
@@ -657,45 +641,12 @@ function Tile({
       {onToggleSave || onDismiss ? (
         <View style={styles.corner} pointerEvents="box-none">
           {onToggleSave ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: Boolean(tile.saved) }}
-              accessibilityLabel={
-                tile.saved
-                  ? `Remove ${tile.title} from watchlist`
-                  : `Save ${tile.title} to watchlist`
-              }
-              /**
-               * **Saving is a state change, so it pulses and it buzzes** (2026-09-08).
-               *
-               * The glyph swap happens between two frames: `bookmark-outline` becomes
-               * `bookmark` with no moment at which anything moved, so on a device the change
-               * is something a reader notices a beat later rather than something they see
-               * happen. One small pulse plus the lightest haptic is what turns it into an
-               * acknowledgement.
-               *
-               * **On the way on only.** `usePulse` gets the *new* state, and celebrating the
-               * removal of a bookmark would be the app disagreeing with the reader. The
-               * haptic fires either way, because both directions are the reader having done
-               * something.
-               */
-              onPress={() => {
-                hapticSelection();
-                if (!tile.saved) bookmark.pulse();
-                onToggleSave();
-              }}
-              style={styles.cornerAction}
-            >
-              {({ pressed }) => (
-                <Animated.View style={[styles.save, pressed && styles.pressed, bookmark.pulseStyle]}>
-                  <Ionicons
-                    name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                    size={16}
-                    color={theme.text.inverse}
-                  />
-                </Animated.View>
-              )}
-            </Pressable>
+            <PosterSaveButton
+              saved={Boolean(tile.saved)}
+              title={tile.title}
+              labels={saveLabels}
+              onPress={onToggleSave}
+            />
           ) : null}
           {onDismiss ? (
             <Pressable
@@ -717,6 +668,90 @@ function Tile({
         </View>
       ) : null}
     </Animated.View>
+  );
+}
+
+export type SaveLabels = {
+  add: (title: string) => string;
+  remove: (title: string) => string;
+  /** How the tile's own label says the title is saved. */
+  state: string;
+};
+
+const FOR_YOU_SAVE_LABELS: SaveLabels = {
+  add: (title) => `Save ${title} to watchlist`,
+  remove: (title) => `Remove ${title} from watchlist`,
+  state: 'saved',
+};
+
+/**
+ * The Feed's words (founder, 2026-11-22): the Feed shows somebody else's activity, so the
+ * control says whose watchlist it writes to.
+ */
+export const FEED_SAVE_LABELS: SaveLabels = {
+  add: (title) => `Add ${title} to your watchlist`,
+  remove: (title) => `Remove ${title} from your watchlist`,
+  state: 'in your watchlist',
+};
+
+export type PosterSaveButtonProps = {
+  /** The READER's state: whether the title is on their own watchlist. */
+  saved: boolean;
+  title: string;
+  onPress: () => void;
+  labels?: SaveLabels;
+  testID?: string;
+};
+
+/**
+ * **The bookmark on a poster** (For You's tile, and since 2026-11-22 every title poster in
+ * the Feed): a 44pt target, the 28pt Maroon square in its top-right corner, the glyph
+ * filled when the reader has the title saved.
+ *
+ * **Saving is a state change, so it pulses and it buzzes** (2026-09-08). The glyph swap
+ * happens between two frames: `bookmark-outline` becomes `bookmark` with no moment at
+ * which anything moved, so on a device the change is something a reader notices a beat
+ * later rather than something they see happen. One small pulse plus the lightest haptic is
+ * what turns it into an acknowledgement.
+ *
+ * **On the way on only.** `usePulse` gets the *new* state, and celebrating the removal of a
+ * bookmark would be the app disagreeing with the reader. The haptic fires either way,
+ * because both directions are the reader having done something.
+ *
+ * It is its own press, never a child of the poster's, so it cannot open the title; the
+ * caller places it beside the poster's press, in the poster's corner.
+ */
+export function PosterSaveButton({
+  saved,
+  title,
+  onPress,
+  labels = FOR_YOU_SAVE_LABELS,
+  testID = 'poster-save',
+}: PosterSaveButtonProps) {
+  const bookmark = usePulse();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: saved }}
+      accessibilityLabel={saved ? labels.remove(title) : labels.add(title)}
+      onPress={() => {
+        hapticSelection();
+        if (!saved) bookmark.pulse();
+        onPress();
+      }}
+      style={styles.cornerAction}
+      testID={testID}
+    >
+      {({ pressed }) => (
+        <Animated.View style={[styles.save, pressed && styles.pressed, bookmark.pulseStyle]}>
+          <Ionicons
+            name={saved ? 'bookmark' : 'bookmark-outline'}
+            size={16}
+            color={theme.text.inverse}
+          />
+        </Animated.View>
+      )}
+    </Pressable>
   );
 }
 
@@ -818,7 +853,7 @@ export function SeasonAverageBadge({
   );
 }
 
-const labelFor = (tile: PosterTile) => {
+const labelFor = (tile: PosterTile, savedWord = 'saved') => {
   const parts = [tile.title];
   // A season tile is titled by its show, and its pill is hidden from the screen reader, so
   // the spoken name says which season it opens (Codex review, 2026-11-17).
@@ -833,9 +868,7 @@ const labelFor = (tile: PosterTile) => {
   if (tile.score != null) parts.push(`scored ${formatScore(tile.score)} out of 10`);
   // Announced on the tile as well as on its own control, because "Saved" is state a
   // sighted reader gets from a filled glyph they can see without touching anything.
-  if (tile.saved) parts.push('saved');
-  if (tile.addedToWatchlist && tile.score == null) parts.push('added to watchlist');
-  if (tile.reviewed) parts.push('reviewed');
+  if (tile.saved) parts.push(savedWord);
   return parts.join(', ');
 };
 
@@ -905,24 +938,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     alignItems: 'center',
     backgroundColor: theme.semantic.action,
-  },
-  /**
-   * The author's save on a session rail (20261130000900): a Maroon bookmark on the raised
-   * surface, in the score's corner, the same height as a score chip. Outlined rather than
-   * filled so it never reads as a number, and never as the viewer's own Save control.
-   */
-  savedChip: {
-    position: 'absolute',
-    right: theme.space[1],
-    bottom: theme.space[1],
-    minWidth: 24,
-    paddingHorizontal: theme.space[1],
-    paddingVertical: 3,
-    borderRadius: theme.radius.control,
-    alignItems: 'center',
-    backgroundColor: theme.surface.raised,
-    borderWidth: 1,
-    borderColor: theme.semantic.score,
   },
   /** A season's pill: Parchment ground, Maroon border and text (existing tokens only). */
   seasonChip: {

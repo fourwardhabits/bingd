@@ -421,27 +421,21 @@ export type SessionSentence = {
   tail: string | null;
   more: number;
   moreLabel: string;
-  breakdown: string | null;
 };
 
 /**
- * **How a session post reads** (founder spec, 2026-11-21).
+ * **How a session post reads** (founder, 2026-11-22; 20261130001000).
  *
- *     Suraj ranked Kaiju No. 8 + 15 more             12m ago · 9 ranked · 7 saved
- *     Suraj saved Dune + 3 more                      4m ago · 2 ranked · 2 saved
- *     Suraj ranked Kaiju No. 8 + 6 more              12m ago
- *     Suraj added Dune + 4 more to their watchlist   3m ago
+ *     Suraj ranked Show F + 2 more
+ *     Suraj added Movie E + 2 more to their watchlist
  *
- * The verb is the newest action's, and it governs only the title it names, which is the
- * newest title. "+ 15 more" is a count, not a second verb, so the sentence makes no claim
- * about what was done to the others; a mixed session states the split exactly on the line
- * under it, and every poster carries its own mark (a score when ranked, a bookmark when
- * saved). The count is the link to the complete list.
+ * A window has one post per kind, so every title in a post had the same thing done to it:
+ * the verb names the newest title and is true of all of them, and "+ 2 more" is the link to
+ * the complete list. There is no split line: no post mixes the two any more.
  *
- * A session of saves alone keeps its established tail, "to their watchlist", because there
- * every title was. A mixed session whose newest title was saved says "saved": "added Dune to
- * their watchlist + 3 more" would split the sentence around the count and say "watchlist"
- * of titles that were ranked.
+ * A post written by 20261130000900 that still holds both (until the historical split runs)
+ * says what was done to its newest title, "ranked" or "saved", and makes no claim about the
+ * rest.
  *
  * Null for anything that is not a session of two or more titles; those keep their own
  * sentences.
@@ -450,14 +444,12 @@ export function sessionSentence(event: SessionSubject): SessionSentence | null {
   const session = event.session;
   if (!session || session.total < 2) return null;
   const onlySaves = session.saved >= session.total;
-  const mixed = session.ranked > 0 && session.saved > 0;
   const more = session.total - 1;
   return {
     verb: session.leadAction === 'ranked' ? 'ranked' : onlySaves ? 'added' : 'saved',
     tail: onlySaves ? 'to their watchlist' : null,
     more,
     moreLabel: `${more} more`,
-    breakdown: mixed ? `${session.ranked} ranked · ${session.saved} saved` : null,
   };
 }
 
@@ -486,7 +478,7 @@ export function activitySentence(
     watchlistCount?: number | null;
   },
   open: { ranking?: () => void; watchlist: (eventId: string) => void },
-): { verb: string; tail: string | null; tailAction: TailAction | null; breakdown: string | null } {
+): { verb: string; tail: string | null; tailAction: TailAction | null } {
   const session = sessionSentence(event);
   if (session) {
     const onPress =
@@ -495,7 +487,6 @@ export function activitySentence(
       verb: session.verb,
       tail: onPress ? session.tail : [`+ ${session.moreLabel}`, session.tail].filter(Boolean).join(' '),
       tailAction: onPress ? { connector: '+', label: session.moreLabel, onPress } : null,
-      breakdown: session.breakdown,
     };
   }
   const batchMore = event.type === 'ranking_batch' ? Math.trunc(event.rankedCount ?? 1) - 1 : 0;
@@ -506,6 +497,5 @@ export function activitySentence(
       batchMore > 0 && open.ranking
         ? { connector: 'and', label: `${batchMore} more`, onPress: open.ranking }
         : watchlistTailAction(event, open.watchlist),
-    breakdown: null,
   };
 }

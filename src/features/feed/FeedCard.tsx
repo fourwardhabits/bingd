@@ -9,6 +9,7 @@ import {
   EngagementRow,
   Poster,
   PosterRail,
+  PosterSaveButton,
   ReactionSummary,
   ScoreBadge,
   SentenceLink,
@@ -16,7 +17,7 @@ import {
   Text,
   type ActivityReaction,
 } from '@/ui/components';
-import type { PosterTile } from '@/ui/components/PosterWall';
+import { FEED_SAVE_LABELS, type PosterTile } from '@/ui/components/PosterWall';
 import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
@@ -61,7 +62,13 @@ export type FeedCardProps = {
   reaction: ActivityReaction;
   onPressComments?: () => void;
   commentCount?: number;
-  /** Save to the reader's watchlist. Absent on their own activity and on a group. */
+  /**
+   * **The reader's own bookmark, on the artwork** (founder, 2026-11-22): the For You tile's
+   * control in the artwork's top-right corner; the author's score keeps the bottom-right.
+   * `saved` is the READER's state, never the author's. A tap toggles it and opens nothing.
+   * There is no second Save under the artwork. Absent on a group (each of its posters has
+   * its own) and wherever the title cannot be watchlisted.
+   */
   onPressSave?: () => void;
   saved?: boolean;
   /** The Recommend sheet, which ends in "Share off bingd". Absent on a group. */
@@ -86,15 +93,9 @@ export type FeedCardProps = {
     loading?: boolean;
     onPressTile: (tile: PosterTile) => void;
     onPressAll: () => void;
+    /** The reader's bookmark on every poster (`PosterRail`'s `onToggleSave`). */
+    onToggleSave?: (tile: PosterTile) => void;
   } | null;
-  /**
-   * **An activity session** (20261130000900): a group of rankings and saves from one half
-   * hour. Given with a rail, the sentence names the newest title instead of the group's size
-   * ("ranked Kaiju No. 8 + 15 more"), with `tailAction` as the way into the complete list,
-   * and the line under it carries `breakdown` ("9 ranked · 7 saved") when the session mixes
-   * both, so the sentence never claims every title was ranked or every title saved.
-   */
-  session?: { breakdown: string | null } | null;
 };
 
 /**
@@ -144,13 +145,13 @@ export function FeedCard({
   onPressShare,
   leading = false,
   rail = null,
-  session = null,
 }: FeedCardProps) {
   const grouped = rail != null;
-  // A session names its newest title and keeps "+ N more" as the link to the list.
-  const namesLead = grouped && session != null;
-  const groupName = rail && !namesLead ? `${rail.total} titles` : null;
-  const filmName = groupName ?? title ?? 'a title';
+  /**
+   * A group names its newest title and keeps "+ N more" (or "and N more") as the link to
+   * the complete list, never a bare count such as "ranked 16 titles" (founder, 2026-11-22).
+   */
+  const filmName = title ?? 'a title';
   const { width } = useWindowDimensions();
   const cardWidth = width - theme.layout.gutter * 2;
   // With no artwork anywhere the frame holds only the initials, so it takes the compact
@@ -158,9 +159,7 @@ export function FeedCard({
   const height = artwork.treatment === 'none' ? NO_ARTWORK_HEIGHT : artworkHeight(cardWidth);
   const posterHeight = height - theme.space[3] * 2;
   const posterWidth = Math.round((posterHeight * 2) / 3);
-  const subline = (
-    grouped ? [timeLabel, session?.breakdown] : [timeLabel, watchLabel, metadata]
-  )
+  const subline = (grouped ? [timeLabel] : [timeLabel, watchLabel, metadata])
     .filter(Boolean)
     .join(' · ');
 
@@ -171,7 +170,7 @@ export function FeedCard({
   // rest, and truncation would cut exactly that.
   const companionsLink = !grouped && companions.length > 2 && onPressCompanions != null;
   const holdsLink = grouped || tailAction != null || companionsLink;
-  const showsTailAction = tailAction != null && (!grouped || namesLead);
+  const showsTailAction = tailAction != null;
 
   return (
     <View style={[styles.card, leading && styles.cardLeading]} testID="feed-card">
@@ -203,24 +202,14 @@ export function FeedCard({
               {actorName}
             </Text>
             {` ${verb} `}
-            {/* A group is named by its size, and the size opens the complete list — never
-                the representative title (founder, 2026-11-19). */}
-            {rail && groupName ? (
-              <SentenceLink
-                label={groupName}
-                onPress={rail.onPressAll}
-                testID="feed-card-group-link"
-              />
-            ) : (
-              <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
-                {filmName}
-                {year ? (
-                  <Text variant="subhead" tone="secondary" style={styles.year}>
-                    {` (${year})`}
-                  </Text>
-                ) : null}
-              </Text>
-            )}
+            <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
+              {filmName}
+              {year ? (
+                <Text variant="subhead" tone="secondary" style={styles.year}>
+                  {` (${year})`}
+                </Text>
+              ) : null}
+            </Text>
             {companions.length && !grouped ? (
               <Text variant="subhead" tone="secondary">
                 {' with '}
@@ -264,10 +253,12 @@ export function FeedCard({
             onPressTile={rail.onPressTile}
             width={cardWidth}
             loadingCount={rail.loading ? Math.min(rail.total, 4) : 0}
+            onToggleSave={rail.onToggleSave}
             testID="feed-card-rail-scroll"
           />
         </View>
       ) : (
+      <View style={[styles.artwork, { height }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={[filmName, year, score != null ? null : metadata]
@@ -276,7 +267,7 @@ export function FeedCard({
         accessibilityHint="Opens the title"
         onPress={onPressTitle}
         testID="feed-card-artwork"
-        style={({ pressed }) => [styles.artwork, { height }, pressed && styles.pressed]}
+        style={({ pressed }) => [StyleSheet.absoluteFill, pressed && styles.pressed]}
       >
         {artwork.treatment === 'backdrop' ? (
           <Image
@@ -320,6 +311,19 @@ export function FeedCard({
           </View>
         ) : null}
       </Pressable>
+      {/* Beside the artwork's press, not inside it, so it can never open the title. */}
+      {onPressSave ? (
+        <View style={styles.heroSave} pointerEvents="box-none">
+          <PosterSaveButton
+            saved={saved}
+            title={filmName}
+            labels={FEED_SAVE_LABELS}
+            onPress={onPressSave}
+            testID="feed-card-save"
+          />
+        </View>
+      ) : null}
+      </View>
       )}
 
       {/* 4. The review the actor published, prominently — or nothing at all. */}
@@ -369,8 +373,6 @@ export function FeedCard({
           reaction={reaction}
           onPressComments={onPressComments}
           commentCount={commentCount}
-          onPressSave={grouped ? undefined : onPressSave}
-          saved={saved}
           onPressShare={grouped ? undefined : onPressShare}
           style={styles.actions}
           testID="feed-card"
@@ -447,6 +449,11 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.full,
     backgroundColor: paperAlpha(0.92),
   },
+  /**
+   * The reader's bookmark on the artwork: the poster tile's 44pt control, a step further in
+   * than on a poster (the artwork is wider), opposite the score's corner.
+   */
+  heroSave: { position: 'absolute', top: theme.space[1], right: theme.space[1] },
   review: { paddingHorizontal: theme.layout.gutter },
   /**
    * The social area holds its own rhythm rather than the card's 12pt gap: summary and
