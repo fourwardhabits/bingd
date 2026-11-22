@@ -17,9 +17,11 @@ import {
   sectionFor,
   sentenceFor,
   spokenSentence,
+  useCommentShapes,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
+  withCommentShape,
   IMPORT_KINDS,
   type InboxSection,
   type Notification,
@@ -251,7 +253,28 @@ export default function NotificationsScreen() {
 
   // Memoised because the mark-on-sight effect below depends on it, and a fresh array
   // identity every render would re-run that effect on every render.
-  const rows = useMemo(() => notifications.data ?? [], [notifications.data]);
+  /**
+   * **What each comment row's comment turned out to be** (2026-11-22). A generic
+   * `comment` row is what the post's owner gets whether the remark was new or a reply to
+   * their own comment, so the payload alone called a reply "commented on your …". The
+   * comment's `parent_id` says which; `withCommentShape` only ever moves a row towards
+   * "replied" when the stored comment proves it, and a comment this reader can no longer
+   * see keeps the row's generic sentence. See `useCommentShapes`.
+   */
+  const fetched = notifications.data;
+  const generic = useMemo(
+    () =>
+      (fetched ?? [])
+        .filter((row) => row.kind === 'comment' && !row.commentIsReply && !row.commentIsFollowUp)
+        .map((row) => row.commentId)
+        .filter((id): id is string => Boolean(id)),
+    [fetched],
+  );
+  const shapes = useCommentShapes(profile.id, generic);
+  const rows = useMemo(
+    () => (fetched ?? []).map((row) => withCommentShape(row, shapes.data, profile.id)),
+    [fetched, shapes.data, profile.id],
+  );
   const requests = rows.filter((row) => row.kind === 'follow_request');
   const rest = useMemo(() => rows.filter((row) => row.kind !== 'follow_request'), [rows]);
   /**

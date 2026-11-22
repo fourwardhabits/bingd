@@ -225,6 +225,62 @@ describe('a tap', () => {
     expect(notifications.clearLastNotificationResponse).not.toHaveBeenCalled();
   });
 
+  /**
+   * **A direct reply, tapped from the lock screen** (2026-11-22). The push carries no
+   * comment id — five fields, deliberately — but it carries its notification, and the
+   * Comments page finds the comment in the inbox (`useNotificationCommentId`) and opens
+   * at it. Cold start: the response is there before the session is.
+   */
+  const reply = {
+    notificationId: '0b5c9a52-4f0e-4d5c-9c51-0a7e2a1f0001',
+    kind: 'comment',
+    actorUsername: 'ada',
+    mediaItemId: null,
+    feedEventId: 'event-1',
+  };
+
+  it('opens a reply push at its comment from a cold start', async () => {
+    notifications.useLastNotificationResponse.mockReturnValue(response(reply));
+    mockAuth = { status: 'loading' };
+    const view = await renderHookWithProviders(() => usePush());
+    expect(mockRouterPush).not.toHaveBeenCalled();
+
+    signedIn();
+    await view.rerender(undefined);
+
+    await waitFor(() =>
+      expect(mockRouterPush).toHaveBeenCalledWith(
+        `/activity/event-1?notification=${reply.notificationId}`,
+      ),
+    );
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a reply push at its comment while the app is running (warm)', async () => {
+    signedIn();
+    const view = await renderHookWithProviders(() => usePush());
+    expect(mockRouterPush).not.toHaveBeenCalled();
+
+    notifications.useLastNotificationResponse.mockReturnValue(response(reply));
+    await view.rerender(undefined);
+
+    await waitFor(() =>
+      expect(mockRouterPush).toHaveBeenCalledWith(
+        `/activity/event-1?notification=${reply.notificationId}`,
+      ),
+    );
+  });
+
+  it('opens an older push with no notification id at the activity, as before', async () => {
+    notifications.useLastNotificationResponse.mockReturnValue(
+      response({ ...reply, notificationId: undefined }),
+    );
+    signedIn();
+    await renderHookWithProviders(() => usePush());
+
+    await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/activity/event-1'));
+  });
+
   it('lands on the inbox when the payload means nothing to this build', async () => {
     notifications.useLastNotificationResponse.mockReturnValue(
       response({ kind: 'from_the_future' }),

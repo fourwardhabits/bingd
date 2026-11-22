@@ -24,6 +24,12 @@ import NotificationsScreen from '../../../app/settings/notifications';
  */
 
 const mockNotifications: Record<string, unknown>[] = [];
+/**
+ * The `comments` rows the inbox reads to tell a reply from a remark (`useCommentShapes`):
+ * `id`, `parent_id` and `author_id`, as `comments_read` lets this reader see them. A
+ * comment absent here is one the reader can no longer see.
+ */
+const mockCommentTable: { id: string; parent_id: string | null; author_id: string }[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -33,6 +39,16 @@ jest.mock('@/lib/supabase', () => ({
       }
       return Promise.resolve({ data: null, error: null });
     },
+    from: (table: string) => ({
+      select: () => ({
+        in: (_column: string, ids: string[]) =>
+          Promise.resolve(
+            table === 'comments'
+              ? { data: mockCommentTable.filter((row) => ids.includes(row.id)), error: null }
+              : { data: [], error: null },
+          ),
+      }),
+    }),
   },
   startSessionRefresh: () => () => {},
 }));
@@ -150,6 +166,8 @@ const follow = (overrides: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   mockNotifications.length = 0;
+  mockCommentTable.length = 0;
+  mockPush.mockClear();
   mockNotifications.push(follow());
   mockRelationships.clear();
   mockAskedAbout.length = 0;
@@ -1252,5 +1270,93 @@ describe('the author’s follow-up', () => {
 
     await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
     expect(view.queryByText(/also commented/)).toBeNull();
+  });
+});
+
+/**
+ * **A comment notification opens at its comment, and says what it is** (2026-11-22).
+ *
+ * The reported thread's last notification went to the post's owner, who had been replied
+ * to under their own comment — and `add_comment` gives the owner the generic
+ * `{comment_id}` row either way, so it read "commented on your …". The stored comment's
+ * `parent_id` settles it.
+ */
+describe('a comment notification, tapped and read', () => {
+  it('opens the Comments page at the comment the row is about', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ payload: { comment_id: 'k1' } }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(/Ada commented on your/));
+
+    expect(mockPush).toHaveBeenCalledWith('/activity/event-1?comment=k1');
+  });
+
+  it('opens a mention at its comment too', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({ kind: 'mention', type: 'mention', payload: { comment_id: 'k2', reply: true } }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/mentioned you in a reply/)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(/Ada mentioned you in a reply/));
+
+    expect(mockPush).toHaveBeenCalledWith('/activity/event-1?comment=k2');
+  });
+
+  it('opens an older row with no comment id at the activity, as before', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ payload: {} }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(/Ada commented on your/));
+
+    expect(mockPush).toHaveBeenCalledWith('/activity/event-1');
+  });
+
+  it('calls a reply in the owner’s own thread a reply, not a comment on the post', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ payload: { comment_id: 'k3' } }));
+    mockCommentTable.push(
+      { id: 'k3', parent_id: 'root-1', author_id: 'them' },
+      { id: 'root-1', parent_id: null, author_id: 'me' },
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/replied under your comment on/)).toBeTruthy());
+    expect(view.queryByText(/commented on your/)).toBeNull();
+  });
+
+  it('keeps a top-level comment a comment, and a comment it cannot see generic', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({ id: 'a', payload: { comment_id: 'top' } }),
+      commentRow({ id: 'b', payload: { comment_id: 'hidden' } }),
+    );
+    mockCommentTable.push({ id: 'top', parent_id: null, author_id: 'them' });
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getAllByText(/commented on your/)).toHaveLength(2));
+    expect(view.queryByText(/replied/)).toBeNull();
+  });
+
+  it('says the post author also commented on their post, which the reader is in', async () => {
+    mockNotifications.length = 0;
+    // The participant row goes to somebody who does not own the post, so the title is not
+    // resolved for them — the case that used to read "commented on your activity".
+    mockNotifications.push(
+      commentRow({
+        media_item_id: null,
+        media_title: null,
+        payload: { comment_id: 'k4', participant: true },
+      }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/also commented on their activity/)).toBeTruthy());
+    expect(view.queryByText(/on your activity/)).toBeNull();
   });
 });

@@ -286,6 +286,20 @@ export type Notification = {
    * "replied to your comment" would claim a Reply they never tapped.
    */
   commentIsFollowUp: boolean;
+  /**
+   * `comment` and `mention` only: the comment the row is about (`payload.comment_id`), so
+   * a tap opens the conversation *at* it rather than at the top. Null on every other kind
+   * and on any row that predates the field, which then opens the activity as before.
+   */
+  commentId?: string | null;
+  /**
+   * `comment` only, and only after `withCommentShape`: a reply in a thread on the reader's
+   * own post — under the reader's own root comment (`commentUnderMine`) or under somebody
+   * else's (`commentInThread`). A reply, so not "commented on your"; and which comment in
+   * the thread it answered is unknown, so never "replied to your comment".
+   */
+  commentUnderMine?: boolean;
+  commentInThread?: boolean;
   preview: string | null;
   /**
    * Why there is no preview, when the reason is a spoiler claim. The row says "Contains
@@ -371,6 +385,174 @@ export const IMPORT_KINDS: ReadonlySet<NotificationKind> = new Set<NotificationK
 ]);
 
 /**
+ * One read of the inbox, shared by `useNotifications` and `useNotificationCommentId` so
+ * both observe one cache entry rather than two copies of the same rows.
+ */
+async function readInbox(): Promise<Notification[]> {
+  const { data, error } = await supabase.rpc('my_notifications', { p_limit: 100 });
+  if (error) throw error;
+
+  return (
+    (data ?? []) as {
+      id: string;
+      kind: string;
+      created_at: string;
+      read_at: string | null;
+      actor_id: string | null;
+      actor_username: string | null;
+      actor_display_name: string | null;
+      actor_avatar_path: string | null;
+      media_item_id: string | null;
+      media_title: string | null;
+      media_kind: 'movie' | 'series' | 'season' | null;
+      series_title: string | null;
+      subject_type: string | null;
+      subject_id: string | null;
+      // 20260901000100, optional for the same rollout reason `comment_excerpt` is.
+      subject_activity_type?: string | null;
+      payload: {
+        mutual?: boolean;
+        award?: string;
+        tier?: string;
+        award_name?: string;
+        tier_label?: string;
+        // `goal_completed` (20260829000200).
+        year?: number;
+        category?: 'movies' | 'tv_seasons';
+        target?: number;
+        // `comment` and `mention`: the comment the row is about. Every comment-family
+        // row has carried it since it was first written.
+        comment_id?: string;
+        // `mention` (20260830000100).
+        reply?: boolean;
+        // `comment` (20260826000600): present iff this row is about a *reply* to the
+        // reader's own comment rather than a remark under their activity.
+        reply_to?: string;
+        participant?: boolean;
+        // `theatrical_release` (20261028000100).
+        opens_on?: string;
+        // `season_premiere` (20261031000100).
+        available_on?: string;
+        season_number?: number | null;
+        // Import lifecycle rows (20261113000100).
+        provider?: string;
+      } | null;
+      // 20261028000100, `watchlist_social` only. Optional for the rollout reason above.
+      cluster_actors?:
+        | { username: string; display_name: string | null; avatar_path: string | null }[]
+        | null;
+      cluster_count?: number | null;
+      // 20260830000100. Optional in the type for the same reason `mentions` is in
+      // `use-comments`: a bundle can be newer than the database it is pointed at
+      // during a rollout, and the absence must read as "no preview" rather than
+      // throw.
+      comment_excerpt?: string | null;
+      comment_spoilers?: boolean | null;
+      viewer_ranked?: boolean | null;
+    }[]
+  )
+    .filter(
+      (row) =>
+        KINDS.has(row.kind) &&
+        (Boolean(row.actor_username) || ACTORLESS_KINDS.has(row.kind)) &&
+        // A social row with nobody left in it says nothing true. The server already
+        // drops it; this is the second of two, against a database that predates it.
+        (row.kind !== 'watchlist_social' || (row.cluster_count ?? 0) > 0),
+    )
+    .map((row) => ({
+      id: row.id,
+      kind: row.kind as NotificationKind,
+      createdAt: row.created_at,
+      readAt: row.read_at,
+      actorId: row.actor_id,
+      actorUsername: row.actor_username,
+      actorName: row.actor_display_name || row.actor_username,
+      actorAvatarUri: avatarUri(row.actor_avatar_path),
+      mediaItemId: row.media_item_id,
+      mediaTitle: row.media_title,
+      mediaKind: row.media_kind,
+      seriesTitle: row.series_title,
+      subjectType: row.subject_type,
+      subjectId: row.subject_id,
+      subjectActivityType: row.subject_activity_type ?? null,
+      mutual: row.kind === 'friendship' ? row.payload?.mutual === true : null,
+      award:
+        row.kind === 'award_earned' && row.payload?.award && row.payload?.tier
+          ? {
+              key: row.payload.award,
+              tierKey: row.payload.tier,
+              ...awardAnnouncement({
+                key: row.payload.award,
+                tierKey: row.payload.tier,
+                // The payload's own names, as the fallback for a track this bundle
+                // does not have. Never drawn when the track is known.
+                name: row.payload.award_name ?? null,
+                tierLabel: row.payload.tier_label ?? null,
+              }),
+            }
+          : null,
+      goal:
+        row.kind === 'goal_completed' && row.payload?.year && row.payload?.category
+          ? {
+              year: Number(row.payload.year),
+              category: row.payload.category,
+              target: Number(row.payload.target ?? 0),
+            }
+          : null,
+      // Trimmed here rather than in the row, because the whitespace is an artefact of
+      // how somebody typed and a preview is one line: a comment beginning with a
+      // newline would otherwise draw an empty second line under the sentence.
+      mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
+      importProvider: IMPORT_KINDS.has(row.kind as NotificationKind)
+        ? row.payload?.provider === 'imdb'
+          ? 'imdb'
+          : 'letterboxd'
+        : null,
+      commentIsReply: row.kind === 'comment' && Boolean(row.payload?.reply_to),
+      commentIsFollowUp: row.kind === 'comment' && Boolean(row.payload?.participant),
+      commentId:
+        (row.kind === 'comment' || row.kind === 'mention') &&
+        typeof row.payload?.comment_id === 'string' &&
+        row.payload.comment_id.length > 0
+          ? row.payload.comment_id
+          : null,
+      preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
+      previewHidden: row.comment_spoilers === true,
+      viewerRanked: row.viewer_ranked === true,
+      cluster:
+        row.kind === 'watchlist_social'
+          ? {
+              count: Number(row.cluster_count ?? 0),
+              actors: (row.cluster_actors ?? []).map((a) => ({
+                username: a.username,
+                name: a.display_name || a.username,
+                avatarUri: avatarUri(a.avatar_path),
+              })),
+            }
+          : null,
+      opensOn:
+        row.kind === 'theatrical_release' &&
+        typeof row.payload?.opens_on === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(row.payload.opens_on)
+          ? row.payload.opens_on
+          : null,
+      availableOn:
+        row.kind === 'season_premiere' &&
+        typeof row.payload?.available_on === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(row.payload.available_on)
+          ? row.payload.available_on
+          : null,
+      seasonNumber:
+        row.kind === 'season_premiere' &&
+        typeof row.payload?.season_number === 'number' &&
+        Number.isInteger(row.payload.season_number) &&
+        row.payload.season_number > 0
+          ? row.payload.season_number
+          : null,
+    }));
+}
+
+/**
  * The caller's own inbox.
  *
  * `my_notifications` is definer and the reason is the whole design of this surface: a
@@ -401,160 +583,7 @@ export function useNotifications(viewerId: string) {
      * browser event that never fires here.
      */
     refetchOnWindowFocus: true,
-    queryFn: async (): Promise<Notification[]> => {
-      const { data, error } = await supabase.rpc('my_notifications', { p_limit: 100 });
-      if (error) throw error;
-
-      return (
-        (data ?? []) as {
-          id: string;
-          kind: string;
-          created_at: string;
-          read_at: string | null;
-          actor_id: string | null;
-          actor_username: string | null;
-          actor_display_name: string | null;
-          actor_avatar_path: string | null;
-          media_item_id: string | null;
-          media_title: string | null;
-          media_kind: 'movie' | 'series' | 'season' | null;
-          series_title: string | null;
-          subject_type: string | null;
-          subject_id: string | null;
-          // 20260901000100, optional for the same rollout reason `comment_excerpt` is.
-          subject_activity_type?: string | null;
-          payload: {
-            mutual?: boolean;
-            award?: string;
-            tier?: string;
-            award_name?: string;
-            tier_label?: string;
-            // `goal_completed` (20260829000200).
-            year?: number;
-            category?: 'movies' | 'tv_seasons';
-            target?: number;
-            // `mention` (20260830000100).
-            reply?: boolean;
-            // `comment` (20260826000600): present iff this row is about a *reply* to the
-            // reader's own comment rather than a remark under their activity.
-            reply_to?: string;
-            participant?: boolean;
-            // `theatrical_release` (20261028000100).
-            opens_on?: string;
-            // `season_premiere` (20261031000100).
-            available_on?: string;
-            season_number?: number | null;
-            // Import lifecycle rows (20261113000100).
-            provider?: string;
-          } | null;
-          // 20261028000100, `watchlist_social` only. Optional for the rollout reason above.
-          cluster_actors?:
-            | { username: string; display_name: string | null; avatar_path: string | null }[]
-            | null;
-          cluster_count?: number | null;
-          // 20260830000100. Optional in the type for the same reason `mentions` is in
-          // `use-comments`: a bundle can be newer than the database it is pointed at
-          // during a rollout, and the absence must read as "no preview" rather than
-          // throw.
-          comment_excerpt?: string | null;
-          comment_spoilers?: boolean | null;
-          viewer_ranked?: boolean | null;
-        }[]
-      )
-        .filter(
-          (row) =>
-            KINDS.has(row.kind) &&
-            (Boolean(row.actor_username) || ACTORLESS_KINDS.has(row.kind)) &&
-            // A social row with nobody left in it says nothing true. The server already
-            // drops it; this is the second of two, against a database that predates it.
-            (row.kind !== 'watchlist_social' || (row.cluster_count ?? 0) > 0),
-        )
-        .map((row) => ({
-          id: row.id,
-          kind: row.kind as NotificationKind,
-          createdAt: row.created_at,
-          readAt: row.read_at,
-          actorId: row.actor_id,
-          actorUsername: row.actor_username,
-          actorName: row.actor_display_name || row.actor_username,
-          actorAvatarUri: avatarUri(row.actor_avatar_path),
-          mediaItemId: row.media_item_id,
-          mediaTitle: row.media_title,
-          mediaKind: row.media_kind,
-          seriesTitle: row.series_title,
-          subjectType: row.subject_type,
-          subjectId: row.subject_id,
-          subjectActivityType: row.subject_activity_type ?? null,
-          mutual: row.kind === 'friendship' ? row.payload?.mutual === true : null,
-          award:
-            row.kind === 'award_earned' && row.payload?.award && row.payload?.tier
-              ? {
-                  key: row.payload.award,
-                  tierKey: row.payload.tier,
-                  ...awardAnnouncement({
-                    key: row.payload.award,
-                    tierKey: row.payload.tier,
-                    // The payload's own names, as the fallback for a track this bundle
-                    // does not have. Never drawn when the track is known.
-                    name: row.payload.award_name ?? null,
-                    tierLabel: row.payload.tier_label ?? null,
-                  }),
-                }
-              : null,
-          goal:
-            row.kind === 'goal_completed' && row.payload?.year && row.payload?.category
-              ? {
-                  year: Number(row.payload.year),
-                  category: row.payload.category,
-                  target: Number(row.payload.target ?? 0),
-                }
-              : null,
-          // Trimmed here rather than in the row, because the whitespace is an artefact of
-          // how somebody typed and a preview is one line: a comment beginning with a
-          // newline would otherwise draw an empty second line under the sentence.
-          mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
-          importProvider: IMPORT_KINDS.has(row.kind as NotificationKind)
-            ? row.payload?.provider === 'imdb'
-              ? 'imdb'
-              : 'letterboxd'
-            : null,
-          commentIsReply: row.kind === 'comment' && Boolean(row.payload?.reply_to),
-          commentIsFollowUp: row.kind === 'comment' && Boolean(row.payload?.participant),
-          preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
-          previewHidden: row.comment_spoilers === true,
-          viewerRanked: row.viewer_ranked === true,
-          cluster:
-            row.kind === 'watchlist_social'
-              ? {
-                  count: Number(row.cluster_count ?? 0),
-                  actors: (row.cluster_actors ?? []).map((a) => ({
-                    username: a.username,
-                    name: a.display_name || a.username,
-                    avatarUri: avatarUri(a.avatar_path),
-                  })),
-                }
-              : null,
-          opensOn:
-            row.kind === 'theatrical_release' &&
-            typeof row.payload?.opens_on === 'string' &&
-            /^\d{4}-\d{2}-\d{2}$/.test(row.payload.opens_on)
-              ? row.payload.opens_on
-              : null,
-          availableOn:
-            row.kind === 'season_premiere' &&
-            typeof row.payload?.available_on === 'string' &&
-            /^\d{4}-\d{2}-\d{2}$/.test(row.payload.available_on)
-              ? row.payload.available_on
-              : null,
-          seasonNumber:
-            row.kind === 'season_premiere' &&
-            typeof row.payload?.season_number === 'number' &&
-            Number.isInteger(row.payload.season_number) &&
-            row.payload.season_number > 0
-              ? row.payload.season_number
-              : null,
-        }));
-    },
+    queryFn: readInbox,
   });
 
   /**
@@ -585,6 +614,131 @@ export function useNotifications(viewerId: string) {
   );
 
   return query;
+}
+
+/**
+ * Which comment a notification is about, looked up by the notification's id.
+ *
+ * For a **push** tap. The push payload carries the notification id but not the comment —
+ * `push-sender` sends five fields, deliberately, and widening it would mean the sender and
+ * `claim_push_batch` both changing. The inbox row already has the comment id in its
+ * payload, so the activity page asks the same cache the bell and the inbox read (one
+ * entry, one read: `readInbox`) and finds the row. A row that is not there — older than
+ * the inbox's hundred, or no longer showable — answers null, and the page simply opens the
+ * activity, which is where every comment push led before this.
+ */
+export function useNotificationCommentId(viewerId: string, notificationId: string | null) {
+  const query = useQuery({
+    queryKey: ['notifications', viewerId],
+    queryFn: readInbox,
+    enabled: Boolean(viewerId && notificationId),
+    staleTime: 30_000,
+  });
+  const row = notificationId
+    ? query.data?.find((candidate) => candidate.id === notificationId)
+    : undefined;
+  /**
+   * **A cache fresh enough to be trusted can still predate the push** (Codex review, PR
+   * #365): an inbox read seconds before the notification was written is inside
+   * `staleTime`, so nothing would fetch and the row could never be found. So a row that is
+   * missing from a successful read is asked for once more, per notification, before the
+   * page gives up and opens the activity at the top.
+   */
+  const missing = Boolean(notificationId && query.isSuccess && !row);
+  const { refetch } = query;
+  const askedAgain = useRef<string | null>(null);
+  useEffect(() => {
+    if (!missing || !notificationId || askedAgain.current === notificationId) return;
+    askedAgain.current = notificationId;
+    void refetch();
+  }, [missing, notificationId, refetch]);
+
+  return { commentId: row?.commentId ?? null };
+}
+
+/**
+ * What a `comment` row is, structurally, beyond what its payload says.
+ *
+ * `add_comment` files one generic row for the activity's owner, `{comment_id}`, whether
+ * the comment was a new remark or a reply — the `reply_to` row goes only to a parent's
+ * author who is *not* the owner. So the owner of a post who is answered under their own
+ * comment was told "commented on your activity", which is the reported thread's last
+ * notification described wrongly. The payload cannot say more; the comment can. This
+ * reads `parent_id` for the rows' comments and the author of each parent, through the
+ * same `comments_read` policy every comment read meets — a comment this reader may no
+ * longer see is simply absent, and its row keeps the generic sentence.
+ */
+export type CommentShape = {
+  isReply: boolean;
+  /**
+   * The author of the comment's stored parent — which is always the **thread's root**:
+   * `_add_comment` re-points every reply at `_comment_root(...)`. It is therefore *not*
+   * necessarily the person the reply answered (Reply may have been tapped on another
+   * reply in that thread), and the copy below never claims it is (Codex review, PR #365).
+   */
+  rootAuthorId: string | null;
+};
+
+export function useCommentShapes(viewerId: string, commentIds: string[]) {
+  const ids = [...new Set(commentIds)].sort();
+  return useQuery({
+    queryKey: ['comment-shapes', viewerId, ids],
+    enabled: Boolean(viewerId) && ids.length > 0,
+    staleTime: 60_000,
+    queryFn: async (): Promise<Map<string, CommentShape>> => {
+      const { data, error } = await supabase
+        .from('comments')
+        .select('id, parent_id')
+        .in('id', ids);
+      if (error) throw error;
+      const rows = (data ?? []) as { id: string; parent_id: string | null }[];
+      const parentIds = [
+        ...new Set(rows.map((row) => row.parent_id).filter((id): id is string => Boolean(id))),
+      ];
+      const parents = new Map<string, string>();
+      if (parentIds.length > 0) {
+        const read = await supabase.from('comments').select('id, author_id').in('id', parentIds);
+        if (read.error) throw read.error;
+        for (const parent of (read.data ?? []) as { id: string; author_id: string }[]) {
+          parents.set(parent.id, parent.author_id);
+        }
+      }
+      const shapes = new Map<string, CommentShape>();
+      for (const row of rows) {
+        shapes.set(row.id, {
+          isReply: row.parent_id !== null,
+          rootAuthorId: row.parent_id ? (parents.get(row.parent_id) ?? null) : null,
+        });
+      }
+      return shapes;
+    },
+  });
+}
+
+/**
+ * A row with what its comment turned out to be folded in: a generic `comment` row whose
+ * comment is stored as a reply *is* a reply, and says so. Only ever moves a row from
+ * "commented" towards "replied" when the stored comment proves it; a top-level comment is
+ * never called a reply.
+ *
+ * **Thread-level wording, never "to your comment"**, because the stored parent is the
+ * thread's root and not necessarily the comment Reply was tapped on: "replied under your
+ * comment" when the thread is the reader's, "replied in a thread on your …" otherwise.
+ * Both are true whichever comment in the thread was answered.
+ */
+export function withCommentShape(
+  row: Notification,
+  shapes: Map<string, CommentShape> | undefined,
+  viewerId: string,
+): Notification {
+  if (row.kind !== 'comment' || row.commentIsReply || row.commentIsFollowUp || !row.commentId) {
+    return row;
+  }
+  const shape = shapes?.get(row.commentId);
+  if (!shape?.isReply) return row;
+  return shape.rootAuthorId === viewerId
+    ? { ...row, commentUnderMine: true }
+    : { ...row, commentInThread: true };
 }
 
 /**
@@ -942,14 +1096,21 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
         if (row.commentIsReply) {
           return { lead: 'replied to your comment on', subject, tail: null };
         }
+        if (row.commentUnderMine) {
+          return { lead: 'replied under your comment on', subject, tail: null };
+        }
+        if (row.commentInThread) {
+          return { lead: 'replied in a thread on your', subject, tail: noun };
+        }
         /**
          * The author following up under their own post. It is not "your" anything — the
          * ranking is theirs — and it is not a reply, because they did not tap one. What
-         * it is is somebody joining a conversation this reader is already in, and that
-         * is what it says.
+         * it is is the post's author joining a conversation this reader is already in, and
+         * "their" says whose post it is (2026-11-22: "the" left the reader to work out
+         * that the person commenting was the person who posted).
          */
         if (row.commentIsFollowUp) {
-          return { lead: 'also commented on the', subject, tail: noun };
+          return { lead: 'also commented on their', subject, tail: noun };
         }
         return { lead: 'commented on your', subject, tail: noun };
       case 'reaction':
@@ -989,6 +1150,27 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
       default:
         break;
     }
+  }
+
+  /**
+   * A comment row whose title could not be resolved still says which of the four it is.
+   * `verbFor` alone said "commented on your activity" for all of them, which called a reply
+   * a remark and the post author's follow-up a comment on the reader's own post.
+   */
+  if (row.kind === 'comment') {
+    return {
+      lead: row.commentIsReply
+        ? 'replied to your comment'
+        : row.commentUnderMine
+          ? 'replied under your comment'
+          : row.commentInThread
+          ? 'replied in a thread on your activity'
+          : row.commentIsFollowUp
+            ? 'also commented on their activity'
+            : 'commented on your activity',
+      subject: null,
+      tail: null,
+    };
   }
 
   // Everything else, and every row whose title could not be resolved: the verb is the
