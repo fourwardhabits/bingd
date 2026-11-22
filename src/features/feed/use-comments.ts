@@ -173,9 +173,10 @@ export function useCommentCounts(eventIds: string[], viewerId: string) {
  * server's, which is the stronger place for it: a blocked person's remark never leaves
  * the database rather than being filtered on arrival.
  *
- * **Ordering.** Roots in time order, each followed by its own replies in time order. A
- * conversation runs downward, and doing the grouping here would mean two surfaces —
- * this sheet and the thread page — each sorting, and eventually disagreeing.
+ * **Not the order.** The rows arrive grouped by thread, but `activity_comments`
+ * (`20260909000100`) sorts the threads by `coalesce(parent_id, id)` — the root's random
+ * UUID, not its time — so two roots come back in whichever order their ids happen to
+ * sort. `threadsOf` below therefore sorts; see the note there.
  *
  * ---------------------------------------------------------------------------
  * `staleTime: 0`, AND IT IS A BUG FIX
@@ -260,7 +261,20 @@ export function useComments(eventId: string | null, viewerId: string) {
  *
  * Derived rather than fetched, and derived *here* rather than in the two components that
  * need it, so the sheet and the dedicated page cannot disagree about what a thread is.
- * The server already returns the rows in this order; this only groups them.
+ *
+ * **Oldest root first, each root's replies under it oldest first** — and this function
+ * does the sorting rather than trusting the server's order (founder, 2026-11-22). This
+ * header used to say "the server already returns the rows in this order; this only groups
+ * them", and the server does not: `activity_comments` orders threads by
+ * `coalesce(parent_id, id)`, which is the root's random UUID. In the reported thread a
+ * root written five minutes after another was drawn above it, so an answer read as if it
+ * came before the remark it answered — on 3 of the 5 production conversations with more
+ * than one live root. Sorting here fixes every bundle that takes the update with no
+ * migration, and both surfaces read this function. The tie-break on `id` makes two
+ * comments in the same instant land in one stable order on every device.
+ *
+ * There is no pagination or limit on `activity_comments`, so the whole conversation is
+ * here and sorting it cannot drop or reorder a page boundary.
  *
  * A reply whose root is missing is dropped. That should be impossible — `parent_id`
  * cascades and a retracted root is tombstoned rather than removed precisely so its
@@ -270,11 +284,20 @@ export function useComments(eventId: string | null, viewerId: string) {
  */
 export type CommentThread = { root: Comment; replies: Comment[] };
 
+/** Time, then id: the order a conversation is read in, stable for a tie. */
+export const chronological = (a: Comment, b: Comment): number => {
+  const at = Date.parse(a.createdAt);
+  const bt = Date.parse(b.createdAt);
+  if (at !== bt) return (Number.isNaN(at) ? 0 : at) - (Number.isNaN(bt) ? 0 : bt);
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
+
 export function threadsOf(comments: Comment[] | undefined): CommentThread[] {
+  const sorted = [...(comments ?? [])].sort(chronological);
   const threads: CommentThread[] = [];
   const byId = new Map<string, CommentThread>();
 
-  for (const comment of comments ?? []) {
+  for (const comment of sorted) {
     if (comment.parentId === null) {
       const thread = { root: comment, replies: [] };
       byId.set(comment.id, thread);
@@ -282,7 +305,8 @@ export function threadsOf(comments: Comment[] | undefined): CommentThread[] {
     }
   }
 
-  for (const comment of comments ?? []) {
+  // Already in time order, so each thread's replies are too.
+  for (const comment of sorted) {
     if (comment.parentId === null) continue;
     byId.get(comment.parentId)?.replies.push(comment);
   }
@@ -290,13 +314,41 @@ export function threadsOf(comments: Comment[] | undefined): CommentThread[] {
   return threads;
 }
 
+/** The thread a comment belongs to: its own if it is a root, its root's if it is a reply. */
+export const threadOf = (threads: CommentThread[], commentId: string): CommentThread | null =>
+  threads.find(
+    (thread) =>
+      thread.root.id === commentId || thread.replies.some((reply) => reply.id === commentId),
+  ) ?? null;
+
 /** How many of these a count should promise. A tombstone is a spacer, not a remark. */
 export const readableCount = (comments: Comment[] | undefined) =>
   (comments ?? []).filter((comment) => !comment.deleted).length;
 
 export type CommentWriteResult =
   | { ok: true }
-  | { ok: false; message: string; selfReaction?: boolean };
+  | {
+      ok: false;
+      message: string;
+      selfReaction?: boolean;
+      /**
+       * Which thing the server could not find, when that is why it refused: the comment
+       * being replied to (deleted, or its author is no longer visible to this reader), or
+       * the activity itself. Read from the `P0002` the writers raise — `add_comment`
+       * says `no such comment` or `no such activity` — and nothing else, so an unrelated
+       * refusal is never mistaken for one. The composer uses `comment` to offer a recovery
+       * rather than a dead end; a reply is never quietly re-sent as a top-level comment.
+       */
+      unavailable?: 'comment' | 'activity';
+    };
+
+const unavailableFrom = (error: unknown): 'comment' | 'activity' | undefined => {
+  const { code, message } = (error ?? {}) as { code?: string; message?: string };
+  if (code !== 'P0002') return undefined;
+  if (/no such comment/i.test(message ?? '')) return 'comment';
+  if (/no such activity/i.test(message ?? '')) return 'activity';
+  return undefined;
+};
 
 /**
  * Posting, editing, deleting and liking.
@@ -363,7 +415,8 @@ export function useCommentWrites(viewerId: string) {
       const message =
         diagnose(error) ??
         (error instanceof Error ? error.message : 'Something went wrong. Try again.');
-      return { ok: false, message };
+      const unavailable = unavailableFrom(error);
+      return unavailable ? { ok: false, message, unavailable } : { ok: false, message };
     }
     // Only `add` writes a notification, and this helper is shared by all the writers —
     // which is right rather than sloppy: a drain is global and debounced, so an edit that

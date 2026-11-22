@@ -1,6 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import { shouldMask } from '@/features/collection/use-watched';
 import { newOperationId } from '@/features/collection/writes';
@@ -17,6 +26,7 @@ import { useCommentReactors } from './use-comment-reactors';
 import { useMentionCandidates } from './use-mentions';
 import {
   COMMENT_MAX_LENGTH,
+  threadOf,
   threadsOf,
   useCommentWrites,
   useComments,
@@ -45,7 +55,28 @@ export type CommentThreadProps = {
    * dedicated page is already inside a scroll view and must not nest a second one.
    */
   scroll: 'own' | 'inherited';
+  /**
+   * The comment a notification was about, when this conversation was opened from one
+   * (`/activity/[id]?comment=`). Its thread is scrolled into view once and the comment is
+   * briefly marked. It never starts a reply: Reply stays the reader's own tap.
+   */
+  focusCommentId?: string | null;
+  /**
+   * Where the focused thread starts, in the coordinates of whatever scrolls this
+   * component, for `scroll: 'inherited'` — the page owns that scroll view. With `own`
+   * the list scrolls itself and this is not called.
+   */
+  onFocusOffset?: (y: number) => void;
 };
+
+/** How long a notification's comment stays marked after the conversation opens. */
+export const FOCUS_HIGHLIGHT_MS = 2500;
+
+/**
+ * How much of what comes before a focused *reply* stays on screen above it: about one
+ * comment, so the reader sees what it answers. Never above the thread's own root.
+ */
+const REPLY_CONTEXT = 160;
 
 /**
  * The conversation on one activity: the comments, their replies, and the box to add one.
@@ -93,6 +124,8 @@ export function CommentThread({
   watched,
   onPressPerson,
   scroll,
+  focusCommentId = null,
+  onFocusOffset,
 }: CommentThreadProps) {
   const comments = useComments(eventId, viewerId);
   const { add, edit, remove, react, busy, reacting } = useCommentWrites(viewerId);
@@ -114,6 +147,14 @@ export function CommentThread({
    * the reader started from, which is the thing the banner is describing.
    */
   const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
+  /**
+   * The server said the comment being replied to is gone (`add_comment`'s `P0002 no such
+   * comment`) before this reader's list had caught up. The list is the other way to know —
+   * see `targetUnavailable` below — and either one stops the composer posting.
+   */
+  const [replyGone, setReplyGone] = useState(false);
+  const input = useRef<TextInput>(null);
+  const list = useRef<ScrollView>(null);
   // Which comment's reason sheet is open, by id. An id rather than the row, because a
   // refetch replaces the objects and the sheet should stay open across one.
   const [reporting, setReporting] = useState<string | null>(null);
@@ -242,8 +283,93 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
+    setReplyGone(false);
     setCaret(0);
   }
+
+  /**
+   * ---------------------------------------------------------------------------
+   * ARRIVING AT ONE COMMENT (a notification tap)
+   *
+   * Laid out before it can be scrolled to, so every thread, reply block and reply reports
+   * its offset as it lays out — the thread inside the list, the replies inside the thread,
+   * the reply inside those — and the scroll happens once, when the target's are known.
+   * Every row reports, not only the target's: a push resolves its comment *after* the
+   * list may have laid out, and a layout that has already happened is never reported
+   * again. Refs rather than state: nothing renders from them.
+   */
+  const layout = useRef({
+    container: undefined as number | undefined,
+    threads: new Map<string, number>(),
+    replies: new Map<string, number>(),
+    rows: new Map<string, number>(),
+  });
+  const scrolledTo = useRef<string | null>(null);
+
+  const allThreads = threadsOf(comments.data);
+  const focusThread = focusCommentId ? threadOf(allThreads, focusCommentId) : null;
+  const focusIsReply = Boolean(focusThread && focusThread.root.id !== focusCommentId);
+  const focusMissing = Boolean(focusCommentId && comments.data && !focusThread);
+
+  const tryFocusScroll = () => {
+    if (!focusCommentId || !focusThread || scrolledTo.current === focusCommentId) return;
+    const at = layout.current;
+    const thread = at.threads.get(focusThread.root.id);
+    if (thread === undefined) return;
+    let within = thread;
+    if (focusIsReply) {
+      const replies = at.replies.get(focusThread.root.id);
+      const reply = at.rows.get(focusCommentId);
+      if (replies === undefined || reply === undefined) return;
+      within = Math.max(thread, thread + replies + reply - REPLY_CONTEXT);
+    }
+    if (scroll === 'own') {
+      scrolledTo.current = focusCommentId;
+      list.current?.scrollTo({ y: within, animated: true });
+      return;
+    }
+    if (at.container === undefined) return;
+    scrolledTo.current = focusCommentId;
+    onFocusOffset?.(at.container + within);
+  };
+
+  /**
+   * The mark, for a moment. Started when the comment is found rather than when the scroll
+   * lands, so a thread already on screen (no scroll needed) is marked all the same. Derived
+   * rather than set: the comment is marked until its timer has run out.
+   */
+  const focusFound = Boolean(focusThread);
+  const [markExpired, setMarkExpired] = useState<string | null>(null);
+  const highlighted = focusCommentId && focusFound && markExpired !== focusCommentId
+    ? focusCommentId
+    : null;
+  useEffect(() => {
+    if (!focusCommentId || !focusFound) return;
+    const timer = setTimeout(() => setMarkExpired(focusCommentId), FOCUS_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [focusCommentId, focusFound]);
+
+  // The rows may have laid out before the target was known (a push's comment arrives with
+  // the inbox read), and a layout already reported is never reported again — so once it is
+  // known, try with what has already been measured. Through a ref, so the effect runs on
+  // the target changing and not on every render's new closure.
+  const focusScroll = useRef(tryFocusScroll);
+  useLayoutEffect(() => {
+    focusScroll.current = tryFocusScroll;
+  });
+  useEffect(() => {
+    if (focusCommentId && focusFound) focusScroll.current();
+  }, [focusCommentId, focusFound]);
+
+  const measured =
+    (key: 'threads' | 'replies' | 'rows', id: string) => (event: LayoutChangeEvent) => {
+      layout.current[key].set(id, event.nativeEvent.layout.y);
+      tryFocusScroll();
+    };
+  const measuredContainer = (event: LayoutChangeEvent) => {
+    layout.current.container = event.nativeEvent.layout.y;
+    tryFocusScroll();
+  };
 
   if (!eventId) return null;
 
@@ -253,6 +379,7 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
+    setReplyGone(false);
     // An empty draft has no fragment, so the suggestion list closes with it rather than
     // hanging over a box the reader has just been given back.
     setCaret(0);
@@ -287,6 +414,9 @@ export function CommentThread({
     const opening = composer.opening;
     const wasEditing = editing;
     const wasReplyingTo = replyingTo;
+    // A reply to a comment that no longer exists is refused here, and by the server,
+    // rather than quietly re-aimed at the top level. See `keepAsNewComment`.
+    if (wasReplyingTo && targetUnavailable) return;
     // Held rather than minted per attempt — see `attempt` above. `??=` is what makes a
     // retry of the same words carry the id the first try used.
     const operationId = (attempt.current ??= newOperationId());
@@ -322,6 +452,24 @@ export function CommentThread({
         });
 
     if (!result.ok) {
+      /**
+       * **The comment being answered went away between Reply and the press.** Deleted,
+       * or its author blocked or hidden since — `add_comment` says `no such comment` for
+       * all three and wrote nothing. The draft stays, the composer says what happened in
+       * place of "Replying to", and the reader chooses: post it as a new comment, or
+       * cancel. Not an alert, because the banner *is* the explanation and the choices
+       * live beside the text they are about.
+       */
+      if (wasReplyingTo && result.unavailable === 'comment') {
+        if (stillHere(opening)) {
+          setReplyGone(true);
+          AccessibilityInfo.announceForAccessibility?.(
+            `${wasReplyingTo.authorName}'s comment is no longer available. Your text is kept.`,
+          );
+          void comments.refetch();
+        }
+        return;
+      }
       // Reported even if the surface has moved on. The write may not have happened and
       // the author believes it did; that is worth interrupting for wherever they are.
       Alert.alert(
@@ -374,12 +522,33 @@ export function CommentThread({
     newIntent();
     setEditing(null);
     setReplyingTo(comment);
+    setReplyGone(false);
     setDraft('');
     setSpoilers(false);
     setCaret(0);
     // A different target is a different comment, and the handles picked for the last one
     // do not carry into it. See `forgetMentions`.
     forgetMentions();
+    /**
+     * **The box takes focus**, so tapping Reply visibly *does* something where the reader
+     * is about to type: the keyboard rises, and on the page the composer is scrolled into
+     * what is left of the screen. Before this the only change was a caption above a box
+     * that might have been off-screen — the likeliest reason so many answers in production
+     * were posted as new comments.
+     */
+    input.current?.focus();
+  };
+
+  /**
+   * Back to a new comment, keeping the words: the recovery for a reply whose comment has
+   * gone. The draft is now a different intent (no parent), so it gets an id of its own;
+   * the reader then presses the ordinary Post.
+   */
+  const keepAsNewComment = () => {
+    newIntent();
+    setReplyingTo(null);
+    setReplyGone(false);
+    input.current?.focus();
   };
 
   const confirmDelete = (comment: Comment) => {
@@ -397,11 +566,13 @@ export function CommentThread({
             // another activity underneath it — and a destructive write confirmed
             // against a context the user can no longer see is not a confirmed write.
             if (!stillHere(opening)) return;
-            // If the comment being deleted is the one open in the composer — as the
-            // thing being edited or the thing being replied to — the composer has to
-            // let go of it, or the next save edits a row that is gone and the next
-            // reply names a parent the server will refuse.
-            if (editing?.id === comment.id || replyingTo?.id === comment.id) reset();
+            // If the comment being deleted is the one being edited, the composer has to
+            // let go of it, or the next save edits a row that is gone. The one being
+            // *replied to* is different: the reader may have written a reply already, and
+            // emptying the box would lose it. The list refetches after the delete, the
+            // target is then missing or a tombstone, and the composer says so and offers
+            // a new comment or Cancel — see `targetUnavailable`.
+            if (editing?.id === comment.id) reset();
             const result = await remove({ commentId: comment.id });
             if (!result.ok) Alert.alert('Could not delete', result.message);
           })();
@@ -441,8 +612,45 @@ export function CommentThread({
   const toggleDefault = (comment: Comment) =>
     choose(comment, comment.myReaction === DEFAULT_REACTION ? null : DEFAULT_REACTION);
 
-  const threads = threadsOf(comments.data);
+  const threads = allThreads;
   const over = draft.length > COMMENT_MAX_LENGTH;
+
+  /**
+   * ---------------------------------------------------------------------------
+   * WHAT THE COMPOSER IS DOING, STATED ONCE
+   *
+   * The comment being replied to, as the list has it now — a refetch may have renamed its
+   * author, tombstoned it or dropped it. The snapshot in `replyingTo` is what the reader
+   * chose; this is whether it still exists.
+   */
+  const liveTarget = replyingTo
+    ? (comments.data?.find((row) => row.id === replyingTo.id) ?? null)
+    : null;
+  const target = liveTarget ?? replyingTo;
+  /**
+   * Gone from the list, a tombstone, or refused by the server. Judged against the last
+   * list that loaded — a refetch that *failed* keeps that list, so a dropped connection is
+   * not mistaken for a deletion.
+   */
+  const targetUnavailable = Boolean(
+    replyingTo &&
+      (replyGone || (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
+  );
+  const targetThread = replyingTo ? threadOf(threads, replyingTo.id) : null;
+  /**
+   * Where the reply will appear, in words: under the comment for a root, or in whose
+   * thread for a reply — the server attaches every reply to its thread's root (one level),
+   * so a reply to a reply shows in the root's thread, addressed to the person tapped.
+   */
+  const replyPlace = !target
+    ? null
+    : !targetThread || targetThread.root.id === target.id
+      ? 'under their comment'
+      : targetThread.root.deleted
+        ? 'in this thread'
+        : targetThread.root.authorId === target.authorId
+          ? 'in their thread'
+          : `in ${targetThread.root.authorName}'s thread`;
 
   const rowProps = (comment: Comment) => ({
     comment,
@@ -460,6 +668,10 @@ export function CommentThread({
     // the header of the row above it go to the same place.
     onPressMention: onPressPerson,
     onReply: () => beginReply(comment),
+    // The comment the composer is answering, and the one a notification pointed at: the
+    // same quiet well, so "where will this go" and "this is what you were told about"
+    // are answered on the row itself as well as in words.
+    marked: (replyingTo?.id === comment.id && !editing) || highlighted === comment.id,
     onReact: () => toggleDefault(comment),
     onOpenPicker: () => setPickerFor(comment.id),
     onOpenReactors: () => setReactorsFor(comment.id),
@@ -476,7 +688,7 @@ export function CommentThread({
     onReport: () => setReporting(comment.id),
   });
 
-  const list = comments.isError ? (
+  const conversation = comments.isError && !comments.data ? (
     <View style={styles.pad}>
       <EmptyState
         kind="couldNotLoad"
@@ -494,18 +706,53 @@ export function CommentThread({
       <EmptyState kind="nothingYet" compact title="No comments yet" body="Say something about this." />
     </View>
   ) : (
-    threads.map((thread) => (
-      <View key={thread.root.id}>
-        <CommentRow {...rowProps(thread.root)} />
-        {thread.replies.map((reply) => (
-          // One indent, and the same row. A reply is not a different kind of thing, and
-          // a second component for it is a second place to get masking wrong.
-          <View key={reply.id} style={styles.indent}>
-            <CommentRow {...rowProps(reply)} isReply />
+    <>
+      {/* A notification about a comment that has since gone: the conversation still
+          opens, and says so rather than leaving the reader looking for it. */}
+      {focusMissing ? (
+        <Text variant="footnote" tone="tertiary" style={styles.pad}>
+          That comment is no longer available.
+        </Text>
+      ) : null}
+      {threads.map((thread, index) => (
+          /**
+           * One thread: a root, then its replies under a connector.
+           *
+           * **A connector only between a root and its own replies** (founder, 2026-11-22,
+           * the "Feed & Comments (Refined)" concept): a thin rule down from the root's
+           * avatar that the replies hang from. Indentation alone did not carry it — an
+           * answer posted as a new comment and a reply looked one step apart. Independent
+           * top-level comments are *not* joined to each other: they are separated by space
+           * alone. No card, no shadow, no rule between threads.
+           */
+          <View
+            key={thread.root.id}
+            testID={`comment-thread-${thread.root.id}`}
+            style={index > 0 && styles.threadGap}
+            onLayout={measured('threads', thread.root.id)}
+          >
+            <CommentRow {...rowProps(thread.root)} />
+            {thread.replies.length > 0 ? (
+              <View
+                testID={`comment-replies-${thread.root.id}`}
+                style={styles.replies}
+                onLayout={measured('replies', thread.root.id)}
+              >
+                {thread.replies.map((reply) => (
+                  // The same row. A reply is not a different kind of thing, and a second
+                  // component for it is a second place to get masking wrong.
+                  <View
+                    key={reply.id}
+                    onLayout={measured('rows', reply.id)}
+                  >
+                    <CommentRow {...rowProps(reply)} isReply />
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
-        ))}
-      </View>
-    ))
+      ))}
+    </>
   );
 
   return (
@@ -521,14 +768,17 @@ export function CommentThread({
          * — the page below already does this and the sheet did not.
          */
         <ScrollView
+          ref={list}
           style={styles.list}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
         >
-          {list}
+          {conversation}
         </ScrollView>
       ) : (
-        <View style={styles.flow}>{list}</View>
+        <View style={styles.flow} onLayout={measuredContainer}>
+          {conversation}
+        </View>
       )}
 
       <View style={styles.composer}>
@@ -572,34 +822,86 @@ export function CommentThread({
               </Text>
             </Pressable>
           </View>
-        ) : replyingTo ? (
-          /* The founder's "Replying to Sarah", in the compact grammar the editing banner
-             already established. It names a person rather than a comment because that is
-             what the reader is answering — and because a comment has no name to use. */
-          <View style={styles.banner}>
-            <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.bannerCopy}>
-              Replying to {replyingTo.authorName}
-            </Text>
+        ) : replyingTo && target ? (
+          /**
+           * **The reply indicator** (founder, 2026-11-22): one line above the SAME input —
+           * there is one composer, and Reply only changes what it says. It tells the reader
+           * what they are writing (a reply), to whom (the person they tapped — on a
+           * reply-to-a-reply that is the reply's author, never the thread's), and where it
+           * will appear. Its ✕ is the Cancel: back to "Add a comment" / Post.
+           *
+           * **When the comment being answered has gone** — deleted, or its author no longer
+           * visible to this reader, deliberately one sentence for all of them — the same
+           * indicator says so instead, Reply is disabled, and the words stay in the box.
+           * Its ✕ then returns to Add a comment *keeping* the words, so posting them as a
+           * new comment is the ordinary Post, pressed on purpose. Nothing is ever re-aimed
+           * at the top level without the reader asking, and there is no second button.
+           */
+          <View
+            style={styles.banner}
+            accessibilityLiveRegion={targetUnavailable ? 'polite' : 'none'}
+          >
+            {targetUnavailable ? (
+              <Text variant="caption" tone="secondary" style={styles.bannerCopy}>
+                {target.authorName}’s comment is no longer available, so this can’t be sent
+                as a reply. Dismiss to post it as a new comment.
+              </Text>
+            ) : (
+              <Text variant="caption" tone="secondary" numberOfLines={2} style={styles.bannerCopy}>
+                Replying to{' '}
+                <Text variant="caption" style={styles.bannerName}>
+                  {target.authorName}
+                </Text>
+                {replyPlace ? ` · ${replyPlace}` : ''}
+              </Text>
+            )}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Stop replying"
-              onPress={reset}
+              accessibilityLabel={
+                targetUnavailable ? 'Dismiss, keep your text' : `Cancel reply to ${target.authorName}`
+              }
+              accessibilityHint={
+                targetUnavailable
+                  ? 'Returns to adding a new comment, with your text still in the box'
+                  : 'Returns to adding a new comment'
+              }
+              onPress={targetUnavailable ? keepAsNewComment : reset}
+              hitSlop={dismissSlop}
+              style={({ pressed }) => pressed && styles.pressed}
             >
-              <Text variant="caption" tone="action">
-                Cancel
-              </Text>
+              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
             </Pressable>
           </View>
         ) : null}
 
         {/* "Your comment" while editing rather than "Edit your comment", which is the
             row button's label — two controls answering to one label is ambiguous to a
-            screen reader, and it is the row's button that performs the *action*. */}
+            screen reader, and it is the row's button that performs the *action*. The
+            same reasoning gives a reply "Your reply to Anna" rather than the row's
+            "Reply to Anna". Every mode is in the label, so it is never only visual. */}
         <TextInput
+          ref={input}
           accessibilityLabel={
-            editing ? 'Your comment' : replyingTo ? `Reply to ${replyingTo.authorName}` : 'Add a comment'
+            editing
+              ? 'Your comment'
+              : replyingTo && target
+                ? `Your reply to ${target.authorName}`
+                : 'Add a comment'
           }
-          placeholder={replyingTo ? `Reply to ${replyingTo.authorName}` : 'Add a comment'}
+          accessibilityHint={
+            editing
+              ? 'Editing your comment'
+              : replyingTo && target
+                ? `A reply to ${target.authorName}, shown ${replyPlace ?? 'in their thread'}`
+                : 'A new comment on this activity, not a reply'
+          }
+          placeholder={
+            editing
+              ? 'Edit your comment'
+              : replyingTo && target
+                ? `Reply to ${target.authorName}…`
+                : 'Add a comment'
+          }
           placeholderTextColor={theme.text.tertiary}
           value={draft}
           onChangeText={(next) => {
@@ -661,14 +963,23 @@ export function CommentThread({
 
           <Button
             label={editing ? 'Save' : replyingTo ? 'Reply' : 'Post'}
+            accessibilityHint={
+              editing
+                ? 'Saves your edit'
+                : replyingTo && target
+                  ? `Posts your reply to ${target.authorName}`
+                  : 'Posts a new comment'
+            }
             onPress={() => void submit()}
-            disabled={!draft.trim() || over || busy}
+            disabled={!draft.trim() || over || busy || targetUnavailable}
             disabledReason={
-              over
-                ? `A comment is limited to ${COMMENT_MAX_LENGTH} characters.`
-                : busy
-                  ? 'Saving your last change.'
-                  : 'Write something first.'
+              targetUnavailable
+                ? 'The comment you were replying to is no longer available.'
+                : over
+                  ? `A comment is limited to ${COMMENT_MAX_LENGTH} characters.`
+                  : busy
+                    ? 'Saving your last change.'
+                    : 'Write something first.'
             }
           />
         </View>
@@ -709,6 +1020,7 @@ function CommentRow({
   title,
   mine,
   isReply = false,
+  marked = false,
   onPressAuthor,
   onPressMention,
   onReply,
@@ -725,6 +1037,8 @@ function CommentRow({
   title: string | null;
   mine: boolean;
   isReply?: boolean;
+  /** The comment being replied to, or the one a notification opened at. */
+  marked?: boolean;
   onPressAuthor: () => void;
   /** A name inside the body. Takes the handle, because that is what the text names. */
   onPressMention: (username: string) => void;
@@ -752,7 +1066,9 @@ function CommentRow({
    */
   if (comment.deleted) {
     return (
-      <View style={[styles.row, styles.tombstone]}>
+      <View
+        style={[styles.row, isReply && styles.replyRow, styles.tombstone, marked && styles.marked]}
+      >
         <Text variant="caption" tone="tertiary">
           Comment deleted
         </Text>
@@ -761,7 +1077,10 @@ function CommentRow({
   }
 
   return (
-    <View style={styles.row}>
+    <View
+      testID={`comment-row-${comment.id}`}
+      style={[styles.row, isReply && styles.replyRow, marked && styles.marked]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${comment.authorName}'s profile`}
@@ -905,6 +1224,9 @@ function CommentRow({
  */
 const slop = (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2;
 
+/** The same floor for the indicator's ✕, which is an icon rather than a line of text. */
+const dismissSlop = (theme.layout.minTapTarget - theme.layout.icon.sm) / 2;
+
 const styles = StyleSheet.create({
   /**
    * **`flexShrink`, and it is the whole of the sheet's keyboard bug** (founder, Android).
@@ -929,9 +1251,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],
   },
-  // One level, and one level only. The avatar is `sm` plus the row gap, so a reply lines
-  // up under the name of the comment it answers rather than at an arbitrary inset.
-  indent: { paddingLeft: theme.space[6] },
+  // Between two threads: space, and only space — a top-level comment is not connected to
+  // the one before it.
+  threadGap: { marginTop: theme.space[2] },
+  /**
+   * The replies, hung from a thin rule that drops from the centre of the root's avatar —
+   * one level, and one level only. `marginLeft` puts the 2pt rule's centre on the avatar's
+   * centre (gutter + half of `sm`), so the connector visibly comes *from* the comment
+   * answered. At 320pt the reply's text column is still ~215pt wide.
+   */
+  replies: {
+    marginLeft: theme.layout.gutter + theme.layout.avatar.sm / 2 - 1,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.border.hairline,
+    marginBottom: theme.space[2],
+  },
+  // Inside the connector the row's own left gutter is the gap from the rule, and a reply
+  // sits a little tighter vertically than a root so a thread reads as one block.
+  replyRow: { paddingLeft: theme.space[3], paddingVertical: theme.space[2] },
+  // The comment being replied to, or the one a notification opened at: a quiet well in
+  // the existing sunken surface, no border and no shadow.
+  marked: { backgroundColor: theme.surface.sunken },
   tombstone: { paddingVertical: theme.space[2] },
   rowCopy: { flex: 1, gap: theme.space[1] },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
@@ -952,8 +1292,14 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
   },
-  banner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.space[3],
+  },
   bannerCopy: { flex: 1 },
+  bannerName: { fontFamily: fontFamily.sansSemibold, color: theme.text.primary },
   input: {
     minHeight: theme.layout.minTapTarget,
     maxHeight: 120,

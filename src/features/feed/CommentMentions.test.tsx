@@ -280,10 +280,8 @@ describe('what reaches the server', () => {
     const view = await open();
     await fireEvent.press(view.getByLabelText('Reply to Anna'));
 
-    // The row's Reply button and the composer share a label once a reply is open — the
-    // button says what it does and the field says what it is for, and both are "Reply to
-    // Anna". The placeholder is what tells them apart without either needing a testID.
-    const input = view.getByPlaceholderText('Reply to Anna');
+    // The composer in reply mode: its placeholder says whose reply it is.
+    const input = view.getByPlaceholderText('Reply to Anna…');
     await type(input, '@rav');
     await waitFor(() => expect(view.getByTestId('mention-suggestions')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Mention Ravi, at ravi'));
@@ -395,7 +393,7 @@ describe('what a picked handle does and does not authorise', () => {
     await fireEvent.press(view.getByLabelText('Mention Ravi, at ravi'));
 
     await fireEvent.press(view.getByLabelText('Reply to Anna'));
-    await type(view.getByPlaceholderText('Reply to Anna'), '@ravi agreed');
+    await type(view.getByPlaceholderText('Reply to Anna…'), '@ravi agreed');
 
     expect((await post(view, 'Reply'))?.p_mention_ids).toEqual([]);
   });

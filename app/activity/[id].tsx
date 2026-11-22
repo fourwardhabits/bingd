@@ -15,6 +15,7 @@ import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { WatchlistGroupSheet } from '@/features/feed/WatchlistGroupSheet';
 import { batchMedium } from '@/features/ranking/RankedSummary';
 import { useActivityEvent } from '@/features/feed/use-feed';
+import { useNotificationCommentId } from '@/features/notifications/use-notifications';
 import { activityReaction } from '@/features/feed/reaction-summary';
 import {
   DEFAULT_REACTION,
@@ -76,7 +77,18 @@ import { theme } from '@/ui/tokens';
  * relies on the other.
  */
 export default function ActivityScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  /**
+   * `comment` and `notification` are how a notification opens this page *at* one comment
+   * (2026-11-22). An inbox row knows the comment (`payload.comment_id`) and sends it; a
+   * push knows only its notification, and the comment is found in the inbox this reader
+   * already reads (`useNotificationCommentId`). Either may be absent — every older link,
+   * and any tap from the Feed, opens the conversation at the top as it always did.
+   */
+  const { id, comment, notification } = useLocalSearchParams<{
+    id: string;
+    comment?: string;
+    notification?: string;
+  }>();
   /**
    * `useAuth`, not `useCurrentProfile`, and this is the one screen in `app/` where that
    * distinction earns its keep.
@@ -116,6 +128,15 @@ export default function ActivityScreen() {
   const watched = useWatched(viewerId ?? '');
 
   const event = activity.data ?? null;
+
+  const commentParam = typeof comment === 'string' && comment.length > 0 ? comment : null;
+  const notificationParam =
+    typeof notification === 'string' && notification.length > 0 ? notification : null;
+  const fromNotification = useNotificationCommentId(
+    viewerId ?? '',
+    commentParam ? null : notificationParam,
+  );
+  const focusCommentId = commentParam ?? fromNotification.commentId;
 
   /**
    * **The post's reactions, read exactly as the Feed reads them** (founder, 2026-08-29).
@@ -240,7 +261,15 @@ export default function ActivityScreen() {
 
       {activity.isPending ? (
         <SkeletonRow count={4} />
-      ) : activity.isError ? (
+      ) : activity.isError && !event ? (
+        /**
+         * **Only when there is nothing to show** (2026-11-22). This used to read
+         * `activity.isError` alone, and React Query reports an error for a *background*
+         * refetch that fails while it still holds the post — so one dropped request while
+         * somebody was writing a reply replaced the whole page, composer and all, and the
+         * reply's target and words went with it. A post already on screen stays on screen;
+         * the next refetch corrects it.
+         */
         <View style={styles.pad}>
           <EmptyState
             kind="couldNotLoad"
@@ -410,6 +439,12 @@ export default function ActivityScreen() {
             onPressPerson={(username) => router.push(`/u/${username}`)}
             // Already inside a ScrollView. See `CommentThread`.
             scroll="inherited"
+            // The comment a notification was about: its thread is scrolled to and marked.
+            // Never a reply in progress — that stays the reader's own tap.
+            focusCommentId={focusCommentId}
+            onFocusOffset={(y) =>
+              scroller.current?.scrollTo({ y: Math.max(0, y - theme.space[2]), animated: true })
+            }
           />
 
           {/* The Feed's own sheet, with the Feed's own behaviour: tapping a name leaves

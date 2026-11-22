@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert, Keyboard, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 /**
  * The dedicated comment-thread page (founder follow-up part A).
@@ -53,10 +54,14 @@ let mockEvent: Record<string, unknown> | null = null;
 let mockEventError = false;
 let mockComments: Record<string, unknown>[] = [];
 let mockGroupTitles: Record<string, unknown>[] = [];
+/** The route's search params: `id`, and `comment` or `notification` from a notification tap. */
+let mockParams: Record<string, string> = { id: 'event-1' };
+/** What `my_notifications` answers, for a push tap that names only its notification. */
+let mockInbox: Record<string, unknown>[] = [];
 
 jest.mock('expo-router', () => ({
   Stack: { Screen: () => null },
-  useLocalSearchParams: () => ({ id: 'event-1' }),
+  useLocalSearchParams: () => mockParams,
   useRouter: () => ({
     push: (href: string) => mockNav.pushed.push(href),
     replace: (href: string) => mockNav.replaced.push(href),
@@ -103,7 +108,9 @@ jest.mock('@/lib/supabase', () => ({
         ? { data: mockComments, error: null }
         : name === 'watchlist_group_titles'
           ? { data: mockGroupTitles, error: null }
-          : { data: null, error: null },
+          : name === 'my_notifications'
+            ? { data: mockInbox, error: null }
+            : { data: null, error: null },
   },
   startSessionRefresh: () => () => {},
 }));
@@ -212,6 +219,8 @@ beforeEach(() => {
   mockEventError = false;
   mockComments = [];
   mockGroupTitles = [];
+  mockParams = { id: 'event-1' };
+  mockInbox = [];
   mockAuth.status = 'ready';
   mockReactions.summary = null;
   mockReactions.askedAbout = [];
@@ -871,14 +880,16 @@ describe('the keyboard and the composer', () => {
     await act(async () => {
       fireEvent.press(view.getByLabelText('Reply to Anna'));
     });
-    // Two controls answer to that sentence once the reply is open — the row's button
-    // and the composer it retargeted — which is itself the evidence that a reply uses
-    // the same box, and so is covered by the same fix.
-    expect(view.getAllByLabelText('Reply to Anna')).toHaveLength(2);
-    expect(view.getByText('Replying to Anna')).toBeTruthy();
+    // The composer the reply retargeted, under its reply-mode name — the row's button
+    // says "Reply to Anna", the box says whose reply it holds. One box, so a reply is
+    // covered by exactly the same fix.
+    expect(view.getByLabelText('Your reply to Anna')).toBeTruthy();
+    expect(view.getByText(/^Replying to Anna/)).toBeTruthy();
 
     await showKeyboard(300);
-    expect(contentPadding(view, 'Reply to Anna')?.paddingBottom).toBe(300);
+    expect(contentPadding(view, 'Your reply to Anna')?.paddingBottom).toBe(300);
+    // And the keyboard took nothing from the reply: still a reply, still to Anna.
+    expect(view.getByText(/^Replying to Anna/)).toBeTruthy();
   });
 });
 
@@ -917,5 +928,191 @@ describe('a grouped watchlist post above the conversation', () => {
     const view = await renderWithProviders(<ActivityScreen />);
     await waitFor(() => expect(view.getByText(/to their watchlist/)).toBeTruthy());
     expect(view.queryByText(/\bothers?\b/)).toBeNull();
+  });
+});
+
+/**
+ * **Arriving at one comment** (2026-11-22). A comment, reply or mention notification opens
+ * this page with `?comment=` (an inbox row) or `?notification=` (a push, which carries no
+ * comment id), and the page scrolls to that comment's thread and marks it — without
+ * starting a reply. Older links carry neither and open the conversation as before.
+ */
+describe('a notification that names one comment', () => {
+  const thread = () => [
+    comment({ id: 'c1', created_at: new Date(Date.now() - 60 * 60_000).toISOString() }),
+    comment({
+      id: 'c2',
+      author_id: 'bo-id',
+      username: 'bo',
+      display_name: 'Bo',
+      body: 'A later remark',
+      created_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+    }),
+    comment({
+      id: 'c3',
+      parent_id: 'c2',
+      author_id: 'viewer-1',
+      username: 'sai',
+      display_name: 'Sai',
+      body: 'My reply to Bo',
+      created_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+    }),
+  ];
+  const layout = (y: number) => ({ nativeEvent: { layout: { x: 0, y, width: 320, height: 80 } } });
+  const marked = (view: Awaited<ReturnType<typeof renderWithProviders>>, id: string) =>
+    (StyleSheet.flatten(view.getByTestId(`comment-row-${id}`).props.style) as ViewStyle)
+      .backgroundColor !== undefined;
+
+  /** Report layouts for the thread holding `c3`, as the native side would. */
+  const layOut = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(500));
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(120));
+    await fireEvent(view.getByTestId('comment-replies-c2'), 'layout', layout(90));
+    await fireEvent(view.getByTestId('comment-row-c3').parent!, 'layout', layout(0));
+  };
+
+  beforeEach(() => {
+    mockComments = thread();
+  });
+
+  it('opens at the comment from an inbox row (?comment=), marks it, and starts no reply', async () => {
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo');
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+    scrollTo.mockClear();
+
+    await layOut(view);
+
+    // The thread's top: Bo's root and the reply under it, in the page's coordinates.
+    expect(scrollTo).toHaveBeenCalledWith({ y: 500 + 120 - theme.space[2], animated: true });
+    expect(marked(view, 'c3')).toBe(true);
+    expect(marked(view, 'c1')).toBe(false);
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
+    expect(view.queryByText(/^Replying to/)).toBeNull();
+
+    // The obvious Reply on that comment works from here.
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Reply to Sai'));
+    });
+    expect(view.getByText(/^Replying to Sai/)).toBeTruthy();
+  });
+
+  it('opens at the comment from a push (?notification=), found in the inbox', async () => {
+    mockParams = { id: 'event-1', notification: 'n-1' };
+    mockInbox = [
+      {
+        id: 'n-1',
+        kind: 'comment',
+        created_at: new Date().toISOString(),
+        read_at: null,
+        actor_id: 'bo-id',
+        actor_username: 'bo',
+        actor_display_name: 'Bo',
+        actor_avatar_path: null,
+        media_item_id: null,
+        media_title: null,
+        media_kind: null,
+        series_title: null,
+        subject_type: 'feed_event',
+        subject_id: 'event-1',
+        payload: { comment_id: 'c3', reply_to: 'c2' },
+      },
+    ];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    await waitFor(() => expect(marked(view, 'c3')).toBe(true));
+    expect(view.queryByText(/^Replying to/)).toBeNull();
+  });
+
+  it('opens the activity as before when the push names a notification it cannot find', async () => {
+    mockParams = { id: 'event-1', notification: 'n-unknown' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    expect(view.getByLabelText('Sinners, 2025')).toBeTruthy();
+    expect(marked(view, 'c3')).toBe(false);
+    expect(view.queryByText('That comment is no longer available.')).toBeNull();
+  });
+
+  it('says the comment is gone, and still shows the conversation, for a deleted target', async () => {
+    mockParams = { id: 'event-1', comment: 'gone' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    expect(view.getByText('That comment is no longer available.')).toBeTruthy();
+    expect(view.getByText('A later remark')).toBeTruthy();
+  });
+
+  it('lists the threads oldest first, whatever order the server sent', async () => {
+    mockComments = [...thread()].reverse();
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    expect(view.getAllByTestId(/^comment-thread-/).map((n) => n.props.testID)).toEqual([
+      'comment-thread-c1',
+      'comment-thread-c2',
+    ]);
+  });
+});
+
+/**
+ * **A failed background refetch of the post must not take the composer with it.** It
+ * used to: `activity.isError` replaced the page while the post was still held, so a reply
+ * in progress — target and words — was unmounted by one dropped request.
+ */
+describe('a reply in progress on the page', () => {
+  beforeEach(() => {
+    mockComments = [comment()];
+  });
+
+  it('survives a refetch of the post that fails while the post is still held', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Reply to Anna'));
+    });
+    await fireEvent.changeText(view.getByLabelText('Your reply to Anna'), 'half a thought');
+
+    mockEventError = true;
+    await view.rerender(<ActivityScreen />);
+
+    expect(view.queryByText('Could not load this')).toBeNull();
+    expect(view.getByText(/^Replying to Anna/)).toBeTruthy();
+    expect(view.getByDisplayValue('half a thought')).toBeTruthy();
+  });
+
+  it('is kept while the reader visits a profile and comes back (the screen stays mounted)', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Reply to Anna'));
+    });
+    await fireEvent.changeText(view.getByLabelText('Your reply to Anna'), 'still mine');
+
+    await act(async () => {
+      // The comment's author, not the post's (both are Anna here).
+      fireEvent.press(view.getAllByLabelText("Anna's profile").at(-1)!);
+    });
+    expect(mockNav.pushed).toContain('/u/anna');
+    // The stack keeps this screen; the reply is still visibly a reply to Anna.
+    expect(view.getByText(/^Replying to Anna/)).toBeTruthy();
+    expect(view.getByDisplayValue('still mine')).toBeTruthy();
+  });
+
+  it('is gone after leaving the conversation and opening it again: no stale target', async () => {
+    const first = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(first.queryByText('Loading comments…')).toBeNull());
+    await act(async () => {
+      fireEvent.press(first.getByLabelText('Reply to Anna'));
+    });
+    await fireEvent.changeText(first.getByLabelText('Your reply to Anna'), 'abandoned');
+    await first.unmount();
+
+    const again = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(again.queryByText('Loading comments…')).toBeNull());
+    expect(again.getByLabelText('Add a comment').props.value).toBe('');
+    expect(again.queryByText(/^Replying to/)).toBeNull();
   });
 });

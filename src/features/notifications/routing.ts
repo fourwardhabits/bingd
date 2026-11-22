@@ -60,8 +60,20 @@ export type NotificationTarget =
    * now (`app/activity/[id].tsx`) and it reads one event by id through
    * `feed_events_read`, so it does not care whose feed the row would have appeared in.
    * The deferral in `.agent-workflow/continuation.md` is closed.
+   *
+   * **And at one comment, when the row names one** (2026-11-22). `commentId` is the
+   * notification's own `payload.comment_id`, which every comment-family row has carried
+   * since it was written; the page scrolls to that comment's thread and marks it. A push
+   * cannot carry it (see `PushData`), so a push names its `notificationId` and the page
+   * finds the comment in the inbox it already reads. Both optional: a row or a push
+   * without them opens the activity at the top, exactly as before.
    */
-  | { kind: 'activity'; eventId: string }
+  | {
+      kind: 'activity';
+      eventId: string;
+      commentId?: string | null;
+      notificationId?: string | null;
+    }
   | { kind: 'awards' }
   /**
    * One specific award, on the screen that celebrates it (`app/awards/celebrate.tsx`).
@@ -132,7 +144,11 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
    */
   const activity: NotificationTarget[] =
     row.subjectType === 'feed_event' && row.subjectId
-      ? [{ kind: 'activity', eventId: row.subjectId }]
+      ? [
+          (row.kind === 'comment' || row.kind === 'mention') && row.commentId
+            ? { kind: 'activity', eventId: row.subjectId, commentId: row.commentId }
+            : { kind: 'activity', eventId: row.subjectId },
+        ]
       : [];
 
   switch (row.kind) {
@@ -195,10 +211,8 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * `mention` (20260830000100) rides the comment chain exactly, and the reason it is
      * not a special case is worth stating: the notification is about one remark in one
      * conversation, `subject_id` **is** that conversation, and the activity page renders
-     * it. The one thing it does not do is scroll to the comment — that is a real
-     * improvement and it is deliberately not built here, because the founder's minimum
-     * was "open the correct thread" and the alternative is anchor plumbing through two
-     * surfaces for a thread that is usually a screenful.
+     * it. Since 2026-11-22 it also scrolls to the comment, for this kind and for
+     * `comment`: `payload.comment_id` rides as `?comment=` (see the `activity` target).
      *
      * The stale cases are the comment chain's, and both already degrade: a deleted
      * comment leaves the thread standing (`delete_comment` sweeps the mention row too,
@@ -341,8 +355,17 @@ export function hrefFor(target: NotificationTarget): Href | null {
       return `/u/${target.username}`;
     case 'title':
       return `/title/${target.mediaItemId}`;
+    /**
+     * `?comment=` when the row names one, `?notification=` when only a push id is known,
+     * and the bare route otherwise — so every link written before this still resolves to
+     * exactly the screen it always did.
+     */
     case 'activity':
-      return `/activity/${target.eventId}`;
+      return target.commentId
+        ? `/activity/${target.eventId}?comment=${encodeURIComponent(target.commentId)}`
+        : target.notificationId
+          ? `/activity/${target.eventId}?notification=${encodeURIComponent(target.notificationId)}`
+          : `/activity/${target.eventId}`;
     /**
      * The Awards sheet is a component on the profile tab rather than a route, so it
      * is opened by a parameter the tab reads once. The object form rather than a
@@ -428,6 +451,11 @@ export function hintFor(row: Notification): string {
  * explanation.
  */
 export type PushTapPayload = {
+  /**
+   * The notification row, which `push-sender` has always sent. A comment or mention push
+   * carries it into the route so the page can find the comment the row names.
+   */
+  notificationId?: unknown;
   kind?: unknown;
   actorUsername?: unknown;
   mediaItemId?: unknown;
@@ -530,7 +558,7 @@ function pushTarget(payload: PushTapPayload | null | undefined): NotificationTar
   const awardKey = awardSlug(payload.awardKey);
   const awardTier = awardSlug(payload.awardTier);
 
-  return targetFor({
+  const target = targetFor({
     kind: kind as NotificationKind,
     actorUsername: readString(payload.actorUsername),
     mediaItemId: readString(payload.mediaItemId),
@@ -539,6 +567,22 @@ function pushTarget(payload: PushTapPayload | null | undefined): NotificationTar
     // The inbox row's own shape, so the award resolves through the same chain.
     award: awardKey && awardTier ? { key: awardKey, tierKey: awardTier } : null,
   } as Notification);
+
+  /**
+   * A comment or mention push names its notification, so the conversation can open at
+   * the comment the row is about — the same landing a tap on the inbox row gives. Only
+   * an id shaped like one is carried: it becomes part of a route.
+   */
+  const notificationId = readString(payload.notificationId);
+  if (
+    target.kind === 'activity' &&
+    (kind === 'comment' || kind === 'mention') &&
+    notificationId &&
+    /^[0-9a-f-]{8,64}$/i.test(notificationId)
+  ) {
+    return { ...target, notificationId };
+  }
+  return target;
 }
 
 /** Every kind, for the tests and for anything that needs to enumerate the matrix. */
