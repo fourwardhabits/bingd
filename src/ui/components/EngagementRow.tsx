@@ -83,13 +83,15 @@ export type EngagementRowProps = {
  *   - **Share** is the Recommend sheet for a title. An award or a group has no share
  *     behaviour yet (`docs/design/screens.md` §7), so it has no Share rather than a dead one.
  *
- * **Counts: one convention on every post** (refined card feed, 2026-11-22). Each action
- * keeps its word, and once there is activity the count follows it: `Like 4`, `Comment 2`,
- * `Liked 5`. Zero is never drawn: with nothing yet the action is its word alone, never
- * `Like 0`. A count of a thousand or more is compact (`1.2K`, `12K`), and every count is
- * also said in the action's spoken label. Before this the comment count replaced the word
- * Comment and the reaction count lived only in the summary line, so two posts with the
- * same activity could read differently.
+ * **Counts: one convention on every post** (refined card feed, 2026-11-22; format from the
+ * founder's Android QA, 2026-11-22). Each action keeps its word, and once there is activity
+ * the count follows it in parentheses: `Like (2)`, `Comment (3)`, `Liked (5)`. Only the
+ * number and its parentheses take the Maroon accent (`semantic.action`); the word and the
+ * icon keep the action's own colour. Zero is never drawn: with nothing yet the action is its
+ * word alone, never `Like (0)`. A count of a thousand or more is compact (`(1.2K)`,
+ * `(12K)`), and every count is also said in the action's spoken label. The numbers are the
+ * ones the Feed already reads: the reaction count, and `activity_comment_counts`, which
+ * counts every readable comment on the post, replies included.
  *
  * **Narrow screens.** The labels are one line each. On the narrowest phones with four
  * actions, "Comment" is the one word that can be wider than its column; it shrinks a
@@ -225,8 +227,8 @@ function Action({
 
 /**
  * One line, shrinking a little before it truncates; never wider than its column. The count,
- * when there is one, follows the word after a non-breaking space in tabular figures, so
- * `Like 9` and `Like 10` keep the word where it was.
+ * when there is one, follows the word after a non-breaking space as `(N)` in tabular
+ * figures and the Maroon accent, so `Like (9)` and `Like (10)` keep the word where it was.
  */
 function Label({
   active,
@@ -248,9 +250,10 @@ function Label({
       style={styles.label}
     >
       {children}
+      {shown ? '\u00A0' : null}
       {shown ? (
-        <Text variant="footnote" tone={active ? 'action' : 'secondary'} style={styles.count}>
-          {`\u00A0${shown}`}
+        <Text variant="footnote" tone="action" style={styles.count}>
+          {`(${shown})`}
         </Text>
       ) : null}
     </Text>

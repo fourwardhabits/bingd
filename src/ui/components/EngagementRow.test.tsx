@@ -163,7 +163,7 @@ describe('the Like', () => {
     );
     const like = view.getByTestId('row-like');
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
-    expect(within(like).getByText('Laugh 1')).toBeTruthy();
+    expect(within(like).getByText('Laugh (1)')).toBeTruthy();
     expect(within(like).getByTestId('reaction-slot')).toBeTruthy();
     expect(like.props.accessibilityLabel).toBe(
       'Laugh. You reacted to Oppenheimer. 1 reaction. Tap to remove, long press to change.',
@@ -187,7 +187,7 @@ describe('Comment, Save and Share', () => {
       <EngagementRow {...base} onPressComments={open} commentCount={3} />,
     );
     const comment = view.getByTestId('row-comment');
-    expect(within(comment).getByText('Comment 3')).toBeTruthy();
+    expect(within(comment).getByText('Comment (3)')).toBeTruthy();
     expect(comment.props.accessibilityLabel).toBe(
       "3 comments on Ada's activity about Oppenheimer. Open them.",
     );
@@ -248,8 +248,8 @@ describe('counts', () => {
         onPressShare={jest.fn()}
       />,
     );
-    expect(within(view.getByTestId('row-like')).getByText('Like 4')).toBeTruthy();
-    expect(within(view.getByTestId('row-comment')).getByText('Comment 2')).toBeTruthy();
+    expect(within(view.getByTestId('row-like')).getByText('Like (4)')).toBeTruthy();
+    expect(within(view.getByTestId('row-comment')).getByText('Comment (2)')).toBeTruthy();
     // Share has no count to show.
     expect(within(view.getByTestId('row-share')).getByText('Share')).toBeTruthy();
     expect(view.getByTestId('row-like').props.accessibilityLabel).toBe(
@@ -273,14 +273,49 @@ describe('counts', () => {
     expect(view.queryByText(/\b0\b/)).toBeNull();
   });
 
-  it('the count is bound to its word and set in tabular figures', async () => {
+  it('the count is "(N)", bound to its word, and only it takes the Maroon accent', async () => {
     const view = await render(
-      <EngagementRow {...base} onPressComments={jest.fn()} commentCount={12} />,
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 2 })}
+        onPressComments={jest.fn()}
+        commentCount={12}
+      />,
     );
-    const label = within(view.getByTestId('row-comment')).getByText('Comment 12');
-    const count = within(label).getByText('12');
-    expect(count.props.children).toBe('\u00A012');
+    const label = within(view.getByTestId('row-comment')).getByText('Comment (12)');
+    const count = within(label).getByText('(12)');
+    expect(count.props.children).toBe('(12)');
+    // The word and its non-breaking space are the label's own, in the action's colour.
+    expect(label.props.children).toEqual(['Comment', '\u00A0', expect.anything()]);
+    expect(style(label).color).toBe(theme.text.secondary);
+    expect(style(count).color).toBe(theme.semantic.action);
     expect(style(count).fontVariant).toEqual(['tabular-nums']);
+    // Like reads the same way, in the same type.
+    const like = within(view.getByTestId('row-like')).getByText('Like (2)');
+    expect(style(within(like).getByText('(2)')).color).toBe(theme.semantic.action);
+    expect(style(like).fontSize).toBe(style(label).fontSize);
+  });
+
+  it('a large count keeps the K rule inside its parentheses', async () => {
+    const view = await render(
+      <EngagementRow {...base} onPressComments={jest.fn()} commentCount={1234} />,
+    );
+    expect(within(view.getByTestId('row-comment')).getByText('Comment (1.2K)')).toBeTruthy();
+    expect(view.getByTestId('row-comment').props.accessibilityLabel).toMatch(
+      /^1234 comments on /,
+    );
+  });
+
+  it('Liked keeps its word and adds "(N)" in the same style', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 3, mineGlyph: '❤️', mineLabel: 'Liked' })}
+      />,
+    );
+    const like = within(view.getByTestId('row-like')).getByText('Liked (3)');
+    expect(style(within(like).getByText('(3)')).color).toBe(theme.semantic.action);
+    expect(view.getByTestId('row-like').props.accessibilityLabel).toMatch(/3 reactions\./);
   });
 
   it('compacts a large count', () => {

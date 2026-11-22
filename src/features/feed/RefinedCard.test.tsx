@@ -6,12 +6,12 @@ import { theme } from '@/ui/tokens';
 import { ACTION_DIVIDER, FeedCard, type FeedCardProps } from './FeedCard';
 import { artworkHeight } from './feed-artwork';
 import {
+  avatarCapOffset,
   bindPhrase,
-  countJoin,
+  headlineJoins,
   estimateHeadlineWidth,
   HEADLINE_AVATAR,
   HEADLINE_GAP,
-  leadWord,
   NBSP,
   splitCountTail,
 } from './FeedHeadline';
@@ -186,17 +186,32 @@ describe('grouped posts keep their rail', () => {
       );
       const scroll = view.getByTestId('feed-card-rail-scroll');
       expect(scroll.props.horizontal).toBe(true);
+      // The viewport is inset and clips (Feed QA polish): its edge, where a poster
+      // disappears mid-swipe, is 12pt inside the card. The content carries no side
+      // padding, which would scroll away with the posters.
+      expect(style(scroll)).toMatchObject({
+        marginHorizontal: FEED_CARD.inset,
+        overflow: 'hidden',
+      });
       const content = StyleSheet.flatten(scroll.props.contentContainerStyle) as ViewStyle;
-      expect(content.paddingHorizontal).toBe(FEED_CARD.inset);
+      expect(content.paddingHorizontal ?? 0).toBe(0);
+      expect(content.paddingLeft ?? 0).toBe(0);
+      expect(content.paddingRight ?? 0).toBe(0);
       const posters = within(scroll).getAllByRole('button', { name: /, 2015/ });
       const widths = new Set(posters.map((poster) => style(poster).width));
       expect(widths.size).toBe(1);
-      // Three whole posters and the peek of a fourth, after the leading inset.
+      // The poster size #368 approved (three whole posters and 0.7 of a fourth after the
+      // leading inset), and inside the inset viewport three whole posters and a partial
+      // fourth still show: more than half of it, never all of it.
       const { gap, peek } = theme.layout.posterShelf;
       const width = [...widths][0] as number;
       const used = FEED_CARD.inset + 3 * width + 3 * gap + peek * width;
       expect(used).toBeLessThanOrEqual(feedCardInnerWidth(screen));
       expect(used).toBeGreaterThan(feedCardInnerWidth(screen) - 4);
+      const viewport = feedCardInnerWidth(screen) - FEED_CARD.inset * 2;
+      const fourth = (viewport - 3 * width - 3 * gap) / width;
+      expect(fourth).toBeGreaterThan(0.5);
+      expect(fourth).toBeLessThan(1);
       // Every poster keeps the reader's bookmark; there is no hero and no collage.
       expect(within(scroll).getAllByTestId('poster-save')).toHaveLength(5);
       expect(view.queryByTestId('feed-card-hero')).toBeNull();
@@ -236,8 +251,8 @@ describe('the actions', () => {
     const view = await render(
       <FeedCard {...base} reaction={reaction({ count: 4 })} commentCount={2} />,
     );
-    expect(within(view.getByTestId('feed-card-like')).getByText('Like 4')).toBeTruthy();
-    expect(within(view.getByTestId('feed-card-comment')).getByText('Comment 2')).toBeTruthy();
+    expect(within(view.getByTestId('feed-card-like')).getByText('Like (4)')).toBeTruthy();
+    expect(within(view.getByTestId('feed-card-comment')).getByText('Comment (2)')).toBeTruthy();
 
     const quiet = await render(<FeedCard {...base} />);
     expect(quiet.queryByText(/\b0\b/)).toBeNull();
@@ -262,122 +277,244 @@ describe('the headline', () => {
     expect(style(avatar.parent!).alignItems).toBe('flex-start');
   });
 
-  it('binds the year to the title and "+ N more" to the title’s last word', async () => {
-    const view = await render(
-      <FeedCard
-        {...base}
-        title="Dune: Part Two"
-        year={2024}
-        rail={{
-          total: 6,
-          tiles: [],
-          loading: true,
-          onPressTile: jest.fn(),
-          onPressAll: jest.fn(),
-        }}
-        tailAction={{ connector: '+', label: '5 more', onPress: jest.fn() }}
-        tail="to their watchlist"
-      />,
-    );
-    const said = sentenceOf(view.getByTestId('feed-card-headline'));
-    expect(said).toContain(`Two${NBSP}(2024)${NBSP}+${NBSP}5${NBSP}more to their watchlist`);
-    // The words of the title still break normally.
-    expect(said).toContain('Dune: Part');
-    // The link is still exactly "5 more", spoken and pressed as one.
-    expect(view.getByTestId('feed-card-tail-link').props.accessibilityLabel).toBe('5 more');
-  });
-
-  it.each(WIDTHS)('keeps "+ 15 more" with a long title at %ipt', async (screen) => {
-    mockWindow = { ...mockWindow, width: screen };
-    const view = await render(
-      <FeedCard
-        {...base}
-        title="The Lord of the Rings: The Fellowship of the Ring"
-        year={2001}
-        rail={{
-          total: 16,
-          tiles: [],
-          loading: true,
-          onPressTile: jest.fn(),
-          onPressAll: jest.fn(),
-        }}
-        tailAction={{ connector: '+', label: '15 more', onPress: jest.fn() }}
-      />,
-    );
-    const said = sentenceOf(view.getByTestId('feed-card-headline'));
-    expect(said).toContain(`Ring${NBSP}(2001)${NBSP}+${NBSP}15${NBSP}more`);
-  });
-
-  it('lets a single unbreakable word go to its own line rather than overflow at 320pt', async () => {
-    mockWindow = { ...mockWindow, width: 320 };
-    const word = 'Supercalifragilisticexpialidociously';
-    const view = await render(
-      <FeedCard
-        {...base}
-        title={word}
-        year={2023}
-        rail={{
-          total: 16,
-          tiles: [],
-          loading: true,
-          onPressTile: jest.fn(),
-          onPressAll: jest.fn(),
-        }}
-        tailAction={{ connector: '+', label: '15 more', onPress: jest.fn() }}
-      />,
-    );
-    const said = sentenceOf(view.getByTestId('feed-card-headline'));
-    // The phrase stays one unit, but is free to start the next line.
-    expect(said).toContain(`${word}${NBSP}(2023) +${NBSP}15${NBSP}more`);
-  });
-
-  it('applies the same rule to a plain "+ N more" with no list to open', async () => {
-    const view = await render(
-      <FeedCard
-        {...base}
-        title="Kaiju No. 8"
-        year={null}
-        tail="+ 15 more to their watchlist"
-      />,
-    );
-    const said = sentenceOf(view.getByTestId('feed-card-headline'));
-    expect(said).toContain(`8${NBSP}+${NBSP}15${NBSP}more to their watchlist`);
-  });
-});
-
-describe('countJoin, the measured rule', () => {
-  const lineWidth = (screen: number) =>
-    feedCardContentWidth(screen) - theme.layout.avatar[HEADLINE_AVATAR] - HEADLINE_GAP;
-  const font = theme.typography.subhead.fontSize;
-
-  it.each(WIDTHS)(
-    'joins an ordinary title at %ipt, and never binds what cannot fit',
-    (screen) => {
-      for (const title of [
-        'Oppenheimer',
-        'Dune: Part Two',
-        'Everything Everywhere All at Once',
-      ]) {
-        const lead = leadWord(title, 2023);
-        expect(countJoin(lead, '+ 15 more', lineWidth(screen), font)).toBe(NBSP);
-        // At 130% text a long chunk may be released to the next line; when it is bound, it fits.
-        const large = font * 1.3;
-        if (countJoin(lead, '+ 15 more', lineWidth(screen), large) === NBSP) {
-          expect(estimateHeadlineWidth(`${lead} + 15 more`, large)).toBeLessThanOrEqual(
-            lineWidth(screen),
+  /**
+   * Optical, not mathematical (Feed QA polish): the avatar's top meets the cap height of
+   * the headline's first line, from Inter's own metrics, at the reader's text size; and it
+   * is the same 32pt, so a one-line post is no taller.
+   */
+  it.each([
+    [1, 5],
+    [1.3, 6],
+  ])(
+    'drops the avatar to the first line’s cap height at %fx text (%ipt)',
+    async (fontScale, offset) => {
+      expect(avatarCapOffset(fontScale)).toBe(offset);
+      for (const uri of ['https://example.com/a.jpg', null]) {
+        for (const onPressActor of [jest.fn(), undefined]) {
+          mockWindow = { ...mockWindow, width: 320, fontScale };
+          const view = await render(
+            <FeedCard {...base} actorAvatarUri={uri} onPressActor={onPressActor} />,
           );
+          const avatar = view.getByTestId('feed-card-avatar', { includeHiddenElements: true });
+          expect(style(avatar).marginTop).toBe(offset);
         }
       }
+      // Never taller than a one-line headline block: 20pt line, 2pt, 16pt time line.
+      const { subhead, caption } = theme.typography;
+      const block =
+        ((subhead.lineHeight as number) + 2 + (caption.lineHeight as number)) * fontScale;
+      expect(offset + theme.layout.avatar[HEADLINE_AVATAR]).toBeLessThanOrEqual(block);
     },
   );
 
-  it('breaks before the phrase only when the bound chunk could not fit a line', () => {
-    const lead = leadWord('Supercalifragilisticexpialidociously', 2023);
-    const width = lineWidth(320);
-    expect(estimateHeadlineWidth(`${lead} + 15 more`, font)).toBeGreaterThan(width);
-    expect(countJoin(lead, '+ 15 more', width, font)).toBe(' ');
-    // Unknown width: bound, as the common case is.
-    expect(countJoin(lead, '+ 15 more', null, font)).toBe(NBSP);
+  it('computes the offset from Inter’s metrics, not a constant', () => {
+    // 14/20: 1.53pt of leading above 16.94pt of font, capitals 3.38pt under the ascender.
+    expect(avatarCapOffset(1)).toBe(5);
+    expect(avatarCapOffset(2)).toBe(10);
+  });
+
+  /** A rail post's headline as one string, every NBSP kept. */
+  const headline = async (
+    title: string,
+    year: number | null,
+    more: number,
+    extra: Partial<FeedCardProps> = {},
+  ) => {
+    const view = await render(
+      <FeedCard
+        {...base}
+        actorName="Suraj"
+        title={title}
+        year={year}
+        rail={{
+          total: more + 1,
+          tiles: [],
+          loading: true,
+          onPressTile: jest.fn(),
+          onPressAll: jest.fn(),
+        }}
+        tailAction={{ connector: '+', label: `${more} more`, onPress: jest.fn() }}
+        {...extra}
+      />,
+    );
+    return { view, said: sentenceOf(view.getByTestId('feed-card-headline')) };
+  };
+
+  it('keeps a short title whole and breaks before it, never inside it (the QA case)', async () => {
+    mockWindow = { ...mockWindow, width: 320 };
+    const { said } = await headline('Nathan for You', 2013, 3);
+    // Not "Nathan for" / "You (2013) + 3 more": the title and its year are one unit, so
+    // the line breaks before the title, and at 320pt the count, which would make that unit
+    // a hair wider than the line, is free to follow on the next.
+    expect(said).toBe(
+      `Suraj ranked Nathan${NBSP}for${NBSP}You${NBSP}(2013) +${NBSP}3${NBSP}more`,
+    );
+    // At 360pt the whole of it fits a line, so all of it is one unit.
+    mockWindow = { ...mockWindow, width: 360 };
+    const wide = await headline('Nathan for You', 2013, 3);
+    expect(wide.said).toBe(
+      `Suraj ranked Nathan${NBSP}for${NBSP}You${NBSP}(2013)${NBSP}+${NBSP}3${NBSP}more`,
+    );
+  });
+
+  it('breaks between the year and "+ N more" when title, year and count cannot share a line', async () => {
+    mockWindow = { ...mockWindow, width: 360 };
+    const { said, view } = await headline('Portrait of a Lady on Fire', 2019, 3, {
+      tail: 'to their watchlist',
+    });
+    expect(said).toBe(
+      `Suraj ranked Portrait${NBSP}of${NBSP}a${NBSP}Lady${NBSP}on${NBSP}Fire${NBSP}(2019) +${NBSP}3${NBSP}more to their watchlist`,
+    );
+    // The link is still exactly "3 more" to a screen reader, pressed as one.
+    expect(view.getByTestId('feed-card-tail-link').props.accessibilityLabel).toBe('3 more');
+  });
+
+  it('lets a title too long for any line wrap at its own words, the year and count as one unit', async () => {
+    mockWindow = { ...mockWindow, width: 320 };
+    const { said } = await headline(
+      'The Lord of the Rings: The Fellowship of the Ring',
+      2001,
+      15,
+    );
+    // Ordinary spaces inside the title, and never "Ring (2001) + 15 more" bound together:
+    // the last word is not dragged onto the next line by what follows it.
+    expect(said).toBe(
+      `Suraj ranked The Lord of the Rings: The Fellowship of the Ring (2001)${NBSP}+${NBSP}15${NBSP}more`,
+    );
+  });
+
+  it('applies the same rule to a plain "+ N more" with no list to open', async () => {
+    const { said } = await headline('Kaiju No. 8', null, 0, {
+      rail: null,
+      tailAction: null,
+      tail: '+ 15 more to their watchlist',
+    });
+    expect(said).toContain(
+      `Kaiju${NBSP}No.${NBSP}8${NBSP}+${NBSP}15${NBSP}more to their watchlist`,
+    );
+  });
+
+  /**
+   * Realistic titles at the founder's two Android widths, at default and 130% text. No
+   * title is special-cased; every one is held to the same four properties.
+   */
+  const TITLES: [string, number | null, number][] = [
+    ['Dune', 2021, 2],
+    ['Past Lives', 2023, 12],
+    ['Nathan for You', 2013, 3],
+    ['The Last of Us, S1', 2023, 1],
+    ['Portrait of a Lady on Fire', 2019, 3],
+    ['Everything Everywhere All at Once', 2022, 5],
+    ['The Lord of the Rings: The Fellowship of the Ring', 2001, 15],
+    ['Shōgun', null, 4],
+    ['Kaiju No. 8', null, 15],
+  ];
+  const lineWidth = (screen: number) =>
+    feedCardContentWidth(screen) - theme.layout.avatar[HEADLINE_AVATAR] - HEADLINE_GAP;
+
+  describe.each([
+    [320, 1],
+    [360, 1],
+    [320, 1.3],
+    [360, 1.3],
+  ])('at %ipt and %fx text', (screen, fontScale) => {
+    const font = theme.typography.subhead.fontSize * fontScale;
+    it.each(TITLES)('%s (%s) + %i more', async (title, year, more) => {
+      mockWindow = { ...mockWindow, width: screen, fontScale };
+      const { said } = await headline(title, year, more);
+      const width = lineWidth(screen);
+      const phrase = bindPhrase(`+ ${more} more`);
+      // 1. "+ N more" is always one unit.
+      expect(said).toContain(phrase);
+      // 2. A title that fits on a line is drawn whole; one that does not wraps normally.
+      const whole = estimateHeadlineWidth(title, font) * 1.05 <= width;
+      expect(said).toContain(whole ? bindPhrase(title) : title);
+      // 3. Nothing bound is wider than the line, so nothing is broken mid-word.
+      for (const run of said.split(' ')) {
+        expect(estimateHeadlineWidth(run, font)).toBeLessThanOrEqual(width);
+      }
+      // 4. Never the title's last word alone with the year or the count.
+      if (!whole) {
+        const last = title.split(' ').pop()!;
+        expect(said).not.toContain(`${last}${NBSP}`);
+      }
+    });
+  });
+});
+
+describe('headlineJoins', () => {
+  const font = theme.typography.subhead.fontSize;
+
+  it('breaks before a short title, between year and count, or after a long title', () => {
+    // Fits whole with everything.
+    expect(
+      headlineJoins({
+        title: 'Dune',
+        year: 2021,
+        countPhrase: '+ 2 more',
+        lineWidth: 218,
+        fontSize: font,
+      }),
+    ).toEqual({ title: 'Dune', beforeYear: NBSP, beforeCount: NBSP });
+    // Title and year fit; the count goes to the next line.
+    expect(
+      headlineJoins({
+        title: 'Portrait of a Lady on Fire',
+        year: 2019,
+        countPhrase: '+ 3 more',
+        lineWidth: 258,
+        fontSize: font,
+      }),
+    ).toEqual({
+      title: bindPhrase('Portrait of a Lady on Fire'),
+      beforeYear: NBSP,
+      beforeCount: ' ',
+    });
+    // Too long for a line: ordinary spaces, and the year and count as one unit.
+    expect(
+      headlineJoins({
+        title: 'The Lord of the Rings: The Fellowship of the Ring',
+        year: 2001,
+        countPhrase: '+ 15 more',
+        lineWidth: 218,
+        fontSize: font,
+      }),
+    ).toEqual({
+      title: 'The Lord of the Rings: The Fellowship of the Ring',
+      beforeYear: ' ',
+      beforeCount: NBSP,
+    });
+    // No count at all: the title and year rules alone.
+    expect(
+      headlineJoins({
+        title: 'Oppenheimer',
+        year: 2023,
+        countPhrase: null,
+        lineWidth: 218,
+        fontSize: font,
+      }),
+    ).toEqual({ title: 'Oppenheimer', beforeYear: NBSP, beforeCount: ' ' });
+  });
+
+  it('measures with Inter’s own advance widths', () => {
+    // From the TTFs' hmtx tables: the SemiBold title is 165.6pt at 14pt and the Regular
+    // year 45.9pt. The table takes the wider weight per character, so it never reads less
+    // than either and never more than a couple of percent over.
+    const title = estimateHeadlineWidth('Portrait of a Lady on Fire', font);
+    const year = estimateHeadlineWidth(' (2019)', font, 'regular');
+    expect(title).toBeGreaterThanOrEqual(165.6);
+    expect(title).toBeLessThan(165.6 * 1.02);
+    expect(year).toBeGreaterThanOrEqual(45.8);
+    expect(year).toBeLessThan(45.9 * 1.02);
+    expect(
+      headlineJoins({
+        title: 'Portrait of a Lady on Fire',
+        year: 2019,
+        countPhrase: null,
+        lineWidth: 218,
+        fontSize: font,
+      }).beforeYear,
+    ).toBe(NBSP);
   });
 
   it('binds the phrase internally and recognises a plain count tail', () => {
@@ -388,7 +525,5 @@ describe('countJoin, the measured rule', () => {
     });
     expect(splitCountTail('and 1 other')).toEqual({ phrase: 'and 1 other', rest: '' });
     expect(splitCountTail('to their watchlist')).toBeNull();
-    expect(leadWord('Kaiju No. 8')).toBe('8');
-    expect(leadWord('Dune', 2021)).toBe('Dune (2021)');
   });
 });
