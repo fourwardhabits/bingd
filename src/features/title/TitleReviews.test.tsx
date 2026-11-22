@@ -44,6 +44,11 @@ const open = (
     sort?: ReviewOrder;
     onChangeSort?: (sort: ReviewOrder) => void;
     onToggleHelpful?: (review: TitleReview) => void;
+    failed?: boolean;
+    onRetry?: () => void;
+    onWrite?: () => void;
+    viewerHasReview?: boolean;
+    noun?: string;
   } = {},
 ) =>
   renderWithProviders(
@@ -55,11 +60,12 @@ const open = (
       onToggleHelpful={over.onToggleHelpful ?? (() => {})}
       maskedFor={() => false}
       onPressAuthor={() => {}}
-      viewerRanked
-      viewerHasReview={false}
-      onWrite={() => {}}
-      noun="film"
+      viewerHasReview={over.viewerHasReview ?? false}
+      onWrite={over.onWrite ?? (() => {})}
+      noun={over.noun ?? 'film'}
       viewerId={VIEWER}
+      failed={over.failed}
+      onRetry={over.onRetry}
     />,
   );
 
@@ -210,7 +216,41 @@ describe('the empty states', () => {
     const view = await open({ reviews: [], sort: 'top_desc' });
 
     await waitFor(() => expect(view.getByText('No reviews yet')).toBeTruthy());
-    expect(view.getByText('Be the first to leave a review of this film.')).toBeTruthy();
+    expect(view.getByText('Be the first to review this film.')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Write a review' })).toBeTruthy();
+  });
+
+  it.each(['movie', 'season', 'show'])('names the %s in the invitation', async (noun) => {
+    const view = await open({ reviews: [], noun });
+    expect(view.getByText(`Be the first to review this ${noun}.`)).toBeTruthy();
+  });
+
+  /**
+   * A failed read is not an empty title (founder, 2026-11-22): the original page's tab and
+   * the editorial sheet say so with Try again, as the Cinematic preview always has.
+   */
+  it('says the reviews could not load, with Try again, never "No reviews yet"', async () => {
+    const onRetry = jest.fn();
+    const view = await open({ reviews: [], failed: true, onRetry });
+    expect(view.getByText('Reviews couldn’t load.')).toBeTruthy();
+    expect(view.queryByText('No reviews yet')).toBeNull();
+    // Still the way to write one, which does not depend on the list.
+    expect(view.getByRole('button', { name: 'Write a review' })).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Try loading reviews again' }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it('says Edit your review once the reader has published one', async () => {
+    const onWrite = jest.fn();
+    const view = await open({
+      reviews: [review({ id: 'mine', userId: VIEWER })],
+      viewerHasReview: true,
+      onWrite,
+    });
+    // The compose control first; the card's own Edit names the same act.
+    await fireEvent.press(view.getAllByRole('button', { name: 'Edit your review' })[0]!);
+    expect(onWrite).toHaveBeenCalled();
+    expect(view.queryByRole('button', { name: 'Write a review' })).toBeNull();
   });
 
   it('says which filter emptied it under Following', async () => {
@@ -222,6 +262,29 @@ describe('the empty states', () => {
     // Not the generic one: a reader who filtered to Following and met "Be the first"
     // would think nobody had written anything at all.
     expect(view.queryByText('No reviews yet')).toBeNull();
+  });
+});
+
+/**
+ * **Your own review leads** (founder, 2026-11-22), on the original page as on the Cinematic
+ * one: then everybody else's, in the server's order.
+ */
+describe('the reader’s own review', () => {
+  it('is listed first whatever the order put it at', async () => {
+    const view = await open({
+      reviews: [
+        review({ id: 'a', userId: 'other-1', name: 'Ada', username: 'ada', text: 'Ada’s.' }),
+        review({ id: 'mine', userId: VIEWER, name: 'Sai', username: 'sai', text: 'Mine.' }),
+        review({ id: 'b', userId: 'other-2', name: 'Bo', username: 'bo', text: 'Bo’s.' }),
+      ],
+      viewerHasReview: true,
+    });
+    const order = ['Mine.', 'Ada’s.', 'Bo’s.'].map((text) => {
+      const json = JSON.stringify(view.toJSON());
+      return json.indexOf(text);
+    });
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });
 
@@ -241,7 +304,6 @@ describe('the editorial sheet', () => {
         onToggleHelpful={() => {}}
         maskedFor={() => false}
         onPressAuthor={() => {}}
-        viewerRanked
         viewerHasReview={false}
         onWrite={() => {}}
         noun="movie"
@@ -301,7 +363,6 @@ describe('the editorial sheet', () => {
         onToggleHelpful={() => {}}
         maskedFor={() => false}
         onPressAuthor={() => {}}
-        viewerRanked
         viewerHasReview={false}
         onWrite={() => {}}
         noun="movie"
@@ -327,7 +388,6 @@ describe('the reviews preview', () => {
     loading: false,
     maskedFor: () => false,
     viewerId: VIEWER,
-    viewerRanked: true,
     ownReview: null,
     onWrite: () => {},
     onSeeAll: () => {},
@@ -482,7 +542,6 @@ describe('the reviews preview', () => {
     const view = await renderWithProviders(
       <ReviewsPreview
         {...base}
-        viewerRanked={false}
         reviews={[]}
         onWrite={onWrite}
         ownReview={{
@@ -499,7 +558,7 @@ describe('the reviews preview', () => {
     expect(mine.queryByTestId('review-card-score')).toBeNull();
     await fireEvent.press(mine.getByTestId('edit-review'));
     expect(onWrite).toHaveBeenCalled();
-    expect(view.queryByRole('button', { name: 'Rank to leave a review' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Write a review' })).toBeNull();
   });
 
   it('says only yours exists when nobody else has written one', async () => {
@@ -550,16 +609,17 @@ describe('the reviews preview', () => {
 });
 
 /**
- * **The write-review action's glyph follows what it says** (design-system v3 A.2 #6).
- * _Write a review_ takes the shared Edit glyph; _Rank to leave a review_ is the first Rank and
- * takes Rank's `star-outline`, never the edit glyph (rule 4). Both places it is drawn: the
- * editorial sheet's compose slot and the preview's empty state.
+ * **One invitation for every reader** (founder, 2026-11-22). _Write a review_ is what the
+ * action says whether or not the reader has ranked the title — the title page routes an
+ * unranked reader through the first ranking — and it takes the shared Edit glyph, never
+ * Rank's star (design-system v3 A.2 #6). Both places it is drawn: the editorial sheet's
+ * compose slot and the preview's empty state.
  */
-describe('the write-review glyph', () => {
+describe('the write-review action', () => {
   const glyph = (name: keyof typeof Ionicons.glyphMap) =>
     String.fromCodePoint(Ionicons.glyphMap[name] as number);
 
-  const editorial = (viewerRanked: boolean) =>
+  const editorial = () =>
     renderWithProviders(
       <TitleReviews
         reviews={[]}
@@ -569,7 +629,6 @@ describe('the write-review glyph', () => {
         onToggleHelpful={() => {}}
         maskedFor={() => false}
         onPressAuthor={() => {}}
-        viewerRanked={viewerRanked}
         viewerHasReview={false}
         onWrite={() => {}}
         noun="film"
@@ -578,14 +637,13 @@ describe('the write-review glyph', () => {
       />,
     );
 
-  const preview = (viewerRanked: boolean) =>
+  const preview = () =>
     renderWithProviders(
       <ReviewsPreview
         reviews={[]}
         loading={false}
         maskedFor={() => false}
         viewerId={VIEWER}
-        viewerRanked={viewerRanked}
         ownReview={null}
         onWrite={() => {}}
         onSeeAll={() => {}}
@@ -596,24 +654,21 @@ describe('the write-review glyph', () => {
   it.each([
     ['the editorial sheet', editorial],
     ['the preview', preview],
-  ])('is the Edit glyph on Write a review in %s', async (_, render) => {
-    const view = await render(true);
+  ])('is Write a review with the Edit glyph in %s, never Rank to leave a review', async (_, render) => {
+    const view = await render();
     const action = view.getByTestId('write-review');
 
     expect(within(action).getByText('Write a review')).toBeTruthy();
     expect(within(action).getByText(glyph(EDIT_ICON_NAME))).toBeTruthy();
     expect(within(action).queryByText(glyph('star-outline'))).toBeNull();
+    expect(view.queryByText('Rank to leave a review')).toBeNull();
   });
 
-  it.each([
-    ['the editorial sheet', editorial],
-    ['the preview', preview],
-  ])('is the Rank star, never the Edit glyph, on Rank to leave a review in %s', async (_, render) => {
-    const view = await render(false);
-    const action = view.getByTestId('write-review');
-
-    expect(within(action).getByText('Rank to leave a review')).toBeTruthy();
-    expect(within(action).getByText(glyph('star-outline'))).toBeTruthy();
-    expect(within(action).queryByText(glyph(EDIT_ICON_NAME))).toBeNull();
+  it('draws the preview’s empty state in the founder’s words', async () => {
+    const view = await preview();
+    const empty = within(view.getByTestId('reviews-preview-empty'));
+    expect(empty.getByText('No reviews yet')).toBeTruthy();
+    expect(empty.getByText('Be the first to review this movie.')).toBeTruthy();
+    expect(empty.getByRole('button', { name: 'Write a review' })).toBeTruthy();
   });
 });

@@ -193,6 +193,13 @@ export type RankingSheetProps = {
     showDecision?: ShowDecision;
   }) => void;
   /**
+   * What the reveal's *Add details* says, when the caller knows what the reader came to
+   * add. The title page passes *Write a review* for a first ranking its "Write a review"
+   * began (title/reviews-everywhere, 2026-11-22): the same exit, the same `onFinishLog`,
+   * named for the composer it now lands in. Absent, it is *Add details*.
+   */
+  finishLogLabel?: string;
+  /**
    * **The placement, told to the caller the moment it lands** — for a caller that has to
    * count placements itself rather than wait for a refetch to do it.
    *
@@ -305,6 +312,7 @@ export function RankingSheet({
   subject,
   onClose,
   onFinishLog,
+  finishLogLabel,
   onPlaced,
   onUpdateShow,
   surface,
@@ -323,6 +331,7 @@ export function RankingSheet({
       subject={subject}
       onClose={onClose}
       onFinishLog={onFinishLog}
+      finishLogLabel={finishLogLabel}
       onPlaced={onPlaced}
       onUpdateShow={onUpdateShow}
       surface={surface}
@@ -386,6 +395,7 @@ function Session({
   subject,
   onClose,
   onFinishLog,
+  finishLogLabel,
   onPlaced,
   onUpdateShow,
   surface,
@@ -1032,6 +1042,7 @@ function Session({
             // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
             // surface the reader finishes on. See `onPlaced`.
             onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
+            finishLogLabel={finishLogLabel}
             keeping={keeping}
             keepError={keepError}
             onKeepShow={
@@ -1911,11 +1922,14 @@ function Reveal({
   earned = [],
   onDone,
   onFinishLog,
+  finishLogLabel = 'Add details',
   onUpdateShow,
   onKeepShow,
   keeping = false,
   keepError = null,
 }: {
+  /** What *Add details* says (`RankingSheetProps.finishLogLabel`). */
+  finishLogLabel?: string;
   /** Keep Show (WS-TVC): present exactly when Update Show is. */
   onKeepShow?: () => void;
   keeping?: boolean;
@@ -2092,7 +2106,7 @@ function Reveal({
         ...(onFinishLog
           ? [
               {
-                label: 'Add details',
+                label: finishLogLabel,
                 kind: 'secondary',
                 onPress: onFinishLog,
                 testID: 'reveal-add-details',
@@ -2110,7 +2124,14 @@ function Reveal({
     : [
         { label: 'Done', kind: onFinishLog ? 'secondary' : 'primary', onPress: onDone },
         ...(onFinishLog
-          ? [{ label: 'Add details', kind: 'primary', onPress: onFinishLog } as RevealExit]
+          ? [
+              {
+                label: finishLogLabel,
+                kind: 'primary',
+                onPress: onFinishLog,
+                testID: 'reveal-add-details',
+              } as RevealExit,
+            ]
           : []),
       ];
   const exitsStacked = deciding

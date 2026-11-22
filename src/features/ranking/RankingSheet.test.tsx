@@ -3682,3 +3682,30 @@ describe('the reveal’s exits', () => {
   });
 });
 
+
+/**
+ * **The reveal's Add details, named for what the reader came to add** (title/reviews-
+ * everywhere, 2026-11-22): a first ranking the title page's "Write a review" began says
+ * *Write a review* there, and it is the same exit with the same placement.
+ */
+describe('the reveal’s finish label', () => {
+  it('says Add details by default', async () => {
+    answering(placement);
+    const sheet = await openSheet({ onFinishLog: jest.fn() });
+    const exit = await sheet.findByTestId('reveal-add-details');
+    expect(within(exit).getByText('Add details')).toBeTruthy();
+  });
+
+  it('says Write a review when asked, and finishes into the log with the placement', async () => {
+    answering(placement);
+    const onFinishLog = jest.fn();
+    const sheet = await openSheet({ onFinishLog, finishLogLabel: 'Write a review' });
+    const exit = await sheet.findByTestId('reveal-add-details');
+    expect(within(exit).getByText('Write a review')).toBeTruthy();
+    expect(sheet.queryByText('Add details')).toBeNull();
+    await fireEvent.press(exit);
+    expect(onFinishLog).toHaveBeenCalledWith(
+      expect.objectContaining({ score: 8.7, position: 3, category: 'movies' }),
+    );
+  });
+});

@@ -1633,15 +1633,22 @@ describe('reviews', () => {
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
     await waitFor(() => expect(view.getByText('No reviews yet')).toBeTruthy());
-    expect(view.getByText('Be the first to leave a review of this movie.')).toBeTruthy();
+    expect(view.getByText('Be the first to review this movie.')).toBeTruthy();
   });
 
-  it('asks an unranked reader to rank first, because a review carries a score', async () => {
+  it('offers an unranked reader Write a review too, which opens the first ranking', async () => {
+    // Founder, 2026-11-22: the invitation is the same for everybody; the route differs.
     mockRpcResults.title_reviews_v2 = [];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByText('Rank to leave a review')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Write a review')).toBeTruthy());
+    expect(view.queryByText('Rank to leave a review')).toBeNull();
+    await fireEvent.press(view.getByText('Write a review'));
+    // The first-ranking flow: the log sheet's band question, before any composer.
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+    expect(writesSent()).toEqual([]);
   });
 
   it('offers a ranked reader the one composer there has ever been', async () => {
@@ -1663,7 +1670,7 @@ describe('reviews', () => {
     await waitFor(() => expect(view.getByText('Write a review')).toBeTruthy());
   });
 
-  it('is absent on a series, which cannot be ranked and so cannot be reviewed', async () => {
+  it('is present on a whole show, which is ranked in its own pool (ports #348)', async () => {
     mockOpenId = 'series-1';
     tableRows.media_items = [
       { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
@@ -1672,7 +1679,7 @@ describe('reviews', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
-    expect(view.queryByRole('tab', { name: 'Reviews' })).toBeNull();
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews' })).toBeTruthy());
   });
 });
 
@@ -3962,18 +3969,63 @@ describe('pull to refresh and the reviews', () => {
     });
   });
 
-  it('on a whole-show page, asks for neither reviews nor their count', async () => {
-    mockOpenId = 'series-1';
-    tableRows.media_items = [
-      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
-    ];
-    const view = await renderWithProviders(<TitleScreen />);
-    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+  /**
+   * A whole show reloads its own reviews on a pull, exactly as a film does (ports #348).
+   * It used to ask for nothing, because a show had no reviews; every read here is of the
+   * series row and never of one of its seasons.
+   */
+  describe.each(['original', 'immersive'] as const)('on a whole-show %s page', (layout) => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout(layout);
+      mockOpenId = 'series-1';
+      tableRows.media_items = [
+        { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+        {
+          id: 'season-1',
+          parent_id: 'series-1',
+          kind: 'season',
+          season_number: 1,
+          title: 'Season 1',
+          release_date: '2008-01-20',
+          poster_path: null,
+          fetched_at: new Date().toISOString(),
+        },
+      ];
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+    });
 
-    await pull(view);
+    it('refetches the show’s reviews and count, and shows a new review', async () => {
+      let published = false;
+      mockRpcResults.title_reviews_v2 = () => (published ? [otherReview] : []);
+      mockRpcResults.title_review_count = () => (published ? 1 : 0);
+      const view = await renderWithProviders(<TitleScreen />);
+      await waitFor(() => expect(callsOf('title_reviews_v2')).toBeGreaterThan(0));
+      await waitFor(() => expect(callsOf('title_review_count')).toBeGreaterThan(0));
+      if (layout === 'original') {
+        await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: /^Reviews/ })));
+      }
+      expect(view.queryByText('Published from the other phone.')).toBeNull();
+      const reviewsBefore = callsOf('title_reviews_v2');
+      const countBefore = callsOf('title_review_count');
 
-    expect(callsOf('title_reviews_v2')).toBe(0);
-    expect(callsOf('title_review_count')).toBe(0);
+      published = true;
+      await pull(view);
+
+      expect(callsOf('title_reviews_v2')).toBeGreaterThan(reviewsBefore);
+      expect(callsOf('title_review_count')).toBeGreaterThan(countBefore);
+      await waitFor(() => expect(view.getByText('Published from the other phone.')).toBeTruthy());
+      if (layout === 'original') {
+        expect(view.getByRole('tab', { name: 'Reviews (1)' })).toBeTruthy();
+      }
+      // The series row, and only the series row: never a season's reviews.
+      const asked = mockRpc.mock.calls
+        .filter(([fn]) => fn === 'title_reviews_v2' || fn === 'title_review_count')
+        .map(([, args]) => (args as { p_media_item_id?: string }).p_media_item_id);
+      expect(new Set(asked)).toEqual(new Set(['series-1']));
+    });
   });
 });
 
@@ -5585,14 +5637,28 @@ describe('the immersive title page (experiment)', () => {
         await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
       });
 
-      it('asks an unranked reader to rank first', async () => {
+      it('offers an unranked reader the same Write a review, in the founder’s words', async () => {
         mockRpcResults.title_reviews_v2 = [];
         mockRpcResults.title_review_count = 0;
         const view = await open();
-        await waitFor(() =>
-          expect(view.getByRole('button', { name: 'Rank to leave a review' })).toBeTruthy(),
-        );
+        const empty = await waitFor(() => view.getByTestId('reviews-preview-empty'));
+        expect(within(empty).getByText('No reviews yet')).toBeTruthy();
+        expect(within(empty).getByText('Be the first to review this movie.')).toBeTruthy();
+        expect(within(empty).getByRole('button', { name: 'Write a review' })).toBeTruthy();
+        expect(view.queryByRole('button', { name: 'Rank to leave a review' })).toBeNull();
         expect(view.queryByTestId('your-review')).toBeNull();
+      });
+
+      it('keeps the section when the read fails, with Try again, never "No reviews yet"', async () => {
+        mockRpcErrors.title_reviews_v2 = { code: '08006', message: 'connection failure' };
+        mockRpcResults.title_review_count = 0;
+        const view = await open();
+        const section = await waitFor(() => view.getByTestId('immersive-section-reviews'));
+        await waitFor(() =>
+          expect(within(section).getByTestId('reviews-preview-failed')).toBeTruthy(),
+        );
+        expect(within(section).queryByText('No reviews yet')).toBeNull();
+        expect(within(section).getByRole('button', { name: 'Try loading reviews again' })).toBeTruthy();
       });
 
       it('draws no "From your circle" line any more', async () => {
@@ -6191,4 +6257,776 @@ describe('the four-control row, on both layouts and every kind', () => {
     expect(menuRows(view).some((label) => /watchlist/i.test(label))).toBe(false);
   });
 
+});
+
+/**
+ * **Reviews on a whole TV show** (founder, 2026-11-22; ports #348).
+ *
+ * The founder ranked *Zatch Bell!* as a whole show and its page had no Reviews at all,
+ * because the page still excluded `kind === 'series'` from every review read and from both
+ * layouts' Reviews, on the outdated reasoning that a show could not be ranked. Since
+ * 20261114000200 a show is ranked in its own `tv_shows` pool, so its page carries the same
+ * Reviews a film's and a season's do: the same components, in the same relative place,
+ * reading the public notes on the exact series row and never its seasons'.
+ *
+ * Who may read a review (a private author, a block either way, suspension) is decided by
+ * `title_reviews_v2` on the server and is pinned against a real database in
+ * `supabase/tests/series-reviews.test.mjs`; here the page draws exactly what it is given.
+ */
+describe('reviews on a whole show', () => {
+  const show = {
+    ...film,
+    id: 'series-zb',
+    kind: 'series',
+    title: 'Zatch Bell!',
+    release_date: '2003-04-06',
+    runtime_minutes: null,
+  };
+  const season = (n: number) => ({
+    id: `season-zb-${n}`,
+    parent_id: 'series-zb',
+    kind: 'season',
+    season_number: n,
+    title: `Season ${n}`,
+    release_date: `${2002 + n}-04-06`,
+    poster_path: null,
+    fetched_at: new Date().toISOString(),
+  });
+  const showReview = {
+    id: 'um-kiyo-zb',
+    user_id: 'user-2',
+    username: 'kiyo',
+    display_name: 'Kiyo',
+    avatar_path: null,
+    note: 'Bao Zakeruga carried the whole run.',
+    has_spoilers: false,
+    updated_at: '2026-11-20T10:00:00.000Z',
+    score: '9.1',
+    reaction_count: 0,
+    helpful_count: 2,
+    viewer_helpful: false,
+  };
+  /** An explicit whole-show ranking (`tv_shows`), as #319 and 20261114000200 write it. */
+  const rankShow = (note: string | null = null, visibility: 'public' | 'private' = 'private') => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-zb',
+        position: 1,
+        category: 'tv_shows',
+        bucket: 'loved',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-zb',
+        bucket: 'loved',
+        watched_on: '2026-11-01',
+        note,
+        note_visibility: visibility,
+        note_has_spoilers: false,
+        note_updated_at: note ? '2026-11-02T10:00:00.000Z' : null,
+      },
+    ];
+  };
+  const ownShowReview = (text = 'My Zatch, my words.') => {
+    rankShow(text, 'public');
+    return {
+      ...showReview,
+      id: 'um-mine-zb',
+      user_id: 'user-1',
+      username: 'sai',
+      display_name: 'Sai',
+      note: text,
+      score: '8.5',
+      helpful_count: 0,
+    };
+  };
+  const reviewReadsFor = () =>
+    mockRpc.mock.calls
+      .filter(([fn]) => fn === 'title_reviews_v2' || fn === 'title_review_count')
+      .map(([, args]) => (args as { p_media_item_id?: string }).p_media_item_id);
+
+  beforeEach(() => {
+    mockOpenId = 'series-zb';
+    tableRows.media_items = [show, season(1), season(2)];
+    tableRows.media_cache = [{ ...credits, media_item_id: 'series-zb' }];
+  });
+
+  const openShow = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Zatch Bell!/)).toBeTruthy());
+    return view;
+  };
+
+  describe('on the original page', () => {
+    it('has a Reviews tab after Cast, in the place a film’s and a season’s sit', async () => {
+      const view = await openShow();
+      await waitFor(() => expect(view.getByRole('tab', { name: 'Cast' })).toBeTruthy());
+      const names = view
+        .getAllByRole('tab')
+        .map((node) => readingOrder(node).join(''))
+        .filter((name) => ['Seasons', 'Similar', 'Cast', 'Reviews', 'Details'].includes(name));
+      expect(names).toEqual(['Seasons', 'Similar', 'Cast', 'Reviews', 'Details']);
+    });
+
+    it('reads the reviews of the series row itself, never of its seasons', async () => {
+      mockRpcResults.title_reviews_v2 = [];
+      mockRpcResults.title_review_count = 0;
+      await openShow();
+      await waitFor(() => expect(reviewReadsFor().length).toBeGreaterThanOrEqual(2));
+      expect(new Set(reviewReadsFor())).toEqual(new Set(['series-zb']));
+    });
+
+    it('on an unranked show with no reviews, invites the first with Write a review', async () => {
+      mockRpcResults.title_reviews_v2 = [];
+      mockRpcResults.title_review_count = 0;
+      const view = await openShow();
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews' })));
+
+      await waitFor(() => expect(view.getByText('No reviews yet')).toBeTruthy());
+      expect(view.getByText('Be the first to review this show.')).toBeTruthy();
+      expect(view.getByText('Write a review')).toBeTruthy();
+      expect(view.queryByText('Rank to leave a review')).toBeNull();
+    });
+
+    it('shows a community review with its score and count, and votes Helpful on it', async () => {
+      mockRpcResults.title_reviews_v2 = [showReview];
+      mockRpcResults.title_review_count = 1;
+      mockRpcResults.set_review_helpful = { helpful_count: 3, viewer_helpful: true };
+      const view = await openShow();
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews (1)' })));
+
+      await waitFor(() =>
+        expect(view.getByText('Bao Zakeruga carried the whole run.')).toBeTruthy(),
+      );
+      expect(view.getByText('Kiyo')).toBeTruthy();
+      expect(view.getByText('9.1')).toBeTruthy();
+
+      await fireEvent.press(view.getByHintText('Tells Kiyo their review helped'));
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith(
+          'set_review_helpful',
+          expect.objectContaining({ p_review_id: 'um-kiyo-zb', p_helpful: true }),
+        ),
+      );
+    });
+
+    it('lists your own show review first, with your score, and says Edit your review', async () => {
+      const mine = ownShowReview();
+      // The server put it second; the page leads with it.
+      mockRpcResults.title_reviews_v2 = [showReview, mine];
+      mockRpcResults.title_review_count = 2;
+      const view = await openShow();
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews (2)' })));
+
+      await waitFor(() => expect(view.getByText('Edit your review')).toBeTruthy());
+      const order = readingOrder(view.toJSON());
+      expect(order.indexOf('My Zatch, my words.')).toBeGreaterThan(-1);
+      expect(order.indexOf('My Zatch, my words.')).toBeLessThan(
+        order.indexOf('Bao Zakeruga carried the whole run.'),
+      );
+      expect(view.getAllByLabelText('8.5 out of 10').length).toBeGreaterThan(0);
+      // No Report and no Helpful on your own review.
+      expect(view.queryByLabelText("Report Sai's review")).toBeNull();
+    });
+
+    it('masks a spoiler on the show for a reader who logged only one of its seasons', async () => {
+      mockRpcResults.title_reviews_v2 = [{ ...showReview, has_spoilers: true }];
+      mockRpcResults.title_review_count = 1;
+      // Having seen Season 1 does not unmask the whole show: the rule is the exact item.
+      tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'season-zb-1' }];
+      const view = await openShow();
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews (1)' })));
+
+      await waitFor(() => expect(view.getByText('Kiyo')).toBeTruthy());
+      expect(view.queryByText('Bao Zakeruga carried the whole run.')).toBeNull();
+    });
+
+    it('shows that spoiler to a reader who logged the show itself', async () => {
+      mockRpcResults.title_reviews_v2 = [{ ...showReview, has_spoilers: true }];
+      mockRpcResults.title_review_count = 1;
+      tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'series-zb' }];
+      const view = await openShow();
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews (1)' })));
+
+      await waitFor(() =>
+        expect(view.getByText('Bao Zakeruga carried the whole run.')).toBeTruthy(),
+      );
+    });
+  });
+
+  describe('on the Cinematic page', () => {
+    beforeEach(async () => {
+      await hydrateTitleLayout();
+      await setTitleLayout('immersive');
+    });
+    afterEach(async () => {
+      await setTitleLayout('original');
+    });
+
+    it('places Reviews after Cast and Trailers and before Similar', async () => {
+      tableRows.media_cache = [
+        { ...credits, media_item_id: 'series-zb' },
+        { ...videos, media_item_id: 'series-zb' },
+      ];
+      mockRpcResults.title_reviews_v2 = [showReview];
+      mockRpcResults.title_review_count = 1;
+      const view = await openShow();
+      await waitFor(() => expect(view.getByTestId('immersive-section-trailers')).toBeTruthy());
+      await waitFor(() => expect(view.getByTestId('immersive-section-reviews')).toBeTruthy());
+
+      const order = readingOrder(view.toJSON());
+      const at = (word: string) => order.indexOf(word);
+      const headings = ['SEASONS', 'CAST', 'TRAILERS', 'REVIEWS', 'SIMILAR'];
+      for (const heading of headings) expect(at(heading)).toBeGreaterThan(-1);
+      for (let i = 1; i < headings.length; i++) {
+        expect(at(headings[i - 1]!)).toBeLessThan(at(headings[i]!));
+      }
+    });
+
+    it('on a show with no reviews, keeps the section: No reviews yet, the line, Write a review', async () => {
+      mockRpcResults.title_reviews_v2 = [];
+      mockRpcResults.title_review_count = 0;
+      const view = await openShow();
+      const section = await waitFor(() => view.getByTestId('immersive-section-reviews'));
+      expect(within(section).getByText('REVIEWS')).toBeTruthy();
+      const empty = await waitFor(() => within(section).getByTestId('reviews-preview-empty'));
+      expect(within(empty).getByText('No reviews yet')).toBeTruthy();
+      expect(within(empty).getByText('Be the first to review this show.')).toBeTruthy();
+      expect(within(empty).getByRole('button', { name: 'Write a review' })).toBeTruthy();
+      expect(view.queryByRole('button', { name: /^See all/ })).toBeNull();
+    });
+
+    it('shows your own show review first, with your score, and the community’s behind See all', async () => {
+      const mine = ownShowReview();
+      mockRpcResults.title_reviews_v2 = [showReview, mine];
+      mockRpcResults.title_review_count = 2;
+      const view = await openShow();
+      const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
+      const own = await waitFor(() => preview.getByTestId('your-review'));
+      expect(within(own).getByText('My Zatch, my words.')).toBeTruthy();
+      expect(within(own).getByLabelText('8.5 out of 10')).toBeTruthy();
+      expect(within(own).getByTestId('edit-review')).toBeTruthy();
+
+      await fireEvent.press(view.getByRole('button', { name: 'See all 2 reviews' }));
+      const sheet = within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
+      expect(sheet.getByText('Bao Zakeruga carried the whole run.')).toBeTruthy();
+      expect(sheet.getByHintText('Tells Kiyo their review helped')).toBeTruthy();
+    });
+
+    it('masks a spoiler in the preview for a reader who has not logged the show', async () => {
+      mockRpcResults.title_reviews_v2 = [{ ...showReview, has_spoilers: true }];
+      mockRpcResults.title_review_count = 1;
+      tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'season-zb-2' }];
+      const view = await openShow();
+      const row = await waitFor(() => view.getByTestId('review-preview-body'));
+      expect(within(row).queryByText(/Bao Zakeruga/)).toBeNull();
+      expect(row.props.accessibilityLabel).toMatch(/Contains spoilers$/);
+    });
+  });
+
+  /**
+   * **A season page is unchanged**: its own reviews, its own count, its own copy, and
+   * never its parent show's.
+   */
+  describe('a season of the show', () => {
+    const seasonPage = {
+      ...film,
+      id: 'season-zb-1',
+      kind: 'season',
+      title: 'Season 1',
+      release_date: '2003-04-06',
+      runtime_minutes: null,
+      parent: { id: 'series-zb', title: 'Zatch Bell!', poster_path: null, backdrop_path: null },
+    };
+
+    beforeEach(() => {
+      mockOpenId = 'season-zb-1';
+      tableRows.media_items = [seasonPage];
+    });
+
+    it('reads its own reviews, says "this season", and never asks for the show’s', async () => {
+      mockRpcResults.title_reviews_v2 = [];
+      mockRpcResults.title_review_count = 0;
+      const view = await renderWithProviders(<TitleScreen />);
+      await waitFor(() => expect(view.getByText(/^Season 1/)).toBeTruthy());
+      await fireEvent.press(await waitFor(() => view.getByRole('tab', { name: 'Reviews' })));
+
+      await waitFor(() =>
+        expect(view.getByText('Be the first to review this season.')).toBeTruthy(),
+      );
+      expect(new Set(reviewReadsFor())).toEqual(new Set(['season-zb-1']));
+    });
+  });
+});
+
+/**
+ * **"Write a review" routes by what is already there** (founder, 2026-11-22), and writing a
+ * review is never a rewatch.
+ *
+ *   ranked               the ⋯ menu's Edit ranking / Add note sheet, straight into the
+ *                        composer: `save_note` and nothing else — no viewing, no watch
+ *                        count, no date, no rerank, never Log rewatch;
+ *   own review           Edit edits that note in place, on its base version;
+ *   private note         the composer opens on it, still private, until the reader shares;
+ *   unranked             the first ranking, and the reveal's exit leads back into the
+ *                        composer with the review intent intact — one visit.
+ *
+ * On the Cinematic page, the default layout; the original page's tab calls the same router.
+ */
+describe('Write a review, routed', () => {
+  type Kind = 'movie' | 'series' | 'season';
+  const PAGES: Record<Kind, { id: string; category: string; noun: string; row: object }> = {
+    movie: { id: 'film-1', category: 'movies', noun: 'movie', row: film },
+    series: {
+      id: 'series-zb',
+      category: 'tv_shows',
+      noun: 'show',
+      row: {
+        ...film,
+        id: 'series-zb',
+        kind: 'series',
+        title: 'Zatch Bell!',
+        release_date: '2003-04-06',
+        runtime_minutes: null,
+      },
+    },
+    season: {
+      id: 'season-zb-2',
+      category: 'tv_seasons',
+      noun: 'season',
+      row: {
+        ...film,
+        id: 'season-zb-2',
+        kind: 'season',
+        season_number: 2,
+        title: 'Season 2',
+        release_date: '2004-04-06',
+        runtime_minutes: null,
+        parent: { id: 'series-zb', title: 'Zatch Bell!', poster_path: null, backdrop_path: null },
+      },
+    },
+  };
+  const NOTE_VERSION = '2026-10-02T10:00:00.000Z';
+
+  /** This reader's row on the page's title: ranked or not, with or without a note. */
+  const seedOwn = (
+    kind: Kind,
+    {
+      ranked,
+      note = null,
+      visibility = 'private',
+      bucket = ranked ? 'loved' : null,
+    }: {
+      ranked: boolean;
+      note?: string | null;
+      visibility?: 'public' | 'private';
+      bucket?: string | null;
+    },
+  ) => {
+    const page = PAGES[kind];
+    tableRows.rankings = ranked
+      ? [
+          {
+            user_id: 'user-1',
+            media_item_id: page.id,
+            position: 1,
+            category: page.category,
+            bucket: 'loved',
+          },
+        ]
+      : [];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: page.id,
+        bucket,
+        watched_on: '2026-08-12',
+        note,
+        note_visibility: visibility,
+        note_has_spoilers: false,
+        note_updated_at: note ? NOTE_VERSION : null,
+      },
+    ];
+  };
+
+  /**
+   * A first ranking against the mock: `log_title` (or `set_bucket` on a row that exists)
+   * leaves the row in the collection, and `rank_start` on an empty band places it at once
+   * and ranks it — so the post-rank sheet reads a row that is really there, as it would.
+   */
+  const rankingLands = (kind: Kind) => {
+    const page = PAGES[kind];
+    const keepRow = () => {
+      const rows = tableRows.user_media as Record<string, unknown>[];
+      const own = rows.find((row) => row.media_item_id === page.id);
+      if (own) own.bucket = 'loved';
+      else
+        rows.push({
+          user_id: 'user-1',
+          media_item_id: page.id,
+          bucket: 'loved',
+          watched_on: '2026-11-22',
+          note: null,
+          note_visibility: 'private',
+          note_has_spoilers: false,
+          note_updated_at: null,
+        });
+    };
+    mockRpcResults.log_title = () => {
+      keepRow();
+      return { status: 'ok', created: true, watch_event_id: 'w-1' };
+    };
+    mockRpcResults.set_bucket = () => {
+      keepRow();
+      return { status: 'ok' };
+    };
+    mockRpcResults.rank_start = () => {
+      tableRows.rankings = [
+        {
+          user_id: 'user-1',
+          media_item_id: page.id,
+          position: 1,
+          category: page.category,
+          bucket: 'loved',
+        },
+      ];
+      return {
+        done: true,
+        position: 1,
+        category: page.category,
+        bucket: 'loved',
+        score: 10,
+        adjustable: false,
+        placement_id: 'placement-1',
+      };
+    };
+  };
+
+  const openPage = async (kind: Kind) => {
+    mockOpenId = PAGES[kind].id;
+    tableRows.media_items = [PAGES[kind].row];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByTestId('immersive-section-reviews')).toBeTruthy());
+    return view;
+  };
+  const pressWrite = async (view: View) => {
+    const section = within(view.getByTestId('immersive-section-reviews'));
+    await fireEvent.press(
+      await waitFor(() => section.getByRole('button', { name: 'Write a review' })),
+    );
+  };
+  const composer = (view: View) =>
+    waitFor(() => view.getByPlaceholderText('What did you think?'));
+  const caption = (view: View) => view.getByTestId('note-claims-caption').props.children;
+  const notesSaved = () =>
+    mockRpc.mock.calls
+      .filter(([fn]) => fn === 'save_note' || fn === 'log_watched')
+      .map(([fn, args]) => ({ fn: fn as string, ...(args as Record<string, unknown>) }) as {
+        fn: string;
+        [key: string]: unknown;
+      });
+  /** Everything that would be a viewing, a date, a count or a ranking move. */
+  const NOT_A_REVIEW = [
+    'log_rewatch',
+    'log_rewatch_with_details',
+    'log_watched',
+    'log_title',
+    'set_watch_date',
+    'clear_watch_date',
+    'edit_watch_event',
+    'set_bucket',
+    'rank_start',
+    'rank_again',
+    'rank_rebucket',
+    'rank_unrank',
+    'rank_answer',
+    'unlog',
+  ];
+  const sentAny = (names: string[]) =>
+    mockRpc.mock.calls.filter(([fn]) => names.includes(fn as string)).map(([fn]) => fn);
+
+  beforeEach(async () => {
+    await hydrateTitleLayout();
+    await setTitleLayout('immersive');
+    mockRpcResults.title_reviews_v2 = [];
+    mockRpcResults.title_review_count = 0;
+    mockRpcResults.save_note = { status: 'ok', note_version: '2026-11-22T10:00:00.000Z' };
+  });
+  afterEach(async () => {
+    await setTitleLayout('original');
+  });
+
+  describe.each(['movie', 'series', 'season'] as const)('on a ranked %s', (kind) => {
+    it('opens the existing log’s composer, focused and shared, and saves through save_note alone', async () => {
+      seedOwn(kind, { ranked: true });
+      const view = await openPage(kind);
+      const section = within(view.getByTestId('immersive-section-reviews'));
+      expect(section.getByText(`Be the first to review this ${PAGES[kind].noun}.`)).toBeTruthy();
+      await pressWrite(view);
+
+      const field = await composer(view);
+      expect(field.props.autoFocus).toBe(true);
+      // A new note from this door starts as a review.
+      expect(caption(view)).not.toBe('Only you can read this.');
+      // The sheet the ⋯ menu's Edit ranking / Add note opens, not Log another watch.
+      expect(view.getByLabelText('How was it?')).toBeTruthy();
+
+      const reviewReads = mockRpc.mock.calls.filter(([fn]) => fn === 'title_reviews_v2').length;
+      const countReads = mockRpc.mock.calls.filter(([fn]) => fn === 'title_review_count').length;
+      await fireEvent.changeText(field, 'Worth every episode.');
+      await fireEvent(field, 'blur');
+
+      await waitFor(() => expect(notesSaved()).toHaveLength(1));
+      expect(notesSaved()[0]).toMatchObject({
+        fn: 'save_note',
+        p_media_item_id: PAGES[kind].id,
+        p_note: 'Worth every episode.',
+        p_note_visibility: 'public',
+      });
+      // The hard rule: a review is not a viewing, a date, a count or a rerank.
+      expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+      // And the section and its count refresh without a pull.
+      await waitFor(() =>
+        expect(mockRpc.mock.calls.filter(([fn]) => fn === 'title_reviews_v2').length).toBeGreaterThan(
+          reviewReads,
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          mockRpc.mock.calls.filter(([fn]) => fn === 'title_review_count').length,
+        ).toBeGreaterThan(countReads),
+      );
+      expect(new Set(reviewReadsOf())).toEqual(new Set([PAGES[kind].id]));
+    });
+  });
+
+  const reviewReadsOf = () =>
+    mockRpc.mock.calls
+      .filter(([fn]) => fn === 'title_reviews_v2' || fn === 'title_review_count')
+      .map(([, args]) => (args as { p_media_item_id?: string }).p_media_item_id);
+
+  it('shows a saved review first, at once, with the reader’s score', async () => {
+    seedOwn('movie', { ranked: true });
+    let saved = false;
+    mockRpcResults.title_reviews_v2 = () =>
+      saved
+        ? [
+            {
+              id: 'um-2',
+              user_id: 'user-2',
+              username: 'ada',
+              display_name: 'Ada',
+              avatar_path: null,
+              note: 'Somebody else’s.',
+              has_spoilers: false,
+              updated_at: '2026-11-01T10:00:00.000Z',
+              score: '7.0',
+              reaction_count: 0,
+              helpful_count: 4,
+              viewer_helpful: false,
+            },
+            {
+              id: 'um-1',
+              user_id: 'user-1',
+              username: 'sai',
+              display_name: 'Sai',
+              avatar_path: null,
+              note: 'Mine, just now.',
+              has_spoilers: false,
+              updated_at: '2026-11-22T10:00:00.000Z',
+              score: '9.6',
+              reaction_count: 0,
+              helpful_count: 0,
+              viewer_helpful: false,
+            },
+          ]
+        : [];
+    mockRpcResults.save_note = () => {
+      saved = true;
+      const own = (tableRows.user_media as Record<string, unknown>[])[0]!;
+      own.note = 'Mine, just now.';
+      own.note_visibility = 'public';
+      own.note_updated_at = '2026-11-22T10:00:00.000Z';
+      return { status: 'ok', note_version: '2026-11-22T10:00:00.000Z' };
+    };
+    const view = await openPage('movie');
+    await pressWrite(view);
+    const field = await composer(view);
+    await fireEvent.changeText(field, 'Mine, just now.');
+    await fireEvent(field, 'blur');
+
+    await waitFor(() => expect(saved).toBe(true));
+    // The reader closes the sheet onto the page, which has already caught up: no pull.
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    const own = await waitFor(() =>
+      within(view.getByTestId('reviews-preview')).getByTestId('your-review'),
+    );
+    expect(within(own).getByText('Mine, just now.')).toBeTruthy();
+    expect(within(own).getByLabelText('9.6 out of 10')).toBeTruthy();
+    const order = readingOrder(view.getByTestId('reviews-preview'));
+    expect(order.indexOf('Mine, just now.')).toBeLessThan(order.indexOf('Somebody else’s.'));
+  });
+
+  it('edits an existing review in place, on its base version — no second review', async () => {
+    seedOwn('series', { ranked: true, note: 'First take.', visibility: 'public' });
+    const view = await openPage('series');
+    const own = await waitFor(() => view.getByTestId('your-review'));
+    await fireEvent.press(within(own).getByTestId('edit-review'));
+
+    const field = await composer(view);
+    await waitFor(() => expect(field.props.value).toBe('First take.'));
+    expect(field.props.autoFocus).toBe(true);
+    await fireEvent.changeText(field, 'Second take.');
+    await fireEvent(field, 'blur');
+
+    await waitFor(() => expect(notesSaved()).toHaveLength(1));
+    expect(notesSaved()[0]).toMatchObject({
+      fn: 'save_note',
+      p_media_item_id: 'series-zb',
+      p_note: 'Second take.',
+      p_note_visibility: 'public',
+      p_base_updated_at: NOTE_VERSION,
+    });
+    expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+  });
+
+  it('opens a private note as it is, publishes nothing by itself, and shares only on the chip', async () => {
+    seedOwn('movie', { ranked: true, note: 'Only for me.', visibility: 'private' });
+    const view = await openPage('movie');
+    // A private note is nobody's review: the section still invites one.
+    expect(view.queryByTestId('your-review')).toBeNull();
+    await pressWrite(view);
+
+    const field = await composer(view);
+    await waitFor(() => expect(field.props.value).toBe('Only for me.'));
+    expect(caption(view)).toBe('Only you can read this.');
+    // Editing it keeps it private.
+    await fireEvent.changeText(field, 'Only for me, edited.');
+    await fireEvent(field, 'blur');
+    await waitFor(() => expect(notesSaved()).toHaveLength(1));
+    expect(notesSaved()[0]).toMatchObject({
+      fn: 'save_note',
+      p_note: 'Only for me, edited.',
+      p_note_visibility: 'private',
+    });
+
+    // Publishing is the reader's own tap, and only then.
+    await fireEvent.press(view.getByLabelText('Share this note as a public review'));
+    await waitFor(() => expect(notesSaved()).toHaveLength(2));
+    expect(notesSaved()[1]).toMatchObject({ fn: 'save_note', p_note_visibility: 'public' });
+    expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+  });
+
+  it('never publishes a private note it only opened', async () => {
+    seedOwn('season', { ranked: true, note: 'Season notes.', visibility: 'private' });
+    const view = await openPage('season');
+    await pressWrite(view);
+    const field = await composer(view);
+    await waitFor(() => expect(field.props.value).toBe('Season notes.'));
+    await fireEvent(field, 'blur');
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(notesSaved()).toEqual([]);
+    expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+  });
+
+  describe.each(['movie', 'series', 'season'] as const)('on an unranked %s', (kind) => {
+    it('ranks first, then lands in the composer with the review intent, in one visit', async () => {
+      tableRows.user_media = [];
+      rankingLands(kind);
+      const view = await openPage(kind);
+      await pressWrite(view);
+
+      // The first-ranking flow: the band question, with no composer in front of it.
+      const loved = await waitFor(() => view.getByLabelText('I liked it'));
+      expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+      await fireEvent.press(loved);
+
+      // The reveal's exit names what the reader came for.
+      const exit = await view.findByTestId('reveal-add-details');
+      expect(within(exit).getByText('Write a review')).toBeTruthy();
+      const before = mockRpc.mock.calls.length;
+      await fireEvent.press(exit);
+
+      const field = await composer(view);
+      expect(field.props.autoFocus).toBe(true);
+      expect(caption(view)).not.toBe('Only you can read this.');
+      await fireEvent.changeText(field, 'Ranked it, then said why.');
+      await fireEvent(field, 'blur');
+
+      await waitFor(() => expect(notesSaved()).toHaveLength(1));
+      expect(notesSaved()[0]).toMatchObject({
+        fn: 'save_note',
+        p_media_item_id: PAGES[kind].id,
+        p_note: 'Ranked it, then said why.',
+        p_note_visibility: 'public',
+      });
+      // The first ranking logged the first watch, as it always has; the review after it
+      // recorded nothing more.
+      const after = mockRpc.mock.calls.slice(before).map(([fn]) => fn as string);
+      expect(after.filter((fn) => NOT_A_REVIEW.includes(fn))).toEqual([]);
+      expect(sentAny(['log_rewatch', 'log_rewatch_with_details'])).toEqual([]);
+    });
+  });
+
+  it('carries a private note through the ranking without publishing it', async () => {
+    seedOwn('movie', { ranked: false, note: 'Kept to myself.', visibility: 'private' });
+    rankingLands('movie');
+    const view = await openPage('movie');
+    await pressWrite(view);
+    await fireEvent.press(await waitFor(() => view.getByLabelText('I liked it')));
+    await fireEvent.press(await view.findByTestId('reveal-add-details'));
+
+    const field = await composer(view);
+    await waitFor(() => expect(field.props.value).toBe('Kept to myself.'));
+    expect(caption(view)).toBe('Only you can read this.');
+    await fireEvent.changeText(field, 'Kept to myself, still.');
+    await fireEvent(field, 'blur');
+    await waitFor(() => expect(notesSaved().length).toBeGreaterThan(0));
+    for (const call of notesSaved()) expect(call.p_note_visibility).not.toBe('public');
+  });
+
+  it('forgets the review once the reveal is left with Done, and then opens the composer', async () => {
+    tableRows.user_media = [];
+    rankingLands('movie');
+    const view = await openPage('movie');
+    await pressWrite(view);
+    await fireEvent.press(await waitFor(() => view.getByLabelText('I liked it')));
+    await view.findByTestId('reveal-add-details');
+    await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(view.queryByTestId('reveal-add-details')).toBeNull());
+
+    // Ranked now: the same invitation goes straight to the composer.
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await pressWrite(view);
+    expect((await composer(view)).props.autoFocus).toBe(true);
+  });
+
+  it('does not carry the review into an ordinary Rank', async () => {
+    tableRows.user_media = [];
+    rankingLands('movie');
+    const view = await openPage('movie');
+    await fireEvent.press(await waitFor(() => view.getByTestId('title-action-rank')));
+    await fireEvent.press(await waitFor(() => view.getByLabelText('I liked it')));
+    const exit = await view.findByTestId('reveal-add-details');
+    expect(within(exit).getByText('Add details')).toBeTruthy();
+    await fireEvent.press(exit);
+    await waitFor(() => expect(view.getByTestId('log-sheet-scroll')).toBeTruthy());
+    // The post-rank sheet opens on nothing, as it always has.
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+
+  it('never opens Log another watch', async () => {
+    seedOwn('movie', { ranked: true });
+    const view = await openPage('movie');
+    await pressWrite(view);
+    await composer(view);
+    expect(view.queryByText(/Log another watch/)).toBeNull();
+    expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+  });
 });

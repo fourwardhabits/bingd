@@ -2673,6 +2673,304 @@ describe('the one Note row', () => {
 });
 
 /**
+ * **A whole show's review is written, edited and refreshed like a film's** (ports #348).
+ *
+ * The show page's Write a review opens this sheet on the series itself, so every write
+ * must name the series row (never one of its seasons) and must refresh that series'
+ * Reviews list and count, by the same prefix keys a film's do.
+ */
+describe('a review of a whole show', () => {
+  const show: LoggableTitle = {
+    id: 'series-zb',
+    title: 'Zatch Bell!',
+    year: 2003,
+    posterUri: null,
+    kind: 'series',
+  };
+  const shareChip = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Share this note as a public review');
+  const invalidatedFor = (spy: jest.SpyInstance, id: string) => {
+    const keys = spy.mock.calls.map(([filters]) =>
+      JSON.stringify((filters as { queryKey?: unknown })?.queryKey),
+    );
+    return {
+      list: keys.includes(JSON.stringify(['title-reviews', id])),
+      count: keys.includes(JSON.stringify(['title-review-count', id])),
+    };
+  };
+
+  it('creates a first public review on the series row, and refreshes its Reviews', async () => {
+    const sheet = await open(show, { noteIntent: 'review' });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'Bao Zakeruga.');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note_visibility: 'public',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+
+  it('edits a published show review in place, on the series row', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'Bao Zakeruga.',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(show);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('Bao Zakeruga.'));
+    await fireEvent.changeText(sheet.note(), 'Bao Zakeruga, edited.');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note: 'Bao Zakeruga, edited.',
+      p_note_visibility: 'public',
+      p_base_updated_at: 'v1',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+
+  it('publishes a private show note on one tap of the chip', async () => {
+    stubReads(
+      {
+        bucket: 'liked',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(show);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    await fireEvent.press(shareChip(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note_visibility: 'public',
+    });
+    await waitFor(() => expect(invalidatedFor(spy, show.id)).toEqual({ list: true, count: true }));
+  });
+});
+
+/**
+ * **"Write a review" on a ranked title is not a rewatch** (founder hard rule, 2026-11-22).
+ *
+ * The title page opens this sheet with `noteIntent: 'review'` and `openWriting: 'public'`
+ * on the log that already exists. Writing, editing, publishing and unpublishing there must
+ * be `save_note` and nothing else: no `log_watched` (which would touch the latest viewing),
+ * no `log_rewatch`, no date write, no bucket or ranking call — so the watch date, the watch
+ * count and the score stay exactly as they were. A private note it opens stays private.
+ */
+describe('writing a review on a ranked title', () => {
+  const ranked = (note: string | null, visibility: 'public' | 'private' = 'private') =>
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note,
+        note_updated_at: note ? 'v1' : null,
+        note_visibility: visibility,
+        note_has_spoilers: false,
+      },
+      { bucket: 'loved' },
+    );
+  const NOT_A_REVIEW = [
+    'log_watched',
+    'log_rewatch',
+    'log_rewatch_with_details',
+    'log_title',
+    'set_watch_date',
+    'clear_watch_date',
+    'set_bucket',
+    'rank_start',
+    'rank_again',
+    'rank_rebucket',
+    'rank_unrank',
+  ];
+  const sentAny = () =>
+    mockRpc.mock.calls.map(([name]) => name as string).filter((n) => NOT_A_REVIEW.includes(n));
+  const reviewDoor = { noteIntent: 'review' as const, openWriting: 'public' as const };
+
+  it('opens on the composer, focused, and a new review saves through save_note alone', async () => {
+    ranked(null);
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { ...reviewDoor, onRank });
+    await waitFor(() => expect(sheet.note()).toBeTruthy());
+    expect(sheet.note().props.autoFocus).toBe(true);
+
+    await fireEvent.changeText(sheet.note(), 'A first review.');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: filmA.id,
+      p_note: 'A first review.',
+      p_note_visibility: 'public',
+    });
+    await settle();
+    expect(sentAny()).toEqual([]);
+    expect(onRank).not.toHaveBeenCalled();
+    // The date row still reads the stored date, untouched.
+    expect(sheet.getByRole('button', { name: 'Watch date' })).toBeTruthy();
+  });
+
+  it('edits, unpublishes and republishes a review without one viewing, date or rerank', async () => {
+    ranked('Published.', 'public');
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve({
+        data: name === 'save_note' ? { status: 'ok', note_version: `v${issued}` } : { status: 'ok' },
+        error: null,
+      }),
+    );
+    const sheet = await open(filmA, reviewDoor);
+    await waitFor(() => expect(sheet.note().props.value).toBe('Published.'));
+
+    await fireEvent.changeText(sheet.note(), 'Published, edited.');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_note: 'Published, edited.',
+      p_note_visibility: 'public',
+      p_base_updated_at: 'v1',
+    });
+
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(2));
+    expect(callsTo('save_note')[1][1]).toMatchObject({ p_note_visibility: 'private' });
+
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(3));
+    expect(callsTo('save_note')[2][1]).toMatchObject({ p_note_visibility: 'public' });
+
+    await settle();
+    expect(sentAny()).toEqual([]);
+  });
+
+  it('opens a private note on its stored visibility and never publishes it by itself', async () => {
+    ranked('Just for me.', 'private');
+    const sheet = await open(filmA, reviewDoor);
+    await waitFor(() => expect(sheet.note().props.value).toBe('Just for me.'));
+    expect(sheet.getByTestId('note-claims-caption').props.children).toBe(
+      'Only you can read this.',
+    );
+
+    // Opening, blurring and closing write nothing.
+    await fireEvent(sheet.note(), 'blur');
+    await settle();
+    expect(callsTo('save_note')).toHaveLength(0);
+
+    // An edit keeps it private.
+    await fireEvent.changeText(sheet.note(), 'Just for me, still.');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({ p_note_visibility: 'private' });
+    expect(sentAny()).toEqual([]);
+  });
+});
+
+/**
+ * **A ranking "Write a review" began returns to the composer** (founder, 2026-11-22).
+ *
+ * The post-rank sheet ordinarily opens on nothing (2026-08-30). The one exception is the
+ * reader who asked to write before they ranked: with `noteIntent: 'review'` and
+ * `openWriting`, it opens on the Note row, focused, a new note starting shared.
+ */
+describe('the post-rank sheet after Write a review', () => {
+  const placed = { score: 9.4, position: 1, category: 'tv_shows' };
+  const show: LoggableTitle = {
+    id: 'series-zb',
+    title: 'Zatch Bell!',
+    year: 2003,
+    posterUri: null,
+    kind: 'series',
+  };
+
+  it('opens on the composer, focused, as a review', async () => {
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-11-22', note: null, note_visibility: 'private' },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(show, {
+      postRank: placed,
+      noteIntent: 'review',
+      openWriting: 'public',
+    });
+    await waitFor(() => expect(sheet.note()).toBeTruthy());
+    expect(sheet.note().props.autoFocus).toBe(true);
+    expect(sheet.getByTestId('note-claims-caption').props.children).not.toBe(
+      'Only you can read this.',
+    );
+
+    await fireEvent.changeText(sheet.note(), 'Ranked, then reviewed.');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: show.id,
+      p_note_visibility: 'public',
+    });
+    await settle();
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('log_rewatch')).toHaveLength(0);
+  });
+
+  it('still opens on nothing without the review intent', async () => {
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-11-22', note: null, note_visibility: 'private' },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(show, { postRank: placed, openWriting: 'public' });
+    await waitFor(() =>
+      expect(sheet.getByLabelText(WRITING).props.accessibilityState.disabled).toBe(false),
+    );
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+
+  it('keeps a private note private through it', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: '2026-11-22',
+        note: 'Mine alone.',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(show, {
+      postRank: placed,
+      noteIntent: 'review',
+      openWriting: 'public',
+    });
+    await waitFor(() => expect(sheet.note().props.value).toBe('Mine alone.'));
+    expect(sheet.getByTestId('note-claims-caption').props.children).toBe(
+      'Only you can read this.',
+    );
+    await fireEvent.changeText(sheet.note(), 'Mine alone, edited.');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({ p_note_visibility: 'private' });
+  });
+});
+
+/**
  * **The state a finished ranking returns to.**
  *
  * The founder's central complaint about the log flow: tap a bucket, answer the

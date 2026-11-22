@@ -26,13 +26,18 @@ import {
 import { theme } from '@/ui/tokens';
 
 /**
- * **The write-review action's glyph follows what it says** (design-system v3 A.2 #6).
- * _Write a review_ is an edit, so it takes the shared Edit glyph. _Rank to leave a review_
- * is the first Rank, so it takes Rank's `star-outline` (§17.3): rule 4 keeps the edit glyph
- * off Rank.
+ * **One invitation, for every reader** (founder, 2026-11-22). _Write a review_ is what the
+ * control says whether or not the reader has ranked the title, and the title page routes it:
+ * a ranked title opens the composer on the log that is there, an unranked one opens the first
+ * ranking and comes back to the composer. It used to read _Rank to leave a review_ for an
+ * unranked reader, with Rank's star; it is writing either way now, so it takes the shared
+ * Edit glyph (design-system v3 A.2 #6).
  */
-const writeReviewIcon = (viewerRanked: boolean) =>
-  viewerRanked ? EDIT_ICON_NAME : ('star-outline' as const);
+const WRITE_REVIEW = 'Write a review';
+const EDIT_REVIEW = 'Edit your review';
+
+/** "Be the first to review this show." — the empty state's line, by kind. */
+export const firstReviewLine = (noun: string) => `Be the first to review this ${noun}.`;
 
 export type TitleReviewsProps = {
   reviews: TitleReview[];
@@ -45,14 +50,21 @@ export type TitleReviewsProps = {
   /** True when this viewer's spoiler masking should apply to a given note. */
   maskedFor: (review: TitleReview) => boolean;
   onPressAuthor: (username: string) => void;
-  /** Whether the viewer has ranked this exact title, which is what a review needs. */
-  viewerRanked: boolean;
-  /** Whether the viewer already wrote one, which changes Add to Edit. */
+  /** Whether the viewer already published one, which changes Write to Edit. */
   viewerHasReview: boolean;
-  /** Opens the log sheet, where a note is written. */
+  /**
+   * Opens the one composer, the log sheet's Note row — through the first ranking when the
+   * title has none yet. The title page decides the route; this only asks.
+   */
   onWrite: () => void;
-  /** Movie or season, for the copy. Never "title". */
+  /** Movie, season or show, for the copy. Never "title". */
   noun: string;
+  /**
+   * The read failed and nothing is cached: say so, with Try again, rather than "No reviews
+   * yet" — an empty state over a failure would tell the reader nobody has written.
+   */
+  failed?: boolean;
+  onRetry?: () => void;
   /**
    * Who is reading, so that the reporting control is absent from their own review.
    * `report()` refuses your own content with a 22023, so offering it there would be a
@@ -143,10 +155,11 @@ export function TitleReviews({
   onToggleHelpful,
   maskedFor,
   onPressAuthor,
-  viewerRanked,
   viewerHasReview,
   onWrite,
   noun,
+  failed = false,
+  onRetry,
   viewerId,
   limit,
   variant,
@@ -160,8 +173,13 @@ export function TitleReviews({
   // Which review's reason sheet is open, by `user_media.id`.
   const [reporting, setReporting] = useState<string | null>(null);
   const editorial = variant === 'editorial';
-  // In the editorial tab your own review is drawn above, so it is not listed again.
-  const listed = editorial ? reviews.filter((review) => review.userId !== viewerId) : reviews;
+  // In the editorial tab your own review is drawn above, so it is not listed again. On the
+  // original page it is listed, and first: the reader's own review leads, then everyone
+  // else's in the order chosen (founder, 2026-11-22).
+  const others = reviews.filter((review) => review.userId !== viewerId);
+  const listed = editorial
+    ? others
+    : [...reviews.filter((review) => review.userId === viewerId), ...others];
   // The editorial sheet's four orders; the original page keeps its three, unchanged.
   const options = editorial
     ? EDITORIAL_SORT_OPTIONS.filter((option) => option.id !== 'rating' || ratingAvailable)
@@ -192,41 +210,21 @@ export function TitleReviews({
               noun={noun}
             />
           ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={viewerRanked ? 'Write a review' : 'Rank to leave a review'}
-              onPress={onWrite}
-              hitSlop={{ top: 12, bottom: 12 }}
-              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
-              testID="write-review"
-            >
-              <Ionicons
-                name={writeReviewIcon(viewerRanked)}
-                size={theme.layout.icon.sm}
-                color={theme.semantic.action}
-              />
-              <Text variant="callout" tone="action">
-                {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
-              </Text>
-            </Pressable>
+            <WriteReviewAction onWrite={onWrite} />
           )}
         </View>
       ) : null}
       {/* The control first, because somebody who has just ranked something is more
-          likely to be here to write than to read. Absent when they have not ranked
-          it — a review of something you have not placed in your list is a review with
-          no score, and the founder's route in is to rank first. */}
+          likely to be here to write than to read. *Write a review* for every reader: an
+          unranked one is taken through the first ranking by the title page, and lands in
+          the composer at the end of it. */}
       {editorial ? null : (
         <View style={styles.compose}>
-          {viewerRanked ? (
-            <Button
-              label={viewerHasReview ? 'Edit your review' : 'Write a review'}
-              kind="secondary"
-              onPress={onWrite}
-            />
-          ) : (
-            <Button label={`Rank to leave a review`} kind="secondary" onPress={onWrite} />
-          )}
+          <Button
+            label={viewerHasReview ? EDIT_REVIEW : WRITE_REVIEW}
+            kind="secondary"
+            onPress={onWrite}
+          />
         </View>
       )}
 
@@ -257,6 +255,10 @@ export function TitleReviews({
 
       {loading ? (
         <SkeletonRow count={2} />
+      ) : failed && listed.length === 0 ? (
+        <View style={styles.cards}>
+          <ReviewsFailed onRetry={onRetry} />
+        </View>
       ) : listed.length === 0 ? (
         sort === 'following' ? (
           <EmptyState
@@ -273,7 +275,7 @@ export function TitleReviews({
             body={
               editorial && ownReview
                 ? `Yours is the only review of this ${noun} so far.`
-                : `Be the first to leave a review of this ${noun}.`
+                : firstReviewLine(noun)
             }
           />
         )
@@ -335,7 +337,6 @@ export type ReviewsPreviewProps = {
   onRetry?: () => void;
   maskedFor: (review: TitleReview) => boolean;
   viewerId: string;
-  viewerRanked: boolean;
   /** The reader's own published review, from their own row; never a private note. */
   ownReview: TitleReviewsProps['ownReview'];
   onWrite: () => void;
@@ -371,7 +372,6 @@ export function ReviewsPreview({
   onRetry,
   maskedFor,
   viewerId,
-  viewerRanked,
   ownReview = null,
   onWrite,
   onSeeAll,
@@ -445,54 +445,20 @@ export function ReviewsPreview({
         />
       ))}
 
-      {failed && others.length === 0 ? (
-        <View style={styles.previewEmpty} testID="reviews-preview-failed">
-          <Text variant="footnote" tone="secondary">
-            Reviews couldn’t load.
-          </Text>
-          {onRetry ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Try loading reviews again"
-              onPress={onRetry}
-              hitSlop={{ top: 12, bottom: 12 }}
-              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
-            >
-              <Ionicons
-                name="refresh"
-                size={theme.layout.icon.sm}
-                color={theme.semantic.action}
-              />
-              <Text variant="callout" tone="action">
-                Try again
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+      {failed && others.length === 0 ? <ReviewsFailed onRetry={onRetry} /> : null}
 
+      {/**
+       * **The empty section, never a missing one** (founder, 2026-11-22): under the REVIEWS
+       * heading, *No reviews yet*, the line that invites the first by kind, and *Write a
+       * review* — for a ranked and an unranked reader alike.
+       */}
       {!failed && !showOwn && others.length === 0 ? (
         <View style={styles.previewEmpty} testID="reviews-preview-empty">
+          <Text variant="subhead">No reviews yet</Text>
           <Text variant="footnote" tone="secondary">
-            No reviews yet
+            {firstReviewLine(noun)}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={viewerRanked ? 'Write a review' : 'Rank to leave a review'}
-            onPress={onWrite}
-            hitSlop={{ top: 12, bottom: 12 }}
-            style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
-            testID="write-review"
-          >
-            <Ionicons
-              name={writeReviewIcon(viewerRanked)}
-              size={theme.layout.icon.sm}
-              color={theme.semantic.action}
-            />
-            <Text variant="callout" tone="action">
-              {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
-            </Text>
-          </Pressable>
+          <WriteReviewAction onWrite={onWrite} />
         </View>
       ) : null}
 
@@ -500,6 +466,54 @@ export function ReviewsPreview({
         <Text variant="footnote" tone="tertiary" testID="reviews-preview-only-yours">
           {`No other reviews of this ${noun} yet.`}
         </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** The compact *Write a review*: the shared Edit glyph and the action's words. */
+function WriteReviewAction({ onWrite }: { onWrite: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={WRITE_REVIEW}
+      onPress={onWrite}
+      hitSlop={{ top: 12, bottom: 12 }}
+      style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+      testID="write-review"
+    >
+      <Ionicons
+        name={EDIT_ICON_NAME}
+        size={theme.layout.icon.sm}
+        color={theme.semantic.action}
+      />
+      <Text variant="callout" tone="action">
+        {WRITE_REVIEW}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A read that failed with nothing cached: said, with the way to ask again. */
+function ReviewsFailed({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <View style={styles.previewEmpty} testID="reviews-preview-failed">
+      <Text variant="footnote" tone="secondary">
+        Reviews couldn’t load.
+      </Text>
+      {onRetry ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Try loading reviews again"
+          onPress={onRetry}
+          hitSlop={{ top: 12, bottom: 12 }}
+          style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+        >
+          <Ionicons name="refresh" size={theme.layout.icon.sm} color={theme.semantic.action} />
+          <Text variant="callout" tone="action">
+            Try again
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
