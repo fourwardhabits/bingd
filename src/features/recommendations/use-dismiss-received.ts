@@ -157,14 +157,21 @@ export function useDismissReceived(viewerId: string) {
       ),
     };
 
-    // A fetch already on its way would land the row back on screen.
-    void queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
+    // At once, in the press's own event, so the row goes on the frame the reader tapped.
     without(queryClient, viewerId, row.id);
     show(removalNotices.removed(titleOf(row)), removed);
 
     const pending = (async (): Promise<Outcome> => {
+      // A read already on its way would land the row back on screen, and cancelling one
+      // reverts the cache to what it held before that read began: so cancel, then take the
+      // row out again.
+      await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
+      without(queryClient, viewerId, row.id);
       const { outcome, code } = await send('dismiss_received_recommendation', row.id);
       if (outcome === 'committed') {
+        // A read that landed while the call was out may have carried the row from before
+        // the commit. The server now agrees it is gone.
+        without(queryClient, viewerId, row.id);
         reconcileBanner();
       } else if (outcome === 'refused') {
         // Proof nothing was written (including a backend without the function yet).
@@ -194,10 +201,14 @@ export function useDismissReceived(viewerId: string) {
     // A refused dismissal already put the row back, and there is nothing to restore.
     if (dismissal && (await dismissal) === 'refused') return;
 
+    // The same reason as `remove`: a read in flight (a pull to refresh, or the reconcile of a
+    // dismissal whose reply was lost) could answer with the dismissed list after the row is
+    // back, so it is cancelled first and the list is reconciled once the restore has landed.
+    await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
     putBack(queryClient, viewerId, target);
     const { outcome, code } = await send('restore_received_recommendation', target.row.id);
     if (outcome === 'committed') {
-      reconcileBanner();
+      reconcileAll();
     } else if (outcome === 'refused') {
       without(queryClient, viewerId, target.row.id);
       show(removalNotices.undoFailed(titleOf(target.row), code === '42501'));

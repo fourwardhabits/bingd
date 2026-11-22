@@ -56,6 +56,8 @@ const row = (id: string, over: Partial<SentRecommendation> = {}): SentRecommenda
 const VIEWER = 'account-a';
 let server: SentRecommendation[] = [];
 let sentFetches = 0;
+/** When set, the next list read waits for it and answers with what the server held then. */
+let gate: Promise<void> | null = null;
 let bannerFetches = 0;
 
 /** The tab's list, the title page's card and the hook, on one client. */
@@ -65,7 +67,11 @@ const useScreen = () => {
     queryKey: ['sent-to-you', VIEWER],
     queryFn: async () => {
       sentFetches += 1;
-      return [...server];
+      const answer = [...server];
+      const wait = gate;
+      gate = null;
+      if (wait) await wait;
+      return answer;
     },
     staleTime: Infinity,
   });
@@ -105,6 +111,7 @@ beforeEach(() => {
   server = [row('a'), row('b'), row('c')];
   sentFetches = 0;
   bannerFetches = 0;
+  gate = null;
 });
 
 describe('useDismissReceived', () => {
@@ -156,6 +163,55 @@ describe('useDismissReceived', () => {
       ['restore_received_recommendation', { p_operation_id: 'op-2', p_recommendation_id: 'b' }],
     ]);
     expect(result.current.removal.notice).toBeNull();
+  });
+
+  it('a list read in flight when Undo is pressed cannot drop the restored row (Codex, #371)', async () => {
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    // A pull to refresh leaves with the server's post-dismissal list and is slow to answer.
+    server = [row('a'), row('c')];
+    let release: () => void = () => {};
+    gate = new Promise((done) => {
+      release = done;
+    });
+    await act(async () => {
+      void result.current.queryClient.refetchQueries({ queryKey: ['sent-to-you', VIEWER] });
+    });
+
+    // Undo: the server has the row again once the restore lands.
+    mockAnswers.restore_received_recommendation = async () => {
+      server = [row('a'), row('b'), row('c')];
+      return { data: { status: 'ok', restored: true }, error: null };
+    };
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+    await act(async () => {
+      release();
+    });
+
+    await waitFor(() =>
+      expect(
+        ids(
+          result.current.queryClient.getQueryData<SentRecommendation[]>([
+            'sent-to-you',
+            VIEWER,
+          ]),
+        ),
+      ).toEqual(['a', 'b', 'c']),
+    );
+    // And it stays there: the stale read was cancelled, not merely outrun.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 20));
+    });
+    expect(
+      ids(
+        result.current.queryClient.getQueryData<SentRecommendation[]>(['sent-to-you', VIEWER]),
+      ),
+    ).toEqual(['a', 'b', 'c']);
   });
 
   it('an Undo pressed before the dismissal answered waits for it', async () => {
