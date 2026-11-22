@@ -371,7 +371,15 @@ describe('what this person likes', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('Watchlist')).toBeTruthy());
+    // The heading and the rail under it both carry the section's name, as the Feed's
+    // Trending heading and shelf do.
+    await waitFor(() =>
+      expect(
+        view
+          .getAllByLabelText('Watchlist')
+          .some((node) => node.props.accessibilityRole === 'header'),
+      ).toBe(true),
+    );
     expect(view.getByLabelText(/^Sicario/)).toBeTruthy();
   });
 
@@ -1543,17 +1551,20 @@ describe('social links', () => {
 });
 
 /**
- * **Somebody else's profile keeps the standard 12pt headings.** The 15pt headings were
- * scoped to the reader's own Profile tab (founder final polish, 2026-11-04), and the
- * sections here are the same components, so the size is asserted rather than assumed.
+ * **Somebody else's profile draws the same section headings as your own** (heading system,
+ * 2026-11-22). They were 12pt here beside 15pt on the Profile tab: the same sections, the
+ * same components, two sizes. "Profile headings serving the same purpose must match", so
+ * every section here is asked for by its role and drawn in `sectionHeading`.
  */
 describe('the headings on somebody else\'s profile', () => {
-  it('stay at 12pt', async () => {
+  it('are section headings, the size the Profile tab draws', async () => {
+    tableRows.rankings = [ranking('m1', 'Dune', 1)];
     const view = await open();
     await waitFor(() => expect(view.getByText('TOP RANKED')).toBeTruthy());
 
     const style = StyleSheet.flatten(view.getByText('TOP RANKED').props.style) as TextStyle;
-    expect(style.fontSize).toBe(12);
+    expect(style.fontSize).toBe(theme.typography.sectionHeading.fontSize);
+    expect(style.letterSpacing).toBe(theme.typography.sectionHeading.letterSpacing);
   });
 });
 

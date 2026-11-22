@@ -590,7 +590,7 @@ export default function WatchHistoryScreen() {
           return (
             <View style={styles.item}>
               {showYear ? (
-                <Text variant="sectionHeader" tone="action" style={styles.year}>
+                <Text variant="groupLabel" tone="action" style={styles.year}>
                   {String(group?.year)}
                 </Text>
               ) : null}

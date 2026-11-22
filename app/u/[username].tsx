@@ -573,9 +573,13 @@ export default function PublicProfileScreen() {
             // sheet's do (founder spec §7, 2026-11-13).
             onPressTitle={(id) => router.push(`/title/${id}`)}
             onPressProfile={(handle) => router.push(`/u/${handle}`)}
+            // Section headings, as on the reader's own profile: the same sections are one
+            // heading on both (heading system, 2026-11-22).
+            headingSize="large"
           />
 
           <TopRanked
+            headingSize="large"
             userId={subjectId}
             otherName={isSelf ? null : profile.data.name}
             onPressTitle={(id: string) => router.push(`/title/${id}`)}
@@ -599,6 +603,7 @@ export default function PublicProfileScreen() {
               tell that what they see on somebody else is what others see on them. */}
           <ProfileWatchlist
             userId={subjectId}
+            headingSize="large"
             onPressTitle={(id: string) => router.push(`/title/${id}`)}
           />
 
@@ -615,6 +620,7 @@ export default function PublicProfileScreen() {
               list directly (§Q.4). */}
           <ProfileLists
             ownerId={subjectId}
+            headingSize="large"
             isOwner={false}
             onOpenList={(listId: string) =>
               router.push(`/lists/${listId}?surface=profile_shelf`)
@@ -634,7 +640,7 @@ export default function PublicProfileScreen() {
                   publish — the same rows the title page lists under a tab called
                   Reviews, through the same predicate. Calling them Notes here was the
                   sharpest of the three names one object had. */}
-              <SectionHeader title="Reviews" />
+              <SectionHeader title="Reviews" size="large" />
               {notes.data.map((entry) => (
                 <View key={`${entry.mediaItemId}-${entry.updatedAt}`} style={styles.note}>
                   <TitleRow
@@ -701,65 +707,68 @@ export default function PublicProfileScreen() {
 
           {recent.length ? (
             <View style={styles.section}>
-              <SectionHeader title="Recent activity" />
-              {recent.map((event) => {
-                return (
-                <ActivityRow
-                  key={event.id}
-                  actorName={event.actorName}
-                  actorAvatarUri={event.actorAvatarUri}
-                  verb={sentenceOf(event).verb}
-                  tail={sentenceOf(event).tail}
-                  /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
-                     Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
-                  tailAction={sentenceOf(event).tailAction}
-                  companions={event.companions}
-                  title={event.title}
-                  year={event.year}
-                  posterUri={posterUri(event.posterPath)}
-                  // The same leading artwork the feed draws, from the same resolver —
-                  // an award row leads with its badge here too, rather than with the
-                  // initial of its name. See `ActivityLead`.
-                  lead={activityLead(event)}
-                  metadata={activityMetadata({
-                    kind: event.kind,
-                    genres: event.genres,
-                    certification: event.certification,
-                    runtimeMinutes: event.runtimeMinutes,
-                    episodeCount: event.episodeCount,
-                  })}
-                  score={event.score}
-                  bucket={event.bucket}
-                  note={event.note?.text ?? null}
-                  noteHasSpoilers={event.note?.hasSpoilers ?? false}
-                  noteMasked={shouldMask({
-                    hasSpoilers: event.note?.hasSpoilers ?? false,
-                    mediaItemId: event.mediaItemId,
-                    viewerId: viewer.id,
-                    authorId: event.actorId,
-                    watched: watched.data,
-                  })}
-                  timeLabel={new Date(event.activityAt).toLocaleDateString()}
-                  onPressTitle={() =>
-                    event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
-                  }
-                  onPressComments={() => setCommentsFor(event.id)}
-                  commentCount={commentCounts.data?.get(event.id) ?? 0}
+              <SectionHeader title="Recent activity" size="large" />
+              {/* The rows a row's step apart; the first follows the heading's row directly. */}
+              <View style={styles.rows}>
+                {recent.map((event) => {
+                  return (
+                    <ActivityRow
+                      key={event.id}
+                      actorName={event.actorName}
+                      actorAvatarUri={event.actorAvatarUri}
+                      verb={sentenceOf(event).verb}
+                      tail={sentenceOf(event).tail}
+                      /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
+                       Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
+                      tailAction={sentenceOf(event).tailAction}
+                      companions={event.companions}
+                      title={event.title}
+                      year={event.year}
+                      posterUri={posterUri(event.posterPath)}
+                      // The same leading artwork the feed draws, from the same resolver —
+                      // an award row leads with its badge here too, rather than with the
+                      // initial of its name. See `ActivityLead`.
+                      lead={activityLead(event)}
+                      metadata={activityMetadata({
+                        kind: event.kind,
+                        genres: event.genres,
+                        certification: event.certification,
+                        runtimeMinutes: event.runtimeMinutes,
+                        episodeCount: event.episodeCount,
+                      })}
+                      score={event.score}
+                      bucket={event.bucket}
+                      note={event.note?.text ?? null}
+                      noteHasSpoilers={event.note?.hasSpoilers ?? false}
+                      noteMasked={shouldMask({
+                        hasSpoilers: event.note?.hasSpoilers ?? false,
+                        mediaItemId: event.mediaItemId,
+                        viewerId: viewer.id,
+                        authorId: event.actorId,
+                        watched: watched.data,
+                      })}
+                      timeLabel={new Date(event.activityAt).toLocaleDateString()}
+                      onPressTitle={() =>
+                        event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
+                      }
+                      onPressComments={() => setCommentsFor(event.id)}
+                      commentCount={commentCounts.data?.get(event.id) ?? 0}
+                    />
+                  );
+                })}
+                {/* A later page failing keeps the rows that arrived. This section has no
+                    first-page error state at all — it is drawn only when `recent.length`
+                    is non-zero — so the footer is the only thing here that can say a page
+                    did not load, and it says it about that page rather than about the
+                    history above it. */}
+                <ActivityPageFooter
+                  isFetchingNextPage={activity.isFetchingNextPage}
+                  isError={activity.isError}
+                  hasNextPage={activity.hasNextPage}
+                  count={recent.length}
+                  onRetry={() => void activity.fetchNextPage()}
                 />
-                );
-              })}
-              {/* A later page failing keeps the rows that arrived. This section has no
-                  first-page error state at all — it is drawn only when `recent.length`
-                  is non-zero — so the footer is the only thing here that can say a page
-                  did not load, and it says it about that page rather than about the
-                  history above it. */}
-              <ActivityPageFooter
-                isFetchingNextPage={activity.isFetchingNextPage}
-                isError={activity.isError}
-                hasNextPage={activity.hasNextPage}
-                count={recent.length}
-                onRetry={() => void activity.fetchNextPage()}
-              />
+              </View>
             </View>
           ) : null}
         </ScrollView>
@@ -882,7 +891,15 @@ const styles = StyleSheet.create({
   // Taste Match had a style here — centred under the photo, two tight lines — and needs
   // none now that it is one line inside the identity column, which `ProfileIdentity`
   // already spaces.
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
-  note: { paddingBottom: theme.space[2] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
+  // Activity rows a row's step apart, as they were before the heading's gap was taken out.
+  rows: { gap: theme.space[2] },
+  // Two reviews a row's step apart, as the section's gap used to set them.
+  note: { paddingBottom: theme.space[4] },
   noteBody: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[1] },
 });

@@ -41,6 +41,8 @@ export const layout = {
    *   headingToControls  a section heading to its own controls (chips, toggles).
    *   controlsToContent  those controls to the content they act on.
    *   between            one section's end to the next section's heading.
+   *   headingToContent   a section heading to the first item it names (heading system).
+   *   headingToText      a section heading to the sentence that explains it.
    *
    * Every value is a step of `space`, so this is a vocabulary rather than new numbers:
    * screens that agreed by hand now agree by name, and a filter sheet's Genre / Decade /
@@ -52,6 +54,15 @@ export const layout = {
     headingToControls: space[2],
     controlsToContent: space[3],
     between: space[6],
+    /**
+     * A section heading's line to the first thing it names — a poster grid, a rail, a
+     * card, a row (heading system, 2026-11-22). A heading whose row carries an action keeps
+     * its 44pt row, whose half-slack under an 18pt line is 13: the same step, to the point.
+     * docs/design/heading-system.md §4.
+     */
+    headingToContent: space[3],
+    /** A section heading's line to a sentence or paragraph that explains the section. */
+    headingToText: space[2],
   },
   cardPadding: space[4],
   /** Efficient surfaces: Rankings, Search. */

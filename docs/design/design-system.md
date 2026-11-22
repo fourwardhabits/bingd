@@ -180,11 +180,13 @@ Both are bundled as local assets and never fetched at runtime — the same failu
 | `subhead` | Inter 500 | 14 / 20 | Field labels, metadata headers |
 | `footnote` | Inter 400 | 13 / 18 | Timestamps, counts |
 | `caption` | Inter 500 | 12 / 16, +0.2 tracking | Overlines, tab labels |
-| `sectionHeader` | Inter 600 | 12 / 16, +0.6 tracking, uppercase | Section headers (§8) |
+| `sectionHeading` | Inter 600 | 13 / 18, +0.5 tracking, uppercase | A section of a content page (§8, [`heading-system.md`](./heading-system.md)) |
+| `groupLabel` | Inter 600 | 12 / 16, +0.6 tracking, uppercase | A group inside a sheet, settings screen or dense list (was `sectionHeader`) |
+| `label` | Inter 500 | 12 / 16, +0.6 tracking, uppercase | A small key above or beside a value, in `text.secondary` |
 
 `score` is tabular so a column of badges does not jitter between `8.7` and `10.0`, and it is the one place the app sets a number in Inter 600 rather than serif — a serif score reads as editorial rather than as data, and DM Serif has no bold to fall back on.
 
-**Section headers moved from `subhead`/tertiary to `sectionHeader`/Maroon.** At `subhead` in `text.tertiary` they measured 5.2:1, technically passing and visibly faint — small, low-contrast, and low-weight all at once, so they read as disclaimers rather than as structure. Maroon at 8.2:1 makes them the one place brand color does organisational work, and dropping to 12pt with tracking keeps them from competing with the row titles beneath.
+**Section headers moved from `subhead`/tertiary to `sectionHeader`/Maroon** (2026-08; split into `sectionHeading` and `groupLabel` by the heading system, 2026-11-22 — see [`heading-system.md`](./heading-system.md)). At `subhead` in `text.tertiary` they measured 5.2:1, technically passing and visibly faint — small, low-contrast, and low-weight all at once, so they read as disclaimers rather than as structure. Maroon at 8.2:1 makes them the one place brand color does organisational work, and dropping to 12pt with tracking keeps them from competing with the row titles beneath.
 
 **Dynamic Type is supported** across the whole app. `reveal` and `display` cap at 130% because they are already display-scale and clip before they help; everything else scales without a ceiling. No token ever scales below 100%. Layouts that break at 200% are bugs, not acceptable trade-offs — the ranking list, the comparison screen, and settings are the three most likely to break and are called out in [`screens.md`](./screens.md).
 
@@ -412,7 +414,7 @@ Every list surface needs three distinct empty states that are frequently collaps
 
 ### Section header
 
-`sectionHeader` type in Maroon, uppercase, at the screen gutter. One line, no rule beneath it. An optional trailing chevron makes the whole header a button to the full list, which is the Apple TV shelf pattern.
+`sectionHeading` type (a section of a page) or `groupLabel` type (a group inside a sheet or list) in Maroon, uppercase, at the screen gutter — `SectionHeader`'s `size="large"` and default. One line, no rule beneath it. Roles, sizes and the spacing around them are in [`heading-system.md`](./heading-system.md). An optional trailing chevron makes the whole header a button to the full list, which is the Apple TV shelf pattern.
 
 The gutter is load-bearing and is the thing that breaks: a header rendered without the screen's horizontal padding sits flush against the display edge while every row below it is inset by 16, and the result reads as a layout bug rather than as a header. Use the component; do not re-implement it with a bare `Text`.
 

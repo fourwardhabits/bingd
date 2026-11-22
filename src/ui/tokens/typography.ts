@@ -70,12 +70,50 @@ export const typography = {
     fontVariant: ['tabular-nums'],
   },
   /**
-   * Section headers, set in Maroon (design-system.md §4). They were `subhead`
-   * in `text.tertiary`, which is small, low-contrast and low-weight all at
-   * once — technically passing at 5.2:1 and reading as a disclaimer rather
-   * than as structure.
+   * **The heading system** (docs/design/heading-system.md, founder brief 2026-11-22). Three
+   * roles below the serif page and sheet titles, and only elements with the same role
+   * share one:
+   *
+   *   sectionHeading   a section of a content page — TRENDING NOW, TOP RANKED, CAST.
+   *   groupLabel       a group inside a sheet, a settings screen or a dense list.
+   *   label            a small key above or beside a value — MATCH, DIRECTOR.
+   *
+   * **A section heading.** Every page-level section on the Feed, both profiles, the title
+   * page in both layouts, the person page, Settings' index, My lists and Watch history,
+   * through `SectionHeader size="large"`, so a heading that serves the same purpose on two
+   * screens is one heading. It replaces two treatments for one role: 15pt (+0.7) on the
+   * Feed and the reader's own profile, and 12pt on somebody else's profile and the title
+   * page.
+   *
+   * **Quieter than the 15pt it replaces, louder than 12.** Compared in context at 360 and
+   * 320pt (heading-system.md §5): at 15pt with 0.7 tracking the caps read as labels laid
+   * over the page and competed with the posts and posters under them; sentence case and
+   * the serif both read as content rather than structure, and a neutral grey lost the warm
+   * accent the page needs. 13pt with tighter tracking keeps the burgundy capitals the app
+   * is known by and sits below the artwork, the post headline and the row titles in the
+   * order a reader takes them in. Maroon on Paper is 8.2:1, on Parchment 7.4:1.
+   *
+   * Scales with the reader's text size without a ceiling, like every non-display token;
+   * the Feed's headings alone stop at 130% beside the mode toggle (`FeedHeading`).
    */
-  sectionHeader: {
+  sectionHeading: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  /**
+   * **A group label: a group inside a sheet, a settings screen or a dense list** — the
+   * filter sheets' GENRE and TIME PERIOD, Where to Watch's STREAM and RENT, a notification
+   * day, a search result kind, a year in Watch history, a Settings sub-screen's groups.
+   *
+   * The old `sectionHeader`, renamed for what it does and otherwise unchanged: it was
+   * already this size everywhere the role is drawn. One step under `sectionHeading`,
+   * because a group sits inside something that already has a heading of its own (a sheet's
+   * title, a screen's title), and two headings of one size stacked read as siblings.
+   */
+  groupLabel: {
     fontFamily: fontFamily.sansSemibold,
     fontSize: 12,
     lineHeight: 16,
@@ -83,24 +121,18 @@ export const typography = {
     textTransform: 'uppercase',
   },
   /**
-   * The same heading, one step up, for the Feed and Profile tabs only (founder final
-   * polish, 2026-11-04): TRENDING NOW and ACTIVITY on Feed; YOUR 2026, bingd AWARDS,
-   * TOP RANKED, WATCHLIST, LISTS and RECENT ACTIVITY on Profile.
-   *
-   * **A second token rather than a bigger `sectionHeader`**, because the founder scoped
-   * it to those eight headings by name and kept 12pt everywhere else — Settings, Where to
-   * Watch, the filter sheets, the Leaderboard's timeframe. Reached only through
-   * `SectionHeader`'s `size="large"`, never set as a variant by hand.
-   *
-   * **Settings' own section headings joined them on 2026-11-13** (founder spec §7:
-   * "increase section-header prominence"): the Settings index only. Its sub-screens,
-   * Where to Watch, the filter sheets and the Leaderboard keep 12pt.
+   * **A small key above or beside a value**: MATCH and SHARED in the Match explainer, an
+   * award's breakdown parts, the original title page's DIRECTOR and RUNTIME. Set in
+   * `text.secondary` (6.4:1 on Paper, 5.8:1 on Parchment), never Maroon: it is metadata about
+   * the line under it, not structure. It was three styles for one role (`caption` caps at
+   * +0.2 in tertiary, `footnote` caps in tertiary, `footnote` caps at +0.6 in secondary), and
+   * the one it settles on is the most legible of the three.
    */
-  sectionHeaderLarge: {
-    fontFamily: fontFamily.sansSemibold,
-    fontSize: 15,
-    lineHeight: 20,
-    letterSpacing: 0.7,
+  label: {
+    fontFamily: fontFamily.sansMedium,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
 } as const satisfies Record<string, TypeToken>;

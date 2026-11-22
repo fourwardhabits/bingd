@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Share, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -1134,13 +1135,13 @@ describe('social links', () => {
 });
 
 /**
- * **The Profile tab's six headings are 15pt** (founder final polish, 2026-11-04): YOUR
- * 2026, bingd AWARDS (bingd still lower-case), TOP RANKED, WATCHLIST, LISTS and RECENT
- * ACTIVITY. Somebody else's profile draws the same sections at 12pt — see
- * `PublicProfileScreen.test.tsx`.
+ * **The Profile tab's six headings are section headings** (heading system, 2026-11-22):
+ * YOUR 2026, bingd AWARDS (bingd still lower-case), TOP RANKED, WATCHLIST, LISTS and RECENT
+ * ACTIVITY, in `sectionHeading` — the size somebody else's profile now draws the same
+ * sections at, too (`PublicProfileScreen.test.tsx`).
  */
 describe('the Profile headings', () => {
-  it('draws all six at 15pt', async () => {
+  it('draws all six as section headings', async () => {
     mockTables.watchlist = [
       {
         user_id: 'user-1',
@@ -1153,7 +1154,7 @@ describe('the Profile headings', () => {
     await waitFor(() => expect(view.getByText('WATCHLIST')).toBeTruthy());
 
     // bingd AWARDS is stubbed in this file (see the mock above), so here it is the size
-    // the tab asks for; `ProfileAwards.test.tsx` asserts the section draws it at 15pt.
+    // the tab asks for; `ProfileAwards.test.tsx` asserts the section draws it at that size.
     expect(view.getByTestId('awards-heading-large')).toBeTruthy();
 
     const headings = [/^YOUR \d{4}$/, 'TOP RANKED', 'WATCHLIST', 'LISTS', 'RECENT ACTIVITY'];
@@ -1161,7 +1162,9 @@ describe('the Profile headings', () => {
       const style = StyleSheet.flatten(view.getByText(heading).props.style) as TextStyle | undefined;
       return [String(heading), style?.fontSize];
     });
-    expect(sizes).toEqual(headings.map((heading) => [String(heading), 15]));
+    expect(sizes).toEqual(
+      headings.map((heading) => [String(heading), theme.typography.sectionHeading.fontSize]),
+    );
   });
 });
 

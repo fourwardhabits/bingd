@@ -35,7 +35,7 @@ export function StreakCelebrationCard({ weeks }: StreakCelebrationCardProps) {
       <Text variant="title1" allowFontScaling={false} style={styles.flame}>
         🔥
       </Text>
-      <Text variant="caption" tone="secondary">
+      <Text variant="label" tone="secondary">
         STREAK CONTINUED
       </Text>
       <Text variant="title2" style={styles.centred}>

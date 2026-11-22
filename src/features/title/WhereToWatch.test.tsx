@@ -413,11 +413,11 @@ describe('the section treatment', () => {
     const view = await open();
     const heading = view.getByText('WHERE TO WATCH');
 
-    // The same token and tone `SectionHeader` uses everywhere else. Written by hand here
-    // only because SectionHeader owns a 44pt full-width row, and this heading has to
-    // share a line with the logos.
-    expect(flat(heading).fontFamily).toBe(theme.typography.sectionHeader.fontFamily);
-    expect(flat(heading).fontSize).toBe(theme.typography.sectionHeader.fontSize);
+    // The same token and tone `SectionHeader` gives every section heading on the title
+    // page (heading system, 2026-11-22). Written by hand here only because SectionHeader
+    // owns a full-width row, and this heading has to share a line with the logos.
+    expect(flat(heading).fontFamily).toBe(theme.typography.sectionHeading.fontFamily);
+    expect(flat(heading).fontSize).toBe(theme.typography.sectionHeading.fontSize);
     expect(flat(heading).color).toBe(theme.semantic.action);
   });
 
@@ -429,7 +429,7 @@ describe('the section treatment', () => {
     expect(flat(credit).color).toBe(theme.text.tertiary);
     // Subordinate to the heading it sits under, which is the whole of "demoted".
     expect(Number(flat(credit).fontSize)).toBeLessThanOrEqual(
-      theme.typography.sectionHeader.fontSize,
+      theme.typography.sectionHeading.fontSize,
     );
   });
 

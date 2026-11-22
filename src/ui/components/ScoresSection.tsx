@@ -215,7 +215,7 @@ export function ScoresSection({
           its own: that component owns a 44pt row and a full-width flex layout, and this
           heading is a label above a row. Casing is a style, so `uppercase` is
           applied rather than typed: a screen reader must not spell out "S C O R E S". */}
-      <Text variant="sectionHeader" tone="action" style={styles.heading}>
+      <Text variant="sectionHeading" tone="action" style={styles.heading}>
         SCORES
       </Text>
 

@@ -224,7 +224,7 @@ export function Section({
 }) {
   return (
     <View style={styles.section}>
-      <Text variant="sectionHeader" tone="action">
+      <Text variant="groupLabel" tone="action">
         {title.toUpperCase()}
       </Text>
       <View

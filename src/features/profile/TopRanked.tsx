@@ -277,6 +277,12 @@ export function TopRanked({
 const WALL = 6;
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
-  tabs: { paddingBottom: theme.space[1] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
+  // The filter is a control under the heading: its content starts a control's step below.
+  tabs: { paddingBottom: theme.layout.section.controlsToContent },
 });

@@ -527,7 +527,7 @@ export default function PersonScreen() {
                 testID="filmography-header"
                 leading={
                   <Text
-                    variant="sectionHeaderLarge"
+                    variant="sectionHeading"
                     tone="action"
                     accessibilityRole="header"
                     accessibilityLabel="Filmography"

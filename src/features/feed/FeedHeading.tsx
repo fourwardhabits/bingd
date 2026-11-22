@@ -35,7 +35,7 @@ export const FEED_HEADING_MAX_SCALE = theme.typography.display.maxFontSizeMultip
  * had them at three sizes: LEADERBOARD and DISCOVER PEOPLE were drawn with `fit`, which
  * shrank each onto one line by however much it needed, and TRENDING NOW was not.
  *
- * It is `SectionHeader` at `size="large"` (`sectionHeaderLarge`, 15pt, Maroon, uppercase)
+ * It is `SectionHeader` at `size="large"` (`sectionHeading`, 13pt, Maroon, uppercase)
  * with one ceiling for all of them, `FEED_HEADING_MAX_SCALE`. Nothing is shrunk to fit, so
  * at every text size every heading on the tab is the same size as every other; a long
  * heading wraps at a word instead. RECENT ACTIVITY is the same type in a secondary place —

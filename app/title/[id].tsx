@@ -2300,8 +2300,13 @@ export default function TitleScreen() {
    * module is inset; below it the page is ordinary Paper, as wide as every other screen.
    *
    * **Vertically efficient.** The heading is its own line, not a 44pt row (`tight`), and
-   * the body starts `gap` below it: 8pt by default, less a component's own top padding
-   * where it has one, so the words under every heading start the same distance down.
+   * the body starts `gap` below it: `section.headingToContent` (12pt) by default — the
+   * step every section heading in the app keeps to the first thing it names, the profile's
+   * shelves included (heading system, 2026-11-22) — less a component's own top padding
+   * where it has one. Prose takes less: a paragraph's own leading supplies the rest.
+   *
+   * **A section heading** (`size="large"`, `sectionHeading`): the same heading the profile
+   * draws over its shelves, since the two serve the same purpose (heading system).
    *
    * **An action's target stays off the rails.** A heading action's slop reaches into the
    * 20pt seam above and the body's 8pt padding below (`TIGHT_SLOP`), so the Cast and
@@ -2314,7 +2319,7 @@ export default function TitleScreen() {
     heading: string,
     body: ReactNode,
     {
-      gap = theme.space[2],
+      gap = theme.layout.section.headingToContent,
       action,
     }: {
       gap?: number;
@@ -2327,6 +2332,7 @@ export default function TitleScreen() {
         actionLabel={action?.label}
         actionAccessibilityLabel={action?.accessibilityLabel}
         onPressAction={action?.onPress}
+        size="large"
         wrap
         tight
       />
@@ -2507,7 +2513,10 @@ export default function TitleScreen() {
       {isSeason
         ? immersiveSection('episodes', 'Episodes', tabContent('episodes'))
         : null}
-      {isSeries ? immersiveSection('seasons', 'Seasons', tabContent('seasons'), { gap: 0 }) : null}
+      {isSeries
+        ? // The season rows carry 4pt of their own above the first thumbnail.
+          immersiveSection('seasons', 'Seasons', tabContent('seasons'), { gap: theme.space[2] })
+        : null}
 
       {cast.length
         ? immersiveSection(
@@ -2642,7 +2651,7 @@ export default function TitleScreen() {
             style={({ pressed }) => [styles.moreDetailsToggle, pressed && styles.pressed]}
             testID="more-details-toggle"
           >
-            <Text variant="sectionHeader" tone="action">
+            <Text variant="sectionHeading" tone="action">
               MORE DETAILS
             </Text>
             <Ionicons
@@ -3580,8 +3589,8 @@ function Detail({ label, value }: { label: string; value: string | null }) {
 
   return (
     <View style={styles.detail}>
-      <Text variant="caption" tone="tertiary">
-        {label.toUpperCase()}
+      <Text variant="label" tone="secondary">
+        {label}
       </Text>
       <Text variant="body">{value}</Text>
     </View>
@@ -3751,8 +3760,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     gap: theme.space[1],
     minHeight: theme.layout.minTapTarget,
-    marginTop: -(theme.layout.minTapTarget - 16) / 2,
-    marginBottom: -(theme.layout.minTapTarget - 16) / 2,
+    // The 44pt target drawn around one `sectionHeading` line, its slack taken back above
+    // and below so the words sit where every other section heading's do.
+    marginTop: -(theme.layout.minTapTarget - theme.typography.sectionHeading.lineHeight) / 2,
+    marginBottom: -(theme.layout.minTapTarget - theme.typography.sectionHeading.lineHeight) / 2,
     paddingHorizontal: theme.layout.gutter,
   },
   facts: {
