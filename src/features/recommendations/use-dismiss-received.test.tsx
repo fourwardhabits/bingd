@@ -317,6 +317,84 @@ describe('useDismissReceived', () => {
     );
   });
 
+  it('a second removal after Undo waits for the restore, so the server ends dismissed (Codex, #371)', async () => {
+    const restoring = deferred();
+    mockAnswers.restore_received_recommendation = async () => {
+      const answer = await restoring.promise;
+      mockDismissed.delete('b');
+      return answer;
+    };
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    let undone: Promise<void> = Promise.resolve();
+    let again: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      undone = result.current.removal.undo();
+    });
+    await act(async () => {
+      again = result.current.removal.remove(row('b'));
+    });
+    // The second dismissal has not left: it would overtake the restore and do nothing.
+    expect(calls('dismiss_received_recommendation')).toHaveLength(1);
+
+    await act(async () => {
+      restoring.resolve({ data: { status: 'ok', restored: true }, error: null });
+      await undone;
+      await again;
+    });
+
+    expect(mockRpc.mock.calls.map(([n]) => n)).toEqual([
+      'dismiss_received_recommendation',
+      'restore_received_recommendation',
+      'dismiss_received_recommendation',
+    ]);
+    expect(mockDismissed.has('b')).toBe(true);
+    await waitFor(() =>
+      expect(
+        ids(
+          result.current.queryClient.getQueryData<SentRecommendation[]>([
+            'sent-to-you',
+            VIEWER,
+          ]),
+        ),
+      ).toEqual(['a', 'c']),
+    );
+  });
+
+  it('a removal after an Undo whose reply was lost replays the restore first', async () => {
+    let restores = 0;
+    mockAnswers.restore_received_recommendation = async () => {
+      restores += 1;
+      return restores === 1
+        ? { data: null, error: { code: '', message: 'Network request failed' } }
+        : { data: { status: 'already_applied' }, error: null };
+    };
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    const sent = mockRpc.mock.calls.map(([name, args]) => [
+      name,
+      (args as { p_operation_id: string }).p_operation_id,
+    ]);
+    expect(sent).toEqual([
+      ['dismiss_received_recommendation', 'op-1'],
+      ['restore_received_recommendation', 'op-2'],
+      ['restore_received_recommendation', 'op-2'],
+      ['dismiss_received_recommendation', 'op-3'],
+    ]);
+  });
+
   it('an Undo pressed before the dismissal answered waits for it', async () => {
     const pending = deferred();
     mockAnswers.dismiss_received_recommendation = () => pending.promise;

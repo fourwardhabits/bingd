@@ -84,10 +84,17 @@ type Placed = { row: SentRecommendation; index: number };
 
 /** A removal an Undo can act on: where the row sat, and the dismissal it has to wait for. */
 type Removed = Placed & {
-  /** The dismissal's own operation id, kept so an Undo can replay it through the ledger. */
-  operationId: string;
   /** How the dismissal ended, once it has. */
   dismissal: Promise<Outcome>;
+};
+
+type Write = 'dismiss_received_recommendation' | 'restore_received_recommendation';
+
+/** One recommendation's writes, in order, and the last one whose answer was lost. */
+type Lane = {
+  tail: Promise<unknown>;
+  seq: number;
+  unsettled: { fn: Write; operationId: string } | null;
 };
 
 const without = (queryClient: QueryClient, viewerId: string, id: string) =>
@@ -144,7 +151,7 @@ export function useDismissReceived(viewerId: string) {
   };
 
   const send = async (
-    fn: 'dismiss_received_recommendation' | 'restore_received_recommendation',
+    fn: Write,
     recommendationId: string,
     operationId: string = newOperationId(),
   ): Promise<{ outcome: Outcome; code: string | undefined }> => {
@@ -156,6 +163,57 @@ export function useDismissReceived(viewerId: string) {
     return { outcome: classifyWrite(serverError), code: serverError?.code ?? undefined };
   };
 
+  /**
+   * **One lane per recommendation** (Codex, #371). Every write about one row — a dismissal,
+   * its Undo, a second removal after that Undo — runs after the one before it has answered,
+   * so the server sees them in the order the reader made them. Two of them in flight at once
+   * could otherwise arrive reversed: a dismissal that reaches the server before an
+   * uncommitted restore finds the row already dismissed and does nothing, and the restore
+   * then lands behind it (the mirror of `races/recommendation-dismiss.mjs` D3).
+   *
+   * A write whose reply was lost is `unsettled`: it may still be running. The next write in
+   * the lane first replays it under its own operation id, which the ledger makes wait for the
+   * original's transaction and answer `already_applied` (or apply it now, if it never
+   * arrived). Only then is the new write sent. If even that cannot be established, the new
+   * write is not sent and the reader is told.
+   */
+  const lanes = useRef(new Map<string, Lane>());
+  const laneOf = (id: string) => {
+    let lane = lanes.current.get(id);
+    if (!lane) {
+      lane = { tail: Promise.resolve(), seq: 0, unsettled: null };
+      lanes.current.set(id, lane);
+    }
+    return lane;
+  };
+  /** Runs `task` after every earlier write for this row. `isLatest` is false once another is queued. */
+  const enqueue = <T>(
+    id: string,
+    task: (isLatest: () => boolean) => Promise<T>,
+  ): Promise<T> => {
+    const lane = laneOf(id);
+    const seq = (lane.seq += 1);
+    const run = lane.tail.then(() => task(() => lane.seq === seq));
+    lane.tail = run.catch(() => undefined);
+    return run;
+  };
+  /** Sends one write with a fresh operation id, remembering it if nobody heard the answer. */
+  const write = async (fn: Write, id: string) => {
+    const operationId = newOperationId();
+    const result = await send(fn, id, operationId);
+    laneOf(id).unsettled = result.outcome === 'unknown' ? { fn, operationId } : null;
+    return result;
+  };
+  /** Establishes how this row's last unanswered write ended, by replaying it. */
+  const settle = async (id: string): Promise<{ ok: boolean; code?: string }> => {
+    const lane = laneOf(id);
+    if (!lane.unsettled) return { ok: true };
+    const replay = await send(lane.unsettled.fn, id, lane.unsettled.operationId);
+    if (replay.outcome !== 'committed') return { ok: false, code: replay.code };
+    lane.unsettled = null;
+    return { ok: true };
+  };
+
   const remove = (row: SentRecommendation) => {
     const rows = queryClient.getQueryData<SentRecommendation[]>(sentKey(viewerId)) ?? [];
     const placed: Placed = {
@@ -165,33 +223,42 @@ export function useDismissReceived(viewerId: string) {
         rows.findIndex((r) => r.id === row.id),
       ),
     };
-    const operationId = newOperationId();
 
     // At once, in the press's own event, so the row goes on the frame the reader tapped.
     without(queryClient, viewerId, row.id);
 
-    const dismissal = (async (): Promise<Outcome> => {
+    const dismissal = enqueue(row.id, async (isLatest): Promise<Outcome> => {
       // A read already on its way would land the row back on screen, and cancelling one
       // reverts the cache to what it held before that read began: so cancel, then take the
       // row out again.
       await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
       without(queryClient, viewerId, row.id);
-      const { outcome, code } = await send(
-        'dismiss_received_recommendation',
-        row.id,
-        operationId,
-      );
+
+      // An earlier Undo of this row whose reply was lost has to have finished first.
+      const prior = await settle(row.id);
+      if (!prior.ok) {
+        reconcileAll();
+        show(removalNotices.failed(titleOf(row), prior.code === '42501'));
+        return 'refused';
+      }
+
+      const { outcome, code } = await write('dismiss_received_recommendation', row.id);
       if (outcome === 'committed') {
         // A read started while the call was out (a pull to refresh) may carry the row from
         // before the commit, whether it has landed or not. Cancel what is still in flight,
         // take the row out of whatever did land, and read the list again now that the server
-        // agrees it is gone (Codex, #371).
+        // agrees it is gone (Codex, #371). An Undo already queued behind this reconciles
+        // for itself.
         await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
-        without(queryClient, viewerId, row.id);
-        reconcileAll();
+        if (isLatest()) {
+          without(queryClient, viewerId, row.id);
+          reconcileAll();
+        } else {
+          reconcileBanner();
+        }
       } else if (outcome === 'refused') {
         // Proof nothing was written (including a backend without the function yet).
-        putBack(queryClient, viewerId, placed);
+        if (isLatest()) putBack(queryClient, viewerId, placed);
         if (undoable.current?.row.id === row.id || !undoable.current) {
           show(removalNotices.failed(titleOf(row), code === '42501'));
         }
@@ -199,9 +266,9 @@ export function useDismissReceived(viewerId: string) {
         reconcileAll();
       }
       return outcome;
-    })();
+    });
 
-    show(removalNotices.removed(titleOf(row)), { ...placed, operationId, dismissal });
+    show(removalNotices.removed(titleOf(row)), { ...placed, dismissal });
     return dismissal;
   };
 
@@ -209,48 +276,40 @@ export function useDismissReceived(viewerId: string) {
     const target = undoable.current;
     show(null);
     if (!target) return;
+    const id = target.row.id;
 
-    const outcome = await target.dismissal;
-    // A refused dismissal already put the row back, and there is nothing to restore.
-    if (outcome === 'refused') return;
+    await enqueue(id, async (isLatest) => {
+      // Already answered: the lane ran it first.
+      const outcome = await target.dismissal;
+      // A refused dismissal already put the row back, and there is nothing to restore.
+      if (outcome === 'refused') return;
 
-    /**
-     * **A dismissal nobody heard back from may still be running** (Codex, #371). A restore that
-     * reaches the server before it commits finds nothing to restore and does not wait
-     * (`races/recommendation-dismiss.mjs` D3), and the dismissal then lands behind it. So the
-     * dismissal is replayed under its own operation id first: the ledger makes that wait for
-     * the original's transaction, then answers `already_applied` (it committed) or applies it
-     * now (it never did). Either way it has finished, and the restore that follows is
-     * ordered after it. If even that cannot be established, the Undo says so rather than
-     * guessing.
-     */
-    if (outcome === 'unknown') {
-      const replay = await send(
-        'dismiss_received_recommendation',
-        target.row.id,
-        target.operationId,
-      );
-      if (replay.outcome !== 'committed') {
+      // A dismissal nobody heard back from may still be running (Codex, #371): a restore
+      // that reached the server first would find nothing to restore and not wait (D3).
+      const prior = await settle(id);
+      if (!prior.ok) {
         reconcileAll();
-        show(removalNotices.undoFailed(titleOf(target.row), replay.code === '42501'));
+        show(removalNotices.undoFailed(titleOf(target.row), prior.code === '42501'));
         return;
       }
-    }
 
-    // The same reason as `remove`: a read in flight (a pull to refresh, or the reconcile of a
-    // dismissal whose reply was lost) could answer with the dismissed list after the row is
-    // back, so it is cancelled first and the list is reconciled once the restore has landed.
-    await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
-    putBack(queryClient, viewerId, target);
-    const restored = await send('restore_received_recommendation', target.row.id);
-    if (restored.outcome === 'committed') {
-      reconcileAll();
-    } else if (restored.outcome === 'refused') {
-      without(queryClient, viewerId, target.row.id);
-      show(removalNotices.undoFailed(titleOf(target.row), restored.code === '42501'));
-    } else {
-      reconcileAll();
-    }
+      // The same reason as `remove`: a read in flight (a pull to refresh, or the reconcile
+      // of a dismissal whose reply was lost) could answer with the dismissed list after the
+      // row is back, so it is cancelled first and the list is reconciled once the restore
+      // has landed. A removal queued behind this one owns the screen from here.
+      await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
+      if (isLatest()) putBack(queryClient, viewerId, target);
+      const restored = await write('restore_received_recommendation', id);
+      if (restored.outcome === 'committed') {
+        if (isLatest()) reconcileAll();
+        else reconcileBanner();
+      } else if (restored.outcome === 'refused') {
+        if (isLatest()) without(queryClient, viewerId, id);
+        show(removalNotices.undoFailed(titleOf(target.row), restored.code === '42501'));
+      } else {
+        reconcileAll();
+      }
+    });
   };
 
   return {
