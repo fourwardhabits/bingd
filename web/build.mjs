@@ -571,11 +571,11 @@ const styles = `
          these pages do not justify a build step to share them. */
       :root {
         --parchment: #f5ebdd;
-        --raised: #fcf6ec;
+        --raised: #fbf8f4;
         --maroon: #773744;
         --ink: #242326;
         --secondary: #5f5a56;
-        --hairline: rgba(36, 35, 38, 0.08);
+        --hairline: rgba(36, 35, 38, 0.12);
       }
 
       * { box-sizing: border-box; }
@@ -646,9 +646,9 @@ const styles = `
         display: block;
         min-height: 48px;
         padding: 0.875rem 1.25rem;
-        border-radius: 0.625rem;
+        border-radius: 0.5rem;
         background: var(--maroon);
-        color: var(--raised);
+        color: var(--parchment);
         font-size: 1rem;
         font-weight: 500;
         text-decoration: none;
@@ -1557,7 +1557,7 @@ const SUPPORT_STYLES = `
         width: 100%;
         max-width: 22rem;
         text-align: center;
-        color: var(--raised);
+        color: var(--parchment);
       }
 
       .help-cards { display: grid; gap: 0.75rem; margin: 0 0 1rem; }
@@ -2330,7 +2330,7 @@ const LANDING_STYLES = `
       /* --------------------------------------------------------------- masthead */
 
       .masthead { display: flex; align-items: center; gap: 0.5rem; padding-top: 1.25rem; }
-      .masthead img { width: 30px; height: 30px; border-radius: 7px; }
+      .masthead img { width: 40px; height: 24px; }
       .masthead .mark {
         font-family: 'DM Serif Display', Georgia, serif;
         font-size: 1.5rem;
@@ -2443,7 +2443,7 @@ const LANDING_STYLES = `
         aspect-ratio: 2 / 3;
         border-radius: 0.5rem;
         overflow: hidden;
-        background: linear-gradient(160deg, #8a4553, var(--maroon) 60%, #5e2a35);
+        background: var(--maroon);
       }
       .demo-tile {
         position: absolute;
@@ -2507,7 +2507,7 @@ const LANDING_STYLES = `
         align-items: center;
         gap: 0.625rem;
         padding: 0.3125rem 0.75rem 0.3125rem 0.5rem;
-        border-radius: 0.625rem;
+        border-radius: 0.5rem;
         background: var(--paper);
         border: 1px solid var(--hairline);
         animation: demo-rise 320ms ease both;
@@ -3241,7 +3241,7 @@ await writeFile(
 
   <body>
     <header class="wrap masthead">
-      <img src="/bingd-icon.png" width="30" height="30" alt="" />
+      <img src="/bingd-mark.svg" width="40" height="24" alt="" />
       <span class="mark">bingd.</span>
     </header>
 
