@@ -1,0 +1,35 @@
+# UNVERIFIED: never run. See README.md in this folder.
+# Ranks one title the demo account has not ranked, stopping for the comparison and the score.
+# THIS WRITES TO THE ACCOUNT: it adds a real ranking. Run it only on the demo account, and undo
+# the ranking afterwards so the next run starts from the same state.
+appId: app.bingd
+---
+- launchApp:
+    clearState: false
+
+- tapOn: 'Search'
+- tapOn:
+    text: '.*Search.*'
+- inputText: ${TITLE}
+- waitForAnimationToEnd
+- tapOn: ${TITLE}
+
+- extendedWaitUntil:
+    visible: 'Rank'
+    timeout: 20000
+- tapOn: 'Rank'
+- tapOn: 'I liked it'
+- waitForAnimationToEnd
+- takeScreenshot: compare
+
+# The number of comparisons depends on the account's list. Keep choosing until the score shows.
+- repeat:
+    while:
+      notVisible: 'Add details'
+    times: 12
+    commands:
+      - tapOn:
+          point: '30%,70%'
+      - waitForAnimationToEnd
+
+- takeScreenshot: reveal

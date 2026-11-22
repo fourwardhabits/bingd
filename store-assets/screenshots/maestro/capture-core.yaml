@@ -1,0 +1,55 @@
+# UNVERIFIED: never run. See README.md in this folder.
+# Walks the tabs of a build already signed in to the demo account and saves one raw PNG per
+# scene, using the same ids as ../manifest/scenes.mjs.
+appId: app.bingd
+---
+- launchApp:
+    clearState: false
+
+- tapOn: 'Feed'
+- extendedWaitUntil:
+    visible: 'Trending'
+    timeout: 20000
+- takeScreenshot: feed
+
+- tapOn: 'Collection'
+- extendedWaitUntil:
+    visible: 'Watchlist'
+    timeout: 20000
+- takeScreenshot: collection-movies
+
+- tapOn: 'Watchlist'
+- waitForAnimationToEnd
+- takeScreenshot: watchlist
+- tapOn: 'Watched'
+
+- tapOn: 'Movies'
+- tapOn: 'TV'
+- waitForAnimationToEnd
+- takeScreenshot: collection-tv
+- tapOn: 'TV'
+- tapOn: 'Movies'
+
+- tapOn: 'For you'
+- extendedWaitUntil:
+    visible: 'Filters'
+    timeout: 20000
+- takeScreenshot: for-you
+
+- tapOn: 'Group Picks'
+- waitForAnimationToEnd
+- takeScreenshot: group-picks
+- back
+
+- tapOn: 'Sent to you'
+- waitForAnimationToEnd
+- takeScreenshot: sent-to-you
+- back
+
+- tapOn: 'Profile'
+- waitForAnimationToEnd
+- takeScreenshot: profile
+
+- tapOn: 'See all'
+- waitForAnimationToEnd
+- takeScreenshot: awards
