@@ -173,7 +173,9 @@ describe('the frame', () => {
     for (const name of ['Followers: 12', 'Following: 34', 'Movies: 210', 'TV Shows: 18']) {
       const cell = view.getByLabelText(name);
       const style = StyleSheet.flatten(
-        typeof cell.props.style === 'function' ? cell.props.style({ pressed: false }) : cell.props.style,
+        typeof cell.props.style === 'function'
+          ? cell.props.style({ pressed: false })
+          : cell.props.style,
       );
       expect(style.minHeight).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
     }
@@ -292,18 +294,41 @@ describe('the labels at the reader’s width and text size', () => {
 });
 
 describe('inside the profile card', () => {
-  it('drops the frame’s own side margin and keeps everything else about it', async () => {
+  /**
+   * **A section of the card, not a card within it** (founder, 2026-11-22): inset by the
+   * card's content gutter like the identity and bio, with no outline or radius of its own.
+   * The rules between the four stay, and so does every cell's 44pt target.
+   */
+  it('is inset by the card gutter and draws no frame; the standalone row keeps its frame', async () => {
     const inCard = await render(<StatRow centered inCard stats={STATS} />);
     const alone = await draw();
     const frame = (view: Awaited<ReturnType<typeof draw>>) =>
       StyleSheet.flatten(first(view.getAllByTestId('stat-rule')).parent?.props.style);
 
-    expect(frame(inCard).marginHorizontal).toBe(0);
+    expect(frame(inCard).marginHorizontal).toBe(theme.layout.gutter);
+    expect(frame(inCard).borderWidth ?? 0).toBe(0);
+    expect(frame(inCard).borderRadius ?? 0).toBe(0);
+    expect(frame(inCard).paddingHorizontal ?? 0).toBe(0);
+    expect(frame(inCard).backgroundColor).toBeUndefined();
+
     expect(frame(alone).marginHorizontal).toBe(theme.layout.gutter);
-    for (const style of [frame(inCard), frame(alone)]) {
-      expect(style.paddingHorizontal).toBe(theme.space[2]);
-      expect(style.borderWidth).toBe(StyleSheet.hairlineWidth * 2);
-      expect(style.borderRadius).toBe(theme.radius.card);
+    expect(frame(alone).paddingHorizontal).toBe(theme.space[2]);
+    expect(frame(alone).borderWidth).toBe(StyleSheet.hairlineWidth * 2);
+    expect(frame(alone).borderRadius).toBe(theme.radius.card);
+  });
+
+  it('keeps the three rules and four whole 44pt targets', async () => {
+    const view = await render(<StatRow centered inCard stats={STATS} />);
+    expect(view.getAllByTestId('stat-rule')).toHaveLength(3);
+    for (const name of ['Followers: 12', 'Following: 34', 'Movies: 210', 'TV Shows: 18']) {
+      const cell = view.getByLabelText(name);
+      const style = StyleSheet.flatten(
+        typeof cell.props.style === 'function'
+          ? cell.props.style({ pressed: false })
+          : cell.props.style,
+      );
+      expect(style.minHeight).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      expect(style.alignItems).toBe('center');
     }
   });
 });
@@ -333,14 +358,19 @@ describe('measured from the font', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require('path') as typeof import('path');
   const font = fs.readFileSync(
-    path.join(process.cwd(), 'node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'),
+    path.join(
+      process.cwd(),
+      'node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf',
+    ),
   );
 
   const ems = (() => {
     const u16 = (o: number) => font.readUInt16BE(o);
     const tables: Record<string, number> = {};
     for (let i = 0; i < u16(4); i++) {
-      tables[font.toString('latin1', 12 + 16 * i, 16 + 16 * i)] = font.readUInt32BE(20 + 16 * i);
+      tables[font.toString('latin1', 12 + 16 * i, 16 + 16 * i)] = font.readUInt32BE(
+        20 + 16 * i,
+      );
     }
     const unitsPerEm = u16(tables.head! + 18);
     const metrics = u16(tables.hhea! + 34);
@@ -381,7 +411,9 @@ describe('measured from the font', () => {
   it('fits every label on one line at or above the 0.85 floor, 320–430pt, every standard size', async () => {
     // The frame and item insets as rendered in the card, not restated.
     const view = await render(<StatRow centered inCard stats={STATS} />);
-    const frame = StyleSheet.flatten(first(view.getAllByTestId('stat-rule')).parent?.props.style);
+    const frame = StyleSheet.flatten(
+      first(view.getAllByTestId('stat-rule')).parent?.props.style,
+    );
     const item = StyleSheet.flatten(
       view.getByRole('button', { name: 'TV Shows: 18' }).props.style,
     );
@@ -391,15 +423,15 @@ describe('measured from the font', () => {
         2 * theme.layout.gutter - // the card's margin
         2 * line - // the card's border
         2 * (frame.marginHorizontal as number) -
-        2 * line - // the frame's border
-        2 * (frame.paddingHorizontal as number) -
+        2 * (frame.borderWidth ? line : 0) - // the row's own frame, none in the card
+        2 * ((frame.paddingHorizontal as number | undefined) ?? 0) -
         3 * line) / // the rules
         4 -
       2 * (item.paddingHorizontal as number);
 
-    expect(quarterAt(320)).toBeCloseTo(58.25, 2);
-    expect(quarterAt(360)).toBeCloseTo(68.25, 2);
-    expect(quarterAt(390)).toBeCloseTo(75.75, 2);
+    expect(quarterAt(320)).toBeCloseTo(58.75, 2);
+    expect(quarterAt(360)).toBeCloseTo(68.75, 2);
+    expect(quarterAt(390)).toBeCloseTo(76.25, 2);
 
     for (let width = 320; width <= 430; width++) {
       for (const fontScale of [0.823, 1, 1.118, 1.235, 1.3, 1.353, 1.49]) {
