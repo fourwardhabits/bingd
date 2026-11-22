@@ -169,10 +169,13 @@ export function useDismissReceived(viewerId: string) {
       without(queryClient, viewerId, row.id);
       const { outcome, code } = await send('dismiss_received_recommendation', row.id);
       if (outcome === 'committed') {
-        // A read that landed while the call was out may have carried the row from before
-        // the commit. The server now agrees it is gone.
+        // A read started while the call was out (a pull to refresh) may carry the row from
+        // before the commit, whether it has landed or not. Cancel what is still in flight,
+        // take the row out of whatever did land, and read the list again now that the server
+        // agrees it is gone (Codex, #371).
+        await queryClient.cancelQueries({ queryKey: sentKey(viewerId) });
         without(queryClient, viewerId, row.id);
-        reconcileBanner();
+        reconcileAll();
       } else if (outcome === 'refused') {
         // Proof nothing was written (including a backend without the function yet).
         putBack(queryClient, viewerId, removed);

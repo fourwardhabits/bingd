@@ -22,6 +22,12 @@ let mockWatchlist: unknown[] = [];
  * screen down with it would prove nothing about what the bookmark does.
  */
 let mockRpcErrors: Record<string, unknown> = {};
+/**
+ * Recommendations the server holds as removed from Sent to You (20261130001200): written by a
+ * successful `dismiss_received_recommendation` / `restore_received_recommendation`, and left
+ * out of both list reads, as the recipient policy does.
+ */
+const mockDismissed = new Set<string>();
 /** How long an RPC takes to answer, in ms: a slow server, for the open-menu race. */
 const mockRpcDelayMs: Record<string, number> = {};
 /**
@@ -45,7 +51,15 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      const answer = { data: error ? null : (mockRpcResults[name] ?? null), error };
+      const id = (args as { p_recommendation_id?: string } | null)?.p_recommendation_id ?? '';
+      if (!error && name === 'dismiss_received_recommendation') mockDismissed.add(id);
+      if (!error && name === 'restore_received_recommendation') mockDismissed.delete(id);
+      const served = mockRpcResults[name] ?? null;
+      const data =
+        Array.isArray(served) && name.startsWith('recommendations_to_me')
+          ? served.filter((row: { id: string }) => !mockDismissed.has(row.id))
+          : served;
+      const answer = { data: error ? null : data, error };
       const delay = mockRpcDelayMs[name] ?? 0;
       return delay > 0
         ? new Promise((done) => setTimeout(() => done(answer), delay))
@@ -225,6 +239,7 @@ beforeEach(() => {
   mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   resetMarkSentSeen();
+  mockDismissed.clear();
   // Re-tapping's tests leave the tab unfocused, and an unfocused tab marks nothing.
   mockNavigation.focused = true;
 });

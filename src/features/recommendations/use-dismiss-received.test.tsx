@@ -17,13 +17,19 @@ import type { TitleRecommendation } from './use-title-recommendations';
 type Answer = { data: unknown; error: unknown };
 const mockRpc = jest.fn();
 let mockAnswers: Record<string, () => Promise<Answer>> = {};
+/** What the server holds as dismissed, written by the default answers below. */
+const mockDismissed = new Set<string>();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const answer = mockAnswers[name];
-      return answer ? answer() : Promise.resolve({ data: { status: 'ok' }, error: null });
+      if (answer) return answer();
+      const id = (args as { p_recommendation_id?: string }).p_recommendation_id ?? '';
+      if (name === 'dismiss_received_recommendation') mockDismissed.add(id);
+      if (name === 'restore_received_recommendation') mockDismissed.delete(id);
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
     },
   },
 }));
@@ -67,7 +73,7 @@ const useScreen = () => {
     queryKey: ['sent-to-you', VIEWER],
     queryFn: async () => {
       sentFetches += 1;
-      const answer = [...server];
+      const answer = server.filter((r) => !mockDismissed.has(r.id));
       const wait = gate;
       gate = null;
       if (wait) await wait;
@@ -112,6 +118,7 @@ beforeEach(() => {
   sentFetches = 0;
   bannerFetches = 0;
   gate = null;
+  mockDismissed.clear();
 });
 
 describe('useDismissReceived', () => {
@@ -135,17 +142,23 @@ describe('useDismissReceived', () => {
     expect(mockRpc.mock.calls.map(([n]) => n)).toEqual(['dismiss_received_recommendation']);
   });
 
-  it('refreshes the title page’s card, and leaves the list to the server’s agreement', async () => {
+  it('refreshes the title page’s card, and reads the list again once the server agrees', async () => {
     const { result } = await mount();
     const listBefore = sentFetches;
     const bannerBefore = bannerFetches;
+    server = [row('a'), row('c')];
 
     await act(async () => {
       await result.current.removal.remove(row('b'));
     });
 
     await waitFor(() => expect(bannerFetches).toBeGreaterThan(bannerBefore));
-    expect(sentFetches).toBe(listBefore);
+    await waitFor(() => expect(sentFetches).toBeGreaterThan(listBefore));
+    expect(
+      ids(
+        result.current.queryClient.getQueryData<SentRecommendation[]>(['sent-to-you', VIEWER]),
+      ),
+    ).toEqual(['a', 'c']);
   });
 
   it('Undo restores it in the same place with a fresh operation id', async () => {
@@ -163,6 +176,45 @@ describe('useDismissReceived', () => {
       ['restore_received_recommendation', { p_operation_id: 'op-2', p_recommendation_id: 'b' }],
     ]);
     expect(result.current.removal.notice).toBeNull();
+  });
+
+  it('a list read started while the dismissal is out cannot bring the row back (Codex, #371)', async () => {
+    const pending = deferred();
+    mockAnswers.dismiss_received_recommendation = () => pending.promise;
+    const { result } = await mount();
+
+    await act(async () => {
+      void result.current.removal.remove(row('b'));
+    });
+    // A pull to refresh leaves while the dismissal is out, before it commits: it reads the
+    // server's list with the row still on it, and answers late.
+    let release: () => void = () => {};
+    gate = new Promise((done) => {
+      release = done;
+    });
+    await act(async () => {
+      void result.current.queryClient.refetchQueries({ queryKey: ['sent-to-you', VIEWER] });
+    });
+
+    server = [row('a'), row('c')];
+    await act(async () => {
+      pending.resolve({ data: { status: 'ok', dismissed: true }, error: null });
+    });
+    await act(async () => {
+      release();
+      await new Promise((done) => setTimeout(done, 20));
+    });
+
+    await waitFor(() =>
+      expect(
+        ids(
+          result.current.queryClient.getQueryData<SentRecommendation[]>([
+            'sent-to-you',
+            VIEWER,
+          ]),
+        ),
+      ).toEqual(['a', 'c']),
+    );
   });
 
   it('a list read in flight when Undo is pressed cannot drop the restored row (Codex, #371)', async () => {
@@ -184,6 +236,7 @@ describe('useDismissReceived', () => {
     // Undo: the server has the row again once the restore lands.
     mockAnswers.restore_received_recommendation = async () => {
       server = [row('a'), row('b'), row('c')];
+      mockDismissed.delete('b');
       return { data: { status: 'ok', restored: true }, error: null };
     };
     await act(async () => {
