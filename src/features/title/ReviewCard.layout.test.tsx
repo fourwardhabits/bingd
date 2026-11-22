@@ -95,7 +95,6 @@ const drawSheet = (width: number) =>
         onToggleHelpful={() => {}}
         maskedFor={() => false}
         onPressAuthor={() => {}}
-        viewerRanked
         viewerHasReview
         onWrite={() => {}}
         noun="movie"
@@ -244,7 +243,7 @@ describe.each([320, 360])('the See all sheet at %ipt', (width) => {
 });
 
 describe('the own review on a title you have not ranked (editorial sheet)', () => {
-  it('is shown, score-less, with Edit — not replaced by Rank to leave a review', async () => {
+  it('is shown, score-less, with Edit — not replaced by Write a review', async () => {
     const view = await renderWithProviders(
       <TitleReviews
         reviews={[review({ id: 'x' })]}
@@ -254,7 +253,6 @@ describe('the own review on a title you have not ranked (editorial sheet)', () =
         onToggleHelpful={() => {}}
         maskedFor={() => false}
         onPressAuthor={() => {}}
-        viewerRanked={false}
         viewerHasReview
         onWrite={() => {}}
         noun="movie"
@@ -273,7 +271,7 @@ describe('the own review on a title you have not ranked (editorial sheet)', () =
     expect(mine.getByText('Public, never ranked.')).toBeTruthy();
     expect(mine.queryByTestId('review-card-score')).toBeNull();
     expect(mine.getByTestId('edit-review')).toBeTruthy();
-    expect(view.queryByRole('button', { name: 'Rank to leave a review' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Write a review' })).toBeNull();
   });
 });
 

@@ -166,6 +166,12 @@ export type LogSheetProps = {
    * with, whichever door was used, and only the named value can seed a note that
    * does not exist yet. That ordering is the whole privacy property of this sheet
    * and this prop is deliberately too weak to break it.
+   *
+   * **The title page's "Write a review" uses it too** (title/reviews-everywhere,
+   * 2026-11-22), with `public` and `noteIntent: 'review'`, and the field is focused as it
+   * opens. On a ranked title that is the composer on the log that is already there; after a
+   * first ranking "Write a review" began, it is the post-rank sheet — the one place the
+   * post-rank rule below gives way, because the reader asked to write before they ranked.
    */
   openWriting?: NoteVisibility | null;
   /**
@@ -521,11 +527,32 @@ function Body({
    * fresh for each one, so the initial value *is* the answer and an effect would only be
    * a second render saying the same thing.
    */
+  /**
+   * The exception, and the only one: a ranking that "Write a review" began returns to the
+   * composer it was begun for. The reader asked to write before they ranked, so the sheet
+   * they finish into is the writing — the other rows are still one tap away under it.
+   */
+  const writeAfterRank = Boolean(postRank && openWriting && noteIntent === 'review');
   const [expanded, setExpanded] = useState<Expanded>(
     // `postRank` wins over both, for the reason recorded above the `openWriting` prop:
     // a reveal that arrives with a row already open under the keyboard is not the sheet
-    // the reader just finished ranking into.
-    postRank ? null : openSection ? openSection : openWriting || seeded ? 'notes' : null,
+    // the reader just finished ranking into — unless it was ranked to be written about.
+    writeAfterRank
+      ? 'notes'
+      : postRank
+        ? null
+        : openSection
+          ? openSection
+          : openWriting || seeded
+            ? 'notes'
+            : null,
+  );
+  /**
+   * Whether the field takes focus as it first appears: only when the sheet was opened *to
+   * write* (`openWriting`), never for a seeded watch note or a row the reader opened.
+   */
+  const [focusOnOpen] = useState(
+    () => Boolean(openWriting) && !seeded && (writeAfterRank || !postRank),
   );
   /**
    * A bucket tap is being handled, so a second one is ignored rather than raced.
@@ -1935,6 +1962,7 @@ function Body({
               <NoteInput
                 value={note}
                 label="Note"
+                autoFocus={focusOnOpen}
                 onChangeText={(next) => {
                   setNoteEdit(next);
                   // A held seed is edited, not saved: Share is its commit (`seedNote`).

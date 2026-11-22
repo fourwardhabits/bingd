@@ -26,6 +26,7 @@ export function NoteInput({
   onChangeText,
   onBlur,
   editable = true,
+  autoFocus = false,
 }: {
   value: string;
   /** "Note". One field, one name; whether it is shared is the chip's job to say. */
@@ -34,10 +35,13 @@ export function NoteInput({
   onBlur: () => void;
   /** False while the caller's save is in flight, so nothing typed then is dropped. */
   editable?: boolean;
+  /** Focus as it mounts: a door that named writing ("Write a review") lands in the field. */
+  autoFocus?: boolean;
 }) {
   return (
     <TextInput
       accessibilityLabel={label}
+      autoFocus={autoFocus}
       editable={editable}
       value={value}
       onChangeText={onChangeText}

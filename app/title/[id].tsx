@@ -350,6 +350,23 @@ export default function TitleScreen() {
    */
   const [logIntent, setLogIntent] = useState<'note' | 'review'>('note');
   /**
+   * **"Write a review" lands in the composer** (title/reviews-everywhere, 2026-11-22). Set
+   * only by that door: the log sheet then opens with its Note row expanded and the field
+   * focused (`LogSheet`'s `openWriting`, which can never republish a stored note). Every
+   * other door — Rank, the ⋯ menu's *Edit ranking / Add note*, a season's `+` — opens it
+   * plain, as since 2026-11-21.
+   */
+  const [writeOnOpen, setWriteOnOpen] = useState(false);
+  /**
+   * **A review asked for before there was a ranking to hang it on.** "Write a review" on
+   * an unranked title opens the first-ranking flow (Rank's own path), and this carries the
+   * request through it: the reveal's *Add details* says *Write a review*, and taking it
+   * opens the post-rank sheet straight into the composer, review intent intact — so the
+   * reader publishes in the same visit rather than coming back. Cleared by every other
+   * way into or out of the flow, so it can never ride into an unrelated log.
+   */
+  const [reviewAfterRank, setReviewAfterRank] = useState(false);
+  /**
    * The log sheet opens with no row expanded from this page (2026-11-21). The old ranking
    * menu's *Edit your note* and *Who I watched with* rows opened it straight into the
    * composer or the companion picker; the one *Edit ranking / Add note* row that replaced
@@ -574,12 +591,14 @@ export default function TitleScreen() {
    * relabelling somebody else's user-generated content as critic writing — was never
    * on the table.
    *
-   * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
+   * **Every kind, a whole show included** (title/reviews-everywhere, 2026-11-22, porting
+   * #348). This used to skip a series on the reasoning that a show could not be ranked and
+   * so could not be reviewed. Since 20261114000200 a show is ranked in its own `tv_shows`
+   * pool, so a show page asks for its own reviews exactly as a film or a season does. They
+   * are the public notes on this exact series row, never its seasons' (`title_reviews_v2`
+   * keys on the one `media_item_id`).
    */
-  const reviews = useTitleReviews(
-    data?.title?.kind === 'series' ? null : titleId,
-    serverSortOf(reviewSort),
-  );
+  const reviews = useTitleReviews(titleId, serverSortOf(reviewSort));
   /**
    * The Most Helpful list, for the Cinematic Editorial page's Reviews preview and for the
    * sheet's Rating order, which re-orders it (post-QA sprint 2, 2026-11-05).
@@ -590,20 +609,12 @@ export default function TitleScreen() {
    * "From your circle" read: the preview supersedes that line, and Following stays a
    * filter inside the sheet.
    */
-  const helpfulReviews = useTitleReviews(
-    immersive && data?.title?.kind !== 'series' ? titleId : null,
-    'top_desc',
-  );
+  const helpfulReviews = useTitleReviews(immersive ? titleId : null, 'top_desc');
   /**
-   * The number on the tab, read separately from the list.
-   *
-   * A series has no reviews of its own -- it cannot be ranked, so nobody has a score to
-   * review it with -- and passing null keeps the read from being issued at all rather
-   * than issuing one that is guaranteed to answer zero.
+   * The number on the tab, read separately from the list. Asked of every kind, a whole
+   * show included, for the reason the list above gives.
    */
-  const reviewCount = useTitleReviewCount(
-    data?.title?.kind === 'series' ? null : titleId,
-  );
+  const reviewCount = useTitleReviewCount(titleId);
   const setHelpful = useSetReviewHelpful(titleId);
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
@@ -765,8 +776,8 @@ export default function TitleScreen() {
    */
   // Also gates the series-only reads below (`rankedSeasons`, `myScores`, ...).
   const isSeriesTitle = data?.title?.kind === 'series';
-  // The title whose reviews a pull reloads: none on a series, which has no reviews.
-  const refreshReviews = useRefreshTitleReviews(isSeriesTitle ? null : titleId);
+  // The title whose reviews a pull reloads: this one, of any kind (a whole show too).
+  const refreshReviews = useRefreshTitleReviews(titleId);
   const pull = usePullRefresh(
     // Memoised, because the hook's callback depends on it: a new array-builder every
     // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
@@ -1045,6 +1056,8 @@ export default function TitleScreen() {
   const rankable = title.kind === 'movie' || title.kind === 'season' || title.kind === 'series';
   const isSeries = title.kind === 'series';
   const isSeason = title.kind === 'season';
+  /** What the Reviews copy calls this title: "this movie", "this season", "this show". */
+  const reviewNoun = isSeries ? 'show' : isSeason ? 'season' : 'movie';
   const year = yearOf(title.release_date);
 
   /**
@@ -1265,7 +1278,7 @@ export default function TitleScreen() {
      *
      *   film     Similar · Cast · Reviews · Videos · Details
      *   season   Episodes · Similar · Cast · Reviews · Videos · Details
-     *   series   Seasons · Similar · Cast · Videos · Details
+     *   series   Seasons · Similar · Cast · Reviews · Videos · Details
      *
      * The title page is where somebody explores from, and on a film nothing else on the
      * page answers "what next" — so the exploration tab leads. On a season and a series
@@ -1289,8 +1302,9 @@ export default function TitleScreen() {
      * the invitation to. Removing it until somebody else has written would mean the
      * only way to leave the first review of a film is to already have left it.
      *
-     * A series is the exception and is excluded below: a series cannot be ranked, so
-     * nobody can have a score to review it with.
+     * A whole show has it too (title/reviews-everywhere, 2026-11-22, porting #348): it is
+     * ranked in its own pool, so it is reviewed like a film or a season. It used to be
+     * excluded here.
      */
     /**
      * The count sits in the label, which is the smallest honest fix for the founder's
@@ -1300,16 +1314,12 @@ export default function TitleScreen() {
      * say no, and it is also the state most titles are in -- the tab still appears,
      * because it is the invitation to write the first one.
      */
-    ...(isSeries
-      ? []
-      : [
-          {
-            id: 'reviews' as const,
-            // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
-            // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
-            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
-          },
-        ]),
+    {
+      id: 'reviews' as const,
+      // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
+      // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
+      label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
+    },
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
   ];
@@ -1334,13 +1344,18 @@ export default function TitleScreen() {
     seasonNumber: title.season_number ?? null,
   };
 
-  const openLog = (intent: 'note' | 'review' = 'note') => {
+  const openLog = (
+    intent: 'note' | 'review' = 'note',
+    { compose = false }: { compose?: boolean } = {},
+  ) => {
     if (!rankable) return;
     setActionError(null);
     // Any other log sheet is not the Update Show it may have been left from: the link
     // must never ride along into an unrelated correction.
     setPendingShowLink(null);
     setLogIntent(intent);
+    setWriteOnOpen(compose);
+    setReviewAfterRank(false);
     setPlacement(null);
     setLoggingTitle(loggable);
   };
@@ -1355,18 +1370,56 @@ export default function TitleScreen() {
    *                comparison on screen and every answer — so this never opens a second
    *                session and never asks the question again.
    */
-  const rank = () => {
+  const startRanking = (forReview: boolean) => {
     const bucket = data.logged?.bucket;
     const resume =
       rankable && rankState === 'unfinished' && bucket ? resumeSubject(loggable, bucket) : null;
     if (!resume) {
-      openLog();
+      // The ordinary first ranking: the log sheet and its *How was it?*. A review asked for
+      // here is a new note's starting visibility there too, and it rides on to the reveal.
+      openLog(forReview ? 'review' : 'note');
+      setReviewAfterRank(forReview);
       return;
     }
     setActionError(null);
     setPlacement(null);
+    setReviewAfterRank(forReview);
     setRankedTitle(loggable);
     setRankingSubject(resume);
+  };
+  // Its own function rather than `startRanking` itself, so the action row's press event
+  // can never be read as a review request.
+  const rank = () => startRanking(false);
+
+  /**
+   * **"Write a review", routed by what is already there** (founder, 2026-11-22). The one
+   * composer is the log sheet's Note row with its *Share as a review* chip; this decides
+   * only which door into it.
+   *
+   *   ranked                 the ⋯ menu's *Edit ranking / Add note* sheet, on the log that
+   *                          is already there, opened straight into the composer. Writing,
+   *                          editing, sharing or unsharing there is `save_note` and nothing
+   *                          else: no viewing, no watch count, no date, no rerank. It is
+   *                          never *Log rewatch*, which is the one act that records a
+   *                          viewing.
+   *   own review, unranked   the same: editing a published review in place needs no
+   *                          ranking first (the server has always allowed one).
+   *   unranked               the first-ranking flow, Rank's own path, carrying the review
+   *                          request through to the reveal and back into the composer
+   *                          (`reviewAfterRank`). That first ranking logs the first watch,
+   *                          which is what a first ranking has always done.
+   *
+   * **A private note stays private.** `review` decides only how a note that does not exist
+   * yet starts out; a stored note always opens on its stored visibility, and publishing it
+   * is the reader's own tap on *Share as a review* (`LogSheet`'s `visibility`).
+   */
+  const writeReview = () => {
+    if (!rankable) return;
+    if (data.ranked || hasReview) {
+      openLog('review', { compose: true });
+      return;
+    }
+    startRanking(true);
   };
 
   /**
@@ -1398,6 +1451,9 @@ export default function TitleScreen() {
     setActionError(null);
     setPendingShowLink(null);
     setPlacement(null);
+    // A season's ranking from the show's page is not the show's review.
+    setReviewAfterRank(false);
+    setWriteOnOpen(false);
     if (resume) {
       setRankedTitle(seasonTitle);
       setRankingSubject(resume);
@@ -1431,6 +1487,9 @@ export default function TitleScreen() {
     if (!show) return;
     setPendingShowLink({ showId: link.showId, linkedPlacementId: link.linkedPlacementId });
     setLogIntent('note');
+    // The show's correction is not the season's review: nothing written carries over.
+    setReviewAfterRank(false);
+    setWriteOnOpen(false);
     setPlacement(null);
     setLoggingTitle(show);
   };
@@ -1543,6 +1602,8 @@ export default function TitleScreen() {
     // (independent review, 2026-11-11). The ⋯ row is behind the menu, so never met it.
     if (rewatchPhase !== 'closed') return;
     setActionError(null);
+    // A rewatch is never a review's route: nothing from an earlier Write a review carries.
+    setReviewAfterRank(false);
     setRewatchPhase('open');
   };
 
@@ -1834,7 +1895,8 @@ export default function TitleScreen() {
     const rows = rating
       ? orderByRating(helpfulReviews.data ?? [], order === 'rating_asc' ? 'asc' : 'desc')
       : (reviews.data ?? []);
-    const loading = rating ? helpfulReviews.isPending : reviews.isPending;
+    const read = rating ? helpfulReviews : reviews;
+    const loading = read.isPending;
     return (
       <TitleReviews
           reviews={rows}
@@ -1860,15 +1922,17 @@ export default function TitleScreen() {
             if (inSheet) setReviewsOpen(false);
             router.push(`/u/${handle}`);
           }}
-          viewerRanked={Boolean(data.ranked)}
-          viewerHasReview={(reviews.data ?? []).some(
-            (review) => review.userId === profile.id,
-          )}
+          // From the reader's own row, which a save refreshes with the list: a published
+          // note is the review that *Edit your review* opens.
+          viewerHasReview={hasReview}
+          // A failed read says so with Try again, never "No reviews yet".
+          failed={read.isError && !read.data}
+          onRetry={() => void read.refetch()}
           // One composer. A note has always been written in the log sheet, where the
           // spoiler flag and the visibility are chosen beside it; a second one here
           // would be a second content model wearing a different button.
-          onWrite={inSheet ? writeFromSheet : () => openLog('review')}
-          noun={title.kind === 'season' ? 'season' : 'movie'}
+          onWrite={inSheet ? writeFromSheet : writeReview}
+          noun={reviewNoun}
           // So the reporting control is absent from the viewer's own review, which
           // the server would refuse anyway.
           viewerId={profile.id}
@@ -1912,7 +1976,7 @@ export default function TitleScreen() {
   const writeFromSheet = () => {
     setReviewsOpen(false);
     if (Platform.OS === 'ios') pendingReviewWrite.current = true;
-    else openLog('review');
+    else writeReview();
   };
 
   /**
@@ -2497,48 +2561,49 @@ export default function TitleScreen() {
         : null}
 
       {/**
-       * **Reviews, after Trailers** (post-QA sprint 2, 2026-11-05; moved after Trailers in the
-       * final title refinement, 2026-11-06): one or two on the page,
-       * yours first, and every review behind See all. Not for a series, which nobody can
-       * rank and so nobody can review.
+       * **Reviews, after Cast and Trailers and before Similar** (post-QA sprint 2,
+       * 2026-11-05; moved after Trailers in the final title refinement, 2026-11-06): one or
+       * two on the page, yours first, and every review behind See all.
+       *
+       * **On every page, always** (title/reviews-everywhere, founder 2026-11-22): a film, a
+       * season and a whole show alike, and with no reviews at all. The section is never
+       * hidden on a count of zero — its empty state is the invitation to write the first —
+       * and a read that failed says so with Try again rather than "No reviews yet".
        */}
-      {!isSeries
-        ? immersiveSection(
-            'reviews',
-            'Reviews',
-            <ReviewsPreview
-              reviews={helpfulReviews.data ?? []}
-              loading={helpfulReviews.isPending}
-              failed={helpfulReviews.isError && !helpfulReviews.data}
-              onRetry={() => void helpfulReviews.refetch()}
-              maskedFor={reviewMasked}
-              viewerId={profile.id}
-              viewerRanked={Boolean(data.ranked)}
-              ownReview={ownPublishedReview}
-              onWrite={() => openLog('review')}
-              onSeeAll={openReviews}
-              noun={title.kind === 'season' ? 'season' : 'movie'}
-              // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
-              // own name and picture on your review, and the same thumbs-up the sheet offers
-              // under everybody else's. Your review carries your score too, as everybody
-              // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
-              onToggleHelpful={toggleHelpful}
-              helpfulPendingId={helpfulPendingId}
-              viewer={reviewViewer}
-            />,
-            {
-              action:
-                reviewTotal > 0
-                  ? {
-                      label: 'See all',
-                      accessibilityLabel:
-                        reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
-                      onPress: openReviews,
-                    }
-                  : undefined,
-            },
-          )
-        : null}
+      {immersiveSection(
+        'reviews',
+        'Reviews',
+        <ReviewsPreview
+          reviews={helpfulReviews.data ?? []}
+          loading={helpfulReviews.isPending}
+          failed={helpfulReviews.isError && !helpfulReviews.data}
+          onRetry={() => void helpfulReviews.refetch()}
+          maskedFor={reviewMasked}
+          viewerId={profile.id}
+          ownReview={ownPublishedReview}
+          onWrite={writeReview}
+          onSeeAll={openReviews}
+          noun={reviewNoun}
+          // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
+          // own name and picture on your review, and the same thumbs-up the sheet offers
+          // under everybody else's. Your review carries your score too, as everybody
+          // else's carries theirs (QA1114-REVIEWS §2): the same server number they see.
+          onToggleHelpful={toggleHelpful}
+          helpfulPendingId={helpfulPendingId}
+          viewer={reviewViewer}
+        />,
+        {
+          action:
+            reviewTotal > 0
+              ? {
+                  label: 'See all',
+                  accessibilityLabel:
+                    reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
+                  onPress: openReviews,
+                }
+              : undefined,
+        },
+      )}
 
       {/**
        * **Similar, six at first** (final title refinement, 2026-11-06): two rows of three,
@@ -2657,7 +2722,7 @@ export default function TitleScreen() {
         onDismissed={() => {
           if (!pendingReviewWrite.current) return;
           pendingReviewWrite.current = false;
-          openLog('review');
+          writeReview();
         }}
       >
         <View style={styles.castSheet} testID="reviews-sheet">
@@ -3168,6 +3233,9 @@ export default function TitleScreen() {
         title={loggingTitle}
         surface="title"
         noteIntent={logIntent}
+        // "Write a review" lands in the composer, focused (`writeOnOpen`). A note that
+        // already exists still opens on its stored visibility: this decides only a new one.
+        openWriting={writeOnOpen ? 'public' : null}
         postRank={placement}
         /* Both exits end the post-ranking flow, so both drain the celebration queue.
            This is the half the founder physically hit: a reader who takes *Add details*
@@ -3185,12 +3253,17 @@ export default function TitleScreen() {
           setPlacement(null);
           setPendingShowLink(null);
           setPendingShowDecision(null);
+          setWriteOnOpen(false);
+          setReviewAfterRank(false);
           celebrate();
         }}
         onClose={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setActionError(null);
+          // Leaving before a band is chosen abandons the review the ranking was for.
+          setWriteOnOpen(false);
+          setReviewAfterRank(false);
           // Leaving the show's band chooser without choosing abandons Update Show.
           setPendingShowLink(null);
           // And leaving the details sheet records no show decision (§3E).
@@ -3219,6 +3292,8 @@ export default function TitleScreen() {
           });
           setRankedTitle(loggingTitle);
           setPlacement(null);
+          // The review request, if there is one, rides on in `reviewAfterRank`.
+          setWriteOnOpen(false);
           setLoggingTitle(null);
         }}
       />
@@ -3267,14 +3342,27 @@ export default function TitleScreen() {
       ) : null}
       <RankingSheet
         subject={rankingSubject}
-        onClose={() => setRankingSubject(null)}
+        onClose={() => {
+          setRankingSubject(null);
+          // Done on the reveal, or leaving mid-comparison: the review was not taken up here.
+          // The title is ranked now if it finished, so *Write a review* opens the composer.
+          setReviewAfterRank(false);
+        }}
+        // A ranking begun by *Write a review* finishes into it: the reveal's Add details
+        // says so, and takes the reader to the composer.
+        finishLogLabel={reviewAfterRank ? 'Write a review' : undefined}
         // Ranking is a subflow of logging, so it returns to the log rather than ending
         // at a number. The same sheet, on the same title, with the score at the top of
         // it — there is one implementation of "the rest of your log" and this is it.
         onFinishLog={(result) => {
           setRankingSubject(null);
           if (!rankedTitle) return;
-          setLogIntent('note');
+          // A ranking begun by *Write a review* returns to the composer, review intent intact
+          // (founder, 2026-11-22): the post-rank sheet opens on the Note row, focused, and a
+          // new note starts shared. Anything else returns to the plain sheet, as before.
+          setLogIntent(reviewAfterRank ? 'review' : 'note');
+          setWriteOnOpen(reviewAfterRank);
+          setReviewAfterRank(false);
           // The founder's "Add more details opens only the Note": nothing on this page
           // pre-expands the sheet any more, and `LogSheet` refuses to auto-expand in the
           // post-rank state for its other callers.

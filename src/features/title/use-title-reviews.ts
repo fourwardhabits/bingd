@@ -105,7 +105,7 @@ const reviewsKey = (mediaItemId: string | null, sort: ReviewSort) =>
  * Reviews on a title, which are Bingd's own public Notes.
  *
  * **There is no second content model, and that is the whole design.** A review is a
- * public Note on this exact canonical movie or season — the same text the Feed shows,
+ * public Note on this exact canonical movie, season or show — the same text the Feed shows,
  * governed by the same `note_visibility`, carrying the same spoiler flag, reportable
  * the same way. One source of truth, which is what the founder asked for in as many
  * words. Writing one is `save_note` through the log sheet; there is no separate
@@ -195,7 +195,7 @@ export function useTitleReviewCount(mediaItemId: string | null) {
  * and `['title-reviews', id]` is a prefix, so every sort the sheet has visited and the
  * Most Helpful preview's `top_desc` entry are covered by one call. Active queries refetch
  * and the returned promises settle when they land; inactive ones are marked stale and
- * refetch when next shown. Null (a series, or a page still loading) asks for nothing.
+ * refetch when next shown. Null (a page still loading) asks for nothing.
  */
 export function useRefreshTitleReviews(mediaItemId: string | null) {
   const queryClient = useQueryClient();
