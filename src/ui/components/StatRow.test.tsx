@@ -295,26 +295,26 @@ describe('the labels at the reader’s width and text size', () => {
 
 describe('inside the profile card', () => {
   /**
-   * **A section of the card, not a card within it** (founder, 2026-11-22): inset by the
-   * card's content gutter like the identity and bio, with no outline or radius of its own.
-   * The rules between the four stay, and so does every cell's 44pt target.
+   * **The framed row, inset from the card's edges** (founder, 2026-11-22): the same hairline
+   * outline and card radius as the standalone row, the card's content gutter in from its
+   * inner edges, the rules between the four kept.
    */
-  it('is inset by the card gutter and draws no frame; the standalone row keeps its frame', async () => {
+  it('keeps the hairline outline and radius, inset by the card gutter', async () => {
     const inCard = await render(<StatRow centered inCard stats={STATS} />);
     const alone = await draw();
     const frame = (view: Awaited<ReturnType<typeof draw>>) =>
       StyleSheet.flatten(first(view.getAllByTestId('stat-rule')).parent?.props.style);
 
-    expect(frame(inCard).marginHorizontal).toBe(theme.layout.gutter);
-    expect(frame(inCard).borderWidth ?? 0).toBe(0);
-    expect(frame(inCard).borderRadius ?? 0).toBe(0);
-    expect(frame(inCard).paddingHorizontal ?? 0).toBe(0);
-    expect(frame(inCard).backgroundColor).toBeUndefined();
-
-    expect(frame(alone).marginHorizontal).toBe(theme.layout.gutter);
+    for (const style of [frame(inCard), frame(alone)]) {
+      expect(style.marginHorizontal).toBe(theme.layout.gutter);
+      expect(style.borderWidth).toBe(StyleSheet.hairlineWidth * 2);
+      expect(style.borderColor).toBe(theme.border.hairline);
+      expect(style.borderRadius).toBe(theme.radius.card);
+      expect(style.backgroundColor).toBeUndefined();
+    }
+    // The inside padding is what pays for the inset, in the card only.
+    expect(frame(inCard).paddingHorizontal).toBe(theme.space[1]);
     expect(frame(alone).paddingHorizontal).toBe(theme.space[2]);
-    expect(frame(alone).borderWidth).toBe(StyleSheet.hairlineWidth * 2);
-    expect(frame(alone).borderRadius).toBe(theme.radius.card);
   });
 
   it('keeps the three rules and four whole 44pt targets', async () => {
@@ -338,10 +338,12 @@ describe('inside the profile card', () => {
  * Inter Regular's own `hmtx` (the measurement `RankingSheet.test.tsx` makes of SemiBold),
  * with the same 4% allowance. A quarter's text width inside the profile card, with each
  * hairline-doubled line (card border, frame border, the three rules) taken at its 1pt
- * maximum on any iOS device or Android at 2x and up:
+ * maximum on any iOS device or Android at 2x and up. Since 2026-11-22 the frame is inset by
+ * the card's gutter, with `space[1]` inside it and 1pt either side of each cell, which is
+ * the width per quarter it had before the inset:
  *
  *     quarter = (W - 2*gutter - 7*1 - 2*frame padding - 2*frame margin) / 4 - 2*item padding
- *             = (W - 32 - 7 - 16 - 0) / 4 - 8
+ *             = (W - 32 - 7 - 8 - 32) / 4 - 2
  *
  *     W    quarter  cap   TV Shows at fontScale 1 / 1.3 / 2         shrink needed
  *     320  58.25    1.05  64.83 / 68.07 (capped) / wraps            0.898 / 0.856
@@ -423,15 +425,15 @@ describe('measured from the font', () => {
         2 * theme.layout.gutter - // the card's margin
         2 * line - // the card's border
         2 * (frame.marginHorizontal as number) -
-        2 * (frame.borderWidth ? line : 0) - // the row's own frame, none in the card
+        2 * line - // the frame's border
         2 * ((frame.paddingHorizontal as number | undefined) ?? 0) -
         3 * line) / // the rules
         4 -
       2 * (item.paddingHorizontal as number);
 
-    expect(quarterAt(320)).toBeCloseTo(58.75, 2);
-    expect(quarterAt(360)).toBeCloseTo(68.75, 2);
-    expect(quarterAt(390)).toBeCloseTo(76.25, 2);
+    expect(quarterAt(320)).toBeCloseTo(58.25, 2);
+    expect(quarterAt(360)).toBeCloseTo(68.25, 2);
+    expect(quarterAt(390)).toBeCloseTo(75.75, 2);
 
     for (let width = 320; width <= 430; width++) {
       for (const fontScale of [0.823, 1, 1.118, 1.235, 1.3, 1.353, 1.49]) {
