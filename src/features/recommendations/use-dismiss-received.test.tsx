@@ -1,0 +1,279 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { act, waitFor } from '@testing-library/react-native';
+
+import { renderHookWithProviders } from '@/test-utils/render';
+
+import { useDismissReceived } from './use-dismiss-received';
+import type { SentRecommendation } from './use-sent-to-you';
+import type { TitleRecommendation } from './use-title-recommendations';
+
+/**
+ * `useDismissReceived` (20261130001200): Remove from Sent to You, optimistic, with Undo.
+ *
+ * The rows live in a real query under the real key (`['sent-to-you', viewerId]`), so every
+ * optimistic write, rollback and reconciliation is asserted on the cache the list draws.
+ */
+
+type Answer = { data: unknown; error: unknown };
+const mockRpc = jest.fn();
+let mockAnswers: Record<string, () => Promise<Answer>> = {};
+
+jest.mock('@/lib/supabase', () => ({
+  supabase: {
+    rpc: (name: string, args: unknown) => {
+      mockRpc(name, args);
+      const answer = mockAnswers[name];
+      return answer ? answer() : Promise.resolve({ data: { status: 'ok' }, error: null });
+    },
+  },
+}));
+
+let mockOp = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${++mockOp}` }));
+
+const row = (id: string, over: Partial<SentRecommendation> = {}): SentRecommendation => ({
+  id,
+  senderId: 's1',
+  senderUsername: 'ada',
+  senderName: 'Ada',
+  senderAvatarUri: null,
+  mediaItemId: `film-${id}`,
+  kind: 'movie',
+  title: `Film ${id}`,
+  seriesTitle: null,
+  posterPath: null,
+  year: 2020,
+  genres: [],
+  language: null,
+  runtimeMinutes: null,
+  recommendedAt: '2026-11-01T00:00:00Z',
+  openedAt: null,
+  message: null,
+  seenAt: null,
+  ...over,
+});
+
+const VIEWER = 'account-a';
+let server: SentRecommendation[] = [];
+let sentFetches = 0;
+let bannerFetches = 0;
+
+/** The tab's list, the title page's card and the hook, on one client. */
+const useScreen = () => {
+  const queryClient = useQueryClient();
+  const list = useQuery({
+    queryKey: ['sent-to-you', VIEWER],
+    queryFn: async () => {
+      sentFetches += 1;
+      return [...server];
+    },
+    staleTime: Infinity,
+  });
+  const banner = useQuery({
+    queryKey: ['title-recommendations', VIEWER, 'film-b'],
+    queryFn: async (): Promise<TitleRecommendation[]> => {
+      bannerFetches += 1;
+      return [];
+    },
+    staleTime: Infinity,
+  });
+  return { list, banner, removal: useDismissReceived(VIEWER), queryClient };
+};
+
+const ids = (rows: SentRecommendation[] | undefined) => (rows ?? []).map((r) => r.id);
+const calls = (name: string) => mockRpc.mock.calls.filter(([n]) => n === name);
+
+const deferred = () => {
+  let resolve: (answer: Answer) => void = () => {};
+  const promise = new Promise<Answer>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
+const mount = async () => {
+  const hook = await renderHookWithProviders(useScreen);
+  await waitFor(() => expect(hook.result.current.list.isSuccess).toBe(true));
+  await waitFor(() => expect(hook.result.current.banner.isSuccess).toBe(true));
+  return hook;
+};
+
+beforeEach(() => {
+  mockRpc.mockReset();
+  mockAnswers = {};
+  mockOp = 0;
+  server = [row('a'), row('b'), row('c')];
+  sentFetches = 0;
+  bannerFetches = 0;
+});
+
+describe('useDismissReceived', () => {
+  it('removes the row at once, sends one operation id, and offers Undo', async () => {
+    const { result } = await mount();
+
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['a', 'c']);
+    expect(calls('dismiss_received_recommendation')).toEqual([
+      ['dismiss_received_recommendation', { p_operation_id: 'op-1', p_recommendation_id: 'b' }],
+    ]);
+    expect(result.current.removal.notice).toMatchObject({
+      message: 'Removed “Film b” from Sent to You',
+      action: { kind: 'undo', label: 'Undo' },
+      tone: 'info',
+    });
+    // Nothing else: not opened, not seen, not the watchlist, not a request, not For You.
+    expect(mockRpc.mock.calls.map(([n]) => n)).toEqual(['dismiss_received_recommendation']);
+  });
+
+  it('refreshes the title page’s card, and leaves the list to the server’s agreement', async () => {
+    const { result } = await mount();
+    const listBefore = sentFetches;
+    const bannerBefore = bannerFetches;
+
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    await waitFor(() => expect(bannerFetches).toBeGreaterThan(bannerBefore));
+    expect(sentFetches).toBe(listBefore);
+  });
+
+  it('Undo restores it in the same place with a fresh operation id', async () => {
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['a', 'b', 'c']);
+    expect(calls('restore_received_recommendation')).toEqual([
+      ['restore_received_recommendation', { p_operation_id: 'op-2', p_recommendation_id: 'b' }],
+    ]);
+    expect(result.current.removal.notice).toBeNull();
+  });
+
+  it('an Undo pressed before the dismissal answered waits for it', async () => {
+    const pending = deferred();
+    mockAnswers.dismiss_received_recommendation = () => pending.promise;
+    const { result } = await mount();
+
+    let undone: Promise<void> = Promise.resolve();
+    await act(async () => {
+      void result.current.removal.remove(row('b'));
+      undone = result.current.removal.undo();
+    });
+    // The restore has not left yet: it would arrive first and find nothing to restore.
+    expect(calls('restore_received_recommendation')).toHaveLength(0);
+
+    await act(async () => {
+      pending.resolve({ data: { status: 'ok', dismissed: true }, error: null });
+      await undone;
+    });
+    expect(mockRpc.mock.calls.map(([n]) => n)).toEqual([
+      'dismiss_received_recommendation',
+      'restore_received_recommendation',
+    ]);
+    // Read from the cache the list draws from: the restore put the row back there.
+    expect(
+      ids(
+        result.current.queryClient.getQueryData<SentRecommendation[]>(['sent-to-you', VIEWER]),
+      ),
+    ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('puts the row back and says so when the server refuses', async () => {
+    mockAnswers.dismiss_received_recommendation = () =>
+      Promise.resolve({ data: null, error: { code: '42501', message: 'suspended' } });
+    const { result } = await mount();
+
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['a', 'b', 'c']);
+    expect(result.current.removal.notice).toMatchObject({
+      message: 'Your account cannot make changes right now.',
+      tone: 'error',
+    });
+  });
+
+  it('a backend without the function puts the row back rather than hiding it', async () => {
+    mockAnswers.dismiss_received_recommendation = () =>
+      Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'not found' } });
+    const { result } = await mount();
+
+    await act(async () => {
+      await result.current.removal.remove(row('a'));
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['a', 'b', 'c']);
+    expect(result.current.removal.notice?.message).toBe('Couldn’t remove “Film a”. Try again.');
+  });
+
+  it('refetches when nobody knows whether it landed', async () => {
+    mockAnswers.dismiss_received_recommendation = () =>
+      Promise.resolve({ data: null, error: { code: '', message: 'Network request failed' } });
+    const { result } = await mount();
+    const before = sentFetches;
+    // The server did commit it: the refetch is what tells the list so.
+    server = [row('a'), row('c')];
+
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    await waitFor(() => expect(sentFetches).toBeGreaterThan(before));
+    await waitFor(() => expect(ids(result.current.list.data)).toEqual(['a', 'c']));
+  });
+
+  it('a refused Undo takes the row out again and says so', async () => {
+    mockAnswers.restore_received_recommendation = () =>
+      Promise.resolve({ data: null, error: { code: 'P0001', message: 'no' } });
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('c'));
+    });
+
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['a', 'b']);
+    expect(result.current.removal.notice?.message).toBe(
+      'Couldn’t put “Film c” back. Try again.',
+    );
+  });
+
+  it('removes one sender’s row of a title and leaves another sender’s', async () => {
+    server = [row('ada', { mediaItemId: 'film-x' }), row('ben', { mediaItemId: 'film-x' })];
+    const { result } = await mount();
+
+    await act(async () => {
+      await result.current.removal.remove(server[0]);
+    });
+
+    expect(ids(result.current.list.data)).toEqual(['ben']);
+  });
+
+  it('closing the notice keeps the removal, and an Undo after it does nothing', async () => {
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('a'));
+    });
+
+    await act(async () => result.current.removal.close());
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+
+    expect(result.current.removal.notice).toBeNull();
+    expect(ids(result.current.list.data)).toEqual(['b', 'c']);
+    expect(calls('restore_received_recommendation')).toHaveLength(0);
+  });
+});
