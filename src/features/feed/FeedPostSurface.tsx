@@ -15,7 +15,11 @@ import { theme } from '@/ui/tokens';
 export const FEED_CARD = {
   /** Screen edge to card edge: the screen's gutter. */
   margin: theme.layout.gutter,
-  /** Card edge to its content, on every side: one 12pt step. */
+  /**
+   * Card edge to its content, on every side: one 12pt step. The one inset of a post: the
+   * avatar and headline, the hero artwork, the review, the reaction summary and the rail's
+   * scrolling viewport all take it, so their edges line up (founder, 2026-11-22).
+   */
   inset: theme.space[3],
   /** The outline. 1pt rather than a hairline, which on a 3x screen is a third of a point and vanishes against white. */
   border: 1,

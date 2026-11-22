@@ -17,7 +17,7 @@ import { FEED_SAVE_LABELS, type PosterTile } from '@/ui/components/PosterWall';
 import { paperAlpha, theme } from '@/ui/tokens';
 
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
-import { FeedHeadline, HEADLINE_AVATAR, HEADLINE_GAP } from './FeedHeadline';
+import { FeedHeadline } from './FeedHeadline';
 import {
   FEED_CARD,
   FeedPostSurface,
@@ -169,7 +169,6 @@ export function FeedCard({
   const subline = (grouped ? [timeLabel] : [timeLabel, watchLabel, metadata])
     .filter(Boolean)
     .join(' · ');
-  const headlineWidth = artworkWidth - theme.layout.avatar[HEADLINE_AVATAR] - HEADLINE_GAP;
 
   const canReact = reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
@@ -193,7 +192,6 @@ export function FeedCard({
           tailAction={tailAction}
           tail={tail}
           subline={subline}
-          lineWidth={headlineWidth}
           fontScale={fontScale}
         />
       </View>
