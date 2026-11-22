@@ -267,6 +267,56 @@ describe('useDismissReceived', () => {
     ).toEqual(['a', 'b', 'c']);
   });
 
+  it('after a lost dismissal reply, Undo replays it under its own id before restoring (Codex, #371)', async () => {
+    let dismissCalls = 0;
+    mockAnswers.dismiss_received_recommendation = async () => {
+      dismissCalls += 1;
+      // The first reply is lost; the replay is answered by the ledger.
+      return dismissCalls === 1
+        ? { data: null, error: { code: '', message: 'Network request failed' } }
+        : { data: { status: 'already_applied' }, error: null };
+    };
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+
+    const sent = mockRpc.mock.calls.map(([name, args]) => [
+      name,
+      (args as { p_operation_id: string }).p_operation_id,
+    ]);
+    expect(sent).toEqual([
+      ['dismiss_received_recommendation', 'op-1'],
+      ['dismiss_received_recommendation', 'op-1'],
+      ['restore_received_recommendation', 'op-2'],
+    ]);
+  });
+
+  it('when even the replay cannot be established, Undo says so and sends no restore', async () => {
+    mockAnswers.dismiss_received_recommendation = async () => ({
+      data: null,
+      error: { code: '', message: 'Network request failed' },
+    });
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+
+    expect(calls('dismiss_received_recommendation')).toHaveLength(2);
+    expect(calls('restore_received_recommendation')).toHaveLength(0);
+    expect(result.current.removal.notice?.message).toBe(
+      'Couldn’t put “Film b” back. Try again.',
+    );
+  });
+
   it('an Undo pressed before the dismissal answered waits for it', async () => {
     const pending = deferred();
     mockAnswers.dismiss_received_recommendation = () => pending.promise;
