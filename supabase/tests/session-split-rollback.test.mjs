@@ -40,6 +40,7 @@ const DROPPED = [
   '_window_posts',
   '_window_anchor',
   '_claim_window_start',
+  '_window_post',
   '_session_split_plan',
   'split_mixed_sessions',
   'revert_session_split',

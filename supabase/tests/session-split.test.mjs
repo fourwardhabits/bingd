@@ -485,6 +485,79 @@ describe('what is left alone', () => {
     assert.ok(w);
   });
 
+  it('a late sitting placement on a partner the split made goes back with the revert (Codex, PR 357)', async () => {
+    const late = await t.createUser({ username: 'ss_late' });
+    const sitting = await uuid();
+    const save1 = await save(late, 'Late save');
+    const r1 = await rank(late, 'Late r1', { note: false });
+    const r2 = await rank(late, 'Late r2', { note: false });
+    await t.actAs(null);
+    const rows = (
+      await t.sql(`select id, type, media_item_id from feed_events where actor_id = $1`, [late])
+    ).rows;
+    const w = rows.find((r) => r.type === 'watchlist_added');
+    // A watchlist post a session batch reused, holding a sitting's placements of its own.
+    await t.sql(`delete from feed_events where actor_id = $1 and type = 'title_ranked'`, [
+      late,
+    ]);
+    await t.sql(
+      `update feed_events set type = 'ranking_batch',
+              payload = payload || jsonb_build_object('count', 3, 'session', true)
+        where id = $1`,
+      [w.id],
+    );
+    await t.sql(
+      `insert into feed_ranking_titles (event_id, media_item_id) values ($1, $2), ($1, $3)`,
+      [w.id, r1, r2],
+    );
+    await t.sql(
+      `insert into feed_ranking_sitting_joins (actor_id, sitting, event_id) values ($1, $2, $3)`,
+      [late, sitting, w.id],
+    );
+    await t.sql(
+      `insert into feed_consolidation_log
+         (batch, kind, group_event_id, member_event_id, created_group, prior_type, prior_payload)
+       values ('ss-h-late', 'session', $1, null, false, 'watchlist_added', '{}'::jsonb)`,
+      [w.id],
+    );
+    await age(late, 2);
+    const before = await snapshot(late);
+
+    const done = await split('ss-late', { apply: true, actor: late });
+    assert.equal(done.applied_posts, 1);
+    assert.equal(done.posts[0].keep, 'watchlist');
+    assert.equal(done.posts[0].created, true);
+    const partner = done.posts[0].partner;
+
+    // A late placement for that sitting reaches the partner through the moved join.
+    const r3 = await rank(late, 'Late r3', { note: false });
+    const noted = await call(`rank_batch_note($1, $2, $3)`, [await uuid(), sitting, r3]);
+    assert.equal(noted.event_id, partner);
+    await t.actAs(null);
+
+    const reverted = await call(`revert_session_split($1)`, ['ss-late']);
+    assert.equal(reverted.reverted_posts, 1);
+    const { rows: back } = await t.sql(
+      `select media_item_id from feed_ranking_titles where event_id = $1 order by media_item_id`,
+      [w.id],
+    );
+    assert.deepEqual(
+      back.map((r) => r.media_item_id).sort(),
+      [r1, r2, r3].sort(),
+      'the late placement came back with the others, not lost',
+    );
+    const { rows: join } = await t.sql(
+      `select event_id from feed_ranking_sitting_joins where actor_id = $1 and sitting = $2`,
+      [late, sitting],
+    );
+    assert.deepEqual(join, [{ event_id: w.id }]);
+    assert.equal(
+      (await snapshot(late)).events.some((e) => e.id === partner),
+      false,
+    );
+    assert.ok(save1 && before);
+  });
+
   it('a partner the split made that gains a conversation is kept by the revert, and reported', async () => {
     const solo = await t.createUser({ username: 'ss_solo' });
     await t.sql(

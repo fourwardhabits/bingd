@@ -34,7 +34,8 @@
 -- WHAT CHANGES
 -- ---------------------------------------------------------------------------
 --
---   * new `_window_posts`, `_window_anchor`, `_claim_window_start`: the shared window;
+--   * new `_window_posts`, `_window_anchor`, `_claim_window_start`, `_window_post`: the
+--     shared window, and the window's post of each kind found by its anchor;
 --   * `_open_session` returns the event's own category only;
 --   * `rank_group_note`, `_post_watchlist_activity`, `rank_batch_finalize`: per category,
 --     anchored on the shared window; no save joins a ranking post and no ranking a
@@ -168,6 +169,44 @@ begin
 end;
 $$;
 
+/**
+ * The window's post of one kind: the actor's visible ranking group (`ranking`) or watchlist
+ * post (`watchlist`) that carries exactly `p_anchor`. Locked. A writer claims its window
+ * first (`_claim_window_start`) and then looks its post up by that anchor, so it can never
+ * join a post of a later window that happens to overlap the event's time (Codex, PR 357).
+ */
+create or replace function _window_post(p_actor uuid, p_anchor timestamptz, p_family text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  if p_anchor is null then
+    return null;
+  end if;
+  select e.id
+    into v_id
+    from feed_events e
+   where e.actor_id = p_actor
+     and e.presented_in is null
+     and e.type = case when p_family = 'ranking' then 'ranking_batch' else 'watchlist_added' end
+     and not (e.payload ? 'consolidation_batch')
+     and not coalesce((e.payload ->> 'dissolved')::boolean, false)
+     and ((e.type = 'ranking_batch' and e.payload ? 'started_at')
+          or (e.type = 'watchlist_added' and e.payload ? 'count'))
+     and e.created_at > p_anchor - _activity_session_window()
+     and coalesce((e.payload ->> 'started_at')::timestamptz, e.created_at) = p_anchor
+   order by e.causal_at desc, e.id
+   limit 1
+     for update of e;
+  return v_id;
+end;
+$$;
+
+revoke execute on function _window_post(uuid, timestamptz, text) from public, anon, authenticated;
 revoke execute on function _window_posts(uuid, timestamptz, text) from public, anon, authenticated;
 revoke execute on function _window_anchor(uuid, timestamptz, text) from public, anon, authenticated;
 revoke execute on function _claim_window_start(uuid, timestamptz, text) from public, anon, authenticated;
@@ -300,8 +339,8 @@ begin
 
   v_anchor := _claim_window_start(v_me, v_event.created_at, 'ranking');
 
-  -- The window's ranking group.
-  v_target := _open_session(v_me, v_event.created_at, 'ranking');
+  -- The window's ranking group: the one carrying this window's anchor (Codex, PR 357).
+  v_target := _window_post(v_me, v_anchor, 'ranking');
   if v_target is not null then
     update feed_events set presented_in = v_target where id = v_event.id;
     perform _session_refresh(v_target);
@@ -429,7 +468,7 @@ begin
 
   if v_grouping then
     v_anchor := _window_anchor(p_actor, now(), 'watchlist');
-    v_event := _open_session(p_actor, now(), 'watchlist');
+    v_event := _window_post(p_actor, v_anchor, 'watchlist');
   end if;
 
   if v_event is null then
@@ -543,8 +582,9 @@ begin
   then
     v_grouping := true;
     v_anchor := _claim_window_start(auth.uid(), v_started, 'ranking');
-    -- Inside the window from both sides (Codex, PR 311).
-    v_target := _open_session(auth.uid(), v_started, 'ranking', true);
+    -- The window's ranking group, by its anchor, which is never after the sitting's start
+    -- (Codex, PR 311 and PR 357).
+    v_target := _window_post(auth.uid(), v_anchor, 'ranking');
   end if;
 
   if v_target is not null then
@@ -1456,9 +1496,11 @@ $$;
 /**
  * Undoes one split batch, newest post first: every membership row and hidden post moves
  * back to the mixed post, a partner the split made is deleted (anything that joined it
- * since is moved back first) unless somebody has since reacted to or commented on it (then
- * the pair is left split, its log kept, and it is reported), a partner it reused is hidden
- * again, and both posts get back their prior type, title, payload and place.
+ * since, hidden posts, membership rows and sitting joins alike, is moved back first)
+ * unless somebody has since reacted to or commented on it, or a ranking added to it since
+ * is already on the mixed post (then the pair is left split, its log kept, and it is
+ * reported), a partner it reused is hidden again, and both posts get back their prior
+ * type, title, payload and place.
  */
 create or replace function revert_session_split(p_batch text)
 returns jsonb
@@ -1488,7 +1530,15 @@ begin
     v_q := v_partner.member_event_id;
     perform 1 from feed_events where id in (v_g.group_event_id, v_q) order by id for update;
 
-    if v_partner.created_group and _feed_event_referenced(v_q) then
+    -- A created partner is deleted below, so anything that reached it since the split (a
+    -- late sitting placement through its moved join) must be able to move back first; a
+    -- ranking already on the mixed post would collide, so that pair is left split
+    -- (Codex, PR 357).
+    if v_partner.created_group
+       and (_feed_event_referenced(v_q)
+            or exists (select 1 from feed_ranking_titles a
+                         join feed_ranking_titles b on b.media_item_id = a.media_item_id
+                        where a.event_id = v_q and b.event_id = v_g.group_event_id)) then
       v_kept := v_kept || v_g.group_event_id;
       continue;
     end if;
@@ -1517,6 +1567,9 @@ begin
 
     if v_partner.created_group then
       update feed_events set presented_in = v_g.group_event_id where presented_in = v_q;
+      update feed_ranking_titles set event_id = v_g.group_event_id where event_id = v_q;
+      update feed_watchlist_titles set event_id = v_g.group_event_id where event_id = v_q;
+      update feed_ranking_sitting_joins set event_id = v_g.group_event_id where event_id = v_q;
       delete from feed_events where id = v_q;
       v_deleted := v_deleted + 1;
     else

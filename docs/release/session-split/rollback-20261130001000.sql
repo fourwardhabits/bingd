@@ -880,6 +880,7 @@ $$;
 revoke execute on function revert_feed_session_consolidation(text) from public, anon, authenticated;
 
 
+drop function if exists _window_post(uuid, timestamptz, text);
 drop function if exists _claim_window_start(uuid, timestamptz, text);
 drop function if exists _window_anchor(uuid, timestamptz, text);
 drop function if exists _window_posts(uuid, timestamptz, text);

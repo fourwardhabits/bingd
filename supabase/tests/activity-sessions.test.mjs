@@ -441,6 +441,38 @@ describe('the shared window', () => {
   });
 });
 
+describe('a late note never joins a later window (Codex, PR 357)', () => {
+  it('save at 0:00, rank at 0:20 noted at 0:40 after a group formed at 0:35: it stays in its own window', async () => {
+    const s = await save('Opens at 0:00');
+    await t.sql(
+      `update feed_events
+          set created_at = now() - interval '40 minutes', causal_at = now() - interval '40 minutes',
+              payload = payload || jsonb_build_object('started_at', now() - interval '40 minutes')
+        where actor_id = $1 and media_item_id = $2`,
+      [user, s],
+    );
+    const late = await rank('Ranked at 0:20', { note: false });
+    await t.sql(
+      `update feed_events set created_at = now() - interval '20 minutes',
+              causal_at = now() - interval '20 minutes'
+        where actor_id = $1 and media_item_id = $2 and type = 'title_ranked'`,
+      [user, late.id],
+    );
+    await rank('Ranked at 0:35');
+    const group = await rank('Ranked at 0:36');
+    assert.equal(group.result.status, 'grouped');
+
+    const noted = await call(`rank_group_note($1, $2)`, [await uuid(), late.id]);
+    assert.equal(noted.status, 'solo', 'not joined to the later window’s group');
+    const all = await posts();
+    const row = all.find((p) => p.type === 'title_ranked' && p.media_item_id === late.id);
+    assert.equal(row.presented_in, null);
+    const w = all.find((p) => p.type === 'watchlist_added');
+    assert.equal(row.payload.started_at, w.payload.started_at, 'in the save’s window');
+    assert.equal(all.find((p) => p.id === group.result.event_id).payload.count, 2);
+  });
+});
+
 describe('what keeps its own card', () => {
   it('a rewatch and a TV update are never members', async () => {
     const old = await rank('Seen before', { note: false });
