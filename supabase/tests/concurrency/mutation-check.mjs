@@ -100,6 +100,12 @@
  *      Since 20261130001000 the kinds keep separate posts and share the window's anchor,
  *      which is what the keys guard: the honest functions are run first as a control and
  *      must leave one anchor, the mutants two.
+ *  21. `_post_watchlist_activity` reading its window (`_window_anchor`) instead of claiming
+ *      it (`_claim_window_start`), which is how 20261130001000 first shipped. `now()` is a
+ *      transaction's start, so a save that began before another device's but took the keys
+ *      after it (WG5 in `races/watchlist-grouping.mjs`) finds no window holding its time and
+ *      starts a second post in one half hour. The honest function is run first as a control
+ *      and must leave one post.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1859,6 +1865,60 @@ end; $$;
 
   results.push([
     'session writers on their own family key -> a ranking and a save at once open two windows',
+    (await scenario('mutant')) === 2,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutant 21: a save that reads its window instead of claiming it (20261130001000).
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const scenario = async (label) => {
+    const me = await fx.createUser();
+    const a = await fx.createMovie(`Mutant 21 ${label} a`);
+    const b = await fx.createMovie(`Mutant 21 ${label} b`);
+    const early = await db.session('early');
+    const late = await db.session('late');
+    try {
+      await early.actAs(me);
+      await late.actAs(me);
+      await early.begin();
+      await early.q(`select pg_sleep(0.02)`);
+      await late.q(`select set_watchlist($1, $2, true)`, [crypto.randomUUID(), a]);
+      await early.q(`select set_watchlist($1, $2, true)`, [crypto.randomUUID(), b]);
+      await early.commit();
+      const [{ n }] = await db.rows(
+        `select count(*)::int as n from feed_events
+          where actor_id = $1 and type = 'watchlist_added' and presented_in is null`,
+        [me],
+      );
+      return n;
+    } finally {
+      await early.rollback().catch(() => {});
+      await early.end().catch(() => {});
+      await late.end().catch(() => {});
+    }
+  };
+
+  controls.push([
+    'save claims its window -> a save that began first but locked second joins the post (WG5 holds)',
+    (await scenario('honest')) === 1,
+  ]);
+
+  const [{ def }] = await db.rows(
+    `select pg_get_functiondef('_post_watchlist_activity(uuid, uuid)'::regprocedure) as def`,
+  );
+  const claim = /v_anchor := _claim_window_start\(p_actor, now\(\), 'watchlist'\);/;
+  if (!claim.test(def)) throw new Error('mutant 21: the claim was not found in _post_watchlist_activity');
+  await db.sql(
+    def.replace(claim, `v_anchor := _window_anchor(p_actor, now(), 'watchlist'); -- mutant 21`),
+  );
+
+  results.push([
+    'save reads its window instead of claiming it -> a save that began first but locked second starts a second post',
     (await scenario('mutant')) === 2,
   ]);
 

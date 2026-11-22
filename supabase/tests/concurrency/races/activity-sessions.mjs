@@ -27,6 +27,10 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  * and on the reaction's commit finds it referenced and leaves it alone: two cards, the liked
  * one still its own.
  *
+ * **RS5. A save whose transaction began before a ranking committed.** The save's `now()` is
+ * earlier than the window the ranking opened; it must still claim that window (whose start
+ * moves back to it), never open a second one.
+ *
  * **RS4. A sitting ending while a save lands.** The finaliser holds both keys; the save waits,
  * then opens its watchlist post on the window the sitting's post carries: two posts, one
  * anchor.
@@ -223,6 +227,40 @@ export default function suite() {
         await liker.rollback().catch(() => {});
         await liker.end().catch(() => {});
         await noter.end().catch(() => {});
+      }
+    });
+
+    it('RS5: a save whose transaction began before a ranking committed shares that ranking’s window', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const film = await loggedToday(me, await fx.createMovie('RS5 ranked', (base += 1)));
+      const saved = await fx.createMovie('RS5 saved', (base += 1));
+      const early = await db.session('early-save');
+      const ranker = await db.session('ranker');
+      try {
+        await early.actAs(me);
+        await ranker.actAs(me);
+        await early.begin();
+        await early.q(`select pg_sleep(0.02)`);
+        assert.equal((await call(ranker, `rank_start($1, 'loved')`, [film])).done, true);
+        assert.equal(
+          (await call(ranker, `rank_group_note($1, $2)`, [await newOp(db), film])).status,
+          'solo',
+        );
+        await call(early, save, [await newOp(db), saved]);
+        await early.commit();
+
+        const s = await shape(me);
+        assert.deepEqual(
+          s.types,
+          ['title_ranked', 'watchlist_added'],
+          'RS5: one post per kind',
+        );
+        assert.equal(s.anchors, 1, 'RS5: one window, starting at the earlier save');
+      } finally {
+        await early.rollback().catch(() => {});
+        await early.end().catch(() => {});
+        await ranker.end().catch(() => {});
       }
     });
 

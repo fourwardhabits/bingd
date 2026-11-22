@@ -428,7 +428,9 @@ grant execute on function rank_group_note(uuid, uuid) to authenticated;
 /**
  * `_post_watchlist_activity`, 20261130000900's body with the two-post rule: a save joins the
  * watchlist post of the actor's current window, or starts one anchored on that window (which
- * a ranking may have opened). It never joins, or makes, a ranking group. Announced once,
+ * a ranking may have opened). The window is claimed (`_claim_window_start`) as every other
+ * writer claims it, because `now()` is the transaction's start and can precede a window a
+ * concurrent writer committed first. It never joins, or makes, a ranking group. Announced once,
  * ever, per (actor, title), as before. With `feed.watchlist_grouping_enabled` false it writes
  * a single post exactly as 20260820000300 did. `set_watchlist` is unchanged.
  */
@@ -467,7 +469,13 @@ begin
   );
 
   if v_grouping then
-    v_anchor := _window_anchor(p_actor, now(), 'watchlist');
+    /**
+     * Claimed, not merely read: `now()` is this transaction's start, so a save that began
+     * before another writer's but took the actor's keys after it has a time earlier than
+     * the window that writer committed. That window is then this save's, its start moving
+     * back to it, exactly as for a late ranking note (WG5, RS5).
+     */
+    v_anchor := _claim_window_start(p_actor, now(), 'watchlist');
     v_event := _window_post(p_actor, v_anchor, 'watchlist');
   end if;
 

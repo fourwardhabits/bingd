@@ -58,9 +58,14 @@ helpers are:
 - `_window_posts(actor, since, family)` returns the actor's visible rows that hold a window,
   with the anchor and kind of each.
 - `_window_anchor(actor, at, family)` returns the anchor of the window that holds `at`.
-- `_claim_window_start(actor, at, family)` is for a writer that may arrive late:
-  - A ranking note is sent without waiting. A sitting is published at its end. Either can
-    reach the server after a later event has already opened a window.
+- `_claim_window_start(actor, at, family)` is how every writer finds its window, because any
+  of them can reach the server after a later event has already opened one:
+  - A ranking note is sent without waiting. A sitting is published at its end.
+  - A save's time is `now()`, its transaction's start. A save that began before another
+    device's writer but took the actor's keys after it has a time earlier than the window
+    that writer committed. Reading the window instead of claiming it, as the save path first
+    did, missed that window and started a second post (WG1 failed intermittently on main;
+    WG5 and RS5 force the interleaving; mutant 21 restores the read).
   - When no window holds `at`, but one opened within 30 minutes after it, this event is
     that window's first. The anchor moves back to `at` on every row that carries it.
   - The anchor moves back only if every member still lies within 30 minutes of the new
@@ -73,7 +78,7 @@ bound above still holds. The PR 311 test now asserts the new behaviour.
 
 All writers take the actor's two keys in one order, `ranking_story` then `watchlist_story`,
 before reading anything. The keys now guard the shared anchor, so whichever writer decides
-second sees the first writer's window (races RS1 and RS4, and mutant 20).
+second sees the first writer's window (races RS1, RS4 and RS5, WG5, and mutants 20 and 21).
 
 ### Writers
 
@@ -81,7 +86,7 @@ second sees the first writer's window (races RS1 and RS4, and mutant 20).
 |---|---|
 | `_open_session` | Returns a post of the event's own kind only. Same signature. |
 | `rank_group_note` | Joins the window's ranking group, or pairs with a lone first ranking of the same window, or records the window's anchor on itself. Never joins a watchlist post. No review test. Same answers. |
-| `_post_watchlist_activity` (`set_watchlist`) | Joins the window's watchlist post, or starts one anchored on the window. Never pairs with a ranking. |
+| `_post_watchlist_activity` (`set_watchlist`) | Claims its window (`_claim_window_start`), then joins that window's watchlist post, or starts one anchored on the window. Never pairs with a ranking. |
 | `rank_batch_finalize` | Joins the window's ranking group. If there is none, it publishes on the window's anchor and presents the window's lone first rankings. It no longer presents watchlist posts. |
 | `rank_batch_note`, `_session_refresh`, `_unpresent`, the readers, the catalogue trigger | Unchanged. A post of one kind reads as one kind. A legacy mixed post reads as before until it is split. |
 | `consolidate_feed_sessions` | Retired: it refuses to apply unless `feed.session_consolidation_enabled` is true (seeded false). Its dry run still answers. |
@@ -275,6 +280,6 @@ too, roll back this migration first.
 | `supabase/tests/session-split.test.mjs` | the dry run held to the function; the founder-first batch; the original kind kept; hidden originals reused; engagement preserved; one-hop links; exact revert in both orders; exceptions |
 | `supabase/tests/session-split-rollback.test.mjs` | the rollback rehearsal |
 | `supabase/tests/session-consolidation.test.mjs` | the retired consolidation refusing without its flag |
-| `supabase/tests/concurrency/races/activity-sessions.mjs`, mutant 20 | races RS1–RS4 on the shared anchor |
+| `supabase/tests/concurrency/races/activity-sessions.mjs`, `watchlist-grouping.mjs`, mutants 20 and 21 | races RS1–RS5 and WG1–WG5 on the shared anchor, including a writer whose transaction began first but took the keys second |
 | `src/features/feed/ActivitySessions.test.tsx` | two cards and their headlines; the bookmark on every ranking tile, watchlist tile and hero, showing the reader's state only; no navigation from a tap in a carousel; rapid taps; an unknown write outcome; refresh-only reordering; legacy mixed posts |
 | `PosterRails`, `CinematicFeed`, `FeedEngagement`, `ReviewedRankingGroup` tests | updated for the new headlines, the hero bookmark, no Save under the artwork, and no Review label |

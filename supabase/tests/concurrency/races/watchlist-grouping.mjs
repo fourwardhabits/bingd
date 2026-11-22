@@ -19,6 +19,11 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  * **WG3. Two devices saving the same title at once announce it once.** The second reads
  * membership after the lock, finds the title, and adds nothing; both calls succeed.
  *
+ * **WG5. A save whose transaction began first but took the actor key second**
+ * (20261130001000). `now()` is a transaction's start, so the second writer's time can be
+ * earlier than the window the first one committed. It must still join that post, the
+ * window's start moving back to it: one post, not two.
+ *
  * **WG4. A catalogue delete of a group's first title waits for a save joining it** (Codex,
  * PR 310). The save holds the actor key uncommitted; the delete's trigger must block on that
  * key, then see the new member, keep the post with it as representative, and not let the
@@ -187,6 +192,48 @@ export default function suite() {
       } finally {
         await t1.end();
         await t2.end();
+      }
+    });
+
+    it('WG5: a save whose transaction began first but took the key second joins the other’s post', async () => {
+      const { db, fx } = ctx;
+      const me = await fx.createUser();
+      const [a, b] = [await fx.createMovie('WG5 A'), await fx.createMovie('WG5 B')];
+      const early = await db.session('early');
+      const late = await db.session('late');
+      try {
+        await early.actAs(me);
+        await late.actAs(me);
+        // `early`'s now() is fixed here, before the other save exists.
+        await early.begin();
+        await early.q(`select pg_sleep(0.02)`);
+        // `late` begins after it, saves and commits first: its post's window starts at its
+        // own now(), which is after `early`'s.
+        await call(late, save, [await newOp(db), a]);
+        await call(early, save, [await newOp(db), b]);
+        await early.commit();
+
+        const rows = await posts(me);
+        assert.equal(
+          rows.length,
+          1,
+          'WG5: one post, whatever order the clocks and the keys ran in',
+        );
+        assert.equal(rows[0].members, 2);
+        assert.equal(rows[0].payload.count, 2);
+        const [{ first }] = await db.rows(
+          `select min(added_at) as first from feed_watchlist_titles where actor_id = $1`,
+          [me],
+        );
+        assert.equal(
+          new Date(rows[0].payload.started_at).getTime(),
+          new Date(first).getTime(),
+          'the window starts at the earlier save',
+        );
+      } finally {
+        await early.rollback().catch(() => {});
+        await early.end().catch(() => {});
+        await late.end().catch(() => {});
       }
     });
   });
