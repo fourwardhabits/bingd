@@ -152,7 +152,12 @@ export function CommentThread({
    * comment`) before this reader's list had caught up. The list is the other way to know —
    * see `targetUnavailable` below — and either one stops the composer posting.
    */
-  const [replyGone, setReplyGone] = useState(false);
+  /**
+   * Keyed by the comment it is about, not a flag: a refusal that arrives after the reader
+   * has moved Reply to another comment is about the old target, and must not mark the new
+   * one unavailable (Codex review, PR #365).
+   */
+  const [replyGone, setReplyGone] = useState<string | null>(null);
   const input = useRef<TextInput>(null);
   const list = useRef<ScrollView>(null);
   // Which comment's reason sheet is open, by id. An id rather than the row, because a
@@ -283,7 +288,7 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
-    setReplyGone(false);
+    setReplyGone(null);
     setCaret(0);
   }
 
@@ -379,7 +384,7 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
-    setReplyGone(false);
+    setReplyGone(null);
     // An empty draft has no fragment, so the suggestion list closes with it rather than
     // hanging over a box the reader has just been given back.
     setCaret(0);
@@ -462,7 +467,7 @@ export function CommentThread({
        */
       if (wasReplyingTo && result.unavailable === 'comment') {
         if (stillHere(opening)) {
-          setReplyGone(true);
+          setReplyGone(wasReplyingTo.id);
           AccessibilityInfo.announceForAccessibility?.(
             `${wasReplyingTo.authorName}'s comment is no longer available. Your text is kept.`,
           );
@@ -522,7 +527,7 @@ export function CommentThread({
     newIntent();
     setEditing(null);
     setReplyingTo(comment);
-    setReplyGone(false);
+    setReplyGone(null);
     setDraft('');
     setSpoilers(false);
     setCaret(0);
@@ -547,7 +552,7 @@ export function CommentThread({
   const keepAsNewComment = () => {
     newIntent();
     setReplyingTo(null);
-    setReplyGone(false);
+    setReplyGone(null);
     input.current?.focus();
   };
 
@@ -634,7 +639,8 @@ export function CommentThread({
    */
   const targetUnavailable = Boolean(
     replyingTo &&
-      (replyGone || (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
+      (replyGone === replyingTo.id ||
+        (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
   );
   const targetThread = replyingTo ? threadOf(threads, replyingTo.id) : null;
   /**

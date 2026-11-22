@@ -31,6 +31,8 @@ const mockWrites: { name: string; args: Record<string, unknown> }[] = [];
 let mockWriteResults: { data?: unknown; error: unknown }[] = [];
 let mockReadError: unknown = null;
 let mockThreadReads = 0;
+/** Held open to keep a write in flight while the reader moves on. */
+let mockWriteGate: Promise<void> | null = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -44,6 +46,7 @@ jest.mock('@/lib/supabase', () => ({
       }
       if (name === 'mention_candidates') return { data: [], error: null };
       mockWrites.push({ name, args });
+      if (mockWriteGate) await mockWriteGate;
       return mockWriteResults.shift() ?? { data: { status: 'ok' }, error: null };
     },
   },
@@ -146,6 +149,7 @@ beforeEach(() => {
   mockWriteResults = [];
   mockReadError = null;
   mockThreadReads = 0;
+  mockWriteGate = null;
 });
 
 describe.each(SURFACES)('on $name', ({ render }) => {
@@ -389,6 +393,35 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     expect(adds()).toHaveLength(1);
     expect(adds()[0]!.args.p_parent_id).toBe('c1');
     expect(view.getByDisplayValue('for Anna')).toBeTruthy();
+  });
+
+  it('does not let a late refusal for one target mark the next target unavailable', async () => {
+    // Codex review, PR #365: reply to Anna, move Reply to Cy while it is in flight, and
+    // the server's "no such comment" for Anna's must not disable the reply to Cy.
+    let release: () => void = () => {};
+    mockWriteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockWriteResults = [{ error: { code: 'P0002', message: 'no such comment' } }];
+    const view = await render();
+
+    await fireEvent.press(view.getByLabelText('Reply to Anna'));
+    await fireEvent.changeText(view.getByLabelText('Your reply to Anna'), 'for Anna');
+    await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
+    await waitFor(() => expect(adds()).toHaveLength(1));
+
+    await fireEvent.press(view.getByLabelText('Reply to Cy'));
+    await act(async () => {
+      release();
+    });
+    mockWriteGate = null;
+
+    await waitFor(() =>
+      expect(view.getByText('Replying to Cy · under their comment')).toBeTruthy(),
+    );
+    expect(view.queryByText(/no longer available/)).toBeNull();
+    await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'for Cy');
+    expect(view.getByRole('button', { name: 'Reply' })).not.toBeDisabled();
   });
 
   it('keeps the draft when the reader deletes the comment they were replying to', async () => {
