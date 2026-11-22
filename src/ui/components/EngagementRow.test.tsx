@@ -4,6 +4,7 @@ import { StyleSheet } from 'react-native';
 import { theme } from '../tokens';
 
 import {
+  actionCount,
   ENGAGEMENT_EDGE,
   EngagementRow,
   LABEL_MIN_SCALE,
@@ -162,10 +163,10 @@ describe('the Like', () => {
     );
     const like = view.getByTestId('row-like');
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
-    expect(within(like).getByText('Laugh')).toBeTruthy();
+    expect(within(like).getByText('Laugh 1')).toBeTruthy();
     expect(within(like).getByTestId('reaction-slot')).toBeTruthy();
     expect(like.props.accessibilityLabel).toBe(
-      'Laugh. You reacted to Oppenheimer. Tap to remove, long press to change.',
+      'Laugh. You reacted to Oppenheimer. 1 reaction. Tap to remove, long press to change.',
     );
   });
 
@@ -180,13 +181,13 @@ describe('the Like', () => {
 });
 
 describe('Comment, Save and Share', () => {
-  it('Comment becomes its count once there is one, and opens the sheet', async () => {
+  it('Comment keeps its word and adds its count once there is one, and opens the sheet', async () => {
     const open = jest.fn();
     const view = await render(
       <EngagementRow {...base} onPressComments={open} commentCount={3} />,
     );
     const comment = view.getByTestId('row-comment');
-    expect(within(comment).getByText('3')).toBeTruthy();
+    expect(within(comment).getByText('Comment 3')).toBeTruthy();
     expect(comment.props.accessibilityLabel).toBe(
       "3 comments on Ada's activity about Oppenheimer. Open them.",
     );
@@ -217,5 +218,80 @@ describe('Comment, Save and Share', () => {
       selected: true,
     });
     expect(saved.getByLabelText('Oppenheimer is in your watchlist')).toBeTruthy();
+  });
+});
+
+/**
+ * **One count convention on every post** (refined card feed, 2026-11-22): the word, then
+ * the count once there is activity; never a `0`.
+ */
+describe('counts', () => {
+  const words = (node: { props: { children?: unknown } }): string => {
+    const walk = (value: unknown): string =>
+      typeof value === 'string' || typeof value === 'number'
+        ? String(value)
+        : Array.isArray(value)
+          ? value.map(walk).join('')
+          : value && typeof value === 'object' && 'props' in value
+            ? walk((value as { props: { children?: unknown } }).props.children)
+            : '';
+    return walk(node.props.children).replace(/\u00A0/g, ' ');
+  };
+
+  it('Like and Comment read the same way: the word, then the count', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 4 })}
+        onPressComments={jest.fn()}
+        commentCount={2}
+        onPressShare={jest.fn()}
+      />,
+    );
+    expect(within(view.getByTestId('row-like')).getByText('Like 4')).toBeTruthy();
+    expect(within(view.getByTestId('row-comment')).getByText('Comment 2')).toBeTruthy();
+    // Share has no count to show.
+    expect(within(view.getByTestId('row-share')).getByText('Share')).toBeTruthy();
+    expect(view.getByTestId('row-like').props.accessibilityLabel).toBe(
+      "React to Ada's activity about Oppenheimer. 4 reactions. Long press for more reactions.",
+    );
+  });
+
+  it('draws no zero: with no activity each action is its word alone', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 0 })}
+        onPressComments={jest.fn()}
+        commentCount={0}
+      />,
+    );
+    const like = within(view.getByTestId('row-like')).getByText(/Like/);
+    const comment = within(view.getByTestId('row-comment')).getByText(/Comment/);
+    expect(words(like)).toBe('Like');
+    expect(words(comment)).toBe('Comment');
+    expect(view.queryByText(/\b0\b/)).toBeNull();
+  });
+
+  it('the count is bound to its word and set in tabular figures', async () => {
+    const view = await render(
+      <EngagementRow {...base} onPressComments={jest.fn()} commentCount={12} />,
+    );
+    const label = within(view.getByTestId('row-comment')).getByText('Comment 12');
+    const count = within(label).getByText('12');
+    expect(count.props.children).toBe('\u00A012');
+    expect(style(count).fontVariant).toEqual(['tabular-nums']);
+  });
+
+  it('compacts a large count', () => {
+    expect(actionCount(0)).toBeNull();
+    expect(actionCount(-3)).toBeNull();
+    expect(actionCount(Number.NaN)).toBeNull();
+    expect(actionCount(1)).toBe('1');
+    expect(actionCount(999)).toBe('999');
+    expect(actionCount(1000)).toBe('1K');
+    expect(actionCount(1234)).toBe('1.2K');
+    expect(actionCount(9999)).toBe('9.9K');
+    expect(actionCount(12_345)).toBe('12K');
   });
 });

@@ -77,11 +77,19 @@ export type EngagementRowProps = {
  *     a long press opens the picker, and the summary line above the row (the host's
  *     `ReactionSummary`) opens who reacted. The slot is `ReactionSlot`, so the heart and
  *     every emoji occupy one box and a tap moves nothing.
- *   - **Comment** opens the comment sheet; its word becomes the count once there is one.
+ *   - **Comment** opens the comment sheet.
  *   - **Save** is the watchlist write, and only an individual title's post has one — not
  *     the reader's own, not an award, not a group.
  *   - **Share** is the Recommend sheet for a title. An award or a group has no share
  *     behaviour yet (`docs/design/screens.md` §7), so it has no Share rather than a dead one.
+ *
+ * **Counts: one convention on every post** (refined card feed, 2026-11-22). Each action
+ * keeps its word, and once there is activity the count follows it: `Like 4`, `Comment 2`,
+ * `Liked 5`. Zero is never drawn: with nothing yet the action is its word alone, never
+ * `Like 0`. A count of a thousand or more is compact (`1.2K`, `12K`), and every count is
+ * also said in the action's spoken label. Before this the comment count replaced the word
+ * Comment and the reaction count lived only in the summary line, so two posts with the
+ * same activity could read differently.
  *
  * **Narrow screens.** The labels are one line each. On the narrowest phones with four
  * actions, "Comment" is the one word that can be wider than its column; it shrinks a
@@ -112,8 +120,8 @@ export function EngagementRow({
           accessibilityState={{ selected: Boolean(mine) }}
           accessibilityLabel={
             mine
-              ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${subject}. Tap to remove, long press to change.`
-              : `React to ${actorName}'s activity about ${subject}. Long press for more reactions.`
+              ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${subject}.${spokenReactions(reaction.count)} Tap to remove, long press to change.`
+              : `React to ${actorName}'s activity about ${subject}.${spokenReactions(reaction.count)} Long press for more reactions.`
           }
           accessibilityHint={
             reaction.onLongPress ? 'Long press to choose a different reaction' : undefined
@@ -127,7 +135,7 @@ export function EngagementRow({
               Liked, the way 😂 Laugh and 😮 Wow are drawn (founder, nav cohesion sprint,
               2026-11-06). Both states sit in the one fixed slot, so a tap moves nothing. */}
           <ReactionSlot glyph={mine} color={theme.text.secondary} />
-          <Label active={Boolean(mine)}>
+          <Label active={Boolean(mine)} count={reaction.count}>
             {mine ? (reaction.mineLabel ?? 'Reacted') : 'Like'}
           </Label>
         </Pressable>
@@ -136,7 +144,8 @@ export function EngagementRow({
       {onPressComments ? (
         <Action
           icon="chatbubble-outline"
-          label={commentCount > 0 ? String(commentCount) : 'Comment'}
+          label="Comment"
+          count={commentCount}
           accessibilityLabel={
             commentCount > 0
               ? `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} on ${actorName}'s activity about ${subject}. Open them.`
@@ -177,6 +186,7 @@ export function EngagementRow({
 function Action({
   icon,
   label,
+  count,
   accessibilityLabel,
   onPress,
   active = false,
@@ -185,6 +195,7 @@ function Action({
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
+  count?: number;
   accessibilityLabel: string;
   onPress: () => void;
   active?: boolean;
@@ -205,13 +216,28 @@ function Action({
         size={theme.layout.icon.sm}
         color={active ? theme.semantic.action : theme.text.secondary}
       />
-      <Label active={active}>{label}</Label>
+      <Label active={active} count={count}>
+        {label}
+      </Label>
     </Pressable>
   );
 }
 
-/** One line, shrinking a little before it truncates; never wider than its column. */
-function Label({ active, children }: { active: boolean; children: string }) {
+/**
+ * One line, shrinking a little before it truncates; never wider than its column. The count,
+ * when there is one, follows the word after a non-breaking space in tabular figures, so
+ * `Like 9` and `Like 10` keep the word where it was.
+ */
+function Label({
+  active,
+  count = 0,
+  children,
+}: {
+  active: boolean;
+  count?: number;
+  children: string;
+}) {
+  const shown = actionCount(count);
   return (
     <Text
       variant="footnote"
@@ -222,9 +248,36 @@ function Label({ active, children }: { active: boolean; children: string }) {
       style={styles.label}
     >
       {children}
+      {shown ? (
+        <Text variant="footnote" tone={active ? 'action' : 'secondary'} style={styles.count}>
+          {`\u00A0${shown}`}
+        </Text>
+      ) : null}
     </Text>
   );
 }
+
+/**
+ * **An action's count as drawn**: null for none (never `0`), the number up to 999, then
+ * `1.2K` to `9.9K` and `12K` upward. Whole numbers only; a fractional or negative input is
+ * treated as none.
+ */
+export function actionCount(count: number): string | null {
+  if (!Number.isFinite(count) || count < 1) return null;
+  const n = Math.floor(count);
+  if (n < 1000) return String(n);
+  if (n < 10_000) {
+    const tenths = Math.floor(n / 100) / 10;
+    return `${Number.isInteger(tenths) ? tenths.toFixed(0) : tenths.toFixed(1)}K`;
+  }
+  return `${Math.floor(n / 1000)}K`;
+}
+
+/** " 4 reactions." for the spoken label, or nothing with none. */
+const spokenReactions = (count: number) =>
+  count >= 1
+    ? ` ${Math.floor(count)} ${Math.floor(count) === 1 ? 'reaction' : 'reactions'}.`
+    : '';
 
 /** How far a label may shrink to fit its column before it truncates instead. */
 export const LABEL_MIN_SCALE = 0.85;
@@ -255,5 +308,6 @@ const styles = StyleSheet.create({
     minWidth: theme.layout.minTapTarget,
   },
   label: { flexShrink: 1 },
+  count: { fontVariant: ['tabular-nums'] },
   pressed: { opacity: 0.7 },
 });

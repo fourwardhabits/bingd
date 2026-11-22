@@ -29,6 +29,7 @@ import { CommentSheet } from '@/features/feed/CommentSheet';
 import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
 import { FeedHeading } from '@/features/feed/FeedHeading';
+import { FeedPostSurface } from '@/features/feed/FeedPostSurface';
 import {
   groupCount,
   previewKey,
@@ -994,8 +995,10 @@ export default function FeedScreen() {
                  * no use for.
                  */
                 event.type === 'follow_added' ? (
+                  /* Every post on the Feed's card surface (refined card feed, 2026-11-22);
+                     the row inside it is unchanged. */
+                  <FeedPostSurface key={event.id} leading={index === 0} row>
                   <FollowStoryRow
-                    key={event.id}
                     event={event}
                     onPressActor={
                       event.actorUsername
@@ -1008,6 +1011,7 @@ export default function FeedScreen() {
                       setFollowStoryFor(event.id);
                     }}
                   />
+                  </FeedPostSurface>
                 ) : takesFeedCard(event) ? (
                   /**
                    * **A title activity is a cinematic card** (founder-approved direction,
@@ -1075,8 +1079,8 @@ export default function FeedScreen() {
                     rail={railFor(event)}
                   />
                 ) : (
+                <FeedPostSurface key={event.id} leading={index === 0} row>
                 <ActivityRow
-                  key={event.id}
                   actorName={event.actorName}
                   actorAvatarUri={event.actorAvatarUri}
                   // Own activity has no profile to visit that is not the tab the user
@@ -1196,6 +1200,7 @@ export default function FeedScreen() {
                    */
                   labelledActions
                 />
+                </FeedPostSurface>
                 ),
               )
             )}

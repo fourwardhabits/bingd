@@ -167,6 +167,8 @@ const members = (eventId: string, titles: string[]) =>
 
 const style = (node: { props: { style?: unknown } }) =>
   StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
+/** A sentence phrase is bound with non-breaking spaces (`bindPhrase`); compared as words. */
+const spaced = (text: unknown) => String(text).replace(/\u00A0/g, ' ');
 
 const entity = { fontFamily: fontFamily.sansSemibold, color: theme.text.primary };
 
@@ -312,7 +314,7 @@ describe('B. "and others" links', () => {
     mockRpc.feed_group_previews = new Error('nope');
     const view = await renderWithProviders(<FeedScreen />);
     const link = await waitFor(() => view.getByTestId('feed-card-tail-link'));
-    expect(link.props.children).toBe('3 others');
+    expect(spaced(link.props.children)).toBe('3 others');
     expect(style(link)).toMatchObject(entity);
     expect(link.props.accessibilityRole).toBe('button');
 
@@ -332,7 +334,7 @@ describe('B. "and others" links', () => {
     mockRpc.feed_group_previews = new Error('nope');
     const view = await renderWithProviders(<FeedScreen />);
     const link = await waitFor(() => view.getByTestId('feed-card-tail-link'));
-    expect(link.props.children).toBe('1 other');
+    expect(spaced(link.props.children)).toBe('1 other');
   });
 
   it('"and 2 more" on a ranking sitting opens the sitting, not the title', async () => {
@@ -340,7 +342,7 @@ describe('B. "and others" links', () => {
     mockRpc.feed_group_previews = new Error('nope');
     const view = await renderWithProviders(<FeedScreen />);
     const link = await waitFor(() => view.getByTestId('feed-card-tail-link'));
-    expect(link.props.children).toBe('2 more');
+    expect(spaced(link.props.children)).toBe('2 more');
     expect(style(link)).toMatchObject(entity);
 
     await fireEvent.press(link);
@@ -361,7 +363,7 @@ describe('B. "and others" links', () => {
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => view.getByTestId('feed-card-rail'));
     const link = view.getByTestId('feed-card-tail-link');
-    expect(link.props.children).toBe('3 others');
+    expect(spaced(link.props.children)).toBe('3 others');
     expect(view.queryByText('4 titles')).toBeNull();
     expect(style(link)).toMatchObject(entity);
 
@@ -384,7 +386,7 @@ describe('B. "and others" links', () => {
     }));
     const view = await renderWithProviders(<FeedScreen />);
     const link = await waitFor(() => view.getByTestId('feed-card-companions-link'));
-    expect(link.props.children).toBe('2 others');
+    expect(spaced(link.props.children)).toBe('2 others');
     expect(style(link)).toMatchObject(entity);
 
     await fireEvent.press(link);

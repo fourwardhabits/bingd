@@ -296,8 +296,10 @@ describe('one window, two posts', () => {
     mockRpc.watchlist_group_titles = [];
     const view = await renderWithProviders(<FeedScreen />);
     await railOf(view, /^Show F/);
-    const links = view.getAllByText('2 more');
+    // The "+" is part of the link (refined card feed, 2026-11-22): one unit, one press.
+    const links = view.getAllByText('+ 2 more');
     expect(links).toHaveLength(2);
+    for (const link of links) expect(link.props.accessibilityLabel).toBe('2 more');
     await fireEvent.press(links[0]!);
     await waitFor(() =>
       expect(mockRpcCalls).toContainEqual({

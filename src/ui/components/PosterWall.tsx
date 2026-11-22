@@ -155,6 +155,13 @@ export type PosterRailProps = {
    * rail is sized to the card rather than to the screen the way a shelf is.
    */
   width: number;
+  /**
+   * Space before the first poster and after the last, inside the scroll (refined card
+   * feed, 2026-11-22). The Feed card's rail scrolls to the card's outline and starts on
+   * the card's 12pt inset, so a poster slides under the card's edge rather than stopping
+   * short of it. Tiles are sized to the width after the leading inset.
+   */
+  inset?: number;
   /** Placeholder frames while the members load, instead of tiles. */
   loadingCount?: number;
   /**
@@ -187,12 +194,14 @@ export function PosterRail({
   tiles,
   onPressTile,
   width,
+  inset = 0,
   loadingCount = 0,
   onToggleSave,
   testID,
 }: PosterRailProps) {
   const { gap, peek } = theme.layout.posterShelf;
-  const cardWidth = Math.floor((width - RAIL_COLUMNS * gap) / (RAIL_COLUMNS + peek));
+  // inset + n posters + n gaps + peek of one = width: every poster the same size.
+  const cardWidth = Math.floor((width - inset - RAIL_COLUMNS * gap) / (RAIL_COLUMNS + peek));
   const cardHeight = Math.round((cardWidth * 3) / 2);
 
   return (
@@ -200,7 +209,7 @@ export function PosterRail({
       horizontal
       showsHorizontalScrollIndicator={false}
       accessibilityLabel={label}
-      contentContainerStyle={[styles.railRow, { gap }]}
+      contentContainerStyle={[styles.railRow, { gap, paddingHorizontal: inset }]}
       decelerationRate="fast"
       testID={testID}
     >
@@ -504,14 +513,17 @@ export function PosterTileCopy({
   badge?: string | null;
 }) {
   return (
-    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       <Tile tile={tile} width={width} onPress={() => {}} badge={badge} />
     </View>
   );
 }
 
 const GRID_POSITION = { disabled: true } as const;
-
 
 /**
  * One poster as a button.
@@ -602,7 +614,11 @@ function Tile({
         ) : null}
         {score != null && average && tile.season == null ? (
           // The season average: the shared outlined badge, `SN AVG 8.7` (FU1113-B).
-          <SeasonAverageBadge score={score} style={styles.chipPosition} testID="poster-average-pill" />
+          <SeasonAverageBadge
+            score={score}
+            style={styles.chipPosition}
+            testID="poster-average-pill"
+          />
         ) : score != null ? (
           <View
             // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
@@ -875,7 +891,7 @@ const labelFor = (tile: PosterTile, savedWord = 'saved') => {
 const styles = StyleSheet.create({
   shelf: { gap: theme.space[2] },
   shelfRow: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[1] },
-  // No gutter of its own: the Feed card that holds a rail is already inset.
+  // No gutter of its own: the caller passes the inset of whatever holds the rail.
   railRow: { paddingVertical: theme.space[1] },
   // Parchment, the colour a poster with no artwork already is.
   railPlaceholder: {

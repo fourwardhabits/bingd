@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { fontFamily, theme } from '../tokens';
 import { Text, type TextProps } from './Text';
@@ -36,7 +36,7 @@ export function SentenceLink({
       variant="subhead"
       style={styles.link}
       onPress={onPress}
-      accessibilityRole="button"
+      accessibilityRole={INLINE_ROLE}
       accessibilityLabel={accessibilityLabel}
       testID={testID}
     >
@@ -44,6 +44,15 @@ export function SentenceLink({
     </Text>
   );
 }
+
+/**
+ * A button on iOS and Android, where a pressable run is part of the sentence's one
+ * attributed string. On the web a `button` role makes react-native-web draw a `<button>`,
+ * which the browser lays out as an inline-block: the line may break before it whatever
+ * non-breaking space precedes it, which undoes the headline's binding of "+ 5 more" to the
+ * title (refined card feed, 2026-11-22). A `link` role is drawn as an inline run there.
+ */
+const INLINE_ROLE = Platform.OS === 'web' ? 'link' : 'button';
 
 /** "1 other", "3 others": the count after a name, singular when it is one. */
 export function othersLabel(count: number) {
