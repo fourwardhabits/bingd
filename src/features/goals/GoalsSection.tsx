@@ -185,7 +185,11 @@ export function GoalsSection({
        * the caller passes it only where that is the reader's own.
        */}
       {/* Beside Set a goal while there is no goal (above); under the bars once there is. */}
-      {streakUserId && !prompting ? <StreakLine userId={streakUserId} /> : null}
+      {streakUserId && !prompting ? (
+        <View style={styles.streak}>
+          <StreakLine userId={streakUserId} />
+        </View>
+      ) : null}
 
       {/* Mounted only while open. The sheet seeds its draft from `targets` on mount,
           so a sheet that lived alongside this section would seed itself from `{}`
@@ -220,7 +224,14 @@ export function GoalsSection({
 }
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
+  // The streak under the bars, a row's step below them.
+  streak: { paddingTop: theme.space[2] },
   body: { paddingHorizontal: theme.layout.gutter },
   bars: { gap: theme.space[4] },
   prompt: { gap: theme.space[3] },

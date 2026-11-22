@@ -33,7 +33,7 @@ describe('FeedHeading', () => {
   };
 
   it('draws every heading on the tab in one treatment', async () => {
-    const token = theme.typography.sectionHeaderLarge;
+    const token = theme.typography.sectionHeading;
     const expected = {
       header: 'header',
       fontSize: token.fontSize,
@@ -128,7 +128,7 @@ describe('FeedHeading, measured from the font', () => {
       [...label].reduce((sum, ch) => sum + advance(glyphOf(ch.charCodeAt(0))), 0) / unitsPerEm;
   })();
 
-  const token = theme.typography.sectionHeaderLarge;
+  const token = theme.typography.sectionHeading;
   const widthAt = (word: string, scale: number) =>
     ems(word) * token.fontSize * scale * 1.04 + token.letterSpacing * scale * word.length;
 
@@ -145,7 +145,8 @@ describe('FeedHeading, measured from the font', () => {
     for (const word of words) {
       expect(widthAt(word, FEED_HEADING_MAX_SCALE)).toBeLessThanOrEqual(besideToggle(320));
     }
-    expect(widthAt('LEADERBOARD', FEED_HEADING_MAX_SCALE)).toBeCloseTo(160.2, 1);
+    // 160.2 at the 15pt heading this replaced; the 13pt section heading leaves 25pt spare.
+    expect(widthAt('LEADERBOARD', FEED_HEADING_MAX_SCALE)).toBeCloseTo(137.4, 1);
     // And the ceiling is what makes it so: at 200% the one-word heading would break.
     expect(widthAt('LEADERBOARD', 2)).toBeGreaterThan(besideToggle(320));
   });

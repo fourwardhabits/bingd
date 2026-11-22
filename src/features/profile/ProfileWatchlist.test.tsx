@@ -125,7 +125,15 @@ describe('the shelf on a profile you can see', () => {
   it('is headed Watchlist and lists what they saved', async () => {
     const view = await open('them');
     // The header renders its label uppercased; the accessible name is the real one.
-    await waitFor(() => expect(view.getByLabelText('Watchlist')).toBeTruthy());
+    // The heading and the rail under it both carry the section's name, as the Feed's
+    // Trending heading and shelf do.
+    await waitFor(() =>
+      expect(
+        view
+          .getAllByLabelText('Watchlist')
+          .some((node) => node.props.accessibilityRole === 'header'),
+      ).toBe(true),
+    );
     for (const title of ['Dune', 'Heat', 'Sicario']) {
       expect(view.getByLabelText(new RegExp(`^${title}`))).toBeTruthy();
     }

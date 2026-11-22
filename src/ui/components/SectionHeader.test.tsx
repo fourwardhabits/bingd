@@ -35,37 +35,48 @@ describe('SectionHeader casing', () => {
 });
 
 /**
- * **Two sizes, and the large one is opt-in** (founder final polish, 2026-11-04). The Feed
- * and Profile tabs ask for 15pt by name; every other heading in the app keeps 12pt, so the
- * default is the one that must not move.
+ * **Two roles** (heading system, 2026-11-22). `large` is a section heading — the Feed, both
+ * profiles, the title page — and `standard`, the default, a group label inside a sheet, a
+ * settings screen or a dense list. The default is the one that must not move: every
+ * group label in the app is drawn by it.
  */
-describe('SectionHeader sizes', () => {
-  it('keeps the standard heading at 12pt', async () => {
+describe('SectionHeader roles', () => {
+  it('keeps the group label at 12pt, unchanged', async () => {
     const view = await render(<SectionHeader title="Account" />);
     const style = printed(view, 'ACCOUNT');
 
     expect(style.fontSize).toBe(12);
     expect(style.lineHeight).toBe(16);
     expect(style.letterSpacing).toBe(0.6);
+    expect(style.color).toBe(theme.semantic.action);
   });
 
-  it('draws the large heading in Inter Semibold 15, Maroon, uppercase, 0.7 tracking', async () => {
+  it('draws the section heading in Inter Semibold 13, Maroon, uppercase, 0.5 tracking', async () => {
     const view = await render(<SectionHeader title="Trending now" size="large" />);
     const style = printed(view, 'TRENDING NOW');
 
-    expect(style.fontFamily).toBe(theme.typography.sectionHeader.fontFamily);
-    expect(style.fontSize).toBe(15);
-    expect(style.lineHeight).toBe(20);
-    expect(style.letterSpacing).toBe(0.7);
+    expect(style.fontFamily).toBe(theme.typography.sectionHeading.fontFamily);
+    expect(style.fontFamily).toBe(theme.typography.groupLabel.fontFamily);
+    expect(style.fontSize).toBe(13);
+    expect(style.lineHeight).toBe(18);
+    expect(style.letterSpacing).toBe(0.5);
     expect(style.textTransform).toBe('uppercase');
     expect(style.color).toBe(theme.semantic.action);
   });
 
-  it('keeps bingd lower-case at the large size', async () => {
+  it('is one step above the group label and well under the 15pt it replaced', () => {
+    const { sectionHeading, groupLabel } = theme.typography;
+    expect(sectionHeading.fontSize).toBeGreaterThan(groupLabel.fontSize);
+    expect(sectionHeading.fontSize).toBeLessThan(15);
+    // Quieter capitals: less tracking per point than either of the treatments before it.
+    expect(sectionHeading.letterSpacing / sectionHeading.fontSize).toBeLessThan(0.7 / 15);
+  });
+
+  it('keeps bingd lower-case as a section heading', async () => {
     const view = await render(<SectionHeader title="bingd AWARDS" exactCase size="large" />);
     const style = printed(view, 'bingd AWARDS');
 
-    expect(style.fontSize).toBe(15);
+    expect(style.fontSize).toBe(13);
     expect(style.textTransform).toBe('none');
   });
 });
@@ -156,6 +167,6 @@ describe('SectionHeader text-size ceiling', () => {
     expect(text.props.maxFontSizeMultiplier).toBe(1.3);
     expect(text.props.adjustsFontSizeToFit).toBeUndefined();
     expect(text.props.numberOfLines).toBeUndefined();
-    expect(printed(view, 'DISCOVER PEOPLE').fontSize).toBe(15);
+    expect(printed(view, 'DISCOVER PEOPLE').fontSize).toBe(13);
   });
 });

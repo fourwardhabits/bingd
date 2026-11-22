@@ -804,11 +804,11 @@ describe('the refined person page', () => {
       },
     ];
     const view = await open();
-    // Row 1: FILMOGRAPHY at the large section size on the left, Movies / TV on the right.
+    // Row 1: FILMOGRAPHY as a section heading on the left, Movies / TV on the right.
     const header = view.getByTestId('filmography-header');
     const heading = within(view.getByTestId('filmography-header-leading')).getByLabelText('Filmography');
     expect(StyleSheet.flatten(heading.props.style).fontSize).toBe(
-      theme.typography.sectionHeaderLarge.fontSize,
+      theme.typography.sectionHeading.fontSize,
     );
     expect(heading.props.accessibilityRole).toBe('header');
     expect(

@@ -71,8 +71,8 @@ function Section({ title, body }: { title: string; body: string }) {
       {/* The heading is the word from the line above it, spelled the same way, so the
           reader can see which half of `89% Match · 42 shared` each paragraph is about
           without the sheet having to repeat the line. */}
-      <Text variant="footnote" tone="tertiary" style={styles.heading}>
-        {title.toUpperCase()}
+      <Text variant="label" tone="secondary">
+        {title}
       </Text>
       <Text variant="callout">{body}</Text>
     </View>
@@ -127,6 +127,5 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
   },
   section: { gap: theme.space[1] },
-  heading: { letterSpacing: 0.6 },
   pressed: { opacity: 0.6 },
 });

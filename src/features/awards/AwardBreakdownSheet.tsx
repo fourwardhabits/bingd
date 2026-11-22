@@ -174,7 +174,7 @@ export function AwardBreakdownSheet({
                       the capped arithmetic self-evident without a paragraph about it. */}
                   {section.label ? (
                     <View style={styles.sectionHead}>
-                      <Text variant="footnote" tone="secondary" style={styles.sectionLabel}>
+                      <Text variant="label" tone="secondary">
                         {section.label}
                       </Text>
                       {section.value ? (
@@ -317,7 +317,6 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
     paddingBottom: theme.space[1],
   },
-  sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   sectionEmpty: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   more: {
     alignItems: 'center',

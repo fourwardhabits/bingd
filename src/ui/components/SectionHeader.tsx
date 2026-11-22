@@ -26,9 +26,17 @@ export type SectionHeaderProps = {
    */
   exactCase?: boolean;
   /**
-   * `large` — 15pt rather than 12 (`sectionHeaderLarge`), for the Feed and Profile tabs'
-   * own headings only (founder final polish, 2026-11-04). Every other heading, including
-   * the same components drawn on somebody else's profile, keeps the standard size.
+   * **Which heading this is** (heading system, docs/design/heading-system.md).
+   *
+   * `large` is a **section heading** (`sectionHeading`, 13pt): a section of a content page —
+   * the Feed, both profiles (the same sections on yours and on somebody else's are the same
+   * heading), the title page in both layouts, the person page, Settings' index, My lists,
+   * Watch history. `standard`, the default, is a **group label** (`groupLabel`, 12pt): a
+   * group inside a sheet, a settings sub-screen or a dense list such as Search's results
+   * and Notifications' days.
+   *
+   * Named for size because it predates the roles, and kept so the shelves that pass it
+   * through (`PosterShelf`'s `headingSize`) did not have to change with them.
    */
   size?: SectionHeaderSize;
   /**
@@ -95,16 +103,22 @@ export const sectionSpacing = (spacing: SectionHeaderProps['spacing']) => {
 export type SectionHeaderSize = 'standard' | 'large';
 
 /**
- * The one way a screen names a section (design-system.md §8).
+ * The one way a screen names a section or a group (design-system.md §8,
+ * heading-system.md).
  *
  * Maroon rather than tertiary grey. A header at 12pt, medium weight and 5.2:1
  * is small, faint and light all at once, and the three together read as a
- * disclaimer under the content instead of a label over it. Maroon is 8.5:1 on
+ * disclaimer under the content instead of a label over it. Maroon is 8.2:1 on
  * Paper and is already the app's structural colour.
  *
  * The gutter padding lives here and not at the call site, which is why
  * screens must not hand-roll a header: Profile did, omitted the padding on one
  * of its two, and shipped a heading flush to the screen edge.
+ *
+ * **Spacing under it** (heading-system.md §4): the first item it names starts
+ * `section.headingToContent` (12) under its line, a sentence that explains it
+ * `section.headingToText` (8). The default 44pt row already leaves 13 under an 18pt line, so
+ * content follows it directly; a `tight` heading leaves it to the caller.
  */
 export function SectionHeader({
   title,
@@ -127,7 +141,7 @@ export function SectionHeader({
       accessibilityLabel={title}
     >
       <Text
-        variant={size === 'large' ? 'sectionHeaderLarge' : 'sectionHeader'}
+        variant={size === 'large' ? 'sectionHeading' : 'groupLabel'}
         tone="action"
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.

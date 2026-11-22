@@ -3,6 +3,7 @@ import { BackHandler, StyleSheet, type TextStyle, type ViewStyle } from 'react-n
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
+import { FEED_CARD } from '@/features/feed/FeedPostSurface';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -1515,8 +1516,9 @@ describe('arriving to find people', () => {
  *
  * Production drew TRENDING NOW, LEADERBOARD and DISCOVER PEOPLE at three sizes: the last two
  * shrank to fit their line and the first did not. Every one is now `FeedHeading` — the same
- * 15pt Maroon token, the same 130% text-size ceiling, and nothing shrunk — and RECENT
- * ACTIVITY is that same type in its secondary place.
+ * Maroon section heading (13pt since the heading system, 2026-11-22), the same 130%
+ * text-size ceiling, and nothing shrunk — and RECENT ACTIVITY is that same type in its
+ * secondary place.
  */
 describe('the Feed headings', () => {
   const styleOf = (node: { props: { style?: unknown } }) =>
@@ -1539,10 +1541,10 @@ describe('the Feed headings', () => {
   };
 
   const SHARED = {
-    fontSize: 15,
-    lineHeight: 20,
-    fontFamily: theme.typography.sectionHeaderLarge.fontFamily,
-    letterSpacing: theme.typography.sectionHeaderLarge.letterSpacing,
+    fontSize: theme.typography.sectionHeading.fontSize,
+    lineHeight: theme.typography.sectionHeading.lineHeight,
+    fontFamily: theme.typography.sectionHeading.fontFamily,
+    letterSpacing: theme.typography.sectionHeading.letterSpacing,
     color: theme.semantic.action,
     maxFontSizeMultiplier: 1.3,
     numberOfLines: undefined,
@@ -1574,6 +1576,28 @@ describe('the Feed headings', () => {
     expect(StyleSheet.flatten(start.props.style).paddingTop).toBe(theme.space[4]);
   });
 
+  /**
+   * **RECENT ACTIVITY keeps TRENDING NOW's distance to what it heads** (heading system,
+   * founder brief 2026-11-22: "Recent Activity sits too close to the first Feed card").
+   *
+   * TRENDING NOW's line sits in the 44pt row it shares with the toggle, 13pt over the shelf,
+   * whose rail keeps 4pt of room for a pressed poster: 16 to the artwork's frame, give or
+   * take the half point of centring. RECENT ACTIVITY's line was 8 from the first post's
+   * outline (the card's own `leading`); its wrapper now adds the heading's share.
+   */
+  it('puts the first post as far under RECENT ACTIVITY as the shelf is under TRENDING NOW', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('RECENT ACTIVITY')).toBeTruthy());
+    const start = StyleSheet.flatten(view.getByTestId('feed-activity-start').props.style);
+
+    const trending =
+      (theme.layout.minTapTarget - theme.typography.sectionHeading.lineHeight) / 2 +
+      theme.space[1];
+    const recent = Number(start.paddingBottom) + FEED_CARD.leading;
+    expect(recent).toBe(theme.space[4]);
+    expect(Math.abs(recent - trending)).toBeLessThanOrEqual(1);
+  });
+
   it('draws no rule above RECENT ACTIVITY when there is no shelf to divide it from', async () => {
     mockTrendingItems = [];
     const view = await open();
@@ -1596,7 +1620,7 @@ describe('the Feed headings', () => {
     const view = await open();
     await toPeople(view);
     expect(treatment(view.getByText('DISCOVER PEOPLE'))).toEqual(SHARED);
-    expect(sizeOf(view.getByText('DISCOVER PEOPLE'))).toBe(15);
+    expect(sizeOf(view.getByText('DISCOVER PEOPLE'))).toBe(13);
   });
 });
 

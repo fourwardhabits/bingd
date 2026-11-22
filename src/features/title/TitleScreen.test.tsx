@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-
 import { Alert, Linking, Share, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
-import { brand } from '@/ui/tokens';
+import { brand, theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -4955,7 +4955,9 @@ describe('the immersive title page (experiment)', () => {
     /**
      * **Efficient vertically** (final title refinement, 2026-11-06): a section heading is its
      * own line rather than a 44pt row. The synopsis starts 4pt under ABOUT, because two
-     * lines of text add their own leading; everything else 8pt, less a rail's own padding.
+     * lines of text add their own leading; everything else `section.headingToContent` (12pt,
+     * heading system 2026-11-22, 8 before it), less a rail's own padding — the step the
+     * profile's shelves keep under the same heading.
      */
     it('sets each section heading on its own line, the body just under it', async () => {
       tableRows.media_cache = [credits];
@@ -4968,11 +4970,14 @@ describe('the immersive title page (experiment)', () => {
         StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight,
       ).toBe(0);
       expect(body('about')).toMatchObject({ paddingTop: 4 });
-      expect(body('similar')).toMatchObject({ paddingTop: 8 });
+      expect(body('similar')).toMatchObject({
+        paddingTop: theme.layout.section.headingToContent,
+      });
+      expect(theme.layout.section.headingToContent).toBe(12);
       // A rail's space is outside its scroll view, where See all's slop can use it without
       // a coasting rail taking the press (independent review 2).
       await waitFor(() => expect(view.getByTestId('immersive-body-cast')).toBeTruthy());
-      expect(body('cast')).toMatchObject({ paddingTop: 8 });
+      expect(body('cast')).toMatchObject({ paddingTop: theme.layout.section.headingToContent });
       const strip = view.getByTestId('cast-strip');
       expect(StyleSheet.flatten(strip.props.contentContainerStyle)).toMatchObject({
         paddingVertical: 0,

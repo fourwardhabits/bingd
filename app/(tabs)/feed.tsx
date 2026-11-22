@@ -29,7 +29,7 @@ import { CommentSheet } from '@/features/feed/CommentSheet';
 import { CompanionsSheet } from '@/features/feed/CompanionsSheet';
 import { FeedCard } from '@/features/feed/FeedCard';
 import { FeedHeading } from '@/features/feed/FeedHeading';
-import { FeedPostSurface } from '@/features/feed/FeedPostSurface';
+import { FEED_CARD, FeedPostSurface } from '@/features/feed/FeedPostSurface';
 import {
   groupCount,
   previewKey,
@@ -900,9 +900,10 @@ export default function FeedScreen() {
              * The nav cohesion sprint took the boundary down to whitespace alone, and on the
              * phone the first post then read as part of the rail. Now: the Feed's own
              * separator (the hairline between posts) under Trending, 16pt either side of it,
-             * and the heading in the Feed's section-label token, as TRENDING NOW is. The first
-             * post sits 20pt under it (`leading`), so the label belongs to what follows. The
-             * rule is drawn only under a shelf; with no shelf there is nothing to divide.
+             * and the heading in the Feed's section-heading token, as TRENDING NOW is. The
+             * first post's outline sits 16pt under its line, the distance TRENDING NOW keeps to
+             * its shelf (`activityStart`), so the heading belongs to what follows. The rule is
+             * drawn only under a shelf; with no shelf there is nothing to divide.
              */}
             <View style={styles.activityStart} testID="feed-activity-start">
               {trendingHasItems ? <View style={styles.activityRule} /> : null}
@@ -1400,8 +1401,20 @@ const styles = StyleSheet.create({
   // Takes the space the toggle leaves, so a long heading truncates rather than pushing
   // the control off the row.
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
-  /** Trending's end, the rule and RECENT ACTIVITY: 16pt above and below the rule. */
-  activityStart: { paddingTop: theme.space[4] },
+  /**
+   * Trending's end, the rule and RECENT ACTIVITY: 16pt above and below the rule — and 16pt
+   * from the heading's line to the first post's outline (heading system, 2026-11-22).
+   *
+   * That is the distance TRENDING NOW keeps to its shelf: 13pt of the 44pt row it shares
+   * with the mode toggle, plus the rail's 4pt of room for a pressed poster. RECENT ACTIVITY
+   * had 8 (the first card's own `FEED_CARD.leading`), which on the phone put the heading on
+   * the card rather than over it. The card's margin is the card's; this is the heading's
+   * share, so the two add up to the same 16 whatever the card does.
+   */
+  activityStart: {
+    paddingTop: theme.space[4],
+    paddingBottom: theme.space[4] - FEED_CARD.leading,
+  },
   // The hairline between two posts (`FeedCard`), full width, as the Feed's other rules are.
   activityRule: {
     height: StyleSheet.hairlineWidth * 2,

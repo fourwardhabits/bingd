@@ -1357,7 +1357,10 @@ the Profile tab's YOUR 2026, bingd AWARDS (still lower-case bingd), TOP RANKED, 
 LISTS and RECENT ACTIVITY. Everything else keeps the 12pt `sectionHeader`, including the
 same sections on somebody else's profile, PEOPLE YOU MAY KNOW and the Leaderboard's
 timeframe beside TRENDING NOW, Settings, Where to Watch and the filter sheets. No icons beside
-headings.
+headings. *Superseded 2026-11-22 by [`heading-system.md`](./heading-system.md): every
+page-level section heading — these, somebody else's profile and the title page included — is
+`sectionHeading` (13/18, +0.5); the 12pt token is `groupLabel`, for groups inside sheets,
+settings screens and dense lists.*
 
 **Leaderboard.** The metrics read All Titles, Movies, TV Shows, Reviews, in one chip row that
 scrolls sideways and never wraps: All Titles is whole on arrival and Reviews is reached by

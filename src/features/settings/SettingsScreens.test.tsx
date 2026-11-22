@@ -1232,12 +1232,12 @@ describe('the Settings header and sections', () => {
     mockLane = 'production';
   });
 
-  it('keeps every other section, under the larger section heading', async () => {
+  it('keeps every other section, under a section heading', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
     for (const title of ['Account', 'Help & feedback', 'Legal', 'About']) {
       const heading = view.getByText(title.toUpperCase());
       expect(StyleSheet.flatten(heading.props.style).fontSize).toBe(
-        theme.typography.sectionHeaderLarge.fontSize,
+        theme.typography.sectionHeading.fontSize,
       );
     }
     expect(view.getByRole('button', { name: /Edit Profile/ })).toBeTruthy();

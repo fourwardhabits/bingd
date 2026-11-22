@@ -148,9 +148,17 @@ export function ListShelf({ lists, onPress }: ListShelfProps) {
 const CARD_TARGET = 104;
 
 const styles = StyleSheet.create({
-  section: { gap: theme.space[2] },
-  shelf: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
+  // No bottom padding of its own: the next section's seam is the profile's one interval
+  // (heading system, 2026-11-22). The extra 8 put Recent activity 12pt further down than
+  // every other section on the page.
+  shelf: { paddingHorizontal: theme.layout.gutter },
   cardTitle: { marginTop: theme.space[2] },
-  nothingPublic: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  nothingPublic: { paddingHorizontal: theme.layout.gutter },
   pressed: { opacity: 0.7 },
 });

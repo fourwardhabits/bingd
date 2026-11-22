@@ -1,18 +1,16 @@
 import { useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
-import { PosterShelf, type SectionHeaderSize } from '@/ui/components';
+import { PosterShelf, SectionHeader, type SectionHeaderSize } from '@/ui/components';
+import { theme } from '@/ui/tokens';
 
 import { useProfileWatchlist } from './use-public-profile';
 
 export type ProfileWatchlistProps = {
   userId: string;
   onPressTitle: (mediaItemId: string) => void;
-  /**
-   * The heading's size: `large` on the reader's own Profile tab only (founder final
-   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
-   * standard 12pt heading.
-   */
+  /** `large` on both profiles: a section heading (heading system, 2026-11-22). */
   headingSize?: SectionHeaderSize;
 };
 
@@ -69,12 +67,30 @@ export function ProfileWatchlist({ userId, onPressTitle, headingSize }: ProfileW
     [watchlist.data],
   );
 
+  // `PosterShelf` draws nothing for no tiles, and neither does the section around it.
+  if (tiles.length === 0) return null;
+
+  /**
+   * **The heading is drawn here, on the profile's section rhythm** (heading system,
+   * 2026-11-22), and the shelf is asked for its rail alone. The shelf's own heading sat 8pt
+   * further from its posters than every other profile section's, and with no seam of its own
+   * above it, 16pt under Top ranked where the others had 33. The rail is the same rail.
+   */
   return (
-    <PosterShelf
-      title="Watchlist"
-      headingSize={headingSize}
-      tiles={tiles}
-      onPressTile={(tile) => onPressTitle(tile.id)}
-    />
+    <View style={styles.section}>
+      <SectionHeader title="Watchlist" size={headingSize} />
+      <PosterShelf
+        title="Watchlist"
+        showTitle={false}
+        tiles={tiles}
+        onPressTile={(tile) => onPressTitle(tile.id)}
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  // Every profile section's seam (`TopRanked`, `ProfileLists`, …); the content follows the
+  // heading's 44pt row directly.
+  section: { paddingTop: theme.space[5] },
+});

@@ -282,7 +282,12 @@ function EmptySlot({ dim, size }: { dim: boolean; size: number }) {
 }
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
   /**
    * Five equal columns rather than five content-sized ones, so a one-word award and a
    * three-word award occupy the same slot and the shelf does not shift as it fills.

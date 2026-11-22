@@ -436,8 +436,8 @@ export default function ProfileScreen() {
           onPressTitle={(id) => router.push(`/title/${id}`)}
           /* Own profile only. See GoalsSectionProps.streakUserId. */
           streakUserId={profile.id}
-          // The Profile tab's six headings are 15pt (founder final polish, 2026-11-04);
-          // somebody else's profile draws the same sections at the standard size.
+          // Section headings (heading system, 2026-11-22): the same six on somebody else's
+          // profile are the same heading, where they were 12pt beside these 15.
           headingSize="large"
         />
 
@@ -535,80 +535,83 @@ export default function ProfileScreen() {
               body="Rank or log a title and it will show up here."
             />
           ) : null}
-          {recent.map((event) => {
-            const summary = reactions.data?.get(event.id);
-            return (
-              <ActivityRow
-                key={event.id}
-                actorName={event.actorName}
-                actorAvatarUri={event.actorAvatarUri}
-                // The shared vocabulary, not a local guess. This line used to read
-                // `type === 'title_logged' ? 'watched' : 'ranked'`, which called a
-                // finished season "ranked" here and "finished" in the feed — one
-                // event saying two things on two screens.
-                verb={sentenceOf(event).verb}
-                tail={sentenceOf(event).tail}
-                /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
-                   Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
-                tailAction={sentenceOf(event).tailAction}
-                companions={event.companions}
-                title={event.title}
-                year={event.year}
-                posterUri={posterUri(event.posterPath)}
-                /**
-                 * The same leading artwork the feed draws, from the same resolver.
-                 *
-                 * Without it an award row fell back to `<Poster uri={null}>` and
-                 * `MissingArtwork` drew the initial — a beige tile reading "S" where
-                 * the feed showed Spark, for the same event. The data was never
-                 * missing: this row is the same `FeedItem` from the same
-                 * `activityPage` call, and only the rendering differed.
-                 */
-                lead={activityLead(event)}
-                metadata={activityMetadata({
-                  kind: event.kind,
-                  genres: event.genres,
-                  certification: event.certification,
-                  runtimeMinutes: event.runtimeMinutes,
-                  episodeCount: event.episodeCount,
-                })}
-                score={event.score}
-                bucket={event.bucket}
-                note={event.note?.text ?? null}
-                noteHasSpoilers={event.note?.hasSpoilers ?? false}
-                noteMasked={shouldMask({
-                  hasSpoilers: event.note?.hasSpoilers ?? false,
-                  mediaItemId: event.mediaItemId,
-                  viewerId: profile.id,
-                  authorId: event.actorId,
-                  watched: watched.data,
-                })}
-                timeLabel={new Date(event.activityAt).toLocaleDateString()}
-                onPressTitle={() =>
-                  event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
-                }
-                // The same interactions the Feed offers, because it is the same event.
-                // Reading what people said about your own ranking is the point of
-                // having the row here at all. Every row here is yours, and the heart is
-                // offered on it as anywhere else (founder, 2026-11-11).
-                reaction={activityReaction({
-                  summary,
-                  viewerId: profile.id,
-                  onToggle: () => void setReaction(event.id, summary?.mine ? null : 'love'),
-                  onOpenDetail: () => setDetailFor(event.id),
-                })}
-                onPressComments={() => setCommentsFor(event.id)}
-                commentCount={commentCounts.data?.get(event.id) ?? 0}
-              />
-            );
-          })}
-          <ActivityPageFooter
-            isFetchingNextPage={feed.isFetchingNextPage}
-            isError={feed.isError}
-            hasNextPage={feed.hasNextPage}
-            count={recent.length}
-            onRetry={() => void feed.fetchNextPage()}
-          />
+          {/* The rows a row's step apart; the first follows the heading's row directly. */}
+          <View style={styles.rows}>
+            {recent.map((event) => {
+              const summary = reactions.data?.get(event.id);
+              return (
+                <ActivityRow
+                  key={event.id}
+                  actorName={event.actorName}
+                  actorAvatarUri={event.actorAvatarUri}
+                  // The shared vocabulary, not a local guess. This line used to read
+                  // `type === 'title_logged' ? 'watched' : 'ranked'`, which called a
+                  // finished season "ranked" here and "finished" in the feed — one
+                  // event saying two things on two screens.
+                  verb={sentenceOf(event).verb}
+                  tail={sentenceOf(event).tail}
+                  /* "ranked Sheroes and 2 more" (20261023000100); a session reads "ranked
+                     Kaiju No. 8 + 15 more" (20261130000900). One rule, `activitySentence`. */
+                  tailAction={sentenceOf(event).tailAction}
+                  companions={event.companions}
+                  title={event.title}
+                  year={event.year}
+                  posterUri={posterUri(event.posterPath)}
+                  /**
+                   * The same leading artwork the feed draws, from the same resolver.
+                   *
+                   * Without it an award row fell back to `<Poster uri={null}>` and
+                   * `MissingArtwork` drew the initial — a beige tile reading "S" where
+                   * the feed showed Spark, for the same event. The data was never
+                   * missing: this row is the same `FeedItem` from the same
+                   * `activityPage` call, and only the rendering differed.
+                   */
+                  lead={activityLead(event)}
+                  metadata={activityMetadata({
+                    kind: event.kind,
+                    genres: event.genres,
+                    certification: event.certification,
+                    runtimeMinutes: event.runtimeMinutes,
+                    episodeCount: event.episodeCount,
+                  })}
+                  score={event.score}
+                  bucket={event.bucket}
+                  note={event.note?.text ?? null}
+                  noteHasSpoilers={event.note?.hasSpoilers ?? false}
+                  noteMasked={shouldMask({
+                    hasSpoilers: event.note?.hasSpoilers ?? false,
+                    mediaItemId: event.mediaItemId,
+                    viewerId: profile.id,
+                    authorId: event.actorId,
+                    watched: watched.data,
+                  })}
+                  timeLabel={new Date(event.activityAt).toLocaleDateString()}
+                  onPressTitle={() =>
+                    event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
+                  }
+                  // The same interactions the Feed offers, because it is the same event.
+                  // Reading what people said about your own ranking is the point of
+                  // having the row here at all. Every row here is yours, and the heart is
+                  // offered on it as anywhere else (founder, 2026-11-11).
+                  reaction={activityReaction({
+                    summary,
+                    viewerId: profile.id,
+                    onToggle: () => void setReaction(event.id, summary?.mine ? null : 'love'),
+                    onOpenDetail: () => setDetailFor(event.id),
+                  })}
+                  onPressComments={() => setCommentsFor(event.id)}
+                  commentCount={commentCounts.data?.get(event.id) ?? 0}
+                />
+              );
+            })}
+            <ActivityPageFooter
+              isFetchingNextPage={feed.isFetchingNextPage}
+              isError={feed.isError}
+              hasNextPage={feed.hasNextPage}
+              count={recent.length}
+              onRetry={() => void feed.fetchNextPage()}
+            />
+          </View>
         </View>
       </ScrollView>
 
@@ -707,5 +710,12 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
+  /**
+   * A profile section: 20pt of seam, then the heading's 44pt row, whose 13pt under the line
+   * is the heading-to-content step (`section.headingToContent`, heading-system.md §4), so
+   * the content follows it with no gap of its own.
+   */
+  section: { paddingTop: theme.space[5] },
+  // Activity rows a row's step apart, as they were before the heading's gap was taken out.
+  rows: { gap: theme.space[2] },
 });

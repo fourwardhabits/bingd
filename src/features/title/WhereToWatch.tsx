@@ -151,7 +151,7 @@ export function WhereToWatch({ mediaItemId, titleName, style, topSpace }: WhereT
            * the same reason `SectionHeader` does it: casing is a style, and a screen
            * reader spelling out "W H E R E" is not.
            */}
-          <Text variant="sectionHeader" tone="action">
+          <Text variant="sectionHeading" tone="action">
             WHERE TO WATCH
           </Text>
           {/**

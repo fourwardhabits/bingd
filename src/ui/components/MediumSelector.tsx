@@ -51,7 +51,7 @@ export type MediumSelectorProps<T extends string = Medium> = {
    *   polish, 2026-11-04). One step down from `title` so the pair shares a 360pt row; no
    *   right padding, because the row's own gap is the space before the switch.
    *
-   * `section` — the app's section-header treatment: uppercase, Maroon, `sectionHeader`.
+   * `section` — the app's group-label treatment: uppercase, Maroon, `groupLabel`.
    *   Added 2026-08-29 for the Leaderboard's timeframe, which sits in a *content* header
    *   row opposite the Feed/Trophy toggle rather than at the top of a screen. A page
    *   title there would out-shout the row it belongs to and disagree with `TRENDING NOW`
@@ -224,7 +224,7 @@ export function MediumSelector<T extends string = Medium>({
             // Uppercased as a *style*, exactly as `SectionHeader` does it — the accessible
             // label on the Pressable carries the readable spelling, so a screen reader is
             // not made to spell out "T H I S  M O N T H".
-            <Text variant="sectionHeader" tone="action">
+            <Text variant="groupLabel" tone="action">
               {labelFor(value, table, labels).toUpperCase()}
             </Text>
           ) : (

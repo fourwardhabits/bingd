@@ -64,7 +64,7 @@ export function CelebrationCard({ awardKey, tierKey }: CelebrationCardProps) {
         />
         {track ? <TierDots earnedTierIndex={tierIndex} /> : null}
       </View>
-      <Text variant="caption" tone="secondary">
+      <Text variant="label" tone="secondary">
         AWARD EARNED
       </Text>
       <Text variant="title2" style={styles.name}>

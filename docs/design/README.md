@@ -8,6 +8,7 @@ The PRD fixes the palette, the typefaces, and the voice. These documents turn th
 | Document | Covers |
 |---|---|
 | [`design-system.md`](./design-system.md) | Color, type, space, components, motion, accessibility |
+| [`heading-system.md`](./heading-system.md) | Heading roles, their type and the spacing around them (2026-11-22) |
 | [`screens.md`](./screens.md) | Every v1 screen: purpose, anatomy, states |
 | [`reference-notes.md`](./reference-notes.md) | What the design archives taught, and what was deliberately refused |
 
