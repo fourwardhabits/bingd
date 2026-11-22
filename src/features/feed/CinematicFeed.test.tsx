@@ -42,8 +42,7 @@ jest.mock('@/lib/supabase', () => ({
       mockRpcCalls.push({ name, args });
       const value = mockRpc[name];
       if (value instanceof Error) return Promise.resolve({ data: null, error: value });
-      const data =
-        typeof value === 'function' ? (value as MockFn)(args) : (value ?? []);
+      const data = typeof value === 'function' ? (value as MockFn)(args) : (value ?? []);
       return Promise.resolve({ data, error: null });
     },
     from: (table: string) => {
@@ -177,6 +176,9 @@ const comment = (
   ...extra,
 });
 
+/** An action's word, with or without the count that follows it (`Liked`, `Liked 3`). */
+const labelled = (word: string) => new RegExp(`^${word}(\\s\\d+)?$`);
+
 const imageUris = (json: unknown): string[] => {
   const out: string[] = [];
   const walk = (node: unknown) => {
@@ -243,7 +245,14 @@ describe('artwork', () => {
       }),
     ];
     mockRpc.public_scores = [
-      { user_id: 'friend', media_item_id: 'film-e1', score: 9.2, bucket: 'loved', position: 3, category: 'movies' },
+      {
+        user_id: 'friend',
+        media_item_id: 'film-e1',
+        score: 9.2,
+        bucket: 'loved',
+        position: 3,
+        category: 'movies',
+      },
     ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByTestId('feed-card-score')).toBeTruthy());
@@ -278,13 +287,23 @@ describe('artwork', () => {
       ),
     ];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByText(/The Last of Us, S1/)).toBeTruthy());
-
-    expect(imageUris(view.toJSON()).some((uri) => uri.endsWith('/tlou-backdrop.jpg'))).toBe(true);
+    // On the artwork itself, not after a wait on the sentence (the GroupedRankingRow race).
+    await waitFor(() => {
+      expect(view.getByText(/The Last of Us, S1/)).toBeTruthy();
+      expect(imageUris(view.toJSON()).some((uri) => uri.endsWith('/tlou-backdrop.jpg'))).toBe(
+        true,
+      );
+    });
   });
 
   it('sets the poster at its own shape when there is no wide image, never stretched', async () => {
-    mockRows = [event('e3', 'title_logged', { kind: 'movie', title: 'Whiplash', poster_path: '/whip.jpg' })];
+    mockRows = [
+      event('e3', 'title_logged', {
+        kind: 'movie',
+        title: 'Whiplash',
+        poster_path: '/whip.jpg',
+      }),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByTestId('feed-card-poster-fallback')).toBeTruthy());
 
@@ -295,7 +314,9 @@ describe('artwork', () => {
   });
 
   it('keeps a card for a title with no artwork at all', async () => {
-    mockRows = [event('e4', 'title_logged', { kind: 'movie', title: 'Harold and the Unposted Print' })];
+    mockRows = [
+      event('e4', 'title_logged', { kind: 'movie', title: 'Harold and the Unposted Print' }),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByTestId('feed-card-poster-fallback')).toBeTruthy());
     expect(view.getByTestId('feed-card-artwork')).toBeTruthy();
@@ -306,7 +327,12 @@ describe('reviews', () => {
   it('shows a published review under the artwork', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockRpc.public_notes = [
-      { user_id: 'friend', media_item_id: 'film-e1', note: 'Three hours that felt like one.', has_spoilers: false },
+      {
+        user_id: 'friend',
+        media_item_id: 'film-e1',
+        note: 'Three hours that felt like one.',
+        has_spoilers: false,
+      },
     ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByText(/Three hours that felt like one/)).toBeTruthy());
@@ -315,10 +341,17 @@ describe('reviews', () => {
   it('masks a spoiler review for a reader who has not seen the title', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockRpc.public_notes = [
-      { user_id: 'friend', media_item_id: 'film-e1', note: 'The ending is a dream.', has_spoilers: true },
+      {
+        user_id: 'friend',
+        media_item_id: 'film-e1',
+        note: 'The ending is a dream.',
+        has_spoilers: true,
+      },
     ];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByLabelText(/Contains spoilers for Oppenheimer/)).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText(/Contains spoilers for Oppenheimer/)).toBeTruthy(),
+    );
     expect(view.queryByText(/The ending is a dream/)).toBeNull();
   });
 
@@ -342,7 +375,9 @@ describe('comments on the card', () => {
   it('draws no comment text and reads no thread from the Feed', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: 2 }];
-    mockRpc.activity_comments = [comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z')];
+    mockRpc.activity_comments = [
+      comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z'),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() =>
       expect(view.getByLabelText(/^2 comments on Ada's activity/)).toBeTruthy(),
@@ -355,7 +390,9 @@ describe('comments on the card', () => {
   it('opens the conversation from Comment, where the words are read', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: 1 }];
-    mockRpc.activity_comments = [comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z')];
+    mockRpc.activity_comments = [
+      comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z'),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     fireEvent.press(await waitFor(() => view.getByTestId('feed-card-comment')));
 
@@ -383,7 +420,9 @@ describe('the actions', () => {
 
     fireEvent.press(like);
 
-    await waitFor(() => expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'),
+    );
     expect(alert).not.toHaveBeenCalledWith('Could not save your reaction', expect.anything());
     await waitFor(() => expect(mockFromCalls('reactions')).toBeGreaterThan(reads));
     // Still a Like to press, and nothing claims a reaction that was never stored.
@@ -424,18 +463,24 @@ describe('the actions', () => {
   ])('draws the viewer’s %s as %s %s, in Maroon, and says so', async (kind, glyph, word) => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [
-      { feed_event_id: 'e1', user_id: 'user-1', kind, profiles: { id: 'user-1', username: 'sai', display_name: 'Sai', avatar_path: null } },
+      {
+        feed_event_id: 'e1',
+        user_id: 'user-1',
+        kind,
+        profiles: { id: 'user-1', username: 'sai', display_name: 'Sai', avatar_path: null },
+      },
     ];
     const view = await renderWithProviders(<FeedScreen />);
 
     const like = await waitFor(() => {
       const control = view.getByTestId('feed-card-like');
-      expect(within(control).getByText(word)).toBeTruthy();
+      expect(within(control).getByText(labelled(word))).toBeTruthy();
       return control;
     });
     expect(within(like).getByText(glyph)).toBeTruthy();
     expect(
-      (StyleSheet.flatten(within(like).getByText(word).props.style) as TextStyle).color,
+      (StyleSheet.flatten(within(like).getByText(labelled(word)).props.style) as TextStyle)
+        .color,
     ).toBe(theme.semantic.action);
     expect(like.props.accessibilityLabel).toMatch(new RegExp(`^${word}\\. You reacted to `));
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
@@ -445,8 +490,18 @@ describe('the actions', () => {
   it('shows who reacted above the actions', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [
-      { feed_event_id: 'e1', user_id: 'theo', kind: 'love', profiles: { id: 'theo', username: 'theo', display_name: 'Theo', avatar_path: null } },
-      { feed_event_id: 'e1', user_id: 'priya', kind: 'funny', profiles: { id: 'priya', username: 'priyan', display_name: 'Priya', avatar_path: null } },
+      {
+        feed_event_id: 'e1',
+        user_id: 'theo',
+        kind: 'love',
+        profiles: { id: 'theo', username: 'theo', display_name: 'Theo', avatar_path: null },
+      },
+      {
+        feed_event_id: 'e1',
+        user_id: 'priya',
+        kind: 'funny',
+        profiles: { id: 'priya', username: 'priyan', display_name: 'Priya', avatar_path: null },
+      },
     ];
     const view = await renderWithProviders(<FeedScreen />);
     // Mixed kinds, so "reacted" rather than "like this"; with nothing to rank them by,
@@ -510,7 +565,11 @@ describe('the actions', () => {
 
   it('leads with the reader’s own reaction and names it on the control', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    mockReactions = [reactor('theo', 'love'), reactor('priya', 'love'), reactor('user-1', 'wow')];
+    mockReactions = [
+      reactor('theo', 'love'),
+      reactor('priya', 'love'),
+      reactor('user-1', 'wow'),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
     const glyphs = within(summary)
@@ -521,14 +580,22 @@ describe('the actions', () => {
 
     const like = view.getByTestId('feed-card-like');
     expect(like.props.accessibilityState).toMatchObject({ selected: true });
-    expect(within(like).getByText('Wow')).toBeTruthy();
+    expect(within(like).getByText(labelled('Wow'))).toBeTruthy();
     // Long press still opens the six to change it.
     fireEvent(like, 'longPress');
     await waitFor(() => expect(view.getByLabelText('Laugh')).toBeTruthy());
   });
 
-  it('keeps one line between posts and more air above the next one', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER), event('e2', 'title_ranked', OPPENHEIMER)];
+  /**
+   * **The refined card** (founder spec 2026-11-22, Concept B): each post is a subtle
+   * surface, white on Paper with a 1pt hairline outline and the card radius, and no shadow.
+   * Cream between two cards replaces the rule between two posts.
+   */
+  it('draws each post on its own subtle card, cream between them, no shadow', async () => {
+    mockRows = [
+      event('e1', 'title_ranked', OPPENHEIMER),
+      event('e2', 'title_ranked', OPPENHEIMER),
+    ];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
     const cards = await waitFor(() => {
@@ -536,17 +603,28 @@ describe('the actions', () => {
       expect(found).toHaveLength(2);
       return found;
     });
-    // The first post sits 20pt under RECENT ACTIVITY (marquee cohesion sprint); every
-    // later one has 16pt above its avatar (founder, 2026-11-19: half the old 28pt), still a
-    // step above the post's own 12pt rhythm, which is unchanged.
-    expect(StyleSheet.flatten(cards[0]!.props.style).paddingTop).toBe(theme.space[5]);
+    const first = StyleSheet.flatten(cards[0]!.props.style);
     const card = StyleSheet.flatten(cards[1]!.props.style);
-    expect(card.paddingTop).toBe(16);
-    expect(card.paddingTop).toBeGreaterThan(card.gap as number);
-    expect(card.gap).toBe(theme.space[3]);
-    // The separator is the card's own foot, and the only one.
-    expect(card.borderBottomWidth).toBeGreaterThan(0);
-    expect(card.borderTopWidth ?? 0).toBe(0);
+    expect(card).toMatchObject({
+      backgroundColor: theme.surface.raised,
+      borderColor: theme.border.hairline,
+      borderWidth: 1,
+      borderRadius: theme.radius.card,
+      marginHorizontal: theme.layout.gutter,
+      marginBottom: theme.space[3],
+      paddingTop: theme.space[3],
+      gap: theme.space[3],
+    });
+    // No lift: a change of surface and a very light line, never a shadow.
+    expect(card.shadowOpacity ?? 0).toBe(0);
+    expect(card.elevation ?? 0).toBe(0);
+    // No rule of its own any more: the outline is the boundary.
+    expect(card.borderBottomColor ?? card.borderColor).toBe(theme.border.hairline);
+    // The first post's card starts 8pt under RECENT ACTIVITY, so heading to avatar is the
+    // 20pt it was (8 + the 12pt inset); every later one starts at the cream between cards.
+    expect(first.marginTop).toBe(theme.space[2]);
+    expect((first.marginTop as number) + (first.paddingTop as number)).toBe(theme.space[5]);
+    expect(card.marginTop ?? 0).toBe(0);
   });
 
   it('names the laughing reaction Laugh everywhere, and still stores it as funny', async () => {
@@ -556,7 +634,9 @@ describe('the actions', () => {
     // Waits for the reaction itself, not just the card: the card draws before the
     // reactions read lands, and under load the label was asserted in between.
     await waitFor(() =>
-      expect(within(view.getByTestId('feed-card-like')).getByText('Laugh')).toBeTruthy(),
+      expect(
+        within(view.getByTestId('feed-card-like')).getByText(labelled('Laugh')),
+      ).toBeTruthy(),
     );
     expect(view.queryByText('Funny')).toBeNull();
   });
@@ -576,15 +656,16 @@ describe('the actions', () => {
    * were content-sized targets spread edge to edge, each landing its icon on the gutter;
    * they are now equal columns across the card, which is what every other post type draws.
    */
-  it('puts the summary on the gutters and the actions in equal 44pt columns', async () => {
+  it('puts the summary on the card inset and the actions in equal 44pt columns', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions-line'));
-    const gutter = theme.layout.gutter;
-    expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
+    expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(theme.space[3]);
     // No Save under the artwork since 2026-11-22: the reader's bookmark is on it.
-    expect(within(view.getByTestId('feed-card-actions')).queryByTestId('feed-card-save')).toBeNull();
+    expect(
+      within(view.getByTestId('feed-card-actions')).queryByTestId('feed-card-save'),
+    ).toBeNull();
     for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-share']) {
       const style = StyleSheet.flatten(view.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(44);
@@ -621,7 +702,13 @@ describe('the actions', () => {
    * author's score keeps bottom-right, and it is a 44pt target that never opens the title.
    */
   it('puts the reader’s bookmark on the artwork, on their own activity too', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' })];
+    mockRows = [
+      event('e1', 'title_ranked', OPPENHEIMER, {
+        actor: 'user-1',
+        username: 'sai',
+        name: 'Sai',
+      }),
+    ];
     const view = await renderWithProviders(<FeedScreen />);
     const save = await waitFor(() => view.getByTestId('feed-card-save'));
     expect(save.props.accessibilityLabel).toBe('Add Oppenheimer to your watchlist');
@@ -646,7 +733,11 @@ describe('the actions', () => {
    */
   describe('on the reader’s own post', () => {
     const own = () =>
-      event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' });
+      event('e1', 'title_ranked', OPPENHEIMER, {
+        actor: 'user-1',
+        username: 'sai',
+        name: 'Sai',
+      });
 
     it('offers the Like, and draws no summary when nobody has reacted', async () => {
       mockRows = [own()];
@@ -676,7 +767,9 @@ describe('the actions', () => {
         p_feed_event_id: 'e1',
         p_kind: 'love',
       });
-      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      expect(
+        within(view.getByTestId('feed-card-like')).getByText(labelled('Liked')),
+      ).toBeTruthy();
       expect(alert).not.toHaveBeenCalled();
       alert.mockRestore();
     });
@@ -697,7 +790,9 @@ describe('the actions', () => {
       const summary = await waitFor(() =>
         view.getByLabelText('You and PRIYA like this. See who reacted.'),
       );
-      expect(within(view.getByTestId('feed-card-like')).getByText('Liked')).toBeTruthy();
+      expect(
+        within(view.getByTestId('feed-card-like')).getByText(labelled('Liked')),
+      ).toBeTruthy();
       fireEvent.press(summary);
       await waitFor(() =>
         expect(view.getByLabelText('PRIYA, Liked. Open their profile.')).toBeTruthy(),
@@ -715,12 +810,15 @@ describe('the actions', () => {
   });
 
   it('draws the Like the same size whether it is set or not', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER), event('e2', 'title_ranked', OPPENHEIMER)];
+    mockRows = [
+      event('e1', 'title_ranked', OPPENHEIMER),
+      event('e2', 'title_ranked', OPPENHEIMER),
+    ];
     mockReactions = [reactor('user-1', 'wow')];
     const view = await renderWithProviders(<FeedScreen />);
     const [set, unset] = await waitFor(() => {
       const likes = view.getAllByTestId('feed-card-like');
-      expect(within(likes[0]!).getByText('Wow')).toBeTruthy();
+      expect(within(likes[0]!).getByText(labelled('Wow'))).toBeTruthy();
       expect(within(likes[1]!).getByText('Like')).toBeTruthy();
       return likes;
     });
@@ -735,7 +833,9 @@ describe('the actions', () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy(),
+    );
 
     // The server's answer to the next read; `useSetReaction` invalidates, so it is read.
     mockReactions = [reactor('theo', 'love'), reactor('user-1', 'love')];
@@ -746,7 +846,9 @@ describe('the actions', () => {
 
     mockReactions = [reactor('theo', 'love')];
     fireEvent.press(view.getByTestId('feed-card-like'));
-    await waitFor(() => expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('THEO likes this. See who reacted.')).toBeTruthy(),
+    );
   });
 
   it('opens the title from the artwork', async () => {
@@ -759,10 +861,19 @@ describe('the actions', () => {
 
 it('never truncates the sentence that holds a sitting’s “and N more”', async () => {
   mockRows = [
-    event('e1', 'ranking_batch', { kind: 'movie', title: 'Keep Your Hands Off Eizouken! The Extended Edition', poster_path: '/k.jpg' }, {
-      name: 'Suraj Kandukuri',
-      payload: { count: 3, sitting: 's-1' },
-    }),
+    event(
+      'e1',
+      'ranking_batch',
+      {
+        kind: 'movie',
+        title: 'Keep Your Hands Off Eizouken! The Extended Edition',
+        poster_path: '/k.jpg',
+      },
+      {
+        name: 'Suraj Kandukuri',
+        payload: { count: 3, sitting: 's-1' },
+      },
+    ),
   ];
   const view = await renderWithProviders(<FeedScreen />);
   const more = await waitFor(() => view.getByText('2 more'));
@@ -780,9 +891,19 @@ it('keeps the feed’s order, and awards keep their compact row', async () => {
     event('e1', 'title_ranked', OPPENHEIMER, { at: '2026-11-04T12:00:00Z' }),
     event('e2', 'award_earned', null, {
       at: '2026-11-04T11:00:00Z',
-      payload: { award: 'movie-muncher', tier: 'bronze', award_name: 'Movie Muncher', tier_label: 'Bronze' },
+      payload: {
+        award: 'movie-muncher',
+        tier: 'bronze',
+        award_name: 'Movie Muncher',
+        tier_label: 'Bronze',
+      },
     }),
-    event('e3', 'watchlist_added', { kind: 'movie', title: 'Whiplash', poster_path: '/whip.jpg' }, { at: '2026-11-04T10:00:00Z' }),
+    event(
+      'e3',
+      'watchlist_added',
+      { kind: 'movie', title: 'Whiplash', poster_path: '/whip.jpg' },
+      { at: '2026-11-04T10:00:00Z' },
+    ),
   ];
   const view = await renderWithProviders(<FeedScreen />);
   await waitFor(() => expect(view.getAllByTestId('feed-card-artwork')).toHaveLength(2));
@@ -791,5 +912,7 @@ it('keeps the feed’s order, and awards keep their compact row', async () => {
   expect(said.indexOf('Oppenheimer')).toBeLessThan(said.indexOf('earned the'));
   expect(said.indexOf('earned the')).toBeLessThan(said.indexOf('Whiplash'));
   // One activity, one card: nothing doubled.
-  expect(within(view.getByTestId('feed-scroll')).getAllByLabelText(/^Oppenheimer, 2023/)).toHaveLength(1);
+  expect(
+    within(view.getByTestId('feed-scroll')).getAllByLabelText(/^Oppenheimer, 2023/),
+  ).toHaveLength(1);
 });

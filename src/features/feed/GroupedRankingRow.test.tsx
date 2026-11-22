@@ -180,14 +180,17 @@ it('leads a grouped sitting with the title’s poster, not the actor’s avatar'
   mockRows = [sitting(3)];
   const view = await renderWithProviders(<FeedScreen />);
 
-  await waitFor(() => expect(view.getByText(/Sheroes/)).toBeTruthy());
-
-  const uris = imageUris(view.toJSON());
-  // The poster is the leading artwork. The bespoke row had none at all, which is the
-  // whole visual difference the founder was describing.
-  expect(uris.some((uri) => uri.includes('/sheroes.jpg'))).toBe(true);
-  // And the actor's avatar is over it rather than instead of it.
-  expect(uris.some((uri) => uri.includes('/ada.jpg'))).toBe(true);
+  // Waits for the artwork itself, not the sentence: the headline (and the rail's
+  // placeholders) can draw before the preview's posters land, and on a loaded runner an
+  // image assertion made after a text wait ran in between (CI, 2026-11-22; #359's class).
+  await waitFor(() => {
+    const uris = imageUris(view.toJSON());
+    // The poster is the leading artwork. The bespoke row had none at all, which is the
+    // whole visual difference the founder was describing.
+    expect(uris.some((uri) => uri.includes('/sheroes.jpg'))).toBe(true);
+    // And the actor's avatar is over it rather than instead of it.
+    expect(uris.some((uri) => uri.includes('/ada.jpg'))).toBe(true);
+  });
 });
 
 it('reads “and N more”, never the old “+ N more”', async () => {
@@ -224,15 +227,23 @@ it('renders through the canonical shell whenever there is a representative title
    * and no backfill is needed for old rows.
    */
   mockRows = [
-    { ...sitting(2, 'The Angel'), id: 'event-old', created_at: '2026-08-01T00:00:00Z',
-      causal_at: '2026-08-01T00:00:00Z' },
+    {
+      ...sitting(2, 'The Angel'),
+      id: 'event-old',
+      created_at: '2026-08-01T00:00:00Z',
+      causal_at: '2026-08-01T00:00:00Z',
+    },
   ];
   const view = await renderWithProviders(<FeedScreen />);
 
-  await waitFor(() => expect(view.getByText(/The Angel/)).toBeTruthy());
-
-  expect(imageUris(view.toJSON()).some((uri) => uri.includes('/sheroes.jpg'))).toBe(true);
-  expect(view.getByText('1 more')).toBeTruthy();
+  // The artwork and the count inside the wait, not after a wait on the title text: the
+  // headline can draw, over the rail's placeholders, before the preview artwork arrives,
+  // and on a loaded runner the image assertion ran in between (CI, 2026-11-22).
+  await waitFor(() => {
+    expect(view.getByText(/The Angel/)).toBeTruthy();
+    expect(imageUris(view.toJSON()).some((uri) => uri.includes('/sheroes.jpg'))).toBe(true);
+    expect(view.getByText('1 more')).toBeTruthy();
+  });
 });
 
 /**

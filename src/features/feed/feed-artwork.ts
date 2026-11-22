@@ -58,16 +58,32 @@ const CARD_TYPES = new Set([
 export const takesFeedCard = (item: { type: string; mediaItemId: string | null }) =>
   Boolean(item.mediaItemId) && CARD_TYPES.has(item.type);
 
-/** The founder's band, 150–190pt; a 16:9 frame of the card's width, clamped into it. */
-export const ARTWORK_MIN_HEIGHT = 150;
-export const ARTWORK_MAX_HEIGHT = 190;
-
 /**
- * 16:9 of the card's width, clamped. At 390pt that is 190 (the 16:9 would be 201); at
- * 360pt it is 185; at 320pt it is 162 — a backdrop is cropped a little at the top and
- * bottom on wide phones, and never letterboxed.
+ * **A single title's hero: 3:2 of the artwork's width** (refined card feed, founder spec
+ * 2026-11-22). Replaces the 16:9 frame clamped into 150–190pt.
+ *
+ * Why 3:2. The card now holds the artwork inside its outline and 12pt inset, so the frame is
+ * 26pt narrower than the old gutter-to-gutter panel, and 16:9 of that would be *shorter* than
+ * before. 3:2 is the still frame of 35mm film: tall enough to read as a picture rather than
+ * a strip, and it takes only about 8% off each side of a 16:9 backdrop (the image is
+ * cropped, never letterboxed). 4:3 or squarer would crop a quarter of the backdrop and
+ * add 40pt+ of scroll per post; 16:10 would add almost nothing at 320–360pt.
+ *
+ *     screen   artwork   old height   new height
+ *     320pt    262pt     162pt        175pt   (+13)
+ *     360pt    302pt     185pt        201pt   (+16)
+ *     390pt    332pt     190pt        221pt   (+31)
+ *     430pt    372pt     190pt        248pt   (+58)
+ *
+ * The floor keeps a very narrow window from a sliver; the ceiling stops a tablet or a wide
+ * browser from turning one post into a screenful.
  */
-export function artworkHeight(cardWidth: number): number {
-  const natural = Math.round((cardWidth * 9) / 16);
+export const ARTWORK_ASPECT = 3 / 2;
+export const ARTWORK_MIN_HEIGHT = 150;
+export const ARTWORK_MAX_HEIGHT = 280;
+
+/** The hero's height for an artwork `artworkWidth` wide: 3:2, clamped. */
+export function artworkHeight(artworkWidth: number): number {
+  const natural = Math.round(artworkWidth / ARTWORK_ASPECT);
   return Math.min(ARTWORK_MAX_HEIGHT, Math.max(ARTWORK_MIN_HEIGHT, natural));
 }
