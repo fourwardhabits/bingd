@@ -198,9 +198,11 @@ describe('A. the same engagement row on every post', () => {
 
     expect(actionsIn(row, 'activity')).toEqual(['like', 'comment']);
     expect(within(view.getByTestId('activity-like')).getByText('Like')).toBeTruthy();
-    // The count is the Comment's label once there is one, as on a card.
+    // The count follows the word as "(N)" once there is one, as on a card.
     await waitFor(() =>
-      expect(within(view.getByTestId('activity-comment')).getByText('2')).toBeTruthy(),
+      expect(
+        within(view.getByTestId('activity-comment')).getByText('Comment (2)'),
+      ).toBeTruthy(),
     );
     for (const id of ['activity-like', 'activity-comment']) {
       const column = style(view.getByTestId(id));

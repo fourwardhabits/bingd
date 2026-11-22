@@ -113,7 +113,7 @@ export type FeedCardProps = {
  *     │ └──────────────────────────────────────────┘ │
  *     │ "The review, if one was published…"          │ ← absent, not empty, without one
  *     │ ❤️😂 Priya and 3 others like this             │ ← absent with no reactions
- *     │  ♡ Like 4      💬 Comment 2      ➤ Share     │ ← `EngagementRow`
+ *     │  ♡ Like (4)    💬 Comment (2)    ➤ Share     │ ← `EngagementRow`
  *     ╰──────────────────────────────────────────────╯
  *
  * Feed only. The profile's Recent activity and the conversation page keep `ActivityRow`,

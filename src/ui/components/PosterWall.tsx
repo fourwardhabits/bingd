@@ -156,10 +156,15 @@ export type PosterRailProps = {
    */
   width: number;
   /**
-   * Space before the first poster and after the last, inside the scroll (refined card
-   * feed, 2026-11-22). The Feed card's rail scrolls to the card's outline and starts on
-   * the card's 12pt inset, so a poster slides under the card's edge rather than stopping
-   * short of it. Tiles are sized to the width after the leading inset.
+   * **The viewport's inset on both sides** (Feed QA polish, 2026-11-22). The scroll view
+   * itself is drawn `inset` in from each side of `width` and clips there, so its visible
+   * edge, the line a poster disappears at, sits inside the card while the rail is being
+   * swiped, not only at rest.
+   *
+   * #368 put this as padding on the scroll's *content*. Content padding moves with the
+   * content: it is a gap before the first poster and after the last, and mid-swipe a poster
+   * slid all the way to the clip, which was the card's outline. A margin on the scroll view
+   * moves the clip itself, so no poster can reach the card's edge at any offset.
    */
   inset?: number;
   /** Placeholder frames while the members load, instead of tiles. */
@@ -200,7 +205,9 @@ export function PosterRail({
   testID,
 }: PosterRailProps) {
   const { gap, peek } = theme.layout.posterShelf;
-  // inset + n posters + n gaps + peek of one = width: every poster the same size.
+  // Every poster the same size, and the size #368 approved: inset + n posters + n gaps +
+  // peek of one = width. The viewport is a further `inset` narrower on the right, so the
+  // fourth poster shows a little over half of itself (0.57 of one at 320pt, 0.58 at 360pt).
   const cardWidth = Math.floor((width - inset - RAIL_COLUMNS * gap) / (RAIL_COLUMNS + peek));
   const cardHeight = Math.round((cardWidth * 3) / 2);
 
@@ -209,7 +216,8 @@ export function PosterRail({
       horizontal
       showsHorizontalScrollIndicator={false}
       accessibilityLabel={label}
-      contentContainerStyle={[styles.railRow, { gap, paddingHorizontal: inset }]}
+      style={[styles.railViewport, { marginHorizontal: inset }]}
+      contentContainerStyle={[styles.railRow, { gap }]}
       decelerationRate="fast"
       testID={testID}
     >
@@ -891,7 +899,9 @@ const labelFor = (tile: PosterTile, savedWord = 'saved') => {
 const styles = StyleSheet.create({
   shelf: { gap: theme.space[2] },
   shelfRow: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[1] },
-  // No gutter of its own: the caller passes the inset of whatever holds the rail.
+  // The clip is the viewport's edge (`inset`), never the content's: see `PosterRail`.
+  railViewport: { overflow: 'hidden', flexGrow: 0 },
+  // Only the vertical room for the press scale; the side inset is the viewport's margin.
   railRow: { paddingVertical: theme.space[1] },
   // Parchment, the colour a poster with no artwork already is.
   railPlaceholder: {

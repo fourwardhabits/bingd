@@ -177,7 +177,7 @@ const comment = (
 });
 
 /** An action's word, with or without the count that follows it (`Liked`, `Liked 3`). */
-const labelled = (word: string) => new RegExp(`^${word}(\\s\\d+)?$`);
+const labelled = (word: string) => new RegExp(`^${word}(\\s\\(\\d+\\))?$`);
 
 const imageUris = (json: unknown): string[] => {
   const out: string[] = [];
