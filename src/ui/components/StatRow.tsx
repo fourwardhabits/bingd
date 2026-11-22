@@ -28,11 +28,12 @@ export type StatRowProps = {
   /** Each figure centred in its quarter, inside the owner's profile card (2026-11-07). */
   centered?: boolean;
   /**
-   * **A section of the profile card rather than a card inside it** (founder, 2026-11-22).
-   * No frame of its own: no outline, no radius. Inset by the card's own `layout.gutter`,
-   * so its edges line up with the identity and bio above it. The rules between the four
-   * stay. Each cell gives 2pt of its side air back, which keeps `TV Shows` on one line
-   * at 320pt (see {@link statLabelFit}).
+   * **The framed row, inset inside the profile card** (founder, 2026-11-22). It keeps its
+   * hairline outline and card radius, and sits the card's `layout.gutter` in from the
+   * card's inner edges, so it no longer touches them. The inside side padding is trimmed
+   * to `space[1]` (frame) and 1pt (each cell), which gives each quarter exactly the text
+   * width it had before the inset, so `TV Shows` still holds one line at 320pt (see
+   * {@link statLabelFit}).
    */
   inCard?: boolean;
 };
@@ -58,16 +59,16 @@ export const STAT_LABEL_MIN_SCALE = 0.85;
  * size, so the capped size times 0.85 must fit the narrowest quarter at that width. The
  * widest label is `TV Shows`, 4.795em of Inter Regular (`StatRow.test.tsx` reads it from
  * the font), 64.83pt at 13pt with the 4% allowance `RankingSheet` uses. A quarter's text
- * width inside the profile card (card border and three rules each at most 1pt; the row
- * inset by the card's gutter with no frame of its own; 2pt item padding either side,
- * 2026-11-22) is
+ * width inside the profile card (card border, frame border and three rules each at most
+ * 1pt; the frame inset by the card's gutter, 2026-11-22; frame `space[1]` and 1pt item
+ * padding either side) is
  *
- *     (W - 2 * gutter - 2 * 1 - 2 * gutter - 3 * 1) / 4 - 2 * 2  =  (W - 69) / 4 - 4
+ *     (W - 2 * gutter - 2 - 2 * gutter - 2 - 2 * space[1] - 3) / 4 - 2 * 1  =  (W - 79) / 4 - 2
  *
  *     W      quarter   largest cap at 0.85   cap   shrink at the cap
- *     320    58.75     1.066                 1.05  0.863
- *     360    68.75     1.247                 1.1   0.964
- *     390    76.25     1.384                 1.2   0.980
+ *     320    58.25     1.057                 1.05  0.856
+ *     360    68.25     1.238                 1.1   0.957
+ *     390    75.75     1.375                 1.2   0.974
  *
  * Steps rather than the ratio itself, so the type does not change size between phones a
  * point apart; each step is checked at the narrowest width it applies to.
@@ -104,7 +105,7 @@ export function StatRow({ stats, centered = false, inCard = false }: StatRowProp
   const labelFit = statLabelFit(width, fontScale);
 
   return (
-    <View style={[styles.row, inCard ? styles.inCard : styles.framed]}>
+    <View style={[styles.row, styles.framed, inCard && styles.inCard]}>
       {stats.map((stat, index) => {
         const content = (
           <>
@@ -190,8 +191,7 @@ const styles = StyleSheet.create({
    * 2026-11-13: "a clean outline rather than a heavy coloured background"). The hairline
    * is the dividers' own colour and weight, so the frame and the rules read as one
    * drawing; the radius is the card's. The cells keep their 44pt targets — the padding is
-   * inside the frame, around them, never taken out of them. `row` is what both share;
-   * `framed` is the outline.
+   * inside the frame, around them, never taken out of them.
    */
   row: {
     flexDirection: 'row',
@@ -205,12 +205,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
   },
   /**
-   * **In the profile card: a section, not a card within a card** (founder, 2026-11-22).
-   * The row touched the card's edges inside its own outline. It is now inset by the
-   * card's content gutter, as the identity and bio rows are, and draws no outline. The
-   * rules between the four are unchanged.
+   * **In the profile card: the same outline, inset from the card's edges** (founder,
+   * 2026-11-22). The frame sits the card's content gutter in, as the identity and bio rows
+   * do, so it no longer touches the card. Its inside padding is `space[1]` rather than
+   * `space[2]`, which, with the cells' 1pt, returns each quarter the width the inset took.
    */
-  inCard: { marginHorizontal: theme.layout.gutter },
+  inCard: { marginHorizontal: theme.layout.gutter, paddingHorizontal: theme.space[1] },
   item: {
     flex: 1,
     alignItems: 'flex-start',
@@ -224,9 +224,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space[1],
     gap: 2,
   },
-  // Centred labels, so the 2pt is not seen; it is what keeps `TV Shows` on one line at
-  // 320pt now that the row is inset by the card's gutter.
-  itemInCard: { paddingHorizontal: 2 },
+  // Centred labels, so the 1pt is not seen; with the frame's `space[1]` it keeps `TV Shows`
+  // on one line at 320pt now that the frame is inset by the card's gutter.
+  itemInCard: { paddingHorizontal: 1 },
   centered: { alignItems: 'center' },
   rule: {
     alignSelf: 'center',
