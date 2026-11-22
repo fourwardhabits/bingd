@@ -88,9 +88,9 @@ export type IconToggleProps<T extends string> = {
  * The arithmetic holds at three on the narrowest phone this app supports. Each cell is
  * `minTapTarget - space[2]` = 36pt wide, so the group is 108pt plus two hairlines; on a
  * 320pt screen that leaves under 180pt of the 288pt between the gutters for the heading
- * beside it, a `SectionHeader size="large"`: Leaderboard and Discover people pass `fit` so
- * they shrink rather than wrap. `touch-targets.test.tsx` is where the 44pt claim is
- * asserted.
+ * beside it, a `FeedHeading`: it stops growing at 130% so LEADERBOARD still fits on its
+ * line, and a two-word heading wraps at its space rather than shrinking (header
+ * consistency, 2026-11-22). `touch-targets.test.tsx` is where the 44pt claim is asserted.
  *
  * `radiogroup` rather than a switch, because a switch implies on/off and neither of
  * these has an off state — the reader is always looking at one of the two.

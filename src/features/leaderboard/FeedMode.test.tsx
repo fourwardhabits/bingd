@@ -233,35 +233,55 @@ const open = async () => {
   return view;
 };
 
+/**
+ * **The board's filter icon** (header consistency, founder spec 2026-11-22). It replaced the
+ * two dropdowns, and its spoken name carries both choices — `Leaderboard filters: All
+ * Titles, This month` — so a test reads the board's state off the one control.
+ */
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const showing = (value: string) => new RegExp(`^Leaderboard filters: .*\\b${escape(value)}\\b`);
+const FILTERS = /^Leaderboard filters: /;
+
 const toBoard = async (view: View, expecting = 'This month') => {
   await fireEvent.press(view.getByLabelText('Leaderboard'));
-  await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
+  await waitFor(() => expect(view.getByLabelText(showing(expecting))).toBeTruthy());
 };
 
-/**
- * Open the content-type dropdown and choose (founder Preview QA, 2026-11-07: the four
- * categories are a dropdown beside the time range, no longer segments).
- */
+/** Open the filter sheet, and the one of its two radio groups asked for. */
+const openFilters = async (view: View, group: 'Type' | 'Time period') => {
+  await fireEvent.press(view.getByTestId('leaderboard-filter-button'));
+  return within(await view.findByLabelText(group));
+};
+
+const closeFilters = async (view: View) => {
+  await fireEvent.press(view.getByTestId('leaderboard-filter-close-press'));
+  await waitFor(() => expect(view.queryByTestId('leaderboard-filter-scroll')).toBeNull());
+};
+
+/** Choose a content type in the filter sheet, and close it again. */
 const chooseMetric = async (view: View, to: string) => {
-  await fireEvent.press(view.getByTestId('leaderboard-metric'));
-  await fireEvent.press(await view.findByRole('menuitem', { name: to }));
+  const group = await openFilters(view, 'Type');
+  await fireEvent.press(group.getByRole('radio', { name: to }));
+  await closeFilters(view);
 };
 
-/** The content-type dropdown's menu, read and closed again on the current entry. */
+/** The sheet's content types, read and closed again on the current entry. */
 const metricMenu = async (view: View) => {
-  await fireEvent.press(view.getByTestId('leaderboard-metric'));
-  const items = await view.findAllByRole('menuitem');
-  const names = items.map((item) => item.props.accessibilityLabel as string);
-  const current = items.find((item) => item.props.accessibilityState?.selected);
-  if (current) await fireEvent.press(current);
+  const group = await openFilters(view, 'Type');
+  const names = group
+    .getAllByRole('radio')
+    .map((item) => item.props.accessibilityLabel as string);
+  await closeFilters(view);
   return names;
 };
 
-/** Open the time-range filter's menu and choose (nav cohesion sprint, 2026-11-06). */
+/** Choose a time period in the filter sheet, and close it again. */
 const chooseTimeframe = async (view: View, from: string, to: string) => {
-  await fireEvent.press(view.getByLabelText(`Showing ${from}`));
-  await fireEvent.press(await view.findByRole('menuitem', { name: to }));
-  await waitFor(() => expect(view.getByLabelText(`Showing ${to}`)).toBeTruthy());
+  expect(view.getByLabelText(showing(from))).toBeTruthy();
+  const group = await openFilters(view, 'Time period');
+  await fireEvent.press(group.getByRole('radio', { name: to }));
+  await closeFilters(view);
+  await waitFor(() => expect(view.getByLabelText(showing(to))).toBeTruthy());
 };
 
 // ---------------------------------------------------------------------------
@@ -318,7 +338,7 @@ describe('the toggle', () => {
     const view = await open();
 
     expect(view.getByLabelText('Recent activity')).toBeTruthy();
-    expect(view.queryByLabelText('Showing This month')).toBeNull();
+    expect(view.queryByLabelText(showing('This month'))).toBeNull();
   });
 
   it('switches to the Leaderboard on the trophy', async () => {
@@ -337,7 +357,7 @@ describe('the toggle', () => {
     await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText('Showing This month')).toBeNull();
+    expect(view.queryByLabelText(showing('This month'))).toBeNull();
   });
 
   it('does not read the board until it is opened', async () => {
@@ -373,11 +393,12 @@ describe('the timeframe, remembered — and the mode, not', () => {
     // decision.
     const view = await open();
     await toBoard(view);
-    await fireEvent.press(view.getByLabelText('Showing This month'));
+    const group = await openFilters(view, 'Time period');
 
-    expect(
-      (await view.findAllByRole('menuitem')).map((item) => item.props.accessibilityLabel),
-    ).toEqual(['This month', 'All time']);
+    expect(group.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
+      'This month',
+      'All time',
+    ]);
     expect(view.queryByText('This week')).toBeNull();
     expect(view.queryByText('This year')).toBeNull();
   });
@@ -436,7 +457,7 @@ describe('the timeframe, remembered — and the mode, not', () => {
     const second = await open();
 
     expect(second.getByLabelText('Recent activity')).toBeTruthy();
-    expect(second.queryByLabelText(/^Showing /)).toBeNull();
+    expect(second.queryByLabelText(FILTERS)).toBeNull();
 
     await toBoard(second, 'All time');
   });
@@ -505,8 +526,8 @@ describe('the board is people only', () => {
         .map((cell) => cell.props.accessibilityState?.selected),
     ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
-    expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    expect(view.getByLabelText('Showing All Titles')).toBeTruthy();
+    expect(view.getByLabelText(showing('This month'))).toBeTruthy();
+    expect(view.getByLabelText(showing('All Titles'))).toBeTruthy();
     expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
   });
 
@@ -753,7 +774,7 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    expect(view.getByLabelText('Showing All Titles')).toBeTruthy();
+    expect(view.getByLabelText(showing('All Titles'))).toBeTruthy();
     expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
     expect(view.queryByText('Watched')).toBeNull();
   });
@@ -1152,7 +1173,7 @@ describe('the hardware back button', () => {
     expect(pressBack()).toBe(true);
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText('Showing This month')).toBeNull();
+    expect(view.queryByLabelText(showing('This month'))).toBeNull();
   });
 
   it('leaves the press alone on the Feed, so normal back behaviour is untouched', async () => {
@@ -1171,7 +1192,7 @@ describe('the hardware back button', () => {
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
     await toBoard(view, 'All time');
-    expect(view.getByLabelText('Showing All time')).toBeTruthy();
+    expect(view.getByLabelText(showing('All time'))).toBeTruthy();
   });
 });
 
@@ -1197,7 +1218,7 @@ describe('re-tapping the Feed tab', () => {
     pressFeedTab();
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText('Showing This month')).toBeNull();
+    expect(view.queryByLabelText(showing('This month'))).toBeNull();
   });
 
   it('changes nothing when the reader is already on the Feed root', async () => {
@@ -1219,7 +1240,7 @@ describe('re-tapping the Feed tab', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Showing This month')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(showing('This month'))).toBeTruthy());
   });
 
   it('keeps the remembered timeframe, exactly as Back does', async () => {
@@ -1231,7 +1252,7 @@ describe('re-tapping the Feed tab', () => {
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
     await toBoard(view, 'All time');
-    expect(view.getByLabelText('Showing All time')).toBeTruthy();
+    expect(view.getByLabelText(showing('All time'))).toBeTruthy();
   });
 
   it('does not record a second leaderboard view for the return trip', async () => {
@@ -1275,11 +1296,14 @@ describe('the content header gutter', () => {
     return total;
   };
 
-  it('puts the time-range filter on the page gutter', async () => {
+  it('puts the filter line on the page gutter', async () => {
     const view = await open();
     await toBoard(view);
 
-    expect(leftInsetOf(view.getByLabelText('Showing This month'))).toBe(theme.layout.gutter);
+    const summary = view.getByTestId('leaderboard-filter-summary', {
+      includeHiddenElements: true,
+    });
+    expect(leftInsetOf(summary)).toBe(theme.layout.gutter);
   });
 
   /**
@@ -1353,7 +1377,7 @@ describe('the People mode', () => {
     await toPeople(view);
 
     expect(view.queryByLabelText('Recent activity')).toBeNull();
-    expect(view.queryByLabelText('Showing This month')).toBeNull();
+    expect(view.queryByLabelText(showing('This month'))).toBeNull();
   });
 
   it('leaves the feed exactly where it was on the way back', async () => {
@@ -1487,15 +1511,45 @@ describe('arriving to find people', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * **The Feed's two headings are 15pt, and only those two** (founder final polish,
- * 2026-11-04). The board's timeframe and People's heading sit in the same slot as
- * TRENDING NOW and keep the standard 12pt, as the founder specified by name.
+ * **One heading for the whole tab** (header consistency, founder spec 2026-11-22).
+ *
+ * Production drew TRENDING NOW, LEADERBOARD and DISCOVER PEOPLE at three sizes: the last two
+ * shrank to fit their line and the first did not. Every one is now `FeedHeading` — the same
+ * 15pt Maroon token, the same 130% text-size ceiling, and nothing shrunk — and RECENT
+ * ACTIVITY is that same type in its secondary place.
  */
 describe('the Feed headings', () => {
-  const sizeOf = (node: { props: { style?: unknown } }) =>
-    (StyleSheet.flatten(node.props.style as TextStyle) as TextStyle).fontSize;
+  const styleOf = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as TextStyle) as TextStyle;
+  const sizeOf = (node: { props: { style?: unknown } }) => styleOf(node).fontSize;
 
-  it('draws TRENDING NOW at 15pt, then one rule and RECENT ACTIVITY at 15pt', async () => {
+  /** Everything about a heading that has to match its neighbours. */
+  const treatment = (node: { props: Record<string, unknown> & { style?: unknown } }) => {
+    const style = styleOf(node);
+    return {
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      fontFamily: style.fontFamily,
+      letterSpacing: style.letterSpacing,
+      color: style.color,
+      maxFontSizeMultiplier: node.props.maxFontSizeMultiplier,
+      numberOfLines: node.props.numberOfLines,
+      adjustsFontSizeToFit: node.props.adjustsFontSizeToFit,
+    };
+  };
+
+  const SHARED = {
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: theme.typography.sectionHeaderLarge.fontFamily,
+    letterSpacing: theme.typography.sectionHeaderLarge.letterSpacing,
+    color: theme.semantic.action,
+    maxFontSizeMultiplier: 1.3,
+    numberOfLines: undefined,
+    adjustsFontSizeToFit: undefined,
+  };
+
+  it('draws TRENDING NOW, then one rule and RECENT ACTIVITY, in the one heading style', async () => {
     mockTrendingItems = [
       {
         mediaItemId: 'film-1',
@@ -1510,12 +1564,10 @@ describe('the Feed headings', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getAllByText('TRENDING NOW').length).toBeGreaterThan(0));
-    expect(sizeOf(view.getAllByText('TRENDING NOW')[0]!)).toBe(15);
-    // Back, as RECENT ACTIVITY (marquee cohesion sprint, 2026-11-07): the Feed's
-    // separator under the shelf, then the heading in the same 15pt label token.
+    expect(treatment(view.getAllByText('TRENDING NOW')[0]!)).toEqual(SHARED);
+    // The Feed's separator under the shelf, then the heading in the same type.
     const heading = view.getByText('RECENT ACTIVITY');
-    expect(sizeOf(heading)).toBe(15);
-    expect(StyleSheet.flatten(heading.props.style as TextStyle).color).toBe(theme.semantic.action);
+    expect(treatment(heading)).toEqual(SHARED);
     expect(view.getByLabelText('Recent activity').props.accessibilityRole).toBe('header');
     expect(view.queryByText('FOLLOWER ACTIVITY')).toBeNull();
     const start = view.getByTestId('feed-activity-start');
@@ -1533,25 +1585,167 @@ describe('the Feed headings', () => {
     expect(view.queryByText('TRENDING NOW')).toBeNull();
   });
 
-  it('names the board LEADERBOARD at 15pt, like TRENDING NOW', async () => {
+  it('names the board LEADERBOARD in the same style, not shrunk to fit', async () => {
     const view = await open();
     await toBoard(view);
     const heading = view.getByText('LEADERBOARD');
-    expect(sizeOf(heading)).toBe(15);
-    // One word cannot wrap, so at a large text size it shrinks onto its line instead.
-    expect(heading.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
-    // TRENDING NOW and the others still wrap.
+    expect(treatment(heading)).toEqual(SHARED);
   });
 
-  it('draws the time filter at 14pt and DISCOVER PEOPLE at 15pt, fitted to its line', async () => {
+  it('names People DISCOVER PEOPLE in the same style, not shrunk to fit', async () => {
+    const view = await open();
+    await toPeople(view);
+    expect(treatment(view.getByText('DISCOVER PEOPLE'))).toEqual(SHARED);
+    expect(sizeOf(view.getByText('DISCOVER PEOPLE'))).toBe(15);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The board's filters, behind one icon** (header consistency, founder spec 2026-11-22).
+ *
+ * The two dropdowns became `FilterIconButton` and one sheet. What must not change is the
+ * board: the same values, the same reads. What must be true of the new control is that a
+ * non-default board is never filtered invisibly.
+ */
+describe('the board filter', () => {
+  const styleOf = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as TextStyle) as TextStyle;
+
+  it('replaces the two dropdowns with one icon and a line naming both choices', async () => {
     const view = await open();
     await toBoard(view);
-    expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText('This month'))).toBe(14);
 
-    await toPeople(view);
-    // The Feed modes share one heading token (marquee cohesion sprint, 2026-11-07).
-    const people = view.getByText('DISCOVER PEOPLE');
-    expect(sizeOf(people)).toBe(15);
-    expect(people.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
+    expect(view.queryByTestId('leaderboard-metric')).toBeNull();
+    expect(view.queryByTestId('leaderboard-timeframe')).toBeNull();
+    expect(view.queryByLabelText(/^Showing /)).toBeNull();
+
+    const button = view.getByTestId('leaderboard-filter-button');
+    expect(button.props.accessibilityRole).toBe('button');
+    expect(button.props.accessibilityLabel).toBe('Leaderboard filters: All Titles, This month');
+    expect(button.props.accessibilityState).toMatchObject({ selected: false });
+    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
+    const summary = view.getByTestId('leaderboard-filter-summary', {
+      includeHiddenElements: true,
+    });
+    expect(
+      within(summary).getByText('All Titles', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    expect(
+      within(summary).getByText('This month', { includeHiddenElements: true }),
+    ).toBeTruthy();
+  });
+
+  it('marks a changed board on the icon, in its name and in the line', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    const view = await open();
+    await toBoard(view, 'All time');
+
+    const once = view.getByTestId('leaderboard-filter-button');
+    expect(once.props.accessibilityLabel).toBe(
+      'Leaderboard filters: All Titles, All time, 1 on',
+    );
+    expect(once.props.accessibilityState).toMatchObject({ selected: true });
+    expect(
+      within(
+        view.getByTestId('leaderboard-filter-button-count', { includeHiddenElements: true }),
+      ).getByText('1', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    const summary = view.getByTestId('leaderboard-filter-summary', {
+      includeHiddenElements: true,
+    });
+    const changed = within(summary).getByText('All time', { includeHiddenElements: true });
+    expect(styleOf(changed).color).toBe(theme.semantic.action);
+    const unchanged = within(summary).getByText('All Titles', { includeHiddenElements: true });
+    expect(styleOf(unchanged).color).toBe(theme.text.secondary);
+
+    await chooseMetric(view, 'Movies');
+    await waitFor(() =>
+      expect(view.getByTestId('leaderboard-filter-button').props.accessibilityLabel).toBe(
+        'Leaderboard filters: Movies, All time, 2 on',
+      ),
+    );
+  });
+
+  it('holds both filters in one sheet, each a radio group with one choice on', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    const type = await openFilters(view, 'Type');
+    expect(
+      type
+        .getAllByRole('radio')
+        .map((item) => [
+          item.props.accessibilityLabel,
+          item.props.accessibilityState?.selected,
+        ]),
+    ).toEqual([
+      ['All Titles', true],
+      ['Movies', false],
+      ['TV Shows', false],
+      ['Reviews', false],
+    ]);
+    const period = within(view.getByLabelText('Time period'));
+    expect(
+      period
+        .getAllByRole('radio')
+        .map((item) => [
+          item.props.accessibilityLabel,
+          item.props.accessibilityState?.selected,
+        ]),
+    ).toEqual([
+      ['This month', true],
+      ['All time', false],
+    ]);
+    // Every chip answers a 44pt press: 32pt drawn and the chip slop around it.
+    for (const chip of [...type.getAllByRole('radio'), ...period.getAllByRole('radio')]) {
+      expect(chip.props.hitSlop).toEqual(theme.layout.chipHitSlop);
+    }
+    await closeFilters(view);
+  });
+
+  it('applies on the press, with the same reads the dropdowns made', async () => {
+    const view = await open();
+    await toBoard(view);
+    const group = await openFilters(view, 'Type');
+    mockRpc.mockClear();
+
+    await fireEvent.press(group.getByRole('radio', { name: 'TV Shows' }));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
+        p_metric: 'tv',
+        p_timeframe: 'month',
+        p_limit: 50,
+      }),
+    );
+    // Still open, the choice shown as made.
+    expect(
+      within(view.getByLabelText('Type')).getByRole('radio', { name: 'TV Shows' }).props
+        .accessibilityState,
+    ).toMatchObject({ selected: true });
+    await closeFilters(view);
+  });
+
+  it('treats re-choosing the value already on as no change', async () => {
+    const view = await open();
+    await toBoard(view);
+    mockTrack.mockClear();
+    mockPrefWrites.length = 0;
+
+    const type = await openFilters(view, 'Type');
+    await fireEvent.press(type.getByRole('radio', { name: 'All Titles' }));
+    await fireEvent.press(
+      within(view.getByLabelText('Time period')).getByRole('radio', {
+        name: 'This month',
+      }),
+    );
+    await closeFilters(view);
+
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'leaderboard_metric_selected' }),
+    );
+    expect(mockPrefWrites).toHaveLength(0);
   });
 });

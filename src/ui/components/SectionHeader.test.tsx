@@ -130,3 +130,32 @@ describe('SectionHeader spacing', () => {
     });
   });
 });
+
+/**
+ * **A ceiling, only when asked** (header consistency, 2026-11-22). The Feed tab's headings
+ * stop growing at the display ceiling; every other heading scales without one, as before.
+ * `fit` is gone: it shrank a heading by however much it needed, which drew three headings
+ * in one slot at three sizes.
+ */
+describe('SectionHeader text-size ceiling', () => {
+  it('scales without a ceiling, and is never shrunk to fit, by default', async () => {
+    const view = await render(<SectionHeader title="Top ranked" size="large" />);
+    const text = view.getByText('TOP RANKED');
+
+    expect(text.props.maxFontSizeMultiplier).toBeUndefined();
+    expect(text.props.adjustsFontSizeToFit).toBeUndefined();
+    expect(text.props.numberOfLines).toBeUndefined();
+  });
+
+  it('stops at the ceiling it is given, and still wraps rather than shrinking', async () => {
+    const view = await render(
+      <SectionHeader title="Discover people" size="large" maxScale={1.3} />,
+    );
+    const text = view.getByText('DISCOVER PEOPLE');
+
+    expect(text.props.maxFontSizeMultiplier).toBe(1.3);
+    expect(text.props.adjustsFontSizeToFit).toBeUndefined();
+    expect(text.props.numberOfLines).toBeUndefined();
+    expect(printed(view, 'DISCOVER PEOPLE').fontSize).toBe(15);
+  });
+});

@@ -2,7 +2,7 @@ import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
-import { medal as medalTokens } from '@/ui/tokens';
+import { medal as medalTokens, theme } from '@/ui/tokens';
 
 import { LeaderboardView } from './LeaderboardView';
 import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
@@ -11,9 +11,8 @@ import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
  * **The Leaderboard's final polish** (founder, 2026-11-04): first place carries a small
  * Amber trophy that leaves the row exactly as it was.
  *
- * **Its categories and time range** (founder, nav cohesion sprint, 2026-11-06): All |
- * Movies | TV | Reviews as four equal segments that always fit, the full names spoken, and
- * This month / All time as a compact filter under them.
+ * **Its categories and time range** behind one filter icon and sheet since the header
+ * consistency pass (founder spec, 2026-11-22).
  */
 
 const person = (over: Partial<LeaderboardEntry> = {}): LeaderboardEntry => ({
@@ -50,75 +49,121 @@ const board = (
   );
 
 /**
- * **What and when, two dropdowns side by side** (founder Preview QA, 2026-11-07): the
- * content type is a dropdown beside the time range, no longer four segments.
+ * **What and when, behind one filter icon** (header consistency, founder spec 2026-11-22):
+ * the two dropdowns became `FilterIconButton`, a line naming both choices, and one sheet
+ * (`LeaderboardFilterSheet`) holding the four types and the two periods as radio chips.
  */
-describe('the content type', () => {
-  it('is a dropdown of the four, named in full, beside the time range', async () => {
+describe('the filters', () => {
+  const openSheet = async (view: Awaited<ReturnType<typeof board>>) => {
+    await fireEvent.press(view.getByTestId('leaderboard-filter-button'));
+    return {
+      type: within(await view.findByLabelText('Type')),
+      period: within(view.getByLabelText('Time period')),
+    };
+  };
+
+  it('is one 44pt icon beside a line naming both choices, on the default board', async () => {
     const view = await board([]);
     const filters = view.getByTestId('leaderboard-filters');
-    expect(StyleSheet.flatten(filters.props.style)).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' });
-    const metric = within(filters).getByLabelText('Showing All Titles');
-    expect(within(filters).getByLabelText('Showing This month')).toBeTruthy();
+    const button = within(filters).getByTestId('leaderboard-filter-button');
+    expect(button.props.accessibilityLabel).toBe('Leaderboard filters: All Titles, This month');
+    expect(button.props.accessibilityHint).toBe('Opens the title type and time period');
+    expect(StyleSheet.flatten(button.props.style)).toMatchObject({ width: 44, height: 44 });
+    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
+    expect(view.queryAllByRole('menuitem')).toHaveLength(0);
     expect(view.queryAllByRole('tab')).toHaveLength(0);
-    // A 44pt target, in the same compact type as the time range.
-    expect(StyleSheet.flatten(metric.props.style).minHeight).toBe(44);
-    expect(
-      (StyleSheet.flatten(within(metric).getByText('All Titles').props.style) as TextStyle).fontSize,
-    ).toBe(14);
 
-    await fireEvent.press(metric);
-    const items = await view.findAllByRole('menuitem');
-    expect(items.map((item) => item.props.accessibilityLabel)).toEqual([
+    const summary = within(filters).getByTestId('leaderboard-filter-summary', {
+      includeHiddenElements: true,
+    });
+    for (const word of ['All Titles', 'This month']) {
+      const text = within(summary).getByText(word, { includeHiddenElements: true });
+      expect((StyleSheet.flatten(text.props.style) as TextStyle).color).toBe(
+        theme.text.secondary,
+      );
+    }
+  });
+
+  it('counts and colours what is not the default', async () => {
+    const view = await render(
+      <LeaderboardView
+        metric="reviews"
+        onChangeMetric={jest.fn()}
+        timeframe="all_time"
+        onChangeTimeframe={jest.fn()}
+        entries={[]}
+        standing={undefined}
+        loading={false}
+        onPressPerson={() => {}}
+      />,
+    );
+    const button = view.getByTestId('leaderboard-filter-button');
+    expect(button.props.accessibilityLabel).toBe(
+      'Leaderboard filters: Reviews, All time, 2 on',
+    );
+    expect(button.props.accessibilityState).toMatchObject({ selected: true });
+    expect(
+      within(
+        view.getByTestId('leaderboard-filter-button-count', { includeHiddenElements: true }),
+      ).getByText('2', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    const summary = view.getByTestId('leaderboard-filter-summary', {
+      includeHiddenElements: true,
+    });
+    for (const word of ['Reviews', 'All time']) {
+      const text = within(summary).getByText(word, { includeHiddenElements: true });
+      expect((StyleSheet.flatten(text.props.style) as TextStyle).color).toBe(
+        theme.semantic.action,
+      );
+    }
+  });
+
+  it('opens one sheet with the four types and the two periods, the current ones chosen', async () => {
+    const view = await board([]);
+    const { type, period } = await openSheet(view);
+
+    expect(type.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
       'All Titles',
       'Movies',
       'TV Shows',
       'Reviews',
     ]);
-    expect(items[0]!.props.accessibilityState).toMatchObject({ selected: true });
-  });
-
-  it('chooses another, and does not report the current one again', async () => {
-    const onChangeMetric = jest.fn();
-    const view = await board([], onChangeMetric);
-    await fireEvent.press(view.getByLabelText('Showing All Titles'));
-    await fireEvent.press((await view.findAllByRole('menuitem'))[0]!);
-    expect(onChangeMetric).not.toHaveBeenCalled();
-
-    await fireEvent.press(view.getByLabelText('Showing All Titles'));
-    await fireEvent.press(await view.findByRole('menuitem', { name: 'Reviews' }));
-    expect(onChangeMetric).toHaveBeenCalledWith('reviews');
-  });
-});
-
-describe('the time range', () => {
-  it('is a compact filter that opens a two-line menu, and chooses All time', async () => {
-    const onChangeTimeframe = jest.fn();
-    const view = await board([], jest.fn(), onChangeTimeframe);
-
-    const filter = view.getByLabelText('Showing This month');
-    expect(filter.props.accessibilityHint).toBe('Choose a time range');
+    expect(period.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
+      'This month',
+      'All time',
+    ]);
     expect(
-      (StyleSheet.flatten(within(filter).getByText('This month').props.style) as TextStyle)
-        .fontSize,
-    ).toBe(14);
+      type.getByRole('radio', { name: 'All Titles' }).props.accessibilityState,
+    ).toMatchObject({
+      selected: true,
+    });
+    expect(
+      period.getByRole('radio', { name: 'This month' }).props.accessibilityState,
+    ).toMatchObject({ selected: true });
+  });
 
-    await fireEvent.press(filter);
-    const items = await view.findAllByRole('menuitem');
-    expect(items.map((item) => item.props.accessibilityLabel)).toEqual(['This month', 'All time']);
-    expect(items[0]!.props.accessibilityState).toMatchObject({ selected: true });
+  it('chooses another type and period, and does not report the current ones again', async () => {
+    const onChangeMetric = jest.fn();
+    const onChangeTimeframe = jest.fn();
+    const view = await board([], onChangeMetric, onChangeTimeframe);
+    const { type, period } = await openSheet(view);
 
-    await fireEvent.press(items[1]!);
+    await fireEvent.press(type.getByRole('radio', { name: 'All Titles' }));
+    await fireEvent.press(period.getByRole('radio', { name: 'This month' }));
+    expect(onChangeMetric).not.toHaveBeenCalled();
+    expect(onChangeTimeframe).not.toHaveBeenCalled();
+
+    await fireEvent.press(type.getByRole('radio', { name: 'Reviews' }));
+    await fireEvent.press(period.getByRole('radio', { name: 'All time' }));
+    expect(onChangeMetric).toHaveBeenCalledWith('reviews');
     expect(onChangeTimeframe).toHaveBeenCalledWith('all_time');
   });
 
-  it('does not report the chosen range again as a change', async () => {
-    const onChangeTimeframe = jest.fn();
-    const view = await board([], jest.fn(), onChangeTimeframe);
-
-    await fireEvent.press(view.getByLabelText('Showing This month'));
-    await fireEvent.press((await view.findAllByRole('menuitem'))[0]!);
-    expect(onChangeTimeframe).not.toHaveBeenCalled();
+  it('closes on Close', async () => {
+    const view = await board([]);
+    await openSheet(view);
+    await fireEvent.press(view.getByTestId('leaderboard-filter-close-press'));
+    expect(view.queryByLabelText('Type')).toBeNull();
   });
 });
 

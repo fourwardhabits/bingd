@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet, type StyleProp, type TextStyle } from 'react-native';
 
 import { memberSearch } from '@/lib/routes';
@@ -78,6 +78,49 @@ describe('the two modes', () => {
 
     await waitFor(() => expect(view.getByText('91% Match')).toBeTruthy());
     expect(view.queryByText('Ben + 2 more')).toBeNull();
+  });
+
+  /**
+   * **Mutuals | Match is the app's compact segmented control** (header consistency, founder
+   * spec 2026-11-22): `CompactSwitch`, as For You's and Collection's Movies | TV, rather than
+   * two loose chips — one radio group, each half a 44pt press, and still on the screen
+   * rather than in a sheet.
+   */
+  it('draws the two modes as one compact radio group, the chosen one selected', async () => {
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
+    mockRpcResults.people_taste_matches = [
+      person({ user_id: 'bo-id', username: 'bo', display_name: 'Bo', match_score: 91 }),
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
+
+    const group = view.getByLabelText('Suggestions');
+    expect(group.props.accessibilityRole).toBe('radiogroup');
+    const halves = () => within(group).getAllByRole('radio');
+    expect(halves().map((half) => half.props.accessibilityLabel)).toEqual(['Mutuals', 'Match']);
+    expect(halves().map((half) => half.props.accessibilityState?.selected)).toEqual([
+      true,
+      false,
+    ]);
+    for (const half of halves()) {
+      const style = StyleSheet.flatten(half.props.style) as {
+        minHeight?: number;
+        minWidth?: number;
+      };
+      expect(style.minHeight).toBe(44);
+      expect(style.minWidth).toBe(44);
+    }
+    // No chip row is left behind it.
+    expect(view.queryAllByRole('button', { name: 'Mutuals' })).toHaveLength(0);
+
+    await fireEvent.press(within(group).getByRole('radio', { name: 'Match' }));
+
+    await waitFor(() => expect(view.getByText('91% Match')).toBeTruthy());
+    expect(halves().map((half) => half.props.accessibilityState?.selected)).toEqual([
+      false,
+      true,
+    ]);
   });
 
   it('says why Mutuals is empty without hiding the Match list that loaded', async () => {

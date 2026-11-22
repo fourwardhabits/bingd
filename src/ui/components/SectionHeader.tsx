@@ -32,11 +32,18 @@ export type SectionHeaderProps = {
    */
   size?: SectionHeaderSize;
   /**
-   * One line, shrinking to fit rather than wrapping. For a one-word heading beside a
-   * control, which cannot wrap at a word: the Feed's LEADERBOARD at a large text size
-   * (nav cohesion sprint, 2026-11-06). Every other heading wraps as before.
+   * The most this heading grows with the reader's text size, as a multiple of its token
+   * (`maxFontSizeMultiplier`). Absent (the default) it scales without a ceiling, as every
+   * heading always has.
+   *
+   * **One caller: the Feed tab's headings** (`FeedHeading`), which share a row with a
+   * fixed-width control and stop at the display ceiling instead (header consistency,
+   * 2026-11-22). It replaced `fit`, which shrank LEADERBOARD and DISCOVER PEOPLE onto one
+   * line by however much each needed and left TRENDING NOW alone — three headings in one
+   * slot drawn at three sizes. A ceiling is the same size for every word, so nothing in
+   * the row is shrunk and nothing is drawn smaller than its neighbour.
    */
-  fit?: boolean;
+  maxScale?: number;
   /**
    * Let the action drop under the heading when the two do not fit on one line, rather than
    * running off the screen: the Cinematic title page's sections at a large text size, whose
@@ -106,7 +113,7 @@ export function SectionHeader({
   onPressAction,
   exactCase = false,
   size = 'standard',
-  fit = false,
+  maxScale,
   wrap = false,
   tight = false,
   spacing,
@@ -124,10 +131,9 @@ export function SectionHeader({
         tone="action"
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={[exactCase ? styles.exactCase : undefined, fit && styles.fit]}
-        numberOfLines={fit ? 1 : undefined}
-        adjustsFontSizeToFit={fit}
-        minimumFontScale={fit ? FIT_FLOOR : undefined}
+        style={exactCase ? styles.exactCase : undefined}
+        // Only when asked: an explicit `undefined` would override the token's own ceiling.
+        {...(maxScale !== undefined ? { maxFontSizeMultiplier: maxScale } : null)}
       >
         {exactCase ? title : title.toUpperCase()}
       </Text>
@@ -151,9 +157,6 @@ export function SectionHeader({
   );
 }
 
-/** LEADERBOARD at 200% text in the space a 320pt phone leaves it needs about 0.69. */
-const FIT_FLOOR = 0.6;
-
 /**
  * A footnote line is 18pt; 20pt above and 8pt below it make a 46pt target that lies over the
  * section's own seam and the body's top padding, never over a rail (see `tight`).
@@ -167,7 +170,6 @@ export const TIGHT_SLOP = {
 
 const styles = StyleSheet.create({
   tight: { minHeight: 0, zIndex: 1 },
-  fit: { flexShrink: 1 },
   wrap: { flexWrap: 'wrap', columnGap: theme.space[3] },
   row: {
     minHeight: theme.layout.minTapTarget,
