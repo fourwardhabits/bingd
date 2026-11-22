@@ -188,28 +188,34 @@ describe('what a comment notification says', () => {
 describe('a generic row whose comment turns out to be a reply', () => {
   const shapes = (shape: CommentShape) => new Map([['comment-9', shape]]);
 
-  it('says "replied to your comment" when the comment answered is mine', () => {
+  // The stored parent is the thread's ROOT (`_add_comment` re-points every reply), so it
+  // names whose thread this is, not which comment was answered. Neither sentence claims
+  // "replied to your comment" for that reason (Codex review, PR #365).
+  it('says it replied under my comment when the thread is mine', () => {
     const shaped = withCommentShape(
       row({ kind: 'comment' }),
-      shapes({ isReply: true, parentAuthorId: VIEWER }),
+      shapes({ isReply: true, rootAuthorId: VIEWER }),
       VIEWER,
     );
-    expect(said(shaped)).toBe('replied to your comment on Crazy Rich Asians');
+    expect(said(shaped)).toBe('replied under your comment on Crazy Rich Asians');
+    expect(said(shaped, null)).toBe('replied under your comment');
+    expect(said(shaped)).not.toMatch(/replied to your comment/);
   });
 
-  it('says it replied to a comment on my post when the comment answered is somebody else’s', () => {
+  it('says it replied in a thread on my post when the thread is somebody else’s', () => {
     const shaped = withCommentShape(
       row({ kind: 'comment' }),
-      shapes({ isReply: true, parentAuthorId: 'someone-else' }),
+      shapes({ isReply: true, rootAuthorId: 'someone-else' }),
       VIEWER,
     );
-    expect(said(shaped)).toBe('replied to a comment on your Crazy Rich Asians watch');
+    expect(said(shaped)).toBe('replied in a thread on your Crazy Rich Asians watch');
+    expect(said(shaped, null)).toBe('replied in a thread on your activity');
   });
 
   it('never calls a top-level comment a reply', () => {
     const shaped = withCommentShape(
       row({ kind: 'comment' }),
-      shapes({ isReply: false, parentAuthorId: null }),
+      shapes({ isReply: false, rootAuthorId: null }),
       VIEWER,
     );
     expect(said(shaped)).toBe('commented on your Crazy Rich Asians watch');
@@ -225,7 +231,7 @@ describe('a generic row whose comment turns out to be a reply', () => {
   });
 
   it('leaves a follow-up, a mention and a row the payload already describes alone', () => {
-    const reply = shapes({ isReply: true, parentAuthorId: VIEWER });
+    const reply = shapes({ isReply: true, rootAuthorId: VIEWER });
     const followUp = row({ kind: 'comment', commentIsFollowUp: true });
     expect(withCommentShape(followUp, reply, VIEWER)).toBe(followUp);
     const mention = row({ kind: 'mention' });

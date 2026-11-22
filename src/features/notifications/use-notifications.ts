@@ -293,10 +293,12 @@ export type Notification = {
    */
   commentId?: string | null;
   /**
-   * `comment` only, and only after `withCommentShape`: a reply under somebody else's
-   * comment on the reader's own post. A reply, so not "commented on your"; not to the
-   * reader's comment, so not "replied to your comment".
+   * `comment` only, and only after `withCommentShape`: a reply in a thread on the reader's
+   * own post — under the reader's own root comment (`commentUnderMine`) or under somebody
+   * else's (`commentInThread`). A reply, so not "commented on your"; and which comment in
+   * the thread it answered is unknown, so never "replied to your comment".
    */
+  commentUnderMine?: boolean;
   commentInThread?: boolean;
   preview: string | null;
   /**
@@ -632,13 +634,26 @@ export function useNotificationCommentId(viewerId: string, notificationId: strin
     enabled: Boolean(viewerId && notificationId),
     staleTime: 30_000,
   });
-  if (!notificationId) return { commentId: null, settled: true };
-  const row = query.data?.find((candidate) => candidate.id === notificationId);
-  return {
-    commentId: row?.commentId ?? null,
-    // Settled once the inbox has answered (either way), so the page knows to stop waiting.
-    settled: query.isSuccess || query.isError,
-  };
+  const row = notificationId
+    ? query.data?.find((candidate) => candidate.id === notificationId)
+    : undefined;
+  /**
+   * **A cache fresh enough to be trusted can still predate the push** (Codex review, PR
+   * #365): an inbox read seconds before the notification was written is inside
+   * `staleTime`, so nothing would fetch and the row could never be found. So a row that is
+   * missing from a successful read is asked for once more, per notification, before the
+   * page gives up and opens the activity at the top.
+   */
+  const missing = Boolean(notificationId && query.isSuccess && !row);
+  const { refetch } = query;
+  const askedAgain = useRef<string | null>(null);
+  useEffect(() => {
+    if (!missing || !notificationId || askedAgain.current === notificationId) return;
+    askedAgain.current = notificationId;
+    void refetch();
+  }, [missing, notificationId, refetch]);
+
+  return { commentId: row?.commentId ?? null };
 }
 
 /**
@@ -653,7 +668,16 @@ export function useNotificationCommentId(viewerId: string, notificationId: strin
  * same `comments_read` policy every comment read meets — a comment this reader may no
  * longer see is simply absent, and its row keeps the generic sentence.
  */
-export type CommentShape = { isReply: boolean; parentAuthorId: string | null };
+export type CommentShape = {
+  isReply: boolean;
+  /**
+   * The author of the comment's stored parent — which is always the **thread's root**:
+   * `_add_comment` re-points every reply at `_comment_root(...)`. It is therefore *not*
+   * necessarily the person the reply answered (Reply may have been tapped on another
+   * reply in that thread), and the copy below never claims it is (Codex review, PR #365).
+   */
+  rootAuthorId: string | null;
+};
 
 export function useCommentShapes(viewerId: string, commentIds: string[]) {
   const ids = [...new Set(commentIds)].sort();
@@ -683,7 +707,7 @@ export function useCommentShapes(viewerId: string, commentIds: string[]) {
       for (const row of rows) {
         shapes.set(row.id, {
           isReply: row.parent_id !== null,
-          parentAuthorId: row.parent_id ? (parents.get(row.parent_id) ?? null) : null,
+          rootAuthorId: row.parent_id ? (parents.get(row.parent_id) ?? null) : null,
         });
       }
       return shapes;
@@ -693,9 +717,14 @@ export function useCommentShapes(viewerId: string, commentIds: string[]) {
 
 /**
  * A row with what its comment turned out to be folded in: a generic `comment` row whose
- * comment is a reply to the reader's own comment *is* a reply, and says so. Only ever moves
- * a row from "commented" towards "replied" when the stored comment proves it; a top-level
- * comment is never called a reply.
+ * comment is stored as a reply *is* a reply, and says so. Only ever moves a row from
+ * "commented" towards "replied" when the stored comment proves it; a top-level comment is
+ * never called a reply.
+ *
+ * **Thread-level wording, never "to your comment"**, because the stored parent is the
+ * thread's root and not necessarily the comment Reply was tapped on: "replied under your
+ * comment" when the thread is the reader's, "replied in a thread on your …" otherwise.
+ * Both are true whichever comment in the thread was answered.
  */
 export function withCommentShape(
   row: Notification,
@@ -707,8 +736,8 @@ export function withCommentShape(
   }
   const shape = shapes?.get(row.commentId);
   if (!shape?.isReply) return row;
-  return shape.parentAuthorId === viewerId
-    ? { ...row, commentIsReply: true }
+  return shape.rootAuthorId === viewerId
+    ? { ...row, commentUnderMine: true }
     : { ...row, commentInThread: true };
 }
 
@@ -1067,8 +1096,11 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
         if (row.commentIsReply) {
           return { lead: 'replied to your comment on', subject, tail: null };
         }
+        if (row.commentUnderMine) {
+          return { lead: 'replied under your comment on', subject, tail: null };
+        }
         if (row.commentInThread) {
-          return { lead: 'replied to a comment on your', subject, tail: noun };
+          return { lead: 'replied in a thread on your', subject, tail: noun };
         }
         /**
          * The author following up under their own post. It is not "your" anything — the
@@ -1129,8 +1161,10 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
     return {
       lead: row.commentIsReply
         ? 'replied to your comment'
-        : row.commentInThread
-          ? 'replied to a comment on your activity'
+        : row.commentUnderMine
+          ? 'replied under your comment'
+          : row.commentInThread
+          ? 'replied in a thread on your activity'
           : row.commentIsFollowUp
             ? 'also commented on their activity'
             : 'commented on your activity',

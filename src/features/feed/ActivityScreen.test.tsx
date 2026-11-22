@@ -58,6 +58,9 @@ let mockGroupTitles: Record<string, unknown>[] = [];
 let mockParams: Record<string, string> = { id: 'event-1' };
 /** What `my_notifications` answers, for a push tap that names only its notification. */
 let mockInbox: Record<string, unknown>[] = [];
+/** How many times the inbox was read, and what the first read answers if not `mockInbox`. */
+let mockInboxReads = 0;
+let mockFirstInbox: Record<string, unknown>[] | null = null;
 
 jest.mock('expo-router', () => ({
   Stack: { Screen: () => null },
@@ -109,7 +112,10 @@ jest.mock('@/lib/supabase', () => ({
         : name === 'watchlist_group_titles'
           ? { data: mockGroupTitles, error: null }
           : name === 'my_notifications'
-            ? { data: mockInbox, error: null }
+            ? {
+                data: (mockInboxReads += 1) === 1 && mockFirstInbox ? mockFirstInbox : mockInbox,
+                error: null,
+              }
             : { data: null, error: null },
   },
   startSessionRefresh: () => () => {},
@@ -221,6 +227,8 @@ beforeEach(() => {
   mockGroupTitles = [];
   mockParams = { id: 'event-1' };
   mockInbox = [];
+  mockInboxReads = 0;
+  mockFirstInbox = null;
   mockAuth.status = 'ready';
   mockReactions.summary = null;
   mockReactions.askedAbout = [];
@@ -1026,6 +1034,38 @@ describe('a notification that names one comment', () => {
     expect(view.queryByText(/^Replying to/)).toBeNull();
   });
 
+  it('asks the inbox again when a fresh cache predates the push', async () => {
+    // Codex review, PR #365: an inbox read just before the notification was written is
+    // inside its staleTime and cannot hold the row. Missing from a successful read means
+    // one more read, not "unavailable".
+    mockParams = { id: 'event-1', notification: 'n-1' };
+    mockFirstInbox = [];
+    mockInbox = [
+      {
+        id: 'n-1',
+        kind: 'comment',
+        created_at: new Date().toISOString(),
+        read_at: null,
+        actor_id: 'bo-id',
+        actor_username: 'bo',
+        actor_display_name: 'Bo',
+        actor_avatar_path: null,
+        media_item_id: null,
+        media_title: null,
+        media_kind: null,
+        series_title: null,
+        subject_type: 'feed_event',
+        subject_id: 'event-1',
+        payload: { comment_id: 'c3' },
+      },
+    ];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    await waitFor(() => expect(marked(view, 'c3')).toBe(true));
+    expect(mockInboxReads).toBe(2);
+  });
+
   it('opens the activity as before when the push names a notification it cannot find', async () => {
     mockParams = { id: 'event-1', notification: 'n-unknown' };
     const view = await renderWithProviders(<ActivityScreen />);
@@ -1033,6 +1073,8 @@ describe('a notification that names one comment', () => {
 
     expect(view.getByLabelText('Sinners, 2025')).toBeTruthy();
     expect(marked(view, 'c3')).toBe(false);
+    // Asked once more, and only once: no loop for a row that is genuinely not there.
+    await waitFor(() => expect(mockInboxReads).toBe(2));
     expect(view.queryByText('That comment is no longer available.')).toBeNull();
   });
 

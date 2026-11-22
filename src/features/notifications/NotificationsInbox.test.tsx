@@ -1317,7 +1317,7 @@ describe('a comment notification, tapped and read', () => {
     expect(mockPush).toHaveBeenCalledWith('/activity/event-1');
   });
 
-  it('calls a reply to the owner’s own comment a reply, not a comment on the post', async () => {
+  it('calls a reply in the owner’s own thread a reply, not a comment on the post', async () => {
     mockNotifications.length = 0;
     mockNotifications.push(commentRow({ payload: { comment_id: 'k3' } }));
     mockCommentTable.push(
@@ -1326,7 +1326,7 @@ describe('a comment notification, tapped and read', () => {
     );
 
     const view = await renderWithProviders(<NotificationsScreen />);
-    await waitFor(() => expect(view.getByText(/replied to your comment on/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/replied under your comment on/)).toBeTruthy());
     expect(view.queryByText(/commented on your/)).toBeNull();
   });
 
