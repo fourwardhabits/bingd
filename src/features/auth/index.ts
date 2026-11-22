@@ -23,6 +23,15 @@ export {
   type SignInOutcome,
 } from './methods';
 
+export {
+  classifyIdentifier,
+  clearPendingUsernameChallenge,
+  pendingUsernameChallenge,
+  sendUsernameCode,
+  verifyUsernameCode,
+  type Identifier,
+} from './username-sign-in';
+
 export { applyInitialVisibility, createProfile, usernameAvailability } from './create-profile';
 
 export { AuthStatusOverlay } from './status-overlay';

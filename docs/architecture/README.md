@@ -21,6 +21,7 @@ Status words used across these documents: **Live in production** (on `main` and 
 | [`diagrams.md`](./diagrams.md) | Mermaid diagrams of what exists on 2026-11-20: system context, app, database, ranking flow, Feed and social, recommendations, background jobs, release |
 | [`data-model.md`](./data-model.md) | Postgres schema, indexes, row-level security |
 | [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
+| [`username-sign-in.md`](./username-sign-in.md) | Username-or-email sign-in: threat model, limits, deployment checklist (dark, not deployed) |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
 | [`api.md`](./api.md) | The write and read surface |
 | [`collection-rerank.md`](./collection-rerank.md) | Collection drag-to-rerank: moves across categories, the TV wall, silent ranking updates (#319) |

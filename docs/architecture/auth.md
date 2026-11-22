@@ -25,6 +25,8 @@ No passwords for users. That removes password storage, strength rules, reset flo
 
 > **One exception, and it is not a user-facing method.** Supabase's password capability is retained so that a dedicated App Store / Play review account can have deterministic credentials — a reviewer has no mailbox to receive a code in. It sits behind *More sign-in options* and cannot create an account. See §8, *The final email contract*, and [`../release/store-review-access.md`](../release/store-review-access.md).
 
+> **Username as an identifier (2026-11-12, dark).** An existing account may type its username instead of its email and receive the same six-digit code at the email on the account, without that email ever reaching the device. It is not a fourth method — the credential is still the email code — and sign-up stays email-only. Built behind `USERNAME_SIGN_IN_ENABLED = false`; see [`username-sign-in.md`](./username-sign-in.md).
+
 ---
 
 ## 2. Linking — Required

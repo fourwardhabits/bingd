@@ -145,7 +145,11 @@ export type OnboardingStep =
  */
 export type PeopleStepVariant =
   'connected' | 'connected_alone' | 'starter_shared' | 'starter_active' | 'could_not_load';
-export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
+/**
+ * `username_code` is the username path (docs/architecture/username-sign-in.md): still an
+ * email code, but asked for by username, so the two can be told apart once it ships.
+ */
+export type SignInMethod = 'email_code' | 'username_code' | 'password' | 'apple' | 'google';
 
 /**
  * Which of the five links on a profile header was opened.

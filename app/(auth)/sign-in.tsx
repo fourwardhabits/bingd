@@ -3,11 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import {
+  classifyIdentifier,
   isAppleSignInAvailable,
   sendEmailCode,
+  sendUsernameCode,
   signInWithApple,
   signInWithGoogle,
 } from '@/features/auth';
+import { USERNAME_SIGN_IN_ENABLED } from '@/features/auth/username-sign-in-flag';
 import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -40,6 +43,18 @@ import { theme } from '@/ui/tokens';
  * That is also what keeps the screen from answering the question. Both cases return the
  * same success, so nothing here can be used to find out whether an address has a Bingd
  * account.
+ *
+ * ---------------------------------------------------------------------------
+ * EMAIL OR USERNAME — BEHIND `USERNAME_SIGN_IN_ENABLED`, WHICH IS FALSE
+ *
+ * Founder decision 2026-11-12: an existing account may type its username instead of its
+ * email. With the constant off this screen is exactly the one above, and every branch
+ * below reads the constant before it reads anything else. With it on, the one field takes
+ * either: a value containing `@` goes down the email path **unchanged** (same call, same
+ * `shouldCreateUser: true`, same next screen), and a username goes to the
+ * `username-sign-in` Edge Function, which never tells this device the email or whether
+ * the name exists. Sign-up stays email-only by construction: the username path cannot
+ * create an account. docs/architecture/username-sign-in.md.
  */
 export default function SignInScreen() {
   const router = useRouter();
@@ -70,6 +85,9 @@ export default function SignInScreen() {
   }, []);
 
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  // Read only when the constant is on, so that with it off nothing new is even evaluated.
+  const identifier = USERNAME_SIGN_IN_ENABLED ? classifyIdentifier(email) : null;
+  const canSubmit = identifier ? identifier.kind !== 'incomplete' : looksLikeEmail;
 
   /**
    * Sends before navigating, so a refusal — a rate limit, signups closed — is shown
@@ -105,6 +123,28 @@ export default function SignInScreen() {
     } else {
       setError(result.message ?? 'That did not work. Try again.');
     }
+  };
+
+  /**
+   * The username path. It always moves on to the code screen when the request was
+   * understood, because the server's answer is the same for a name that exists and one
+   * that does not — stopping here for either would be the disclosure the server avoids.
+   */
+  const submitUsername = async (username: string) => {
+    if (sending.current) return;
+    sending.current = true;
+    setBusy('email');
+    setError(null);
+    const result = await sendUsernameCode(username);
+    sending.current = false;
+    setBusy(null);
+    if (result.ok) router.push('/(auth)/verify-username');
+    else setError(result.message);
+  };
+
+  const submitIdentifier = () => {
+    if (identifier?.kind === 'username') return submitUsername(identifier.username);
+    return submitEmail();
   };
 
   const submitProvider = async (
@@ -153,7 +193,7 @@ export default function SignInScreen() {
 
       <View style={styles.form}>
         <Field
-          label="Email"
+          label={USERNAME_SIGN_IN_ENABLED ? 'Email or username' : 'Email'}
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
@@ -164,18 +204,42 @@ export default function SignInScreen() {
           textContentType="emailAddress"
           returnKeyType="go"
           editable={busy === null}
-          onSubmitEditing={looksLikeEmail ? submitEmail : undefined}
+          onSubmitEditing={
+            USERNAME_SIGN_IN_ENABLED
+              ? canSubmit
+                ? submitIdentifier
+                : undefined
+              : looksLikeEmail
+                ? submitEmail
+                : undefined
+          }
           error={error ?? undefined}
           // Says what happens next, and says it before the tap rather than after: no
           // password is the reassurance, and "code" is the word the next screen uses.
-          hint={error ? undefined : 'We will send a six-digit code. No password to remember.'}
+          hint={
+            error
+              ? undefined
+              : USERNAME_SIGN_IN_ENABLED
+                ? 'We will send a six-digit code to your email. No password to remember.'
+                : 'We will send a six-digit code. No password to remember.'
+          }
         />
         <Button
-          label={busy === 'email' ? 'Sending…' : 'Continue with email'}
-          onPress={submitEmail}
-          disabled={!looksLikeEmail || busy !== null}
+          label={
+            busy === 'email'
+              ? 'Sending…'
+              : USERNAME_SIGN_IN_ENABLED
+                ? 'Continue'
+                : 'Continue with email'
+          }
+          onPress={USERNAME_SIGN_IN_ENABLED ? submitIdentifier : submitEmail}
+          disabled={!canSubmit || busy !== null}
           disabledReason={
-            looksLikeEmail ? 'Signing in, one moment.' : 'Enter your email address first.'
+            canSubmit
+              ? 'Signing in, one moment.'
+              : USERNAME_SIGN_IN_ENABLED
+                ? 'Enter your email or username first.'
+                : 'Enter your email address first.'
           }
         />
       </View>
