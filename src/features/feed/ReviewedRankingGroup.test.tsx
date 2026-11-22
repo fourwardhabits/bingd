@@ -4,15 +4,14 @@ import { PosterRail } from '@/ui/components/PosterWall';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { batchReviews, RankingBatchSheet } from './RankingBatchSheet';
-import { readGroupReviews, reviewKey } from './use-group-previews';
 
 /**
  * **A reviewed first ranking inside its group** (20261130000800).
  *
  * The server now folds a reviewed first ranking into its half-hour group instead of giving
  * it a card of its own, so the review has to be readable from the group: under its own
- * title in the group's sheet, masked for spoilers as the Feed masks it, and marked on its
- * poster in the rail. Who may read it is decided by `public_notes` alone (asserted against
+ * title in the group's sheet, masked for spoilers as the Feed masks it. (Since 2026-11-22
+ * its poster in the rail carries no review label.) Who may read it is decided by `public_notes` alone (asserted against
  * real SQL in `supabase/tests/reviewed-rankings-group.test.mjs`); what only the client can
  * get wrong is asking for the right author and titles, putting each review under its own
  * title, and never rendering a masked one.
@@ -175,86 +174,32 @@ describe("the group's sheet", () => {
   });
 });
 
-describe("the rail's review mark", () => {
-  it('marks only the pairs asked for, from public_notes', async () => {
-    mockRpc.mockResolvedValue({
-      data: [
-        { user_id: 'author', media_item_id: 'invincible' },
-        { user_id: 'author', media_item_id: 'unasked' },
-      ],
-      error: null,
-    });
-    const marks = await readGroupReviews([
-      reviewKey('author', 'invincible'),
-      reviewKey('author', 'seven'),
-    ]);
-    expect(mockRpc).toHaveBeenCalledWith('public_notes', {
-      p_user_ids: ['author'],
-      p_media_item_ids: ['invincible', 'seven'],
-      p_limit: 100,
-    });
-    expect([...marks.keys()]).toEqual([reviewKey('author', 'invincible')]);
-  });
-
-  it('asks one author at a time, so one author’s reviews never crowd out another’s', async () => {
-    // public_notes filters authors and titles independently and caps by recency (Codex,
-    // PR 347): asked together, A's review of B's title would be a row nobody wanted.
-    mockRpc.mockImplementation((_name: string, args: { p_user_ids: string[] }) =>
-      Promise.resolve({
-        data:
-          args.p_user_ids[0] === 'a'
-            ? [{ user_id: 'a', media_item_id: 'heat' }]
-            : [{ user_id: 'b', media_item_id: 'dune' }],
-        error: null,
-      }),
-    );
-    const marks = await readGroupReviews([
-      reviewKey('a', 'heat'),
-      reviewKey('a', 'alien'),
-      reviewKey('b', 'dune'),
-    ]);
-    expect(mockRpc).toHaveBeenCalledTimes(2);
-    expect(mockRpc).toHaveBeenCalledWith('public_notes', {
-      p_user_ids: ['a'],
-      p_media_item_ids: ['heat', 'alien'],
-      p_limit: 100,
-    });
-    expect(mockRpc).toHaveBeenCalledWith('public_notes', {
-      p_user_ids: ['b'],
-      p_media_item_ids: ['dune'],
-      p_limit: 100,
-    });
-    expect(new Set(marks.keys())).toEqual(
-      new Set([reviewKey('a', 'heat'), reviewKey('b', 'dune')]),
-    );
-  });
-
-  it('a failed read is no marks, not an error', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { message: 'down' } });
-    const marks = await readGroupReviews([reviewKey('author', 'invincible')]);
-    expect(marks.size).toBe(0);
-  });
-
-  it('draws a quiet "Review" label on a reviewed poster, and says so in its name', async () => {
+/**
+ * Removed by the founder (2026-11-22): reviews play no part in how a group is drawn. A
+ * reviewed first ranking is a poster like any other in the rail, with no "Review" label;
+ * its review is read in the group's sheet, above.
+ */
+describe('the rail', () => {
+  it('draws no review label on any poster', async () => {
     const view = await render(
       <PosterRail
-        label="Maya's 2 titles"
-        width={360}
-        onPressTile={() => {}}
+        label="Ada's 2 titles"
         tiles={[
-          { id: 'seven', title: 'Se7en', year: 1995, score: 9.1 },
-          { id: 'invincible', title: 'Invincible', year: 2021, score: 9.6, reviewed: true },
+          { id: 'invincible', title: 'Invincible', score: 9.6 },
+          { id: 'seven', title: 'Se7en', score: 9.1 },
         ]}
+        onPressTile={() => {}}
+        width={360}
       />,
     );
-    // Hidden from the screen reader, since the tile's own name says it.
     expect(
-      view.getAllByTestId('poster-review-badge', { includeHiddenElements: true }),
-    ).toHaveLength(1);
-    expect(view.getByText('Review', { includeHiddenElements: true })).toBeTruthy();
-    expect(
-      view.getByLabelText('Invincible, 2021, scored 9.6 out of 10, reviewed'),
-    ).toBeTruthy();
-    expect(view.getByLabelText('Se7en, 1995, scored 9.1 out of 10')).toBeTruthy();
+      view.queryByTestId('poster-review-badge', { includeHiddenElements: true }),
+    ).toBeNull();
+    expect(view.queryByText('Review')).toBeNull();
+    for (const label of view
+      .getAllByRole('button')
+      .map((tile) => String(tile.props.accessibilityLabel))) {
+      expect(label).not.toMatch(/review/i);
+    }
   });
 });

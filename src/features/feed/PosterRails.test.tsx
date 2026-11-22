@@ -241,28 +241,34 @@ const answer = (rows: Record<string, unknown>[]) => (args: unknown) => {
 };
 
 describe('a grouped watchlist post', () => {
-  it('reads "added 4 titles to their watchlist" over a rail of its posters', async () => {
+  it('reads "added Dune and 3 others to their watchlist" over a rail of its posters', async () => {
     mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
     mockRpc.feed_group_previews = answer(WATCHLIST_MEMBERS);
     const view = await renderWithProviders(<FeedScreen />);
     const rail = await loadedRail(view, /^Dune/);
 
-    expect(textOf(view.toJSON())).toMatch(/Ada added 4 titles to their watchlist/);
+    // The lead title, never a bare count (founder, 2026-11-22).
+    expect(textOf(view.toJSON())).toMatch(
+      /Ada added Dune \(2023\) and 3 others to their watchlist/,
+    );
+    expect(textOf(view.toJSON())).not.toMatch(/4 titles/);
     const tiles = within(rail).getAllByRole('button', { name: /, 2021/ });
-    // Each poster is marked a save (20261130000900), in its label and with a bookmark.
     expect(tiles.map((tile) => tile.props.accessibilityLabel)).toEqual([
-      'Dune, 2021, added to watchlist',
-      'Arrival, 2021, added to watchlist',
-      'Sicario, 2021, added to watchlist',
-      'Enemy, 2021, added to watchlist',
+      'Dune, 2021',
+      'Arrival, 2021',
+      'Sicario, 2021',
+      'Enemy, 2021',
     ]);
     // A save carries no score.
     expect(
       within(rail).queryByTestId('poster-score-pill', { includeHiddenElements: true }),
     ).toBeNull();
+    // No mark for the author's save; every poster has the READER's own bookmark instead.
     expect(
-      within(rail).getAllByTestId('poster-saved-mark', { includeHiddenElements: true }),
-    ).toHaveLength(4);
+      within(rail).queryByTestId('poster-saved-mark', { includeHiddenElements: true }),
+    ).toBeNull();
+    expect(within(rail).getByLabelText('Add Sicario to your watchlist')).toBeTruthy();
+    expect(within(rail).getAllByTestId('poster-save')).toHaveLength(4);
     // The representative's artwork is not drawn as well.
     expect(view.queryByTestId('feed-card-artwork')).toBeNull();
   });
@@ -283,16 +289,16 @@ describe('a grouped watchlist post', () => {
       },
     });
     expect(mockPush).not.toHaveBeenCalled();
-    await fireEvent.press(within(rail).getByLabelText('Sicario, 2021, added to watchlist'));
+    await fireEvent.press(within(rail).getByLabelText('Sicario, 2021'));
     expect(mockPush).toHaveBeenLastCalledWith('/title/sicario');
-    await fireEvent.press(within(rail).getByLabelText('Arrival, 2021, added to watchlist'));
+    await fireEvent.press(within(rail).getByLabelText('Arrival, 2021'));
     expect(mockPush).toHaveBeenLastCalledWith('/title/arrival');
 
     // No separate "View all" under the rail (founder, 2026-11-17): the posters are the
-    // way in, and "4 titles" in the sentence opens the whole list.
+    // way in, and "3 others" in the sentence opens the whole list.
     expect(view.queryByTestId('feed-card-view-all')).toBeNull();
     expect(view.queryByText(/View all/)).toBeNull();
-    await fireEvent.press(view.getByText('4 titles'));
+    await fireEvent.press(view.getByText('3 others'));
     await waitFor(() =>
       expect(mockRpcCalls).toContainEqual({
         name: 'watchlist_group_titles',
@@ -318,7 +324,7 @@ describe('a grouped watchlist post', () => {
 
     expect(view.getAllByTestId('feed-card-like')).toHaveLength(1);
     await waitFor(() =>
-      expect(view.getByLabelText(/^3 comments on Ada's activity about 4 titles/)).toBeTruthy(),
+      expect(view.getByLabelText(/^3 comments on Ada's activity about Dune/)).toBeTruthy(),
     );
     expect(view.queryByTestId('feed-card-save')).toBeNull();
     expect(view.queryByTestId('feed-card-share')).toBeNull();
@@ -335,13 +341,15 @@ describe('a grouped watchlist post', () => {
         view.getAllByTestId('poster-rail-placeholder', { includeHiddenElements: true }),
       ).toHaveLength(4),
     );
-    expect(textOf(view.toJSON())).toMatch(/Ada added 6 titles to their watchlist/);
+    expect(textOf(view.toJSON())).toMatch(
+      /Ada added Dune \(2023\) and 5 others to their watchlist/,
+    );
     expect(view.queryByText(/View all/)).toBeNull();
   });
 });
 
 describe('a grouped ranking sitting', () => {
-  it('reads "ranked 3 titles" and carries the author’s scores, with the season pill', async () => {
+  it('reads "ranked Dune and 2 more" and carries the author’s scores, with the season pill', async () => {
     mockRows = [
       event('r1', 'ranking_batch', DUNE, { payload: { count: 3 }, mediaId: 'film-r1' }),
     ];
@@ -349,7 +357,7 @@ describe('a grouped ranking sitting', () => {
     const view = await renderWithProviders(<FeedScreen />);
     const rail = await loadedRail(view, /^Heat/);
 
-    expect(textOf(view.toJSON())).toMatch(/Ada ranked 3 titles/);
+    expect(textOf(view.toJSON())).toMatch(/Ada ranked Dune \(2023\) and 2 more/);
     // The chips are hidden from the screen reader (the score is in each tile's label).
     const hidden = { includeHiddenElements: true };
     expect(within(rail).getByTestId('poster-score-pill', hidden)).toBeTruthy();
@@ -402,7 +410,7 @@ describe('a grouped ranking sitting', () => {
     const view = await renderWithProviders(<FeedScreen />);
     const rail = await loadedRail(view, /^Oppenheimer/);
 
-    expect(textOf(view.toJSON())).toMatch(/Ada ranked 3 titles/);
+    expect(textOf(view.toJSON())).toMatch(/Ada ranked Oppenheimer \(2023\) and 2 more/);
     const hidden = { includeHiddenElements: true };
     expect(within(rail).getAllByTestId('poster-score-pill', hidden)).toHaveLength(2);
     expect(within(rail).getByText('8.7', hidden)).toBeTruthy();
@@ -433,7 +441,7 @@ describe('a grouped ranking sitting', () => {
     await fireEvent.press(within(rail).getByLabelText(/^Severance/));
     expect(mockPush).toHaveBeenLastCalledWith('/title/severance-s1');
     expect(view.queryByTestId('feed-card-view-all')).toBeNull();
-    await fireEvent.press(view.getByText('3 titles'));
+    await fireEvent.press(view.getByText('2 more'));
     await waitFor(() =>
       expect(mockRpcCalls).toContainEqual({
         name: 'ranking_batch_titles',
@@ -501,8 +509,10 @@ describe('degrading safely', () => {
     mockRpc.feed_group_previews = answer(WATCHLIST_MEMBERS);
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => view.getByTestId('feed-card-rail'));
-    expect(textOf(view.toJSON())).toMatch(/Ada added 30 titles to their watchlist/);
-    expect(view.getByText('30 titles')).toBeTruthy();
+    expect(textOf(view.toJSON())).toMatch(
+      /Ada added Dune \(2023\) and 29 others to their watchlist/,
+    );
+    expect(view.getByText('29 others')).toBeTruthy();
   });
 });
 

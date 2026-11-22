@@ -96,8 +96,10 @@
  *      ranking note on `ranking_story`, the save on `watchlist_story`, which is how they
  *      locked before sessions. A first ranking noted uncommitted on one device and a save on
  *      another (RS1 in `races/activity-sessions.mjs`) must stop serialising: the save sees
- *      no session and no marked ranking and starts a second post in one half hour. The
- *      honest functions are run first as a control and must leave one post.
+ *      no window and anchors a second one on itself, so one half hour holds two windows.
+ *      Since 20261130001000 the kinds keep separate posts and share the window's anchor,
+ *      which is what the keys guard: the honest functions are run first as a control and
+ *      must leave one anchor, the mutants two.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1821,7 +1823,8 @@ end; $$;
       await t1.commit();
       await p2;
       const [{ n }] = await db.rows(
-        `select count(*)::int as n from feed_events where actor_id = $1 and presented_in is null`,
+        `select count(distinct payload ->> 'started_at')::int as n from feed_events
+          where actor_id = $1 and presented_in is null`,
         [me],
       );
       return n;
@@ -1833,7 +1836,7 @@ end; $$;
   };
 
   controls.push([
-    'session keys present -> a ranking and a save at once are one post (RS1 holds)',
+    'session keys present -> a ranking and a save at once share one window (RS1 holds)',
     (await scenario('honest')) === 1,
   ]);
 
@@ -1855,7 +1858,7 @@ end; $$;
   }
 
   results.push([
-    'session writers on their own family key -> a ranking and a save at once are two posts',
+    'session writers on their own family key -> a ranking and a save at once open two windows',
     (await scenario('mutant')) === 2,
   ]);
 

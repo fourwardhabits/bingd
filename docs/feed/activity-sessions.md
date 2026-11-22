@@ -1,5 +1,10 @@
 # Activity sessions: one post per half hour (20261130000900)
 
+> **Superseded by [`session-split.md`](session-split.md) (20261130001000, founder,
+> 2026-11-22).** A window has one ranking post and one watchlist post, never a mixed one.
+> The window, ordering and pagination sections below still describe the mechanism; the
+> "one post", "mixed session" and presentation sections no longer apply.
+
 Founder spec, 2026-11-21. Builds on the half-hour rule for first rankings (#328,
 `20261130000200`) and reviewed first rankings in groups (#347, `20261130000800`).
 

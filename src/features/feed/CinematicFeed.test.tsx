@@ -583,7 +583,9 @@ describe('the actions', () => {
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions-line'));
     const gutter = theme.layout.gutter;
     expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
-    for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-save', 'feed-card-share']) {
+    // No Save under the artwork since 2026-11-22: the reader's bookmark is on it.
+    expect(within(view.getByTestId('feed-card-actions')).queryByTestId('feed-card-save')).toBeNull();
+    for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-share']) {
       const style = StyleSheet.flatten(view.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(44);
       expect(style.minWidth).toBeGreaterThanOrEqual(44);
@@ -613,11 +615,28 @@ describe('the actions', () => {
     expect(view.getByTestId('feed-card-share')).toBeTruthy();
   });
 
-  it('offers no Save on the reader’s own activity', async () => {
+  /**
+   * Changed on 2026-11-22 (founder): the reader's own bookmark is on every title's artwork,
+   * their own posts included, since any title can be watchlisted. It sits top-right, the
+   * author's score keeps bottom-right, and it is a 44pt target that never opens the title.
+   */
+  it('puts the reader’s bookmark on the artwork, on their own activity too', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER, { actor: 'user-1', username: 'sai', name: 'Sai' })];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByTestId('feed-card-comment')).toBeTruthy());
-    expect(view.queryByTestId('feed-card-save')).toBeNull();
+    const save = await waitFor(() => view.getByTestId('feed-card-save'));
+    expect(save.props.accessibilityLabel).toBe('Add Oppenheimer to your watchlist');
+    expect(save.props.accessibilityState).toMatchObject({ selected: false });
+    const box = StyleSheet.flatten(save.props.style);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    fireEvent.press(save);
+    await waitFor(() =>
+      expect(mockRpcCalls.find((call) => call.name === 'set_watchlist')?.args).toMatchObject({
+        p_media_item_id: 'film-e1',
+        p_present: true,
+      }),
+    );
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   /**

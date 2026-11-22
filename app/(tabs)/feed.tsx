@@ -31,9 +31,7 @@ import { FeedCard } from '@/features/feed/FeedCard';
 import {
   groupCount,
   previewKey,
-  reviewKey,
   useGroupPreviews,
-  useGroupReviews,
 } from '@/features/feed/use-group-previews';
 import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
@@ -487,9 +485,11 @@ export default function FeedScreen() {
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
   const groupPreviews = useGroupPreviews(events, profile.id);
-  // Which rail posters carry the author's review (20261130000800): a reviewed first ranking
-  // joins its group, so the poster is marked and the sheet shows the text.
-  const groupReviews = useGroupReviews(events, groupPreviews.data, profile.id);
+  // The reader's own watchlist: every bookmark on this screen reads it, and only it.
+  const saved = useMemo(
+    () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
+    [watchlist.data],
+  );
 
   /**
    * **A grouped post's rail, or null for the cinematic card** (Feed poster rails).
@@ -524,18 +524,17 @@ export default function FeedScreen() {
         title: row.title,
         year: row.year,
         posterUri: posterUri(row.posterPath, 'card'),
-        // Each poster says what the author did to it (20261130000900): a ranked title its
-        // score, a saved one a bookmark.
+        // The author's score on a ranked title; a save carries none.
         score: row.action === 'saved' ? null : row.score,
-        addedToWatchlist: row.action === 'saved' || (row.action === null && event.type === 'watchlist_added'),
         season: row.seasonNumber,
-        reviewed:
-          event.type === 'ranking_batch' &&
-          row.action !== 'saved' &&
-          groupReviews.data?.has(reviewKey(event.actorId, row.mediaItemId)) === true,
+        // The READER's watchlist, never the author's (founder, 2026-11-22).
+        saved: saved.has(row.mediaItemId),
       })),
       onPressTile: (tile: { id: string }) => router.push(`/title/${tile.id}`),
       onPressAll: openAll,
+      // The reader's bookmark on every poster: the same write, guard and reconciliation as
+      // the single-title card's (`toggleWatchlist`).
+      onToggleSave: (tile: { id: string }) => void toggleWatchlist(tile.id),
     };
   };
   const { setReaction } = useSetReaction(profile.id);
@@ -573,11 +572,6 @@ export default function FeedScreen() {
     const mine = reactions.data?.get(eventId)?.mine ?? null;
     return choose(eventId, mine === DEFAULT_REACTION ? null : DEFAULT_REACTION);
   };
-
-  const saved = useMemo(
-    () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
-    [watchlist.data],
-  );
 
   // Adding a friend's title to your own watchlist is the feed's whole point —
   // PRD §28 counts it as the product's core virality metric — so it happens
@@ -773,9 +767,6 @@ export default function FeedScreen() {
               // and count, so its preview key does not move, and only a refetch here
               // brings a poster's score up to what the member sheet already shows.
               void groupPreviews.refetch();
-              // And their review marks (Codex, PR 347): a review published or unshared
-              // since keeps the same author and title pairs, so the key does not move.
-              void groupReviews.refetch();
               // The bell is on this screen, so a reader pulling to see what is new is
               // asking about it too. Leaving it out meant the one deliberate "refresh
               // this page" gesture in the app refreshed everything on it except the
@@ -1045,7 +1036,6 @@ export default function FeedScreen() {
                     verb={sentenceFor(event).verb}
                     tail={sentenceFor(event).tail}
                     tailAction={sentenceFor(event).tailAction}
-                    session={event.session ? { breakdown: sentenceFor(event).breakdown } : null}
                     companions={event.companions}
                     onPressCompanions={() => setCompanionsFor(event.id)}
                     title={event.title}
@@ -1076,14 +1066,14 @@ export default function FeedScreen() {
                     onPressComments={() => setCommentsFor(event.id)}
                     commentCount={commentCounts.data?.get(event.id) ?? 0}
                     /**
-                     * Save and Share are an individual title's (founder, 2026-11-19). A
-                     * group's would act on its first title alone, so a group has neither,
-                     * whether it is drawn as its rail or falls back to the representative
-                     * card: Like and Comment are the whole post's. A group has no share
-                     * mechanism of its own yet (`docs/design/screens.md` §7).
+                     * The reader's bookmark on the artwork (founder, 2026-11-22), on their
+                     * own posts too: any title can be watchlisted. A group has none here,
+                     * because each of its posters carries its own, and a group drawn as its
+                     * representative card would save one member only. Share stays an
+                     * individual title's (founder, 2026-11-19; `docs/design/screens.md` §7).
                      */
                     onPressSave={
-                      event.actorId !== profile.id && !groupCount(event)
+                      event.mediaItemId && !groupCount(event)
                         ? () => toggleWatchlist(event.mediaItemId!)
                         : undefined
                     }
