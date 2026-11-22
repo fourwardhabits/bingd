@@ -219,6 +219,13 @@ beforeEach(async () => {
   await setConfig('proactive.push_enabled', true);
   await setConfig('proactive.generation_enabled', true);
   await setConfig('proactive.resurface_enabled', true);
+  // 20261130001100: social and theatrical each have their own switch now, and a friend
+  // counts only above an affinity threshold. These tests pin the cluster, ledger and
+  // arbiter mechanics, so every mutual friend qualifies here (0.5 > 0); the threshold
+  // itself is pinned in proactive-pilot.test.mjs.
+  await setConfig('proactive.social_enabled', true);
+  await setConfig('proactive.theatrical_enabled', true);
+  await setConfig('proactive.friend_min_affinity', 0);
 });
 
 // ===========================================================================
