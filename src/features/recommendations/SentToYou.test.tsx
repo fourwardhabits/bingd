@@ -1352,7 +1352,9 @@ describe('removing a recommendation from Sent to You', () => {
     await openSent(view);
     await waitFor(() => expect(view.getAllByText('Inception (2010)')).toHaveLength(2));
 
-    await fireEvent.press(view.getAllByLabelText('More options for Inception')[0]);
+    const [adasMenu] = view.getAllByLabelText('More options for Inception');
+    if (!adasMenu) throw new Error('no ⋯ on the first row');
+    await fireEvent.press(adasMenu);
     await fireEvent.press(await view.findByRole('button', { name: 'Remove from Sent to You' }));
 
     await waitFor(() => expect(view.getAllByText('Inception (2010)')).toHaveLength(1));

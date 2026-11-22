@@ -251,11 +251,12 @@ describe('useDismissReceived', () => {
   });
 
   it('removes one sender’s row of a title and leaves another sender’s', async () => {
-    server = [row('ada', { mediaItemId: 'film-x' }), row('ben', { mediaItemId: 'film-x' })];
+    const ada = row('ada', { mediaItemId: 'film-x' });
+    server = [ada, row('ben', { mediaItemId: 'film-x' })];
     const { result } = await mount();
 
     await act(async () => {
-      await result.current.removal.remove(server[0]);
+      await result.current.removal.remove(ada);
     });
 
     expect(ids(result.current.list.data)).toEqual(['ben']);
