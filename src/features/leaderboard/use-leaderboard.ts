@@ -4,12 +4,12 @@ import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 /**
- * The four metrics, in the order the categories draw them.
+ * The four metrics, in the order the category dropdown lists them.
  *
- * **All | Movies | TV | Reviews on screen, the full names spoken** (founder, nav cohesion
- * sprint, 2026-11-06): four equal segments across a 320pt phone leave no room for
- * "All Titles" and "TV Shows", so `short` is what the control draws and `label` is
- * what a screen reader hears. Neither is sent anywhere; `value` is.
+ * **All Titles, Movies, TV Shows, Reviews** (founder brief 2026-11-23): the dropdown draws
+ * `label`, closed and open, so the full names are what the reader sees and hears. `short`
+ * is kept for the one-word places (none on the board since the dropdown). Neither is sent
+ * anywhere; `value` is.
  *
  * **All Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28,
  * named All Titles in the final polish (2026-11-04). It is the union of the two beside it, so the row reads as a total followed by its
@@ -32,6 +32,9 @@ export type LeaderboardMetric = (typeof LEADERBOARD_METRICS)[number]['value'];
 
 export const DEFAULT_METRIC: LeaderboardMetric = 'titles';
 
+export const isLeaderboardMetric = (value: unknown): value is LeaderboardMetric =>
+  LEADERBOARD_METRICS.some((option) => option.value === value);
+
 /**
  * The two timeframes, and the heading each one puts on the left of the row.
  *
@@ -45,25 +48,25 @@ export const DEFAULT_METRIC: LeaderboardMetric = 'titles';
  * typo is a visible failure instead of a board about the wrong question.
  */
 export const LEADERBOARD_TIMEFRAMES = [
-  // `id` rather than `value`, because this table is handed straight to `MediumSelector` —
-  // the dropdown the founder asked the timeframe to reuse. `LEADERBOARD_METRICS` above
-  // keeps `value` because it drives `Chip`. Each table is shaped for the control it
-  // feeds, rather than for a house style neither component actually has.
-  { id: 'month', label: 'This month' },
+  // `id` rather than `value`, because this table is handed straight to `CompactSwitch`,
+  // the board's timeframe toggle (founder brief 2026-11-23), whose options are `{ id,
+  // label }`. All time first: it is the default, and the leftmost half being the default
+  // is the rule every switch in the app follows.
   { id: 'all_time', label: 'All time' },
+  { id: 'month', label: 'This month' },
 ] as const;
 
 export type LeaderboardTimeframe = (typeof LEADERBOARD_TIMEFRAMES)[number]['id'];
 
 /**
- * **This month is the default, and that is the product decision rather than an order.**
+ * **All time is the default** (founder brief 2026-11-23, which reverses the 2026-08-29
+ * choice of This month). A reader who already chose a timeframe keeps it: the remembered
+ * value is read before the default is consulted (`useLeaderboardSelection`).
  *
- * A monthly board resets incumbent advantage every four weeks, which is what makes second
- * place worth playing for. All time is decided once — by whoever joined first and watches
- * most — and is primarily curiosity, historical standing, and a way of finding the people
- * who are actually active. Useful; not the competitive mechanic.
+ * This month still resets every UTC month, and neither timeframe is drawn as a filter
+ * that is "on": both are plain choices of one switch.
  */
-export const DEFAULT_TIMEFRAME: LeaderboardTimeframe = 'month';
+export const DEFAULT_TIMEFRAME: LeaderboardTimeframe = 'all_time';
 
 export const isLeaderboardTimeframe = (value: unknown): value is LeaderboardTimeframe =>
   value === 'month' || value === 'all_time';
@@ -310,11 +313,12 @@ export function emptyCopy(
   metric: LeaderboardMetric,
   timeframe: LeaderboardTimeframe = DEFAULT_TIMEFRAME,
 ): { title: string; body: string } {
+  // `tv` counts whole shows and seasons since 20261130001300, so its noun names both.
   const noun =
     metric === 'movies'
       ? 'films'
       : metric === 'tv'
-        ? 'seasons'
+        ? 'shows or seasons'
         : metric === 'reviews'
           ? 'reviews'
           : 'watches';
@@ -326,13 +330,14 @@ export function emptyCopy(
 }
 
 /**
- * The unit under a number, singular where it should be.
+ * The unit under a number, singular where it should be. TV Shows counts whole shows and
+ * seasons (20261130001300), so its unit is the neutral "title", as All Titles' is.
  *
  * "1 title" and not "1 titles", which is the sort of thing that reads as broken on the
  * one row a small beta most wants to look at — the reader's own, on a quiet month.
  */
 export function countLabel(metric: LeaderboardMetric, count: number): string {
   const noun =
-    metric === 'movies' ? 'film' : metric === 'tv' ? 'season' : metric === 'reviews' ? 'review' : 'title';
+    metric === 'movies' ? 'film' : metric === 'reviews' ? 'review' : 'title';
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

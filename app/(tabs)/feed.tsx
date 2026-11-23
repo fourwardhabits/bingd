@@ -62,19 +62,16 @@ import {
 import { LeaderboardView } from '@/features/leaderboard/LeaderboardView';
 import { DEFAULT_PEOPLE_MODE, PeopleView } from '@/features/people/PeopleView';
 import {
-  DEFAULT_METRIC,
-  DEFAULT_TIMEFRAME,
-  isLeaderboardTimeframe,
   useLeaderboard,
   useMyStanding,
   type LeaderboardMetric,
   type LeaderboardTimeframe,
 } from '@/features/leaderboard/use-leaderboard';
+import { useLeaderboardSelection } from '@/features/leaderboard/use-leaderboard-selection';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { useTrending } from '@/features/trending/use-trending';
 import { track } from '@/lib/analytics';
-import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { peopleDiscovery } from '@/lib/routes';
@@ -113,17 +110,6 @@ import { theme } from '@/ui/tokens';
 type FeedMode = 'feed' | 'leaderboard' | 'people';
 
 /**
- * Which leaderboard timeframe this reader last chose, per account.
- *
- * **Not the Feed's mode**, which is deliberately not persisted (§2). The two are one line
- * apart in this file precisely because conflating them is the easy mistake: remembering
- * the timeframe is remembering how to draw a surface, and remembering the mode would be
- * remembering to replace the homepage.
- *
- * Local only, through the same `readPref`/`writePref` pair Collection's two preferences
- * use — a device habit rather than something about the account, so no column and no sync.
- */
-/**
  * How close to the end of the list the next page is asked for, in points.
  *
  * Eight hundred is about one phone screen. The fetch has to start while the reader
@@ -132,8 +118,6 @@ type FeedMode = 'feed' | 'leaderboard' | 'people';
  * trip roughly a screenful of reading time without prefetching the whole feed.
  */
 const NEXT_PAGE_THRESHOLD = 800;
-
-const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
 
 const FEED_MODES = [
   // `newspaper` rather than `list`: Collection's list glyph means "the other way of
@@ -176,43 +160,23 @@ export default function FeedScreen() {
    * out of the navigation tree", and it does: nothing here works to preserve it.
    */
   const [mode, setMode] = useState<FeedMode>('feed');
-  const [metric, setMetric] = useState<LeaderboardMetric>(DEFAULT_METRIC);
   /**
-   * Which timeframe the board is showing — **and this one IS remembered** (founder §2).
+   * What the board counts and over when — **and these ARE remembered**, per account
+   * (founder §2, widened to the category by the brief of 2026-11-23).
    *
-   * The distinction the founder drew, and the reason the two live side by side here
-   * without being conflated:
+   *   `mode`                not persisted. Leaderboard is an alternate surface, and a launch
+   *                         that opened on it would have replaced the homepage with a
+   *                         scoreboard.
+   *   `metric`, `timeframe` persisted. Once the reader is *in* the board, which category
+   *                         and timeframe they read it in is a preference about the same
+   *                         surface — the Collection Poster/List argument exactly.
    *
-   *   `mode`      not persisted. Leaderboard is an alternate surface, and a launch that
-   *               opened on it would have replaced the homepage with a scoreboard.
-   *   `timeframe` persisted. Once the reader is *in* the board, which timeframe they
-   *               read it in is a preference about the same surface — the Collection
-   *               Poster/List argument exactly — and re-choosing All time on every visit
-   *               would be the app forgetting something it watched them decide.
-   *
-   * So: a fresh launch opens Feed; tapping Trophy opens the board on the timeframe they
-   * last chose.
+   * So: a fresh launch opens Feed; tapping Trophy opens the board on what they last chose.
+   * `useLeaderboardSelection` owns the store, the account tag that keeps one reader's
+   * choice from reaching the next, and the rule that a late read never undoes a choice.
    */
-  /**
-   * **Tagged with the account it was read for**, which is `mediumPref`'s shape in
-   * `CollectionScreen` and is here for the reason independent review found: without it,
-   * the previous account's timeframe stays *usable* for the whole of the asynchronous
-   * preference read. Sign out of an account that chose All time, sign in as somebody with
-   * no preference, tap Trophy quickly, and their first board is drawn — and requested —
-   * as All time before the miss resolves.
-   *
-   * Carrying the id fixes it *during the render that switches*, with no effect to fire and
-   * nothing to clean up: a preference belongs to whoever it was read for, so one that does
-   * not name the current reader is simply not theirs and the default stands.
-   */
-  const [timeframePref, setTimeframePref] = useState<{
-    profileId: string;
-    value: LeaderboardTimeframe;
-  }>({ profileId: profile.id, value: DEFAULT_TIMEFRAME });
-  const timeframe: LeaderboardTimeframe =
-    timeframePref.profileId === profile.id ? timeframePref.value : DEFAULT_TIMEFRAME;
-  /** Whether the reader has chosen since their preference was read. Same guard Collection uses. */
-  const chosenTimeframe = useRef(false);
+  const board = useLeaderboardSelection(profile.id);
+  const { metric, timeframe } = board;
   const showingBoard = mode === 'leaderboard';
   const showingPeople = mode === 'people';
   /**
@@ -256,44 +220,10 @@ export default function FeedScreen() {
    */
   const trendingHasItems = (useTrending().data?.items ?? []).length > 0;
 
-  /**
-   * The remembered timeframe, applied when it arrives.
-   *
-   * Deliberately the same shape as Collection's two preference reads, down to the
-   * `cancelled` flag, the ref reset and the failure fallback — three preferences with one
-   * pattern rather than three patterns, so a fix to one is a fix to all.
-   *
-   * The miss and the failure both resolve to the default rather than leaving whatever was
-   * there, which is the cross-account leak `CollectionScreen` records: this state is not
-   * tagged with the account it was read for, so the read has to write in both directions.
-   */
-  useEffect(() => {
-    let cancelled = false;
-    chosenTimeframe.current = false;
-    const settle = (next: LeaderboardTimeframe) => {
-      if (cancelled || chosenTimeframe.current) return;
-      setTimeframePref({ profileId: profile.id, value: next });
-    };
-    readPref<unknown>(`${profile.id}.${TIMEFRAME_PREF_KEY}`)
-      .then((stored) => settle(isLeaderboardTimeframe(stored) ? stored : DEFAULT_TIMEFRAME))
-      .catch(() => settle(DEFAULT_TIMEFRAME));
-    return () => {
-      cancelled = true;
-    };
-  }, [profile.id]);
-
-  /**
-   * Choosing a timeframe, and remembering it.
-   *
-   * The write is not awaited and its failure is swallowed, exactly as Collection's is: a
-   * store that refuses should cost the reader nothing more than opening on This month
-   * next time.
-   */
+  /** Only a genuine change: re-choosing the timeframe on screen is not one. */
   const changeTimeframe = (next: LeaderboardTimeframe) => {
     if (next === timeframe) return;
-    chosenTimeframe.current = true;
-    setTimeframePref({ profileId: profile.id, value: next });
-    void writePref(`${profile.id}.${TIMEFRAME_PREF_KEY}`, next).catch(() => {});
+    board.changeTimeframe(next);
   };
 
   /**
@@ -376,8 +306,8 @@ export default function FeedScreen() {
    * Returning `false` leaves normal route back behaviour exactly where it was.
    *
    * `setMode` rather than `changeMode`: leaving the board is not a `leaderboard_viewed`
-   * event, and the remembered timeframe is a separate piece of state that this does not
-   * touch — coming back to the board returns to the timeframe they chose.
+   * event, and the remembered category and timeframe are separate state that this does not
+   * touch — coming back to the board returns to what they chose.
    */
   useFocusEffect(
     useCallback(() => {
@@ -406,7 +336,7 @@ export default function FeedScreen() {
    * `showingFeed`, not `showingBoard`: People is a mode a reader experiences as a second
    * screen too, and re-tapping the tab must leave it the same way. `setMode` rather than
    * `changeMode`, because leaving the board is not a `leaderboard_viewed` event and the
-   * remembered timeframe is somebody else's state.
+   * remembered category and timeframe are somebody else's state.
    *
    * **Already on the Feed, so the habit's other half applies**: back to the top of it.
    * No refetch — the reader has pull-to-refresh for that, and spending a round trip to
@@ -424,10 +354,10 @@ export default function FeedScreen() {
     }, [showingFeed]),
   );
 
-  /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
+  /** Only a genuine change. Re-choosing the category on screen would measure fidgeting. */
   const changeMetric = (next: LeaderboardMetric) => {
     if (next === metric) return;
-    setMetric(next);
+    board.changeMetric(next);
     track({ name: 'leaderboard_metric_selected', props: { metric: next } });
   };
   // Which row has the picker open, and which has its detail sheet open. Two
@@ -802,7 +732,7 @@ export default function FeedScreen() {
          * **The content header row** (founder follow-up §1).
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
-         *     LEADERBOARD                     [Feed] [Trophy] [People]
+         *                                     [Feed] [Trophy] [People]
          *     DISCOVER PEOPLE                 [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
@@ -810,9 +740,12 @@ export default function FeedScreen() {
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode, LEADERBOARD in Leaderboard mode, and since 2026-09-08 (§A3)
-         * the People heading in People mode, in the same slot with the same treatment. In
-         * Feed mode it is drawn only when the shelf will actually
+         * name in Feed mode and since 2026-09-08 (§A3) the People heading in People mode,
+         * in the same slot with the same treatment. **In Leaderboard mode it is empty**
+         * (founder brief 2026-11-23): what is immediately below is the board's own control
+         * row (category ▾ and All time | This month), and LEADERBOARD is drawn under that,
+         * in `LeaderboardView`, over the list it names — one heading, never a second one
+         * competing above the controls. In Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
          * absent shelf would be a label for nothing. `useTrending` is called here purely
          * to know that, and costs no request — it is the same query key the shelf itself
@@ -821,15 +754,14 @@ export default function FeedScreen() {
          * **Every heading on this tab is `FeedHeading`** (header consistency, founder spec
          * 2026-11-22): one component, one token and one text-size ceiling for TRENDING NOW,
          * LEADERBOARD, DISCOVER PEOPLE and RECENT ACTIVITY below, so the row does not change
-         * size when the mode does. None is a dropdown: the board's filters are the icon under
-         * it, in `LeaderboardView`, and People's Mutuals / Match switch is in `PeopleView`.
+         * size when the mode does. None is a dropdown: the board's category and timeframe are
+         * its own control row, in `LeaderboardView`, and People's Mutuals / Match switch is in
+         * `PeopleView`.
          */}
-        <View style={styles.contentHeader}>
+        <View style={styles.contentHeader} testID="feed-content-header">
           {/* Every occupant is a `FeedHeading`, which pads itself to the gutter. */}
           <View style={styles.contentHeaderLeft}>
-            {showingBoard ? (
-              <FeedHeading title="Leaderboard" />
-            ) : showingPeople ? (
+            {showingBoard ? null : showingPeople ? (
               // DISCOVER PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint,
               // 2026-11-10): the list is discovery, and most suggestions are not people the
               // reader knows.

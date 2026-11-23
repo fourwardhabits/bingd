@@ -24,20 +24,30 @@ import { FilterIconButton } from './FilterIconButton';
  * `edgeInset` is how far the last tool's own padding reaches past its glyph, so that glyph
  * lands on the gutter: 12pt for a 44pt icon cell around a 20pt glyph (Filters is one since
  * FU1113-B), 8pt for a text action.
+ *
+ * `gap` is the least space kept between the title and the tools when they share a line
+ * (8pt by default). The tools sit on the right gutter, so the space a reader sees is
+ * usually wider; the Leaderboard passes 4 so `TV Shows ▾` and `All time | This month` still
+ * share a 320pt line (2026-11-23).
  */
 export function ContentToolbar({
   title,
   children,
   edgeInset = theme.space[2],
+  gap = theme.space[2],
   testID,
 }: {
   title: ReactNode;
   children?: ReactNode;
   edgeInset?: number;
+  gap?: number;
   testID?: string;
 }) {
   return (
-    <View style={[styles.row, { paddingRight: theme.layout.gutter - edgeInset }]} testID={testID}>
+    <View
+      style={[styles.row, { paddingRight: theme.layout.gutter - edgeInset, columnGap: gap }]}
+      testID={testID}
+    >
       <View style={styles.title}>{title}</View>
       {children ? <View style={styles.tools}>{children}</View> : null}
     </View>

@@ -1,23 +1,21 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { FeedHeading } from '@/features/feed/FeedHeading';
 import {
   Avatar,
-  BrowseControlsRow,
+  ContentToolbar,
   Divider,
   EmptyState,
-  FilterIconButton,
+  MediumSelector,
   SkeletonRow,
   Text,
 } from '@/ui/components';
+import { CompactSwitch } from '@/ui/components/CompactSwitch';
 import { fontFamily, medal, theme } from '@/ui/tokens';
 
-import { LeaderboardFilterSheet } from './LeaderboardFilterSheet';
 import {
   countLabel,
-  DEFAULT_METRIC,
-  DEFAULT_TIMEFRAME,
   emptyCopy,
   LEADERBOARD_METRICS,
   LEADERBOARD_TIMEFRAMES,
@@ -56,7 +54,7 @@ export type LeaderboardViewProps = {
  * thing to add to a leaderboard — so the absence has to be a decision somebody can read,
  * or it will be filled in by the next person who thinks the screen looks bare.
  *
- * What is left is a heading, one filter icon and a list. The restraint is the design.
+ * What is left is one row of controls, a heading and a list. The restraint is the design.
  *
  * ---------------------------------------------------------------------------
  * THE TOP THREE, AND WHY THE TREATMENT IS A COLOUR RATHER THAN A MEDAL
@@ -97,80 +95,67 @@ export function LeaderboardView({
   const rows = entries ?? [];
   const youAreListed = rows.some((entry) => entry.isYou);
   const empty = emptyCopy(metric, timeframe);
-  // The filter sheet, mounted only while open.
-  const [filtering, setFiltering] = useState(false);
-  const metricLabel =
-    LEADERBOARD_METRICS.find((option) => option.value === metric)?.label ?? '';
-  const timeframeLabel =
-    LEADERBOARD_TIMEFRAMES.find((option) => option.id === timeframe)?.label ?? '';
-  // Changed from the board's defaults, which is what the badge counts and the Maroon marks.
-  const metricChanged = metric !== DEFAULT_METRIC;
-  const timeframeChanged = timeframe !== DEFAULT_TIMEFRAME;
-  const changedCount = Number(metricChanged) + Number(timeframeChanged);
+  const window = useWindowDimensions();
 
   return (
     <View style={styles.body}>
-      {/* LEADERBOARD is the section's heading, in the screen's content header row — see
-          `app/(tabs)/feed.tsx`. This component draws the board beneath it. */}
-
       {/**
-       * **What and when, behind one filter icon** (header consistency, founder spec
-       * 2026-11-22).
+       * **The controls, then the heading, then the board** (founder brief 2026-11-23).
        *
-       *     All Titles · This month                              ⚙
-       *     Movies · All time                                    ⚙²
+       *                                               [Feed] [Trophy] [People]
+       *     All Titles ▾                          [ All time | This month ]
+       *     LEADERBOARD
+       *     1  ● Ada  @ada                                                12
        *
-       * It replaced two text-and-chevron dropdowns, All Titles ▾ and This month ▾, which
-       * were the bulkiest thing under the heading. The icon is the app's one filter control
-       * (`FilterIconButton`, as on Collection and For You) and opens one sheet holding both
-       * filters (`LeaderboardFilterSheet`). The board is never filtered invisibly: the line
-       * beside the icon always names both choices, and when either is not the default the
-       * icon turns Maroon and carries how many are changed, and the changed word turns
-       * Maroon too. The values, the handlers and so the query are the dropdowns' own.
+       * The mode toggle keeps its row and its place, opposite nothing in this mode (see
+       * `app/(tabs)/feed.tsx`). Under it, what the board counts and over when:
+       *
+       * - **The category is the browsing pages' dropdown** — For You's Recommended ▾ and
+       *   Collection's Watched ▾, `MediumSelector` at the `marquee` size, with its small
+       *   anchored menu. All Titles, Movies, TV Shows, Reviews; a choice applies at once,
+       *   and the closed control always names the category showing.
+       * - **The timeframe is `CompactSwitch`**, the Movies | TV control from the same two
+       *   pages: All time | This month, the chosen half on Parchment in Maroon. Neither half
+       *   is a filter that is "on", so nothing is counted, badged or summarised.
+       *
+       * They share `ContentToolbar`, the row whose title never truncates: when both do not
+       * fit (a large text size) the switch wraps onto a line of its own and stays on the
+       * right gutter. Its least gap is 4pt rather than 8, so the longest category, TV Shows,
+       * still shares a 320pt line at 100% (114 + 4 + 166.5 of 288pt, measured in Chromium).
+       *
+       * LEADERBOARD is the Feed tab's one section heading (`FeedHeading`, the 2026-11-22
+       * heading system), moved here from the toggle's row so it names the list directly
+       * under it and there is only ever one.
        */}
-      <View style={styles.filters} testID="leaderboard-filters">
-        <BrowseControlsRow
-          leading={
-            <Text
-              variant="footnote"
-              numberOfLines={2}
-              testID="leaderboard-filter-summary"
-              // The icon's spoken name says the same; heard twice it would be noise.
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            >
-              <Text variant="footnote" tone={metricChanged ? 'action' : 'secondary'}>
-                {metricLabel}
-              </Text>
-              <Text variant="footnote" tone="tertiary">
-                {'  ·  '}
-              </Text>
-              <Text variant="footnote" tone={timeframeChanged ? 'action' : 'secondary'}>
-                {timeframeLabel}
-              </Text>
-            </Text>
-          }
-          trailing={
-            <FilterIconButton
-              activeCount={changedCount}
-              accessibilityLabel={`Leaderboard filters: ${metricLabel}, ${timeframeLabel}`}
-              accessibilityHint="Opens the title type and time period"
-              onPress={() => setFiltering(true)}
-              testID="leaderboard-filter-button"
+      <View testID="leaderboard-controls">
+        <ContentToolbar
+          edgeInset={0}
+          gap={theme.space[1]}
+          title={
+            <MediumSelector
+              size="marquee"
+              value={metric}
+              options={METRIC_OPTIONS}
+              onChange={onChangeMetric}
+              accessibilityHint="Choose what the leaderboard counts"
+              testID="leaderboard-category"
             />
           }
-        />
+        >
+          <View testID="leaderboard-timeframe">
+            <CompactSwitch
+              accessibilityLabel="Time period"
+              options={timeframeOptions(window.width, window.fontScale)}
+              value={timeframe}
+              onChange={onChangeTimeframe}
+            />
+          </View>
+        </ContentToolbar>
       </View>
 
-      {filtering ? (
-        <LeaderboardFilterSheet
-          metric={metric}
-          onChangeMetric={onChangeMetric}
-          timeframe={timeframe}
-          onChangeTimeframe={onChangeTimeframe}
-          onClose={() => setFiltering(false)}
-        />
-      ) : null}
+      <View testID="leaderboard-heading">
+        <FeedHeading title="Leaderboard" />
+      </View>
 
       {/**
         * **One content container for every state and every metric** (founder physical QA,
@@ -235,6 +220,34 @@ export function LeaderboardView({
  * as the server computes it. Hidden from a screen reader, which hears "Number 2" from the
  * row.
  */
+/**
+ * **The switch's words, for the room it has** (the `rankedCategoryOptions` rule).
+ *
+ * `All time | This month` is 166.5pt at 100% (Inter Medium 14pt from the TTF's advance
+ * widths: 3.55em + 5.35em, plus each half's 16pt of padding and the outline's 10). The row
+ * gives it the screen less two gutters, and it wraps onto its own line before it is ever
+ * squeezed — so the only case left is the switch alone being wider than the screen: a
+ * 320pt phone at about 190% text. There, and only there, This month is said and drawn
+ * `Month`, which at 200% leaves the switch 225pt. The value is the same either way.
+ */
+const TIMEFRAME_TEXT_EM = 3.547 + 5.347;
+const TIMEFRAME_FIXED = 2 * 2 * theme.space[2] + 10;
+const SHORT_TIMEFRAMES = [
+  { id: 'all_time', label: 'All time' },
+  { id: 'month', label: 'Month' },
+] as const;
+
+export const timeframeOptions = (width: number, fontScale: number) =>
+  TIMEFRAME_TEXT_EM * 14 * 1.04 * fontScale + TIMEFRAME_FIXED <= width - 2 * theme.layout.gutter
+    ? LEADERBOARD_TIMEFRAMES
+    : SHORT_TIMEFRAMES;
+
+/** The dropdown's table: `LEADERBOARD_METRICS` shaped as `MediumSelector` options. */
+const METRIC_OPTIONS = LEADERBOARD_METRICS.map((option) => ({
+  id: option.value,
+  label: option.label,
+}));
+
 const MEDAL = 26;
 const MEDALS: Record<number, (typeof medal)[keyof typeof medal]> = {
   1: medal.gold,
@@ -458,9 +471,6 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
-  // The filter line under the heading row. `BrowseControlsRow` puts it on the gutters, the
-  // icon's right edge under the mode toggle's; this only spaces it from the heading.
-  filters: { paddingBottom: theme.space[1] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
