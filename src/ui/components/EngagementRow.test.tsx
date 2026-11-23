@@ -7,7 +7,6 @@ import {
   actionCount,
   ENGAGEMENT_EDGE,
   EngagementRow,
-  LABEL_MIN_SCALE,
   type ActivityReaction,
 } from './EngagementRow';
 import { estimateTextWidth } from './ReactionSummary';
@@ -81,19 +80,11 @@ describe('which actions appear', () => {
 });
 
 describe('the layout', () => {
-  it('gives every action an equal column, at least 44pt each way, contents centred', async () => {
+  it('gives a pair of actions equal columns, at least 44pt each way, contents centred', async () => {
     const view = await render(
-      <EngagementRow
-        {...base}
-        reaction={reaction()}
-        onPressComments={jest.fn()}
-        onPressSave={jest.fn()}
-        onPressShare={jest.fn()}
-      />,
+      <EngagementRow {...base} reaction={reaction()} onPressComments={jest.fn()} />,
     );
-    const columns = ['row-like', 'row-comment', 'row-save', 'row-share'].map((id) =>
-      style(view.getByTestId(id)),
-    );
+    const columns = ['row-like', 'row-comment'].map((id) => style(view.getByTestId(id)));
     for (const column of columns) {
       expect(column).toMatchObject({
         flexGrow: 1,
@@ -105,39 +96,112 @@ describe('the layout', () => {
       });
       expect(column.minHeight).toBeGreaterThanOrEqual(44);
       expect(column.minWidth).toBeGreaterThanOrEqual(44);
-      // No content-sized padding: the column, not its word, sets the width.
-      expect(column.paddingHorizontal ?? 0).toBe(0);
     }
-    // Every column is styled identically, so none can claim more of the row than another.
     expect(new Set(columns.map((column) => JSON.stringify(column))).size).toBe(1);
-  });
-
-  it('keeps each label on one line, shrinking a little before it would truncate', async () => {
-    const view = await render(
-      <EngagementRow {...base} reaction={reaction()} onPressComments={jest.fn()} />,
-    );
-    const label = within(view.getByTestId('row-comment')).getByText('Comment');
-    expect(label.props.numberOfLines).toBe(1);
-    expect(label.props.adjustsFontSizeToFit).toBe(true);
-    expect(label.props.minimumFontScale).toBe(LABEL_MIN_SCALE);
-    expect(style(label).flexShrink).toBe(1);
+    expect(style(view.getByTestId('row-actions')).justifyContent).toBeUndefined();
   });
 
   /**
-   * The arithmetic the 320pt and 360pt phones depend on: four columns across the screen,
-   * `ENGAGEMENT_EDGE` in from each side, still hold the widest label ("Comment") beside its
-   * icon at full size, and are far above the 44pt floor.
+   * Three or more (founder, 2026-11-23): sized to their words and spread across the host's
+   * inset, so "Comment (3)" is never squeezed into a third of the row and cut off.
    */
-  it.each([320, 360])('fits four labelled actions at %ipt without overflowing', (width) => {
-    const column = (width - ENGAGEMENT_EDGE * 2) / 4;
-    const footnote = theme.typography.footnote.fontSize;
-    const widest = Math.max(
-      ...['Like', 'Comment', 'Save', 'Saved', 'Share'].map((w) =>
-        estimateTextWidth(w, footnote),
-      ),
+  it('spreads three actions by their own width across the host inset, 44pt each', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 2 })}
+        onPressComments={jest.fn()}
+        commentCount={3}
+        onPressShare={jest.fn()}
+        spreadInset={12}
+      />,
     );
-    expect(column).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
-    expect(theme.layout.icon.sm + theme.space[1] + widest).toBeLessThanOrEqual(column);
+    expect(style(view.getByTestId('row-actions'))).toMatchObject({
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+    });
+    for (const id of ['row-like', 'row-comment', 'row-share']) {
+      const box = style(view.getByTestId(id));
+      expect(box.flexGrow).toBe(0);
+      expect(box.flexBasis).toBeUndefined();
+      expect(box.minHeight).toBeGreaterThanOrEqual(44);
+      expect(box.minWidth).toBeGreaterThanOrEqual(44);
+    }
+    // Only an action with a count may give up width (its count then wraps below the word);
+    // a bare word never shrinks, so it can never break.
+    expect(style(view.getByTestId('row-like')).flexShrink).toBe(1);
+    expect(style(view.getByTestId('row-comment')).flexShrink).toBe(1);
+    expect(style(view.getByTestId('row-share')).flexShrink).toBe(0);
+  });
+
+  it('spreads on ENGAGEMENT_EDGE when the host names no inset', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction()}
+        onPressComments={jest.fn()}
+        onPressShare={jest.fn()}
+      />,
+    );
+    expect(style(view.getByTestId('row-actions')).paddingHorizontal).toBe(ENGAGEMENT_EDGE);
+  });
+
+  it('never caps, ellipsizes or shrinks a label', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 2 })}
+        onPressComments={jest.fn()}
+        commentCount={3}
+        onPressShare={jest.fn()}
+      />,
+    );
+    for (const [id, word] of [
+      ['row-like', 'Like (2)'],
+      ['row-comment', 'Comment (3)'],
+      ['row-share', 'Share'],
+    ]) {
+      const label = within(view.getByTestId(id!)).getByText(word!);
+      expect(label.props.numberOfLines).toBeUndefined();
+      expect(label.props.ellipsizeMode).toBeUndefined();
+      expect(label.props.adjustsFontSizeToFit).toBeFalsy();
+      expect(label.props.minimumFontScale).toBeUndefined();
+    }
+  });
+
+  /**
+   * The arithmetic the narrowest phone at large text depends on. At 320pt and 130% text,
+   * with counts of (12K) and (1.2K), the words alone (each beside its 20pt icon) fit the
+   * spread row inside the card's inset, so at worst the counts drop below their words and
+   * nothing is cut.
+   */
+  it('fits the three words at 320pt and 1.3x text, counts free to drop below', () => {
+    const row = 320 - 16 * 2 - 2 - 12 * 2;
+    const font = theme.typography.footnote.fontSize * 1.3;
+    const words = ['Liked', 'Comment', 'Share'].map(
+      (w) => theme.layout.icon.sm + theme.space[1] + estimateTextWidth(w, font),
+    );
+    const total = words.reduce((sum, w) => sum + w, 0) + theme.space[2] * 2;
+    expect(total).toBeLessThanOrEqual(row);
+  });
+
+  it('draws every label in full at 320pt and 1.3x text with (12K) and (1.2K)', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction({ count: 12_345, mineGlyph: '❤️', mineLabel: 'Liked' })}
+        onPressComments={jest.fn()}
+        commentCount={1234}
+        onPressShare={jest.fn()}
+        spreadInset={12}
+      />,
+    );
+    expect(within(view.getByTestId('row-like')).getByText('Liked (12K)')).toBeTruthy();
+    expect(within(view.getByTestId('row-comment')).getByText('Comment (1.2K)')).toBeTruthy();
+    expect(within(view.getByTestId('row-share')).getByText('Share')).toBeTruthy();
+    // The word and its count are joined by an ordinary space: the count may wrap, whole.
+    const comment = within(view.getByTestId('row-comment')).getByText('Comment (1.2K)');
+    expect(comment.props.children).toEqual(['Comment', ' ', expect.anything()]);
   });
 });
 
@@ -285,8 +349,8 @@ describe('counts', () => {
     const label = within(view.getByTestId('row-comment')).getByText('Comment (12)');
     const count = within(label).getByText('(12)');
     expect(count.props.children).toBe('(12)');
-    // The word and its non-breaking space are the label's own, in the action's colour.
-    expect(label.props.children).toEqual(['Comment', '\u00A0', expect.anything()]);
+    // The word and its space are the label's own, in the action's colour.
+    expect(label.props.children).toEqual(['Comment', ' ', expect.anything()]);
     expect(style(label).color).toBe(theme.text.secondary);
     expect(style(count).color).toBe(theme.semantic.action);
     expect(style(count).fontVariant).toEqual(['tabular-nums']);

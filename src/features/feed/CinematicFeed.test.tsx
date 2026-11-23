@@ -656,7 +656,7 @@ describe('the actions', () => {
    * were content-sized targets spread edge to edge, each landing its icon on the gutter;
    * they are now equal columns across the card, which is what every other post type draws.
    */
-  it('puts the summary on the card inset and the actions in equal 44pt columns', async () => {
+  it('puts the summary on the card inset and spreads the three actions across it, 44pt each', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
@@ -670,10 +670,15 @@ describe('the actions', () => {
       const style = StyleSheet.flatten(view.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(44);
       expect(style.minWidth).toBeGreaterThanOrEqual(44);
-      expect(style).toMatchObject({ flexGrow: 1, flexBasis: 0, justifyContent: 'center' });
+      // Sized to its words, never a third of the row (founder, 2026-11-23: nothing cut off).
+      expect(style.flexGrow).toBe(0);
     }
     const row = StyleSheet.flatten(view.getByTestId('feed-card-actions').props.style);
-    expect(row.flexDirection).toBe('row');
+    expect(row).toMatchObject({
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: theme.space[3],
+    });
   });
 
   it('saves to the watchlist and shares into Recommend', async () => {

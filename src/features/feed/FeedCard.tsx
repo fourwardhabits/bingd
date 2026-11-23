@@ -337,6 +337,7 @@ export function FeedCard({
           commentCount={commentCount}
           onPressShare={grouped ? undefined : onPressShare}
           style={styles.actions}
+          spreadInset={FEED_CARD.inset}
           testID="feed-card"
         />
       </View>
@@ -436,9 +437,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.border.hairline,
   },
   /**
-   * The actions span the card, `ENGAGEMENT_EDGE` in from its outline, in equal columns
-   * (founder, 2026-11-19). Each column keeps a 44pt minimum in both directions; see
-   * `EngagementRow`.
+   * A pair of actions spans the card, `ENGAGEMENT_EDGE` in from its outline, in equal
+   * columns (founder, 2026-11-19). Three (Like · Comment · Share) are content-sized and
+   * spread across the card's content inset instead (`spreadInset`), so no label is ever
+   * cut off. Each action keeps a 44pt minimum in both directions; see `EngagementRow`.
    */
   actions: { paddingHorizontal: ENGAGEMENT_EDGE },
   pressed: { opacity: 0.7 },

@@ -275,6 +275,29 @@ describe('the actions', () => {
     expect(quiet.queryByText(/\b0\b/)).toBeNull();
   });
 
+  it('draws Liked (12K) · Comment (1.2K) · Share in full at 320pt and 1.3x text', async () => {
+    mockWindow = { ...mockWindow, width: 320, fontScale: 1.3 };
+    const view = await render(
+      <FeedCard
+        {...base}
+        reaction={reaction({ count: 12_345, mineGlyph: '❤️', mineLabel: 'Liked' })}
+        commentCount={1234}
+      />,
+    );
+    const like = within(view.getByTestId('feed-card-like')).getByText('Liked (12K)');
+    const comment = within(view.getByTestId('feed-card-comment')).getByText('Comment (1.2K)');
+    const share = within(view.getByTestId('feed-card-share')).getByText('Share');
+    for (const label of [like, comment, share]) {
+      expect(label.props.numberOfLines).toBeUndefined();
+      expect(label.props.ellipsizeMode).toBeUndefined();
+      expect(label.props.adjustsFontSizeToFit).toBeFalsy();
+    }
+    // Spread across the same content inset as the avatar and the artwork.
+    expect(style(view.getByTestId('feed-card-actions')).paddingHorizontal).toBe(
+      FEED_CARD.inset,
+    );
+  });
+
   it('draw the divider the constant asks for: none as shipped', async () => {
     const view = await render(<FeedCard {...base} />);
     if (ACTION_DIVIDER === 'none') {
