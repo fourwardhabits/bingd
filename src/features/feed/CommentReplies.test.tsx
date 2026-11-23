@@ -705,6 +705,23 @@ describe('arriving at one comment (a notification)', () => {
     expect(onFocusOffset).toHaveBeenCalledWith(400 + Math.max(0, 40 + 200 + 0 - 160));
   });
 
+  it('keeps its measurements when focusing draws the same list (one thread)', async () => {
+    // Codex review, PR #374: nothing moves, so no new layout would ever arrive.
+    mockCommentRows = conversation().filter((row) => row.id !== 'c2');
+    const onFocusOffset = jest.fn();
+    const props = { ...base, scroll: 'inherited' as const, onFocusOffset };
+    const view = await settle(await renderWithProviders(<CommentThread {...props} />));
+
+    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(400));
+    await fireEvent(view.getByTestId('comment-thread-c1'), 'layout', layout(0));
+    await fireEvent(view.getByTestId('comment-replies-c1'), 'layout', layout(300));
+    await fireEvent(view.getByTestId('comment-row-r1').parent!, 'layout', layout(0));
+
+    await view.rerender(<CommentThread {...props} focusCommentId="r1" />);
+    expect(view.queryByText(/^See all/)).toBeNull();
+    expect(onFocusOffset).toHaveBeenCalledWith(400 + (0 + 300 + 0 - 160));
+  });
+
   it('says so, and still opens the conversation, when that comment has gone', async () => {
     const view = await SURFACES[1]!.render({ focusCommentId: 'deleted-one' });
     expect(view.getByText('That comment is no longer available.')).toBeTruthy();

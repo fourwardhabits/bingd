@@ -356,7 +356,16 @@ export function CommentThread({
    * thread — its replies, a reply — do not move with it and are kept). A layout effect,
    * so it runs before both the arrival effect below and the native layout events.
    */
-  const listShape = focusedView && focusThread ? `focused:${focusThread.root.id}` : 'all';
+  // The shape is what is actually drawn — which threads, and whether "See all" sits
+  // above them — so a change of mode that draws the same thing (a post with one thread)
+  // keeps its measurements, since no new layout would come to replace them (Codex
+  // review, PR #374).
+  const listShape = [
+    focusThread && allThreads.length > 1 ? 'see-all' : '',
+    ...(focusedView && focusThread ? [focusThread] : allThreads).map(
+      (thread) => thread.root.id,
+    ),
+  ].join('|');
   useLayoutEffect(() => {
     layout.current.threads.clear();
   }, [listShape]);
