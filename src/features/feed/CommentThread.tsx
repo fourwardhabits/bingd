@@ -14,7 +14,14 @@ import {
 import { shouldMask } from '@/features/collection/use-watched';
 import { newOperationId } from '@/features/collection/writes';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
-import { Avatar, Button, EmptyState, ReactionControl, SpoilerNote, Text } from '@/ui/components';
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  ReactionControl,
+  SpoilerNote,
+  Text,
+} from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { relativeTime } from './activity';
@@ -26,6 +33,7 @@ import { useCommentReactors } from './use-comment-reactors';
 import { useMentionCandidates } from './use-mentions';
 import {
   COMMENT_MAX_LENGTH,
+  readableCount,
   threadOf,
   threadsOf,
   useCommentWrites,
@@ -57,8 +65,23 @@ export type CommentThreadProps = {
   scroll: 'own' | 'inherited';
   /**
    * The comment a notification was about, when this conversation was opened from one
-   * (`/activity/[id]?comment=`). Its thread is scrolled into view once and the comment is
-   * briefly marked. It never starts a reply: Reply stays the reader's own tap.
+   * (`/activity/[id]?comment=` or `?notification=`). Only notification entry sets it.
+   *
+   * Since 2026-11-23 (founder: "Comments UX & Notification Reply Refinement") it does three
+   * things, where #365 did one:
+   *
+   *   1. **Focused view.** Only that comment's thread is drawn at first — the root and its
+   *      replies — with "See all N comments" to expand in place. Scrolled into view once
+   *      and the comment briefly marked, as before.
+   *   2. **Reply mode.** The composer starts as a reply to that comment's author, because
+   *      somebody who was told "Ada replied to your comment" and types into the box means
+   *      to answer Ada — #365 left it on "Add a comment", and the answer became a new
+   *      top-level comment. **The keyboard is not opened**: arriving is not the same as
+   *      deciding to type, and a keyboard over the thread on arrival hides what they came
+   *      to read. An explicit Reply tap still focuses, as before.
+   *   3. Nothing else: a draft, an edit or a reply the reader has already started is never
+   *      overwritten, and a target that is gone, retracted or the reader's own leaves the
+   *      composer on "Add a comment".
    */
   focusCommentId?: string | null;
   /**
@@ -316,17 +339,53 @@ export function CommentThread({
   const focusIsReply = Boolean(focusThread && focusThread.root.id !== focusCommentId);
   const focusMissing = Boolean(focusCommentId && comments.data && !focusThread);
 
+  /**
+   * **The focused view, and its way out.** Only while the target's thread exists; a
+   * notification about a comment that has gone opens the whole conversation with a note,
+   * as before. "See all" expands in place — same component, same state — so the reply
+   * target and the draft are simply still there, and the composer's mode is untouched.
+   */
+  const [expanded, setExpanded] = useState(false);
+  const focusedView = Boolean(focusThread) && !expanded;
+  /**
+   * **Reply mode on arrival**, set during render rather than in an effect so the first
+   * frame that shows the comment already shows "Replying to …" — the same pattern the
+   * per-activity reset above uses. Once per focused comment: Cancel returns to "Add a
+   * comment" and stays there, and a refetch never re-applies it.
+   */
+  const [arrivedFor, setArrivedFor] = useState<string | null>(null);
+  const arrival =
+    focusCommentId && focusThread && arrivedFor !== focusCommentId
+      ? (comments.data?.find((row) => row.id === focusCommentId) ?? null)
+      : null;
+  if (arrival) {
+    setArrivedFor(focusCommentId);
+    if (
+      !arrival.deleted &&
+      arrival.authorId !== viewerId &&
+      !editing &&
+      !replyingTo &&
+      draft.length === 0
+    ) {
+      setReplyingTo(arrival);
+      setReplyGone(null);
+    }
+  }
+
   const tryFocusScroll = () => {
     if (!focusCommentId || !focusThread || scrolledTo.current === focusCommentId) return;
     const at = layout.current;
     const thread = at.threads.get(focusThread.root.id);
     if (thread === undefined) return;
-    let within = thread;
+    // In the focused view the thread is the whole list, and "See all" sits above it: land
+    // at the top of the list so both are in view. Otherwise, at the thread's own top.
+    const floor = focusedView ? 0 : thread;
+    let within = floor;
     if (focusIsReply) {
       const replies = at.replies.get(focusThread.root.id);
       const reply = at.rows.get(focusCommentId);
       if (replies === undefined || reply === undefined) return;
-      within = Math.max(thread, thread + replies + reply - REPLY_CONTEXT);
+      within = Math.max(floor, thread + replies + reply - REPLY_CONTEXT);
     }
     if (scroll === 'own') {
       scrolledTo.current = focusCommentId;
@@ -345,9 +404,8 @@ export function CommentThread({
    */
   const focusFound = Boolean(focusThread);
   const [markExpired, setMarkExpired] = useState<string | null>(null);
-  const highlighted = focusCommentId && focusFound && markExpired !== focusCommentId
-    ? focusCommentId
-    : null;
+  const highlighted =
+    focusCommentId && focusFound && markExpired !== focusCommentId ? focusCommentId : null;
   useEffect(() => {
     if (!focusCommentId || !focusFound) return;
     const timer = setTimeout(() => setMarkExpired(focusCommentId), FOCUS_HIGHLIGHT_MS);
@@ -618,6 +676,7 @@ export function CommentThread({
     choose(comment, comment.myReaction === DEFAULT_REACTION ? null : DEFAULT_REACTION);
 
   const threads = allThreads;
+  const shownThreads = focusedView && focusThread ? [focusThread] : threads;
   const over = draft.length > COMMENT_MAX_LENGTH;
 
   /**
@@ -639,8 +698,8 @@ export function CommentThread({
    */
   const targetUnavailable = Boolean(
     replyingTo &&
-      (replyGone === replyingTo.id ||
-        (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
+    (replyGone === replyingTo.id ||
+      (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
   );
   const targetThread = replyingTo ? threadOf(threads, replyingTo.id) : null;
   /**
@@ -656,7 +715,9 @@ export function CommentThread({
         ? 'in this thread'
         : targetThread.root.authorId === target.authorId
           ? 'in their thread'
-          : `in ${targetThread.root.authorName}'s thread`;
+          : targetThread.root.authorId === viewerId
+            ? 'in your thread'
+            : `in ${targetThread.root.authorName}'s thread`;
 
   const rowProps = (comment: Comment) => ({
     comment,
@@ -694,33 +755,71 @@ export function CommentThread({
     onReport: () => setReporting(comment.id),
   });
 
-  const conversation = comments.isError && !comments.data ? (
-    <View style={styles.pad}>
-      <EmptyState
-        kind="couldNotLoad"
-        compact
-        title="Could not load comments"
-        body="Check your connection and try again."
-      />
-    </View>
-  ) : comments.isPending ? (
-    <Text variant="footnote" tone="tertiary" style={styles.pad}>
-      Loading comments…
-    </Text>
-  ) : threads.length === 0 ? (
-    <View style={styles.pad}>
-      <EmptyState kind="nothingYet" compact title="No comments yet" body="Say something about this." />
-    </View>
-  ) : (
-    <>
-      {/* A notification about a comment that has since gone: the conversation still
+  const conversation =
+    comments.isError && !comments.data ? (
+      <View style={styles.pad}>
+        <EmptyState
+          kind="couldNotLoad"
+          compact
+          title="Could not load comments"
+          body="Check your connection and try again."
+        />
+      </View>
+    ) : comments.isPending ? (
+      <Text variant="footnote" tone="tertiary" style={styles.pad}>
+        Loading comments…
+      </Text>
+    ) : threads.length === 0 ? (
+      <View style={styles.pad}>
+        <EmptyState
+          kind="nothingYet"
+          compact
+          title="No comments yet"
+          body="Say something about this."
+        />
+      </View>
+    ) : (
+      <>
+        {/* A notification about a comment that has since gone: the conversation still
           opens, and says so rather than leaving the reader looking for it. */}
-      {focusMissing ? (
-        <Text variant="footnote" tone="tertiary" style={styles.pad}>
-          That comment is no longer available.
-        </Text>
-      ) : null}
-      {threads.map((thread, index) => (
+        {focusMissing ? (
+          <Text variant="footnote" tone="tertiary" style={styles.pad}>
+            That comment is no longer available.
+          </Text>
+        ) : null}
+        {/**
+         * "See all N comments": subdued maroon, at the top of the focused conversation so it
+         * is on screen when the reader lands. N is every comment this reader can see — the
+         * same readable count the Feed's comment button states — and the control exists only
+         * when there is more than this thread to see.
+         */}
+        {focusThread && threads.length > 1 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              expanded
+                ? 'Show only this conversation'
+                : `See all ${readableCount(comments.data)} comments`
+            }
+            accessibilityHint={
+              expanded
+                ? 'Hides the other conversations on this activity'
+                : 'Shows every conversation on this activity. Your reply stays as it is'
+            }
+            // In place, and from where the control is: "See all" shows the conversation
+            // from its first thread, directly under the control the reader just pressed.
+            onPress={() => setExpanded((value) => !value)}
+            hitSlop={slop}
+            style={({ pressed }) => [styles.seeAll, pressed && styles.pressed]}
+          >
+            <Text variant="footnote" tone="action">
+              {expanded
+                ? 'Show only this conversation'
+                : `See all ${readableCount(comments.data)} comments`}
+            </Text>
+          </Pressable>
+        ) : null}
+        {shownThreads.map((thread, index) => (
           /**
            * One thread: a root, then its replies under a connector.
            *
@@ -747,19 +846,16 @@ export function CommentThread({
                 {thread.replies.map((reply) => (
                   // The same row. A reply is not a different kind of thing, and a second
                   // component for it is a second place to get masking wrong.
-                  <View
-                    key={reply.id}
-                    onLayout={measured('rows', reply.id)}
-                  >
+                  <View key={reply.id} onLayout={measured('rows', reply.id)}>
                     <CommentRow {...rowProps(reply)} isReply />
                   </View>
                 ))}
               </View>
             ) : null}
           </View>
-      ))}
-    </>
-  );
+        ))}
+      </>
+    );
 
   return (
     <>
@@ -789,17 +885,17 @@ export function CommentThread({
 
       <View style={styles.composer}>
         {/**
-          * The suggestions, above the field and above the banner both.
-          *
-          * Above the *field* because the keyboard is below it, and a list drawn under
-          * the composer would be off-screen exactly when it is needed. Above the
-          * *banner* because "Replying to Sarah" is context for the box, and putting a
-          * transient strip between the two would separate a label from the thing it
-          * labels every time somebody typed an @.
-          *
-          * Present exactly while a fragment is: there is no open/closed state to get
-          * out of step, because `fragment` is derived from the draft and the caret.
-          */}
+         * The suggestions, above the field and above the banner both.
+         *
+         * Above the *field* because the keyboard is below it, and a list drawn under
+         * the composer would be off-screen exactly when it is needed. Above the
+         * *banner* because "Replying to Sarah" is context for the box, and putting a
+         * transient strip between the two would separate a label from the thing it
+         * labels every time somebody typed an @.
+         *
+         * Present exactly while a fragment is: there is no open/closed state to get
+         * out of step, because `fragment` is derived from the draft and the caret.
+         */}
         {fragment ? (
           <MentionSuggestions
             candidates={suggestions.data ?? []}
@@ -822,7 +918,11 @@ export function CommentThread({
             <Text variant="caption" tone="secondary">
               Editing your comment
             </Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Stop editing" onPress={reset}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Stop editing"
+              onPress={reset}
+            >
               <Text variant="caption" tone="action">
                 Cancel
               </Text>
@@ -849,11 +949,16 @@ export function CommentThread({
           >
             {targetUnavailable ? (
               <Text variant="caption" tone="secondary" style={styles.bannerCopy}>
-                {target.authorName}’s comment is no longer available, so this can’t be sent
-                as a reply. Dismiss to post it as a new comment.
+                {target.authorName}’s comment is no longer available, so this can’t be sent as a
+                reply. Dismiss to post it as a new comment.
               </Text>
             ) : (
-              <Text variant="caption" tone="secondary" numberOfLines={2} style={styles.bannerCopy}>
+              <Text
+                variant="caption"
+                tone="secondary"
+                numberOfLines={2}
+                style={styles.bannerCopy}
+              >
                 Replying to{' '}
                 <Text variant="caption" style={styles.bannerName}>
                   {target.authorName}
@@ -864,7 +969,9 @@ export function CommentThread({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
-                targetUnavailable ? 'Dismiss, keep your text' : `Cancel reply to ${target.authorName}`
+                targetUnavailable
+                  ? 'Dismiss, keep your text'
+                  : `Cancel reply to ${target.authorName}`
               }
               accessibilityHint={
                 targetUnavailable
@@ -1073,7 +1180,12 @@ function CommentRow({
   if (comment.deleted) {
     return (
       <View
-        style={[styles.row, isReply && styles.replyRow, styles.tombstone, marked && styles.marked]}
+        style={[
+          styles.row,
+          isReply && styles.replyRow,
+          styles.tombstone,
+          marked && styles.marked,
+        ]}
       >
         <Text variant="caption" tone="tertiary">
           Comment deleted
@@ -1260,6 +1372,11 @@ const styles = StyleSheet.create({
   // Between two threads: space, and only space — a top-level comment is not connected to
   // the one before it.
   threadGap: { marginTop: theme.space[2] },
+  seeAll: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
   /**
    * The replies, hung from a thin rule that drops from the centre of the root's avatar —
    * one level, and one level only. `marginLeft` puts the 2pt rule's centre on the avatar's

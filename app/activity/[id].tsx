@@ -8,6 +8,9 @@ import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
 import { goalAchievement } from '@/features/goals/goals';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
+import { FeedCard } from '@/features/feed/FeedCard';
+import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
+import { groupCount, previewKey, useGroupPreviews } from '@/features/feed/use-group-previews';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { activitySentence, metadataFor, watchLabel } from '@/features/feed/activity';
@@ -195,6 +198,48 @@ export default function ActivityScreen() {
    */
   const reactionsResolved = reactions.isSuccess && !reactions.isError;
 
+  /**
+   * A group's posters, read exactly as the Feed reads them (`useGroupPreviews`), so a
+   * grouped post here is the same rail the reader just scrolled past. Each poster opens
+   * its title; the "+ N more" in the headline opens the whole list. No bookmark on the
+   * posters here: the watchlist is the Feed's and the title page's.
+   */
+  const groupPreviews = useGroupPreviews(event ? [event] : [], viewerId ?? '');
+  const groupTotal = event ? groupCount(event) : null;
+  const groupRows =
+    event && groupTotal ? groupPreviews.data?.get(previewKey(event, groupTotal)) : undefined;
+  const openGroup = () => {
+    if (!event) return;
+    if (event.type === 'ranking_batch') setRankingBatchFor(event.id);
+    else setWatchlistGroupFor(event.id);
+  };
+  const rail =
+    !event || !groupTotal || (groupRows === undefined && groupPreviews.isError)
+      ? null
+      : groupRows === undefined
+        ? {
+            total: groupTotal,
+            tiles: [],
+            loading: true,
+            onPressTile: () => {},
+            onPressAll: openGroup,
+          }
+        : groupRows.length < 2
+          ? null
+          : {
+              total: groupTotal,
+              tiles: groupRows.map((row) => ({
+                id: row.mediaItemId,
+                title: row.title,
+                year: row.year,
+                posterUri: posterUri(row.posterPath, 'card'),
+                score: row.action === 'saved' ? null : row.score,
+                season: row.seasonNumber,
+              })),
+              onPressTile: (tile: { id: string }) => router.push(`/title/${tile.id}`),
+              onPressAll: openGroup,
+            };
+
   const choose = async (kind: ReactionKind | null) => {
     if (!event) return;
     setPickerOpen(false);
@@ -211,7 +256,8 @@ export default function ActivityScreen() {
    * gesture means "react", and the way to remove one you can see is to tap the one you
    * chose.
    */
-  const toggleDefault = () => choose(summary?.mine === DEFAULT_REACTION ? null : DEFAULT_REACTION);
+  const toggleDefault = () =>
+    choose(summary?.mine === DEFAULT_REACTION ? null : DEFAULT_REACTION);
 
   /**
    * Back, from a screen that may have nothing behind it.
@@ -301,133 +347,190 @@ export default function ActivityScreen() {
           contentContainerStyle={[styles.page, keyboard > 0 && { paddingBottom: keyboard }]}
           keyboardShouldPersistTaps="handled"
         >
-          {/* The canonical feed card, and the same component the Feed draws. Not a
-              reduced copy: a reader arriving here from a notification should recognise
-              the post as the one they would have scrolled past. */}
-          <ActivityRow
-            actorName={event.actorName}
-            actorAvatarUri={event.actorAvatarUri}
-            onPressActor={
-              event.actorId === viewerId || !event.actorUsername
-                ? undefined
-                : () => router.push(`/u/${event.actorUsername}`)
-            }
-            // The Feed's sentence, from the same rule (`activitySentence`): "added Dune and
-            // 4 others to their watchlist" (20261125000100), a session's "ranked Kaiju No. 8
-            // + 15 more" (20261130000900). The conversation on this page is the post's,
-            // never a member's.
-            verb={sentence?.verb ?? ''}
-            tail={sentence?.tail ?? null}
-            tailAction={sentence?.tailAction ?? null}
-            companions={event.companions}
-            title={event.title}
-            year={event.year}
-            posterUri={posterUri(event.posterPath)}
-            // The badge leads an award row, exactly as the feed draws it.
-            lead={
-              event.award ? (
-                <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
-              ) : event.goal ? (
-                // The feed's own lead for a goal row. This page draws the same activity,
-                // and a goal row here with an empty poster box was the one place the two
-                // surfaces disagreed about what a goal looks like.
-                <GoalActivityLead />
-              ) : undefined
-            }
-            // The same second line the feed draws, from the same two functions — see
-            // `app/(tabs)/feed.tsx`. A conversation page reached from a notification
-            // shows the activity it is about, so a metal here would be the same
-            // non-explanation in a second place.
-            metadata={
-              event.award
-                ? event.award.achievement
-                : event.goal
-                  ? goalAchievement(event.goal.category, event.goal.target)
-                  : metadataFor(event)
-            }
-            watchLabel={watchLabel(event.watchNumber)}
-            score={event.score}
-            bucket={event.bucket}
-            note={event.note?.text ?? null}
-            noteHasSpoilers={event.note?.hasSpoilers ?? false}
-            noteMasked={shouldMask({
-              hasSpoilers: event.note?.hasSpoilers ?? false,
-              mediaItemId: event.mediaItemId,
-              viewerId: viewerId,
-              authorId: event.actorId,
-              watched: watched.data,
-            })}
-            timeLabel={relativeTime(event.activityAt)}
-            // An award row opens the earner's Awards rather than a title (§5).
-            onPressTitle={() => {
-              if (event.mediaItemId) {
-                router.push(`/title/${event.mediaItemId}`);
-              } else if (event.award) {
-                if (event.actorId === viewerId) {
-                  router.push({ pathname: '/profile', params: { awards: '1' } });
-                } else if (event.actorUsername) {
-                  router.push({
-                    pathname: '/u/[username]',
-                    params: { username: event.actorUsername, awards: '1' },
-                  });
-                }
+          {/**
+           * **The post as the Feed draws it** (founder, 2026-11-23). A title activity is
+           * the Feed's own `FeedCard` — headline, the large artwork (or the poster rail
+           * for a group), the score, the published review, the reaction summary — with
+           * its action row left off (`actions={false}`): on this page the discussion and
+           * the composer below *are* the actions. The mini-poster summary it replaces
+           * felt like a different product from the Feed the reader had just left.
+           *
+           * Awards and goals keep the compact row, exactly as the Feed draws them.
+           */}
+          {takesFeedCard(event) ? (
+            <FeedCard
+              leading
+              actions={false}
+              actorName={event.actorName}
+              actorAvatarUri={event.actorAvatarUri}
+              onPressActor={
+                event.actorId === viewerId || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
               }
-            }}
-            /**
-             * **Reactions, and nothing else.**
-             *
-             * No comments control: the conversation is directly below, and a button that
-             * scrolls you six points down the screen you are already on is noise. No
-             * watchlist and no recommend: this screen exists because somebody was told
-             * something and came to read it, and a row of *actions* at the top of it
-             * turns a message into a post to be worked on. Both are on the Feed, on the
-             * same card, one tap away.
-             *
-             * Reactions were omitted alongside them until 2026-08-29 and should not have
-             * been — see the hook above for the founder's report and why this one is a
-             * different kind of thing. Every value here comes from the shared summary.
-             */
-            reaction={
-              reactionsResolved
-                ? activityReaction({
-                    summary,
-                    viewerId,
-                    onToggle: () => void toggleDefault(),
-                    onOpenPicker: () => setPickerOpen(true),
-                    onOpenDetail: () => setDetailOpen(true),
-                    picker: pickerOpen ? (
-                      <ReactionPill
-                        current={summary?.mine ?? null}
-                        onChoose={(kind) => void choose(kind)}
-                        onDismiss={() => setPickerOpen(false)}
-                      />
-                    ) : null,
-                  })
-                : undefined
-            }
-          />
+              verb={sentence?.verb ?? ''}
+              tail={sentence?.tail ?? null}
+              tailAction={sentence?.tailAction ?? null}
+              companions={event.companions}
+              title={event.title}
+              year={event.year}
+              metadata={metadataFor(event)}
+              watchLabel={watchLabel(event.watchNumber)}
+              timeLabel={relativeTime(event.activityAt)}
+              artwork={feedArtwork(event)}
+              score={event.score}
+              bucket={event.bucket}
+              review={
+                event.note
+                  ? {
+                      text: event.note.text,
+                      hasSpoilers: event.note.hasSpoilers,
+                      masked: shouldMask({
+                        hasSpoilers: event.note.hasSpoilers,
+                        mediaItemId: event.mediaItemId,
+                        viewerId,
+                        authorId: event.actorId,
+                        watched: watched.data,
+                      }),
+                    }
+                  : null
+              }
+              onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
+              // Read-only here: the summary and who reacted. Reacting is the Feed's row.
+              reaction={activityReaction({
+                summary: reactionsResolved ? summary : null,
+                viewerId,
+                onToggle: () => void toggleDefault(),
+                onOpenDetail: () => setDetailOpen(true),
+              })}
+              rail={rail}
+            />
+          ) : (
+            <ActivityRow
+              actorName={event.actorName}
+              actorAvatarUri={event.actorAvatarUri}
+              onPressActor={
+                event.actorId === viewerId || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
+              }
+              // The Feed's sentence, from the same rule (`activitySentence`): "added Dune and
+              // 4 others to their watchlist" (20261125000100), a session's "ranked Kaiju No. 8
+              // + 15 more" (20261130000900). The conversation on this page is the post's,
+              // never a member's.
+              verb={sentence?.verb ?? ''}
+              tail={sentence?.tail ?? null}
+              tailAction={sentence?.tailAction ?? null}
+              companions={event.companions}
+              title={event.title}
+              year={event.year}
+              posterUri={posterUri(event.posterPath)}
+              // The badge leads an award row, exactly as the feed draws it.
+              lead={
+                event.award ? (
+                  <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+                ) : event.goal ? (
+                  // The feed's own lead for a goal row. This page draws the same activity,
+                  // and a goal row here with an empty poster box was the one place the two
+                  // surfaces disagreed about what a goal looks like.
+                  <GoalActivityLead />
+                ) : undefined
+              }
+              // The same second line the feed draws, from the same two functions — see
+              // `app/(tabs)/feed.tsx`. A conversation page reached from a notification
+              // shows the activity it is about, so a metal here would be the same
+              // non-explanation in a second place.
+              metadata={
+                event.award
+                  ? event.award.achievement
+                  : event.goal
+                    ? goalAchievement(event.goal.category, event.goal.target)
+                    : metadataFor(event)
+              }
+              watchLabel={watchLabel(event.watchNumber)}
+              score={event.score}
+              bucket={event.bucket}
+              note={event.note?.text ?? null}
+              noteHasSpoilers={event.note?.hasSpoilers ?? false}
+              noteMasked={shouldMask({
+                hasSpoilers: event.note?.hasSpoilers ?? false,
+                mediaItemId: event.mediaItemId,
+                viewerId: viewerId,
+                authorId: event.actorId,
+                watched: watched.data,
+              })}
+              timeLabel={relativeTime(event.activityAt)}
+              // An award row opens the earner's Awards rather than a title (§5).
+              onPressTitle={() => {
+                if (event.mediaItemId) {
+                  router.push(`/title/${event.mediaItemId}`);
+                } else if (event.award) {
+                  if (event.actorId === viewerId) {
+                    router.push({ pathname: '/profile', params: { awards: '1' } });
+                  } else if (event.actorUsername) {
+                    router.push({
+                      pathname: '/u/[username]',
+                      params: { username: event.actorUsername, awards: '1' },
+                    });
+                  }
+                }
+              }}
+              /**
+               * **Reactions, and nothing else.**
+               *
+               * No comments control: the conversation is directly below, and a button that
+               * scrolls you six points down the screen you are already on is noise. No
+               * watchlist and no recommend: this screen exists because somebody was told
+               * something and came to read it, and a row of *actions* at the top of it
+               * turns a message into a post to be worked on. Both are on the Feed, on the
+               * same card, one tap away.
+               *
+               * Reactions were omitted alongside them until 2026-08-29 and should not have
+               * been — see the hook above for the founder's report and why this one is a
+               * different kind of thing. Every value here comes from the shared summary.
+               */
+              reaction={
+                reactionsResolved
+                  ? activityReaction({
+                      summary,
+                      viewerId,
+                      onToggle: () => void toggleDefault(),
+                      onOpenPicker: () => setPickerOpen(true),
+                      onOpenDetail: () => setDetailOpen(true),
+                      picker: pickerOpen ? (
+                        <ReactionPill
+                          current={summary?.mine ?? null}
+                          onChoose={(kind) => void choose(kind)}
+                          onDismiss={() => setPickerOpen(false)}
+                        />
+                      ) : null,
+                    })
+                  : undefined
+              }
+            />
+          )}
 
           {/**
-            * **No divider here, and that is the fix** (founder physical report,
-            * 2026-08-30: "a small bar of empty space between the post and the comments",
-            * on the notification route and on the direct Feed tap alike).
-            *
-            * It was `<View style={styles.divider} />` -- a second hairline rule with
-            * `marginTop: theme.space[2]` above it. `ActivityRow` already ends in a
-            * `borderBottomWidth` of its own, because that is the separator the Feed
-            * draws between cards, so this screen was stacking **two** rules with a band
-            * of empty page trapped between them. That band is the bar: not padding, not
-            * a reserved container, not a loading state, and not route-specific -- both
-            * routes render this same subtree, which is why it reproduced from either.
-            *
-            * The legitimate divider is kept and is the row's own. The unintended one is
-            * simply gone: no negative margin pulling the thread up over it, no collapsed
-            * touch target, and `CommentThread` keeps its own vertical rhythm --
-            * `styles.flow` has no top padding and each comment carries
-            * `paddingVertical: theme.space[3]`, so the first comment sits the same
-            * distance below the rule as every later one sits below its neighbour. One
-            * post, one rule, one conversation.
-            */}
+           * **No divider here, and that is the fix** (founder physical report,
+           * 2026-08-30: "a small bar of empty space between the post and the comments",
+           * on the notification route and on the direct Feed tap alike).
+           *
+           * It was `<View style={styles.divider} />` -- a second hairline rule with
+           * `marginTop: theme.space[2]` above it. `ActivityRow` already ends in a
+           * `borderBottomWidth` of its own, because that is the separator the Feed
+           * draws between cards, so this screen was stacking **two** rules with a band
+           * of empty page trapped between them. That band is the bar: not padding, not
+           * a reserved container, not a loading state, and not route-specific -- both
+           * routes render this same subtree, which is why it reproduced from either.
+           *
+           * The legitimate divider is kept and is the row's own. The unintended one is
+           * simply gone: no negative margin pulling the thread up over it, no collapsed
+           * touch target, and `CommentThread` keeps its own vertical rhythm --
+           * `styles.flow` has no top padding and each comment carries
+           * `paddingVertical: theme.space[3]`, so the first comment sits the same
+           * distance below the rule as every later one sits below its neighbour. One
+           * post, one rule, one conversation.
+           */}
           <CommentThread
             eventId={event.id}
             // The exact media item the activity is about — a season, never its parent

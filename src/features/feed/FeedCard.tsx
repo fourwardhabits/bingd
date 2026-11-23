@@ -98,6 +98,14 @@ export type FeedCardProps = {
     /** The reader's bookmark on every poster (`PosterRail`'s `onToggleSave`). */
     onToggleSave?: (tile: PosterTile) => void;
   } | null;
+  /**
+   * **The Feed's action row, or not** (Comments page, founder 2026-11-23). Default `true`,
+   * so the Feed is exactly as it was. The conversation page draws the same post with this
+   * `false`: there the discussion and the composer *are* the actions, and a Like · Comment ·
+   * Share row above a thread would be a second, redundant set. The reaction summary stays —
+   * it is part of what the post is — and so do the headline, artwork, score and review.
+   */
+  actions?: boolean;
 };
 
 /**
@@ -151,6 +159,7 @@ export function FeedCard({
   onPressShare,
   leading = false,
   rail = null,
+  actions = true,
 }: FeedCardProps) {
   const grouped = rail != null;
   /**
@@ -175,7 +184,11 @@ export function FeedCard({
   const othersGlyphs = (reaction.glyphs ?? []).filter((glyph) => glyph !== mine).slice(0, 3);
 
   return (
-    <FeedPostSurface leading={leading} style={styles.card} testID="feed-card">
+    <FeedPostSurface
+      leading={leading}
+      style={[styles.card, !actions && styles.cardWithoutActions]}
+      testID="feed-card"
+    >
       {/* 1. Who did what, and when. */}
       <View style={styles.inset}>
         <FeedHeadline
@@ -303,44 +316,48 @@ export function FeedCard({
        * The Like is offered on the reader's own post too (founder, 2026-11-11). The
        * bookmark is the artwork's and is never repeated here.
        */}
-      <View style={styles.social} testID="feed-card-social">
-        {reaction.count > 0 ? (
-          <ReactionSummary
-            glyphs={
-              reaction.summaryGlyphs ??
-              (mine ? [mine, ...othersGlyphs] : othersGlyphs).slice(0, 3)
-            }
-            forms={
-              reaction.summaryForms?.length
-                ? reaction.summaryForms
-                : [reactionCountLabel(reaction.count)]
-            }
-            onPress={reaction.onPressSummary}
-            style={styles.summary}
-            testID="feed-card-reactions"
-          />
-        ) : null}
+      {actions || reaction.count > 0 ? (
+        <View style={styles.social} testID="feed-card-social">
+          {reaction.count > 0 ? (
+            <ReactionSummary
+              glyphs={
+                reaction.summaryGlyphs ??
+                (mine ? [mine, ...othersGlyphs] : othersGlyphs).slice(0, 3)
+              }
+              forms={
+                reaction.summaryForms?.length
+                  ? reaction.summaryForms
+                  : [reactionCountLabel(reaction.count)]
+              }
+              onPress={reaction.onPressSummary}
+              style={styles.summary}
+              testID="feed-card-reactions"
+            />
+          ) : null}
 
-        {reaction.picker && canReact ? (
-          <View style={styles.picker}>{reaction.picker}</View>
-        ) : null}
+          {actions && reaction.picker && canReact ? (
+            <View style={styles.picker}>{reaction.picker}</View>
+          ) : null}
 
-        {ACTION_DIVIDER === 'inset' ? (
-          <View style={styles.divider} testID="feed-card-divider" />
-        ) : null}
+          {actions && ACTION_DIVIDER === 'inset' ? (
+            <View style={styles.divider} testID="feed-card-divider" />
+          ) : null}
 
-        <EngagementRow
-          actorName={actorName}
-          subject={filmName}
-          reaction={reaction}
-          onPressComments={onPressComments}
-          commentCount={commentCount}
-          onPressShare={grouped ? undefined : onPressShare}
-          style={styles.actions}
-          spreadInset={FEED_CARD.inset}
-          testID="feed-card"
-        />
-      </View>
+          {actions ? (
+            <EngagementRow
+              actorName={actorName}
+              subject={filmName}
+              reaction={reaction}
+              onPressComments={onPressComments}
+              commentCount={commentCount}
+              onPressShare={grouped ? undefined : onPressShare}
+              style={styles.actions}
+              spreadInset={FEED_CARD.inset}
+              testID="feed-card"
+            />
+          ) : null}
+        </View>
+      ) : null}
     </FeedPostSurface>
   );
 }
@@ -381,6 +398,9 @@ const styles = StyleSheet.create({
    * leaves about 13pt of white under the words, the same as above the headline.
    */
   card: { paddingTop: FEED_CARD.inset, gap: FEED_CARD.inset },
+  // Without the action row the card still needs its bottom inset, or the last line (the
+  // summary, the review or the artwork) would sit on the outline.
+  cardWithoutActions: { paddingBottom: FEED_CARD.inset },
   inset: { paddingHorizontal: FEED_CARD.inset },
   artwork: {
     marginHorizontal: FEED_CARD.inset,
