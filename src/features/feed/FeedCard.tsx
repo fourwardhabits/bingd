@@ -17,7 +17,7 @@ import { FEED_SAVE_LABELS, type PosterTile } from '@/ui/components/PosterWall';
 import { paperAlpha, theme } from '@/ui/tokens';
 
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
-import { FeedHeadline, HEADLINE_AVATAR, HEADLINE_GAP } from './FeedHeadline';
+import { FeedHeadline } from './FeedHeadline';
 import {
   FEED_CARD,
   FeedPostSurface,
@@ -169,7 +169,6 @@ export function FeedCard({
   const subline = (grouped ? [timeLabel] : [timeLabel, watchLabel, metadata])
     .filter(Boolean)
     .join(' · ');
-  const headlineWidth = artworkWidth - theme.layout.avatar[HEADLINE_AVATAR] - HEADLINE_GAP;
 
   const canReact = reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
@@ -193,7 +192,6 @@ export function FeedCard({
           tailAction={tailAction}
           tail={tail}
           subline={subline}
-          lineWidth={headlineWidth}
           fontScale={fontScale}
         />
       </View>
@@ -339,6 +337,7 @@ export function FeedCard({
           commentCount={commentCount}
           onPressShare={grouped ? undefined : onPressShare}
           style={styles.actions}
+          spreadInset={FEED_CARD.inset}
           testID="feed-card"
         />
       </View>
@@ -438,9 +437,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.border.hairline,
   },
   /**
-   * The actions span the card, `ENGAGEMENT_EDGE` in from its outline, in equal columns
-   * (founder, 2026-11-19). Each column keeps a 44pt minimum in both directions; see
-   * `EngagementRow`.
+   * A pair of actions spans the card, `ENGAGEMENT_EDGE` in from its outline, in equal
+   * columns (founder, 2026-11-19). Three (Like · Comment · Share) are content-sized and
+   * spread across the card's content inset instead (`spreadInset`), so no label is ever
+   * cut off. Each action keeps a 44pt minimum in both directions; see `EngagementRow`.
    */
   actions: { paddingHorizontal: ENGAGEMENT_EDGE },
   pressed: { opacity: 0.7 },

@@ -1,5 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { theme } from '../tokens';
 import { ReactionSlot } from './ReactionControl';
@@ -50,6 +59,12 @@ export type EngagementRowProps = {
   onPressShare?: () => void;
   /** Margins or padding from the host, so the columns sit on its gutters. */
   style?: StyleProp<ViewStyle>;
+  /**
+   * The row's side padding when three or more actions are spread (`spread`): the host's
+   * content inset, so the first action starts and the last ends on the post's edges.
+   * Defaults to `ENGAGEMENT_EDGE`.
+   */
+  spreadInset?: number;
   /** `${testID}-like`, `-comment`, `-save` and `-share` on the controls; the row itself is `${testID}-actions`. */
   testID?: string;
 };
@@ -93,9 +108,18 @@ export type EngagementRowProps = {
  * ones the Feed already reads: the reaction count, and `activity_comment_counts`, which
  * counts every readable comment on the post, replies included.
  *
- * **Narrow screens.** The labels are one line each. On the narrowest phones with four
- * actions, "Comment" is the one word that can be wider than its column; it shrinks a
- * little to fit (to 85%) before it would ever truncate, and nothing leaves the row.
+ * **Nothing is cut off, on any phone** (founder, 2026-11-23). A label has no line cap, no
+ * ellipsis and no shrink-to-fit. Three or more actions are sized to their own content and
+ * spread with `space-between` across the host's content inset (`spreadInset`), so
+ * `Liked (2) · Comment (3) · Share` takes the width the words need instead of three equal
+ * columns, one of which was too narrow for "Comment (3)" at 320pt and cut it to "Commen…".
+ * Two actions keep their equal columns, centred in each half (founder, 2026-11-19: a
+ * pair at opposite edges read as two unrelated controls).
+ *
+ * If the words still do not fit (large text, a narrow phone, `(1.2K)`), only the count
+ * drops below its word: the word and its count are joined by an ordinary space, and only
+ * an action with a count may shrink, so a bare word ("Share") never wraps or breaks. Every
+ * action keeps its 44pt target either way.
  */
 export function EngagementRow({
   actorName,
@@ -107,15 +131,56 @@ export function EngagementRow({
   saved = false,
   onPressShare,
   style,
+  spreadInset = ENGAGEMENT_EDGE,
   testID = 'engagement',
 }: EngagementRowProps) {
   const canReact = reaction != null && reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
+  const { fontScale } = useWindowDimensions();
+  const [rowWidth, setRowWidth] = useState<number | null>(null);
 
-  if (!canReact && !onPressComments && !onPressSave && !onPressShare) return null;
+  // The words each present action shows, for the last-resort wrap below.
+  const words = [
+    canReact ? (mine ? (reaction.mineLabel ?? 'Reacted') : 'Like') : null,
+    onPressComments ? 'Comment' : null,
+    onPressSave ? (saved ? 'Saved' : 'Save') : null,
+    onPressShare ? 'Share' : null,
+  ].filter((word): word is string => word != null);
+  if (!words.length) return null;
+
+  /**
+   * **The last resort: the row wraps** (Codex review, 2026-11-23). A word never shrinks or
+   * breaks, so at very large text on a narrow phone even the bare words can be wider than
+   * the row, and a row that cannot wrap pushes its last action out of the card, where the
+   * card clips it. When the words alone (each beside its icon, counts left to drop below)
+   * cannot fit the row as measured, the actions are content-sized and the row wraps onto a
+   * second line instead. Ordinary text sizes never reach it: at 320pt the three words fit
+   * up to about 133% text, at 360pt up to about 164%.
+   */
+  const wraps =
+    rowWidth != null &&
+    wordsWidth(words, theme.typography.footnote.fontSize * fontScale) > rowWidth;
+  const spread = words.length >= 3 || wraps;
+  /** An action's box: an equal column for a pair, its own width when spread. */
+  const boxFor = (count: number) =>
+    !spread ? styles.action : actionCount(count) ? styles.spreadShrinks : styles.spreadFixed;
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width } = event.nativeEvent.layout;
+    const inner = width - (spread ? spreadInset * 2 : ENGAGEMENT_EDGE * 2);
+    if (inner !== rowWidth) setRowWidth(inner);
+  };
 
   return (
-    <View style={[styles.row, style]} testID={`${testID}-actions`}>
+    <View
+      style={[
+        styles.row,
+        style,
+        spread && [styles.spread, { paddingHorizontal: spreadInset }],
+        wraps && styles.wrap,
+      ]}
+      onLayout={onLayout}
+      testID={`${testID}-actions`}
+    >
       {canReact ? (
         <Pressable
           accessibilityRole="button"
@@ -130,7 +195,7 @@ export function EngagementRow({
           }
           onPress={reaction.onPress}
           onLongPress={reaction.onLongPress}
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+          style={({ pressed }) => [boxFor(reaction.count), pressed && styles.pressed]}
           testID={`${testID}-like`}
         >
           {/* Every selected state is its emoji and its word, a Like included: the ❤️ and
@@ -154,6 +219,7 @@ export function EngagementRow({
               : `Comment on ${actorName}'s activity about ${subject}`
           }
           onPress={onPressComments}
+          box={boxFor(commentCount)}
           testID={`${testID}-comment`}
         />
       ) : null}
@@ -168,6 +234,7 @@ export function EngagementRow({
             saved ? `${subject} is in your watchlist` : `Add ${subject} to your watchlist`
           }
           onPress={onPressSave}
+          box={boxFor(0)}
           testID={`${testID}-save`}
         />
       ) : null}
@@ -178,6 +245,7 @@ export function EngagementRow({
           label="Share"
           accessibilityLabel={`Share ${subject} with a friend`}
           onPress={onPressShare}
+          box={boxFor(0)}
           testID={`${testID}-share`}
         />
       ) : null}
@@ -193,6 +261,7 @@ function Action({
   onPress,
   active = false,
   selected,
+  box,
   testID,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -202,6 +271,7 @@ function Action({
   onPress: () => void;
   active?: boolean;
   selected?: boolean;
+  box: StyleProp<ViewStyle>;
   testID?: string;
 }) {
   return (
@@ -210,7 +280,7 @@ function Action({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={selected === undefined ? undefined : { selected }}
       onPress={onPress}
-      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+      style={({ pressed }) => [box, pressed && styles.pressed]}
       testID={testID}
     >
       <Ionicons
@@ -226,9 +296,10 @@ function Action({
 }
 
 /**
- * One line, shrinking a little before it truncates; never wider than its column. The count,
- * when there is one, follows the word after a non-breaking space as `(N)` in tabular
- * figures and the Maroon accent, so `Like (9)` and `Like (10)` keep the word where it was.
+ * The word, then `(N)` in tabular figures and the Maroon accent, so `Like (9)` and
+ * `Like (10)` keep the word where it was. Never capped, ellipsized or shrunk: the space
+ * before the count is an ordinary one, so when the action is squeezed the count is what
+ * moves, onto a second line under the word.
  */
 function Label({
   active,
@@ -241,16 +312,9 @@ function Label({
 }) {
   const shown = actionCount(count);
   return (
-    <Text
-      variant="footnote"
-      tone={active ? 'action' : 'secondary'}
-      numberOfLines={1}
-      adjustsFontSizeToFit
-      minimumFontScale={LABEL_MIN_SCALE}
-      style={styles.label}
-    >
+    <Text variant="footnote" tone={active ? 'action' : 'secondary'} style={styles.label}>
       {children}
-      {shown ? '\u00A0' : null}
+      {shown ? ' ' : null}
       {shown ? (
         <Text variant="footnote" tone="action" style={styles.count}>
           {`(${shown})`}
@@ -276,14 +340,46 @@ export function actionCount(count: number): string | null {
   return `${Math.floor(n / 1000)}K`;
 }
 
+/**
+ * The actions' words in Inter Regular (the `footnote` face), as a fraction of the font
+ * size, from the bundled TTF's `hmtx` advance widths. Any other word is estimated at
+ * 0.66em a character, which is above Inter's widest common letters, so it errs wide.
+ */
+const WORD_EM: Record<string, number> = {
+  Like: 1.939,
+  Liked: 2.552,
+  Reacted: 3.882,
+  Comment: 4.583,
+  Save: 2.348,
+  Saved: 2.96,
+  Share: 2.754,
+  Laugh: 2.923,
+  Wow: 2.403,
+  Sad: 1.815,
+  Agree: 2.846,
+  Disagree: 4.209,
+};
+
+/**
+ * The width the actions' bare words need in one row: each word beside its 20pt icon and
+ * 4pt gap, `space[2]` between actions, plus 1% for pixel rounding (the advances are exact,
+ * and kerning only tightens these words). Counts are left out on
+ * purpose: they can drop below their words, a word cannot.
+ */
+export function wordsWidth(words: string[], fontSize: number): number {
+  const text = words.reduce(
+    (sum, word) => sum + (WORD_EM[word] ?? [...word].length * 0.66) * fontSize,
+    0,
+  );
+  const chrome = words.length * (theme.layout.icon.sm + theme.space[1]);
+  return (text + chrome + theme.space[2] * (words.length - 1)) * 1.01;
+}
+
 /** " 4 reactions." for the spoken label, or nothing with none. */
 const spokenReactions = (count: number) =>
   count >= 1
     ? ` ${Math.floor(count)} ${Math.floor(count) === 1 ? 'reaction' : 'reactions'}.`
     : '';
-
-/** How far a label may shrink to fit its column before it truncates instead. */
-export const LABEL_MIN_SCALE = 0.85;
 
 /**
  * How far in from the screen's edge a host sets the row: 4pt. The columns centre their
@@ -306,6 +402,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+  },
+  /**
+   * Spread (three or more): each action is as wide as its icon and words, at least 44pt,
+   * and the row's free space goes between them (`space-between`).
+   */
+  spread: { justifyContent: 'space-between', gap: theme.space[2] },
+  /** The last resort (`wraps`): onto a second line rather than out of the card. */
+  wrap: { flexWrap: 'wrap', rowGap: 0 },
+  spreadFixed: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+  },
+  /** An action with a count: it may give up width, and its count then wraps below the word. */
+  spreadShrinks: {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.space[1],
     minHeight: theme.layout.minTapTarget,
     minWidth: theme.layout.minTapTarget,
