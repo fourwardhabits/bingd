@@ -8,6 +8,7 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
+import { resetDismissLanes } from './use-dismiss-received';
 import { resetMarkSentSeen } from './use-mark-sent-seen';
 import { SENT_LIMIT, relativeTime, resetSentToYouSource } from './use-sent-to-you';
 
@@ -240,6 +241,7 @@ beforeEach(() => {
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   resetMarkSentSeen();
   mockDismissed.clear();
+  resetDismissLanes();
   // Re-tapping's tests leave the tab unfocused, and an unfocused tab marks nothing.
   mockNavigation.focused = true;
 });

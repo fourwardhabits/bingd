@@ -3,7 +3,7 @@ import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { useDismissReceived } from './use-dismiss-received';
+import { resetDismissLanes, useDismissReceived } from './use-dismiss-received';
 import type { SentRecommendation } from './use-sent-to-you';
 import type { TitleRecommendation } from './use-title-recommendations';
 
@@ -119,6 +119,7 @@ beforeEach(() => {
   bannerFetches = 0;
   gate = null;
   mockDismissed.clear();
+  resetDismissLanes();
 });
 
 describe('useDismissReceived', () => {
@@ -296,6 +297,40 @@ describe('useDismissReceived', () => {
     ]);
   });
 
+  it('a lost dismissal reply is replayed at once under the same id and counts as done', async () => {
+    let dismissCalls = 0;
+    mockAnswers.dismiss_received_recommendation = async () => {
+      dismissCalls += 1;
+      if (dismissCalls === 1) {
+        mockDismissed.add('b'); // it committed; only the reply was lost
+        return { data: null, error: { code: '08007', message: 'resolution unknown' } };
+      }
+      return { data: { status: 'already_applied' }, error: null };
+    };
+    const { result } = await mount();
+
+    await act(async () => {
+      await result.current.removal.remove(row('b'));
+    });
+
+    expect(
+      calls('dismiss_received_recommendation').map(
+        ([, a]) => (a as { p_operation_id: string }).p_operation_id,
+      ),
+    ).toEqual(['op-1', 'op-1']);
+    expect(result.current.removal.notice?.message).toBe('Removed “Film b” from Sent to You');
+    await waitFor(() =>
+      expect(
+        ids(
+          result.current.queryClient.getQueryData<SentRecommendation[]>([
+            'sent-to-you',
+            VIEWER,
+          ]),
+        ),
+      ).toEqual(['a', 'c']),
+    );
+  });
+
   it('when even the replay cannot be established, Undo says so and sends no restore', async () => {
     mockAnswers.dismiss_received_recommendation = async () => ({
       data: null,
@@ -310,7 +345,8 @@ describe('useDismissReceived', () => {
       await result.current.removal.undo();
     });
 
-    expect(calls('dismiss_received_recommendation')).toHaveLength(2);
+    // The lost reply, its immediate replay, and the Undo's own attempt to settle it.
+    expect(calls('dismiss_received_recommendation')).toHaveLength(3);
     expect(calls('restore_received_recommendation')).toHaveLength(0);
     expect(result.current.removal.notice?.message).toBe(
       'Couldn’t put “Film b” back. Try again.',
@@ -393,6 +429,29 @@ describe('useDismissReceived', () => {
       ['restore_received_recommendation', 'op-2'],
       ['dismiss_received_recommendation', 'op-3'],
     ]);
+  });
+
+  it('an Undo queued behind a dismissal the server refuses puts the row back (Codex, #371)', async () => {
+    const pending = deferred();
+    mockAnswers.dismiss_received_recommendation = () => pending.promise;
+    const { result } = await mount();
+
+    let undone: Promise<void> = Promise.resolve();
+    await act(async () => {
+      void result.current.removal.remove(row('b'));
+      undone = result.current.removal.undo();
+    });
+    await act(async () => {
+      pending.resolve({ data: null, error: { code: 'PGRST202', message: 'not found' } });
+      await undone;
+    });
+
+    expect(calls('restore_received_recommendation')).toHaveLength(0);
+    expect(
+      ids(
+        result.current.queryClient.getQueryData<SentRecommendation[]>(['sent-to-you', VIEWER]),
+      ),
+    ).toEqual(['a', 'b', 'c']);
   });
 
   it('an Undo pressed before the dismissal answered waits for it', async () => {

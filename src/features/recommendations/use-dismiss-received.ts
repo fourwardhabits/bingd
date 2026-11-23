@@ -110,6 +110,18 @@ const putBack = (queryClient: QueryClient, viewerId: string, { row, index }: Pla
     return next;
   });
 
+/**
+ * The lanes, for the life of the process and keyed by viewer as well as by recommendation.
+ * Module-level rather than a ref because Sent to You unmounts whenever For You is chosen, and
+ * a write still in flight from before that must still order the next one.
+ */
+const lanes = new Map<string, Lane>();
+
+/** For tests: forget the lanes a previous test left behind. */
+export function resetDismissLanes() {
+  lanes.clear();
+}
+
 /** The name the row draws, so the confirmation names what disappeared. */
 const titleOf = (row: SentRecommendation) => compactName(row) ?? row.title;
 
@@ -177,12 +189,12 @@ export function useDismissReceived(viewerId: string) {
    * arrived). Only then is the new write sent. If even that cannot be established, the new
    * write is not sent and the reader is told.
    */
-  const lanes = useRef(new Map<string, Lane>());
   const laneOf = (id: string) => {
-    let lane = lanes.current.get(id);
+    const key = `${viewerId}:${id}`;
+    let lane = lanes.get(key);
     if (!lane) {
       lane = { tail: Promise.resolve(), seq: 0, unsettled: null };
-      lanes.current.set(id, lane);
+      lanes.set(key, lane);
     }
     return lane;
   };
@@ -197,12 +209,22 @@ export function useDismissReceived(viewerId: string) {
     lane.tail = run.catch(() => undefined);
     return run;
   };
-  /** Sends one write with a fresh operation id, remembering it if nobody heard the answer. */
+  /**
+   * Sends one write with a fresh operation id. If nobody heard the answer it is replayed once
+   * at once under the same id, which waits for the original on the server and so usually
+   * establishes how it ended; if even that is unheard, the lane remembers it for the next
+   * write to settle first.
+   */
   const write = async (fn: Write, id: string) => {
     const operationId = newOperationId();
     const result = await send(fn, id, operationId);
-    laneOf(id).unsettled = result.outcome === 'unknown' ? { fn, operationId } : null;
-    return result;
+    if (result.outcome !== 'unknown') {
+      laneOf(id).unsettled = null;
+      return result;
+    }
+    laneOf(id).unsettled = { fn, operationId };
+    const settled = await settle(id);
+    return settled.ok ? { outcome: 'committed' as const, code: undefined } : result;
   };
   /** Establishes how this row's last unanswered write ended, by replaying it. */
   const settle = async (id: string): Promise<{ ok: boolean; code?: string }> => {
@@ -281,8 +303,13 @@ export function useDismissReceived(viewerId: string) {
     await enqueue(id, async (isLatest) => {
       // Already answered: the lane ran it first.
       const outcome = await target.dismissal;
-      // A refused dismissal already put the row back, and there is nothing to restore.
-      if (outcome === 'refused') return;
+      // A refused dismissal wrote nothing, so there is nothing to restore on the server. Its
+      // own put-back stood down because this Undo was queued behind it, so the row goes back
+      // here (Codex, #371).
+      if (outcome === 'refused') {
+        if (isLatest()) putBack(queryClient, viewerId, target);
+        return;
+      }
 
       // A dismissal nobody heard back from may still be running (Codex, #371): a restore
       // that reached the server first would find nothing to restore and not wait (D3).
