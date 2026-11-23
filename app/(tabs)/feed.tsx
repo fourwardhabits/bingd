@@ -732,7 +732,7 @@ export default function FeedScreen() {
          * **The content header row** (founder follow-up §1).
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
-         *                                     [Feed] [Trophy] [People]
+         *     LEADERBOARD                     [Feed] [Trophy] [People]
          *     DISCOVER PEOPLE                 [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
@@ -740,12 +740,12 @@ export default function FeedScreen() {
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode and since 2026-09-08 (§A3) the People heading in People mode,
-         * in the same slot with the same treatment. **In Leaderboard mode it is empty**
-         * (founder brief 2026-11-23): what is immediately below is the board's own control
-         * row (category ▾ and All time | This month), and LEADERBOARD is drawn under that,
-         * in `LeaderboardView`, over the list it names — one heading, never a second one
-         * competing above the controls. In Feed mode it is drawn only when the shelf will actually
+         * name in Feed mode, LEADERBOARD in Leaderboard mode, and since 2026-09-08 (§A3)
+         * the People heading in People mode, in the same slot with the same treatment. In
+         * Leaderboard mode the board's own quiet control row (category ▾ and All time |
+         * This month, `LeaderboardView`) follows directly under this one: a compact
+         * two-row header (founder layout correction, 2026-11-23). In Feed mode it is drawn
+         * only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
          * absent shelf would be a label for nothing. `useTrending` is called here purely
          * to know that, and costs no request — it is the same query key the shelf itself
@@ -761,7 +761,9 @@ export default function FeedScreen() {
         <View style={styles.contentHeader} testID="feed-content-header">
           {/* Every occupant is a `FeedHeading`, which pads itself to the gutter. */}
           <View style={styles.contentHeaderLeft}>
-            {showingBoard ? null : showingPeople ? (
+            {showingBoard ? (
+              <FeedHeading title="Leaderboard" />
+            ) : showingPeople ? (
               // DISCOVER PEOPLE, not PEOPLE YOU MAY KNOW (founder, UI consistency sprint,
               // 2026-11-10): the list is discovery, and most suggestions are not people the
               // reader knows.

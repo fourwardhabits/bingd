@@ -1684,13 +1684,15 @@ describe('the Feed headings', () => {
     expect(view.queryByText('TRENDING NOW')).toBeNull();
   });
 
-  it('names the board LEADERBOARD in the same style, once, under its controls', async () => {
+  it('names the board LEADERBOARD in the same style, once, beside the mode toggle', async () => {
     const view = await open();
     await toBoard(view);
     expect(view.getAllByText('LEADERBOARD')).toHaveLength(1);
     const heading = view.getByText('LEADERBOARD');
     expect(treatment(heading)).toEqual(SHARED);
-    expect(within(view.getByTestId('leaderboard-heading')).getByText('LEADERBOARD')).toBeTruthy();
+    const row = view.getByTestId('feed-content-header');
+    expect(within(row).getByText('LEADERBOARD')).toBeTruthy();
+    expect(within(row).getByLabelText('Feed mode')).toBeTruthy();
   });
 
   it('names People DISCOVER PEOPLE in the same style, not shrunk to fit', async () => {
@@ -1704,15 +1706,15 @@ describe('the Feed headings', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * **The board's controls** (founder brief 2026-11-23).
+ * **The board's controls** (founder brief 2026-11-23, and its layout correction).
  *
- *                                               [Feed] [Trophy] [People]
+ *     LEADERBOARD                              [Feed] [Trophy] [People]
  *     All Titles ▾                          [ All time | This month ]
- *     LEADERBOARD
  *
- * The filter icon, its count and the "All Titles · This month" line are gone, and so is
- * the combined sheet. The category is the browsing pages' marquee dropdown and the
- * timeframe is `CompactSwitch`; LEADERBOARD is one heading, under them.
+ * A compact two-row header. The filter icon, its count and the "All Titles · This month"
+ * line are gone, and so is the combined sheet. The category is a quiet `MediumSelector`
+ * (`filter` size) and the timeframe is `CompactSwitch`; LEADERBOARD is the one heading, in
+ * the toggle's row as TRENDING NOW and DISCOVER PEOPLE are.
  */
 describe('the board controls', () => {
   it('draws no filter icon, no count and no summary line', async () => {
@@ -1729,40 +1731,39 @@ describe('the board controls', () => {
     expect(view.queryByLabelText(/filters/i)).toBeNull();
   });
 
-  it('puts the category on the left and the timeframe on the right of one row, above the heading', async () => {
+  it('puts the category on the left and the timeframe on the right of one row, under the heading row', async () => {
     const view = await open();
     await toBoard(view);
     const controls = view.getByTestId('leaderboard-controls');
     expect(within(controls).getByTestId('leaderboard-category')).toBeTruthy();
     expect(within(controls).getByTestId('leaderboard-timeframe')).toBeTruthy();
 
-    // Tree order is reading order: the mode toggle, the controls, the heading, the rows.
+    // Tree order is reading order: the heading, the mode toggle, the controls, the rows.
     const order = view.root!
       .queryAll(
         (node) =>
+          (node.props.accessibilityRole === 'header' && node.props.accessibilityLabel === 'Leaderboard') ||
           node.props.accessibilityLabel === 'Feed mode' ||
           node.props.testID === 'leaderboard-controls' ||
-          node.props.testID === 'leaderboard-heading' ||
           node.props.testID === 'leaderboard-content',
       )
       .map((node) => node.props.testID ?? node.props.accessibilityLabel);
     expect(order.filter((x, i) => order.indexOf(x) === i)).toEqual([
+      'Leaderboard',
       'Feed mode',
       'leaderboard-controls',
-      'leaderboard-heading',
       'leaderboard-content',
     ]);
+    expect(view.queryByTestId('leaderboard-heading')).toBeNull();
   });
 
-  it('leaves the mode toggle where it is, with no heading competing beside it', async () => {
+  it('keeps the controls out of the heading row, and the heading out of the controls', async () => {
     const view = await open();
     await toBoard(view);
-    // The toggle's row has nothing on its left in this mode: LEADERBOARD is under the
-    // controls, so no second heading sits above them.
     const row = view.getByTestId('feed-content-header');
-    expect(within(row).getByLabelText('Feed mode')).toBeTruthy();
-    expect(within(row).queryByText('LEADERBOARD')).toBeNull();
     expect(within(row).queryByTestId('leaderboard-category')).toBeNull();
+    expect(within(row).queryByTestId('leaderboard-timeframe')).toBeNull();
+    expect(within(view.getByTestId('leaderboard-controls')).queryByText('LEADERBOARD')).toBeNull();
   });
 
   it('closed, the dropdown always names the category showing', async () => {
@@ -1770,7 +1771,7 @@ describe('the board controls', () => {
     await toBoard(view);
     for (const label of ['Movies', 'TV Shows', 'Reviews', 'All Titles']) {
       await chooseMetric(view, label);
-      expect(view.getByTestId('leaderboard-category-label').props.children).toBe(label);
+      expect(within(view.getByTestId('leaderboard-category')).getByText(label)).toBeTruthy();
       expect(view.queryByTestId('leaderboard-category-menu')).toBeNull();
     }
   });
