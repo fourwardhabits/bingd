@@ -617,8 +617,10 @@ describe('arriving at one comment (a notification)', () => {
     nativeEvent: { layout: { x: 0, y, width: 320, height: 80 } },
   });
 
-  it('scrolls to the thread, marks the comment briefly, and starts no reply', async () => {
+  it('scrolls to the thread, marks the comment briefly, and starts a reply without the keyboard', async () => {
     jest.useFakeTimers();
+    const focus = jest.spyOn(TextInput.prototype, 'focus');
+    focus.mockClear();
     try {
       const onFocusOffset = jest.fn();
       const view = await SURFACES[1]!.render({ focusCommentId: 'r1', onFocusOffset });
@@ -636,18 +638,34 @@ describe('arriving at one comment (a notification)', () => {
       const style = () =>
         StyleSheet.flatten(view.getByTestId('comment-row-r1').props.style) as ViewStyle;
       expect(style().backgroundColor).toBe(theme.surface.sunken);
-      // Not a reply in progress: the default composer, and Reply on that comment works.
-      expect(view.getByLabelText('Add a comment')).toBeTruthy();
-      expect(view.queryByText(/^Replying to/)).toBeNull();
+      // Since 2026-11-23: arriving from a notification starts a reply to that comment's
+      // author — without opening the keyboard — and shows only its conversation.
+      expect(view.getByText("Replying to Bo · in Anna's thread")).toBeTruthy();
+      expect(view.getByLabelText('Your reply to Bo').props.placeholder).toBe('Reply to Bo…');
+      // The focus mock is shared by every native component, so ask which one was focused.
+      expect(
+        focus.mock.contexts.some((c) => (c as TextInput | undefined)?.props?.placeholder),
+      ).toBe(false);
+      expect(view.queryByTestId('comment-thread-c2')).toBeNull();
+      expect(view.getByText('See all 3 comments')).toBeTruthy();
 
       await act(async () => {
         jest.advanceTimersByTime(FOCUS_HIGHLIGHT_MS + 10);
       });
+      // The notification's mark is over, but the row stays marked as the comment being
+      // replied to — until the reply is cancelled.
+      expect(style().backgroundColor).toBe(theme.surface.sunken);
+      await fireEvent.press(view.getByRole('button', { name: 'Cancel reply to Bo' }));
       expect(style().backgroundColor).toBeUndefined();
 
-      await fireEvent.press(view.getByLabelText('Reply to Bo'));
+      // An explicit Reply still focuses, as before.
+      await fireEvent.press(view.getAllByLabelText('Reply to Bo')[0]!);
       expect(view.getByText(/^Replying to Bo/)).toBeTruthy();
+      expect(
+        focus.mock.contexts.some((c) => (c as TextInput | undefined)?.props?.placeholder),
+      ).toBe(true);
     } finally {
+      focus.mockRestore();
       jest.useRealTimers();
     }
   });

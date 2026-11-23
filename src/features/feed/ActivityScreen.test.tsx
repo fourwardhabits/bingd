@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Keyboard, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
+import { Keyboard, ScrollView, StyleSheet, TextInput, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -60,6 +60,8 @@ let mockParams: Record<string, string> = { id: 'event-1' };
 let mockInbox: Record<string, unknown>[] = [];
 /** How many times the inbox was read, and what the first read answers if not `mockInbox`. */
 let mockInboxReads = 0;
+/** The comment writes the page sent. */
+const mockWrites: { name: string; args: Record<string, unknown> }[] = [];
 let mockFirstInbox: Record<string, unknown>[] | null = null;
 
 jest.mock('expo-router', () => ({
@@ -79,7 +81,7 @@ jest.mock('expo-router', () => ({
 const mockAuth = { status: 'ready' as string };
 
 jest.mock('@/features/auth', () => ({
-  useAuth: () => 
+  useAuth: () =>
     mockAuth.status === 'ready'
       ? {
           status: 'ready',
@@ -106,17 +108,20 @@ jest.mock('@/features/feed/use-feed', () => ({
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
-    rpc: async (name: string) =>
-      name === 'activity_comments'
-        ? { data: mockComments, error: null }
-        : name === 'watchlist_group_titles'
-          ? { data: mockGroupTitles, error: null }
-          : name === 'my_notifications'
-            ? {
-                data: (mockInboxReads += 1) === 1 && mockFirstInbox ? mockFirstInbox : mockInbox,
-                error: null,
-              }
-            : { data: null, error: null },
+    rpc: async (name: string, args: Record<string, unknown> = {}) =>
+      ['add_comment', 'edit_comment', 'delete_comment'].includes(name)
+        ? (mockWrites.push({ name, args }), { data: { status: 'ok' }, error: null })
+        : name === 'activity_comments'
+          ? { data: mockComments, error: null }
+          : name === 'watchlist_group_titles'
+            ? { data: mockGroupTitles, error: null }
+            : name === 'my_notifications'
+              ? {
+                  data:
+                    (mockInboxReads += 1) === 1 && mockFirstInbox ? mockFirstInbox : mockInbox,
+                  error: null,
+                }
+              : { data: null, error: null },
   },
   startSessionRefresh: () => () => {},
 }));
@@ -229,6 +234,7 @@ beforeEach(() => {
   mockInbox = [];
   mockInboxReads = 0;
   mockFirstInbox = null;
+  mockWrites.length = 0;
   mockAuth.status = 'ready';
   mockReactions.summary = null;
   mockReactions.askedAbout = [];
@@ -260,10 +266,6 @@ describe('the reactions on the post above the conversation', () => {
     ...over,
   });
 
-  /** The control, by the label `ActivityRow` gives it in each of its two states. */
-  const control = (view: { getByLabelText: (m: RegExp) => unknown }, reacted: boolean) =>
-    view.getByLabelText(reacted ? /You reacted to Sinners/ : /^React to Anna's activity/);
-
   it('asks about the activity on screen, and about nothing else', async () => {
     mockReactions.summary = summary();
     await renderWithProviders(<ActivityScreen />);
@@ -279,49 +281,49 @@ describe('the reactions on the post above the conversation', () => {
   });
 
   /**
-   * The viewer's own reaction goes in the action slot and is subtracted from the cluster
-   * beside it — `ActivityRow`'s rule, and the reason this screen must not draw its own
-   * control: the no-self-duplication behaviour is in the shared component.
+   * **The post is the Feed's card without its action row** (founder, 2026-11-23): the
+   * discussion and the composer are this page's actions, so Like · Comment · Share is not
+   * repeated above the thread. What a reaction *is* stays — the summary, and who reacted —
+   * read from the same shared summary the Feed reads.
    */
-  it('puts the viewer’s own reaction in its own slot', async () => {
-    mockReactions.summary = summary({ mine: 'love', total: 6 });
-    const view = await renderWithProviders(<ActivityScreen />);
-
-    // The label the control uses only when the reader has reacted, led by its word.
-    await waitFor(() =>
-      expect(view.getByLabelText(/^Liked\. You reacted to Sinners/)).toBeTruthy(),
-    );
-  });
-
-  /**
-   * The founder's own ranking of Logan, opened from a notification, with one friend's
-   * heart on it. Since the founder's decision of 2026-11-11 the author may react to it:
-   * the control is drawn, a tap saves with no alert, and the friend is still named.
-   */
-  it('offers a reaction on the viewer’s own post, saves it, and names who reacted', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai', title: 'Logan', year: 2017 });
+  it('shows who reacted to the post, and opens them, with no action row', async () => {
     mockReactions.summary = summary({
       total: 1,
       kinds: ['love'],
       byKind: { love: 1 },
       people: [
-        { userId: 'priya', username: 'priya', name: 'Priya Raman', avatarUri: null, kind: 'love' },
+        {
+          userId: 'priya',
+          username: 'priya',
+          name: 'Priya Raman',
+          avatarUri: null,
+          kind: 'love',
+        },
       ],
     });
     const view = await renderWithProviders(<ActivityScreen />);
 
-    await waitFor(() => view.getByLabelText('Priya Raman likes this. See who reacted.'));
-    const react = view.getByLabelText(/^React to Sai's activity/);
-    fireEvent.press(react as never);
+    const who = await waitFor(() =>
+      view.getByLabelText('Priya Raman likes this. See who reacted.'),
+    );
+    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    expect(view.queryByLabelText(/^Share/)).toBeNull();
+    expect(view.queryByTestId('feed-card-actions')).toBeNull();
 
-    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
-    expect(alert).not.toHaveBeenCalled();
-    alert.mockRestore();
+    await act(async () => {
+      fireEvent.press(who as never);
+    });
+    await waitFor(() => expect(view.getAllByText('Priya Raman').length).toBeGreaterThan(0));
   });
 
   it('counts and names the viewer’s own reaction to their own post', async () => {
-    mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai', title: 'Logan', year: 2017 });
+    mockEvent = event({
+      actorId: 'viewer-1',
+      actorUsername: 'sai',
+      actorName: 'Sai',
+      title: 'Logan',
+      year: 2017,
+    });
     mockReactions.summary = summary({
       total: 2,
       mine: 'love',
@@ -329,91 +331,54 @@ describe('the reactions on the post above the conversation', () => {
       byKind: { love: 2 },
       people: [
         { userId: 'viewer-1', username: 'sai', name: 'Sai', avatarUri: null, kind: 'love' },
-        { userId: 'priya', username: 'priya', name: 'Priya Raman', avatarUri: null, kind: 'love' },
+        {
+          userId: 'priya',
+          username: 'priya',
+          name: 'Priya Raman',
+          avatarUri: null,
+          kind: 'love',
+        },
       ],
     });
     const view = await renderWithProviders(<ActivityScreen />);
 
     await waitFor(() =>
-      expect(view.getByLabelText('You and Priya Raman like this. See who reacted.')).toBeTruthy(),
+      expect(
+        view.getByLabelText('You and Priya Raman like this. See who reacted.'),
+      ).toBeTruthy(),
     );
-    expect(view.getByLabelText(/^Liked\. You reacted to Logan/)).toBeTruthy();
   });
 
-  /**
-   * **An older server answer, said calmly** (20261110000100). Dead-safe handling: a
-   * server with 20261115000100 never refuses a self-reaction, but one with 20261110000100
-   * alone does; the reader is told plainly, not "Could not save your reaction".
-   */
-  it('says a refused self-reaction in its own words, not as a failure', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    mockReactions.result = {
-      ok: false,
-      message: 'You can’t react to your own post.',
-      selfReaction: true,
-    };
-    const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-
-    fireEvent.press(control(view, false) as never);
-
-    await waitFor(() => expect(alert).toHaveBeenCalledWith('You can’t react to your own post.'));
-    expect(alert).not.toHaveBeenCalledWith('Could not save your reaction', expect.anything());
-    alert.mockRestore();
-  });
-
-  it('keeps the existing alert for any other refusal', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    mockReactions.result = { ok: false, message: 'account is suspended' };
-    const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-
-    fireEvent.press(control(view, false) as never);
-
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith('Could not save your reaction', 'account is suspended'),
-    );
-    alert.mockRestore();
-  });
-
-  it('sets the default reaction on a tap, and clears it on the next one', async () => {
-    const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-
-    fireEvent.press(control(view, false) as never);
-    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
-
-    // Now with the heart already set, the same tap removes it — the Feed's rule, not a
-    // second one written for this screen.
-    mockReactions.set = [];
-    mockReactions.summary = summary({ mine: 'love' });
-    const again = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(again.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-
-    fireEvent.press(control(again, true) as never);
-    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', null]]));
-  });
-
-  it('opens the picker on a long press', async () => {
-    const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-
-    fireEvent(control(view, false) as never, 'longPress');
-
-    // The shared pill, by the label it gives its own default choice.
-    await waitFor(() => expect(view.getByLabelText('Liked')).toBeTruthy());
-  });
-
-  /**
-   * A genuinely unreacted activity is clean rather than empty-looking: the control is
-   * there to react with, and nothing claims a count.
-   */
   it('stays quiet on an activity nobody has reacted to', async () => {
     const view = await renderWithProviders(<ActivityScreen />);
 
     await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
-    expect(control(view, false)).toBeTruthy();
     expect(view.queryByText(/reaction/)).toBeNull();
+    expect(view.queryByLabelText(/See who reacted/)).toBeNull();
+  });
+
+  /**
+   * An award or goal keeps the compact row, exactly as the Feed draws it — and with it the
+   * row's own reaction control, which is not the card's action row.
+   */
+  it('keeps the compact row, and its reaction, for an award', async () => {
+    mockEvent = event({
+      type: 'award_earned',
+      mediaItemId: null,
+      title: 'Comment Gremlin',
+      award: {
+        key: 'comment-gremlin',
+        tierKey: 'whisper',
+        title: 'Whisper',
+        achievement: 'Wrote 20 comments',
+      },
+    });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByText('Wrote 20 comments')).toBeTruthy());
+    expect(view.queryByTestId('feed-card')).toBeNull();
+    fireEvent.press(view.getByLabelText(/^React to Anna's activity/) as never);
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
   });
 
   /**
@@ -498,7 +463,13 @@ describe('the activity above the conversation', () => {
   it('shows replies under the comment they answer', async () => {
     mockComments = [
       comment(),
-      comment({ id: 'c2', parent_id: 'c1', body: 'Agreed', username: 'ben', display_name: 'Ben' }),
+      comment({
+        id: 'c2',
+        parent_id: 'c1',
+        body: 'Agreed',
+        username: 'ben',
+        display_name: 'Ben',
+      }),
     ];
     const view = await renderWithProviders(<ActivityScreen />);
 
@@ -595,8 +566,11 @@ describe('the seam between the post and the conversation', () => {
     const view = await renderWithProviders(<ActivityScreen />);
     await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
 
+    // Since 2026-11-23 the post is the Feed's card, whose outline closes it.
     const ruled = nodes(view.toJSON()).filter(
-      (n) => Number(n.style.borderBottomWidth ?? 0) > 0 && n.children.length > 0,
+      (n) =>
+        Number(n.style.borderBottomWidth ?? n.style.borderWidth ?? 0) > 0 &&
+        n.children.length > 0,
     );
     expect(ruled.length).toBeGreaterThan(0);
   });
@@ -804,7 +778,8 @@ describe('the keyboard and the composer', () => {
     let node: { parent: unknown; props: Record<string, unknown> } | null =
       view.getAllByLabelText(composerLabel).at(-1) ?? null;
     while (node) {
-      const style = StyleSheet.flatten(node.props.contentContainerStyle) as ViewStyle | undefined;
+      const style = StyleSheet.flatten(node.props.contentContainerStyle) as
+        ViewStyle | undefined;
       if (style) return style;
       node = node.parent as typeof node;
     }
@@ -815,12 +790,13 @@ describe('the keyboard and the composer', () => {
     // A comment to reply to, which the default fixture does not have.
     mockComments = [comment()];
     mockKeyboard.clear();
-    jest
-      .spyOn(Keyboard, 'addListener')
-      .mockImplementation(((event: string, listener: (payload: unknown) => void) => {
-        mockKeyboard.set(event, listener);
-        return { remove: () => mockKeyboard.delete(event) };
-      }) as never);
+    jest.spyOn(Keyboard, 'addListener').mockImplementation(((
+      event: string,
+      listener: (payload: unknown) => void,
+    ) => {
+      mockKeyboard.set(event, listener);
+      return { remove: () => mockKeyboard.delete(event) };
+    }) as never);
   });
 
   it('makes room under the content for the measured keyboard', async () => {
@@ -946,6 +922,11 @@ describe('a grouped watchlist post above the conversation', () => {
  * starting a reply. Older links carry neither and open the conversation as before.
  */
 describe('a notification that names one comment', () => {
+  /**
+   * Anna's root (the post's author), then Bo's root, then Cy's reply to Bo — the reply a
+   * "Cy replied to your comment" notification is about. The viewer is Sai, who is Bo for
+   * the purposes of the story: the person being answered.
+   */
   const thread = () => [
     comment({ id: 'c1', created_at: new Date(Date.now() - 60 * 60_000).toISOString() }),
     comment({
@@ -959,78 +940,196 @@ describe('a notification that names one comment', () => {
     comment({
       id: 'c3',
       parent_id: 'c2',
-      author_id: 'viewer-1',
-      username: 'sai',
-      display_name: 'Sai',
-      body: 'My reply to Bo',
+      author_id: 'cy-id',
+      username: 'cy',
+      display_name: 'Cy',
+      body: 'Cy answers Bo',
       created_at: new Date(Date.now() - 20 * 60_000).toISOString(),
     }),
   ];
-  const layout = (y: number) => ({ nativeEvent: { layout: { x: 0, y, width: 320, height: 80 } } });
+  const layout = (y: number) => ({
+    nativeEvent: { layout: { x: 0, y, width: 320, height: 80 } },
+  });
   const marked = (view: Awaited<ReturnType<typeof renderWithProviders>>, id: string) =>
     (StyleSheet.flatten(view.getByTestId(`comment-row-${id}`).props.style) as ViewStyle)
       .backgroundColor !== undefined;
-
-  /** Report layouts for the thread holding `c3`, as the native side would. */
-  const layOut = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
-    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(500));
-    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(120));
-    await fireEvent(view.getByTestId('comment-replies-c2'), 'layout', layout(90));
-    await fireEvent(view.getByTestId('comment-row-c3').parent!, 'layout', layout(0));
-  };
+  const inboxRow = (payload: Record<string, unknown>) => ({
+    id: 'n-1',
+    kind: 'comment',
+    created_at: new Date().toISOString(),
+    read_at: null,
+    actor_id: 'cy-id',
+    actor_username: 'cy',
+    actor_display_name: 'Cy',
+    actor_avatar_path: null,
+    media_item_id: null,
+    media_title: null,
+    media_kind: null,
+    series_title: null,
+    subject_type: 'feed_event',
+    subject_id: 'event-1',
+    payload,
+  });
 
   beforeEach(() => {
     mockComments = thread();
   });
 
-  it('opens at the comment from an inbox row (?comment=), marks it, and starts no reply', async () => {
+  it('opens at the comment (?comment=), in reply mode to its author, with no keyboard', async () => {
     mockParams = { id: 'event-1', comment: 'c3' };
     const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo');
+    const focus = jest.spyOn(TextInput.prototype, 'focus');
+    focus.mockClear();
     const view = await renderWithProviders(<ActivityScreen />);
     await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
     scrollTo.mockClear();
 
-    await layOut(view);
-
-    // The thread's top: Bo's root and the reply under it, in the page's coordinates.
-    expect(scrollTo).toHaveBeenCalledWith({ y: 500 + 120 - theme.space[2], animated: true });
+    // Only the conversation the notification is about, and the way to the rest.
+    expect(view.queryByTestId('comment-thread-c1')).toBeNull();
+    expect(view.getByTestId('comment-thread-c2')).toBeTruthy();
+    expect(view.getByText('See all 3 comments')).toBeTruthy();
     expect(marked(view, 'c3')).toBe(true);
-    expect(marked(view, 'c1')).toBe(false);
-    expect(view.getByLabelText('Add a comment')).toBeTruthy();
-    expect(view.queryByText(/^Replying to/)).toBeNull();
 
-    // The obvious Reply on that comment works from here.
-    await act(async () => {
-      fireEvent.press(view.getByLabelText('Reply to Sai'));
-    });
-    expect(view.getByText(/^Replying to Sai/)).toBeTruthy();
+    // Reply mode, to Cy, in Bo's thread — without opening the keyboard.
+    expect(view.getByText("Replying to Cy · in Bo's thread")).toBeTruthy();
+    expect(view.getByLabelText('Your reply to Cy').props.placeholder).toBe('Reply to Cy…');
+    expect(view.getByRole('button', { name: 'Reply' })).toBeTruthy();
+    // The focus mock is shared by every native component, so ask which one was focused.
+    expect(
+      focus.mock.contexts.some((c) => (c as TextInput | undefined)?.props?.placeholder),
+    ).toBe(false);
+    focus.mockRestore();
+
+    // Brought into view past the post: the top of the focused conversation.
+    await fireEvent(view.getByTestId('comment-thread-c2').parent!, 'layout', layout(500));
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(40));
+    await fireEvent(view.getByTestId('comment-replies-c2'), 'layout', layout(90));
+    await fireEvent(view.getByTestId('comment-row-c3').parent!, 'layout', layout(0));
+    expect(scrollTo).toHaveBeenCalledWith({ y: 500 - theme.space[2], animated: true });
   });
 
-  it('opens at the comment from a push (?notification=), found in the inbox', async () => {
+  it('posts what is typed there as a reply in that thread, to the comment notified about', async () => {
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'Thanks Cy');
+    await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
+
+    await waitFor(() =>
+      expect(mockWrites.filter((w) => w.name === 'add_comment')).toHaveLength(1),
+    );
+    // The comment tapped-through-to: the server attaches it to Bo's root and notifies Cy.
+    expect(mockWrites.find((w) => w.name === 'add_comment')!.args).toMatchObject({
+      p_parent_id: 'c3',
+      p_body: 'Thanks Cy',
+    });
+  });
+
+  it('expands to every conversation in place, keeping the reply and the draft', async () => {
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+    await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'half a thought');
+
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: 'See all 3 comments' }));
+    });
+    expect(view.getAllByTestId(/^comment-thread-/).map((n) => n.props.testID)).toEqual([
+      'comment-thread-c1',
+      'comment-thread-c2',
+    ]);
+    expect(view.getByText(/^Replying to Cy/)).toBeTruthy();
+    expect(view.getByDisplayValue('half a thought')).toBeTruthy();
+
+    // And back again, still the same reply.
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: 'Show only this conversation' }));
+    });
+    expect(view.queryByTestId('comment-thread-c1')).toBeNull();
+    expect(view.getByDisplayValue('half a thought')).toBeTruthy();
+  });
+
+  it('targets the root’s author for a notification about a root', async () => {
+    mockParams = { id: 'event-1', comment: 'c2' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() =>
+      expect(view.getByText('Replying to Bo · under their comment')).toBeTruthy(),
+    );
+  });
+
+  it('opens in reply mode from a push (?notification=), found in the inbox', async () => {
     mockParams = { id: 'event-1', notification: 'n-1' };
-    mockInbox = [
-      {
-        id: 'n-1',
-        kind: 'comment',
-        created_at: new Date().toISOString(),
-        read_at: null,
-        actor_id: 'bo-id',
-        actor_username: 'bo',
-        actor_display_name: 'Bo',
-        actor_avatar_path: null,
-        media_item_id: null,
-        media_title: null,
-        media_kind: null,
-        series_title: null,
-        subject_type: 'feed_event',
-        subject_id: 'event-1',
-        payload: { comment_id: 'c3', reply_to: 'c2' },
-      },
+    mockInbox = [inboxRow({ comment_id: 'c3', reply_to: 'c2' })];
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(marked(view, 'c3')).toBe(true));
+    expect(view.getByText("Replying to Cy · in Bo's thread")).toBeTruthy();
+  });
+
+  it('opens in reply mode from a mention', async () => {
+    mockParams = { id: 'event-1', notification: 'n-1' };
+    mockInbox = [{ ...inboxRow({ comment_id: 'c3', reply: true }), kind: 'mention' }];
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+  });
+
+  it('stays on Add a comment once the reader cancels, through a refetch', async () => {
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Cancel reply to Cy' }));
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: ['comments'] });
+    });
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
+    expect(view.queryByText(/^Replying to/)).toBeNull();
+  });
+
+  it('keeps the reply through a refetch of the conversation', async () => {
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+    await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'still going');
+
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: ['comments'] });
+    });
+    expect(view.getByText(/^Replying to Cy/)).toBeTruthy();
+    expect(view.getByDisplayValue('still going')).toBeTruthy();
+  });
+
+  it('leaves the composer on Add a comment for the reader’s own comment or a retracted one', async () => {
+    mockComments = thread().map((row) =>
+      row.id === 'c3' ? { ...row, author_id: 'viewer-1', display_name: 'Sai' } : row,
+    );
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const own = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(marked(own, 'c3')).toBe(true));
+    expect(own.getByLabelText('Add a comment')).toBeTruthy();
+    await own.unmount();
+
+    mockComments = [
+      ...thread().map((row) =>
+        row.id === 'c2' ? { ...row, body: null, deleted_at: new Date().toISOString() } : row,
+      ),
     ];
+    mockParams = { id: 'event-1', comment: 'c2' };
+    const gone = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(gone.getByText('Comment deleted')).toBeTruthy());
+    expect(gone.getByLabelText('Add a comment')).toBeTruthy();
+  });
+
+  it('opens normally — the whole conversation, Add a comment — with no notification', async () => {
     const view = await renderWithProviders(<ActivityScreen />);
     await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
 
-    await waitFor(() => expect(marked(view, 'c3')).toBe(true));
+    expect(view.getAllByTestId(/^comment-thread-/)).toHaveLength(2);
+    expect(view.queryByText(/^See all/)).toBeNull();
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
     expect(view.queryByText(/^Replying to/)).toBeNull();
   });
 
@@ -1064,6 +1163,7 @@ describe('a notification that names one comment', () => {
 
     await waitFor(() => expect(marked(view, 'c3')).toBe(true));
     expect(mockInboxReads).toBe(2);
+    expect(view.getByText(/^Replying to Cy/)).toBeTruthy();
   });
 
   it('opens the activity as before when the push names a notification it cannot find', async () => {
@@ -1073,6 +1173,7 @@ describe('a notification that names one comment', () => {
 
     expect(view.getByLabelText('Sinners, 2025')).toBeTruthy();
     expect(marked(view, 'c3')).toBe(false);
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
     // Asked once more, and only once: no loop for a row that is genuinely not there.
     await waitFor(() => expect(mockInboxReads).toBe(2));
     expect(view.queryByText('That comment is no longer available.')).toBeNull();
