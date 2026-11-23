@@ -154,6 +154,21 @@ export function useDismissReceived(viewerId: string) {
     }
   };
 
+  /**
+   * A failure that arrives after the fact, for one row. It must not take away the Undo of a
+   * *newer* removal still on offer, of another row or of this one (Codex, #371): that stays,
+   * and the failure is spoken instead. The row itself is already right — put back, taken out
+   * again or reconciled — so what is lost is only the sentence on screen.
+   */
+  const fail = (rowId: string, failure: RerankNotice, latest: boolean) => {
+    // Another row's Undo, or a newer removal of this same row, is the notice that matters.
+    if (undoable.current && (undoable.current.row.id !== rowId || !latest)) {
+      AccessibilityInfo.announceForAccessibility?.(failure.message);
+      return;
+    }
+    show(failure);
+  };
+
   /** The title page's card reads the same rows; a stale copy would still name the sender. */
   const reconcileBanner = () =>
     void queryClient.invalidateQueries({ queryKey: ['title-recommendations', viewerId] });
@@ -260,7 +275,7 @@ export function useDismissReceived(viewerId: string) {
       const prior = await settle(row.id);
       if (!prior.ok) {
         reconcileAll();
-        show(removalNotices.failed(titleOf(row), prior.code === '42501'));
+        fail(row.id, removalNotices.failed(titleOf(row), prior.code === '42501'), isLatest());
         return 'refused';
       }
 
@@ -281,9 +296,7 @@ export function useDismissReceived(viewerId: string) {
       } else if (outcome === 'refused') {
         // Proof nothing was written (including a backend without the function yet).
         if (isLatest()) putBack(queryClient, viewerId, placed);
-        if (undoable.current?.row.id === row.id || !undoable.current) {
-          show(removalNotices.failed(titleOf(row), code === '42501'));
-        }
+        fail(row.id, removalNotices.failed(titleOf(row), code === '42501'), isLatest());
       } else if (mustReconcile(outcome)) {
         reconcileAll();
       }
@@ -316,7 +329,11 @@ export function useDismissReceived(viewerId: string) {
       const prior = await settle(id);
       if (!prior.ok) {
         reconcileAll();
-        show(removalNotices.undoFailed(titleOf(target.row), prior.code === '42501'));
+        fail(
+          id,
+          removalNotices.undoFailed(titleOf(target.row), prior.code === '42501'),
+          isLatest(),
+        );
         return;
       }
 
@@ -332,7 +349,11 @@ export function useDismissReceived(viewerId: string) {
         else reconcileBanner();
       } else if (restored.outcome === 'refused') {
         if (isLatest()) without(queryClient, viewerId, id);
-        show(removalNotices.undoFailed(titleOf(target.row), restored.code === '42501'));
+        fail(
+          id,
+          removalNotices.undoFailed(titleOf(target.row), restored.code === '42501'),
+          isLatest(),
+        );
       } else {
         reconcileAll();
       }

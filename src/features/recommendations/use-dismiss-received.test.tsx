@@ -454,6 +454,40 @@ describe('useDismissReceived', () => {
     ).toEqual(['a', 'b', 'c']);
   });
 
+  it('an older Undo that fails does not take away a newer removal’s Undo (Codex, #371)', async () => {
+    const restoring = deferred();
+    mockAnswers.restore_received_recommendation = () => restoring.promise;
+    const { result } = await mount();
+    await act(async () => {
+      await result.current.removal.remove(row('a'));
+    });
+    let undone: Promise<void> = Promise.resolve();
+    await act(async () => {
+      undone = result.current.removal.undo();
+    });
+    await act(async () => {
+      await result.current.removal.remove(row('c'));
+    });
+
+    await act(async () => {
+      restoring.resolve({ data: null, error: { code: 'P0001', message: 'no' } });
+      await undone;
+    });
+
+    expect(result.current.removal.notice?.message).toBe('Removed “Film c” from Sent to You');
+    // And that Undo still works.
+    mockAnswers.restore_received_recommendation = async () => ({
+      data: { status: 'ok', restored: true },
+      error: null,
+    });
+    await act(async () => {
+      await result.current.removal.undo();
+    });
+    expect(calls('restore_received_recommendation').at(-1)?.[1]).toMatchObject({
+      p_recommendation_id: 'c',
+    });
+  });
+
   it('an Undo pressed before the dismissal answered waits for it', async () => {
     const pending = deferred();
     mockAnswers.dismiss_received_recommendation = () => pending.promise;
