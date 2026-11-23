@@ -27,6 +27,7 @@ import {
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { ForYouList, type ForYouListTile } from '@/features/recommendations/ForYouList';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
+import { useDismissReceived } from '@/features/recommendations/use-dismiss-received';
 import { useMarkSentSeen } from '@/features/recommendations/use-mark-sent-seen';
 import {
   refreshRecommendations,
@@ -61,6 +62,7 @@ import { mediaKindFor, track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
+import { RerankNoticeBar } from '@/features/collection/RerankNoticeBar';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
@@ -1036,6 +1038,7 @@ export default function RecommendationsScreen() {
 
           {sentOnly ? (
             <SentList
+              viewerId={profile.id}
               header={toolbar}
               query={sent}
               rows={sentVisible}
@@ -1410,6 +1413,7 @@ const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [
  * hidden everything that was sent, or the list could not load.
  */
 function SentList({
+  viewerId,
   query,
   rows,
   total,
@@ -1421,6 +1425,7 @@ function SentList({
   onToggleSave,
   header,
 }: {
+  viewerId: string;
   /** The page's toolbar: first in the list's scroller, in every state. */
   header: React.ReactNode;
   query: ReturnType<typeof useSentToYou>;
@@ -1442,68 +1447,85 @@ function SentList({
    * grows to fill the page so a state sits where it did.
    */
   const loaded = !query.isPending && !query.isError && total > 0 && rows.length > 0;
+  /**
+   * **Remove from Sent to You, with Undo** (20261130001200). The row's ⋯ menu removes it at
+   * once; the confirmation over the foot of the list is the collection's own notice bar
+   * (`RerankNoticeBar`), drawn outside the scroller so it stays put while the list moves
+   * and outlives the last row (the empty state can still be undone).
+   */
+  const removal = useDismissReceived(viewerId);
   return (
-    <ScrollView
-      contentContainerStyle={[styles.content, !loaded && styles.stateContent]}
-      refreshControl={
-        <RefreshControl
-          refreshing={query.isRefetching}
-          onRefresh={() => void query.refetch()}
-          tintColor={theme.semantic.action}
-          colors={[theme.semantic.action]}
-        />
-      }
-    >
-      {header}
-      {query.isPending ? (
-        <SkeletonRow count={5} />
-      ) : query.isError ? (
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load these"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void query.refetch() }}
-        />
-      ) : total === 0 ? (
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing sent your way yet"
-          body="When someone you follow back recommends a film or a season, it lands here."
-        />
-      ) : inMedium === 0 ? (
-        // Something was sent, all of it on the other side of the switch. Not the filter
-        // state: there may be no filter to clear, and the switch is in the header.
-        <EmptyState
-          kind="nothingYet"
-          title={medium === 'tv' ? 'No TV sent your way yet' : 'No movies sent your way yet'}
-          body={
-            medium === 'tv'
-              ? 'Switch to Movies to see what people have sent you.'
-              : 'Switch to TV to see what people have sent you.'
-          }
-        />
-      ) : rows.length === 0 ? (
-        // No button. Clear all is already on screen, in the chip row a few points above
-        // this, and a second one with the same label is the duplicated state the founder
-        // rejected on the Feed: the reader would have to work out whether the two do the
-        // same thing.
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing matches your filters"
-          body="Clear your filters to see everything people have sent you."
-        />
-      ) : (
-        <View style={styles.wallBody}>
-          <SentToYouList
-            rows={rows}
-            saved={saved}
-            busyId={busyId}
-            onOpen={onOpen}
-            onToggleSave={onToggleSave}
+    <View style={styles.sentPage}>
+      <ScrollView
+        contentContainerStyle={[styles.content, !loaded && styles.stateContent]}
+        refreshControl={
+          <RefreshControl
+            refreshing={query.isRefetching}
+            onRefresh={() => void query.refetch()}
+            tintColor={theme.semantic.action}
+            colors={[theme.semantic.action]}
           />
-        </View>
-      )}
-    </ScrollView>
+        }
+      >
+        {header}
+        {query.isPending ? (
+          <SkeletonRow count={5} />
+        ) : query.isError ? (
+          <EmptyState
+            kind="couldNotLoad"
+            title="Could not load these"
+            body="Check your connection and try again."
+            action={{ label: 'Try again', onPress: () => void query.refetch() }}
+          />
+        ) : total === 0 ? (
+          <EmptyState
+            kind="nothingYet"
+            title="Nothing sent your way yet"
+            body="When someone you follow back recommends a film or a season, it lands here."
+          />
+        ) : inMedium === 0 ? (
+          // Something was sent, all of it on the other side of the switch. Not the filter
+          // state: there may be no filter to clear, and the switch is in the header.
+          <EmptyState
+            kind="nothingYet"
+            title={medium === 'tv' ? 'No TV sent your way yet' : 'No movies sent your way yet'}
+            body={
+              medium === 'tv'
+                ? 'Switch to Movies to see what people have sent you.'
+                : 'Switch to TV to see what people have sent you.'
+            }
+          />
+        ) : rows.length === 0 ? (
+          // No button. Clear all is already on screen, in the chip row a few points above
+          // this, and a second one with the same label is the duplicated state the founder
+          // rejected on the Feed: the reader would have to work out whether the two do the
+          // same thing.
+          <EmptyState
+            kind="nothingYet"
+            title="Nothing matches your filters"
+            body="Clear your filters to see everything people have sent you."
+          />
+        ) : (
+          <View style={styles.wallBody}>
+            <SentToYouList
+              rows={rows}
+              saved={saved}
+              busyId={busyId}
+              onOpen={onOpen}
+              onToggleSave={onToggleSave}
+              onRemove={(row) => void removal.remove(row)}
+            />
+          </View>
+        )}
+      </ScrollView>
+      {removal.notice ? (
+        <RerankNoticeBar
+          notice={removal.notice}
+          onAction={() => void removal.undo()}
+          onDismiss={removal.close}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -1581,6 +1603,8 @@ const styles = StyleSheet.create({
   // Top Rated has no features row; this is the seam the row's foot would have given.
   topRatedGap: { height: theme.space[3] },
   content: { paddingBottom: theme.space[10] },
+  // Sent to You's scroller and, over its foot, the removal notice.
+  sentPage: { flex: 1 },
   // A loading, empty or failed wall under the toolbar fills the page, as it did when it
   // was drawn outside the scroller.
   stateContent: { flexGrow: 1 },

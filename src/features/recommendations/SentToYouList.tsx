@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
-import { Text, TitleRow } from '@/ui/components';
+import { Sheet, SheetRow, Text, TitleRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { isUnread, relativeTime, type SentRecommendation } from './use-sent-to-you';
@@ -15,6 +16,11 @@ export type SentToYouListProps = {
   busyId: string | null;
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
+  /**
+   * Removes one recommendation from Sent to You (20261130001200). Offered from the row's ⋯
+   * menu, and only when given: without it the row has no menu at all.
+   */
+  onRemove?: (row: SentRecommendation) => void;
 };
 
 /**
@@ -30,7 +36,18 @@ export type SentToYouListProps = {
  * text on the line under the title and never drawn over the artwork, which was the
  * founder's explicit constraint.
  */
-export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: SentToYouListProps) {
+export function SentToYouList({
+  rows,
+  saved,
+  busyId,
+  onOpen,
+  onToggleSave,
+  onRemove,
+}: SentToYouListProps) {
+  /** The row whose ⋯ menu is open, or null. One menu, mounted only while open. */
+  const [menuFor, setMenuFor] = useState<SentRecommendation | null>(null);
+  const menuName = menuFor ? (compactName(menuFor) ?? menuFor.title) : '';
+
   return (
     <View>
       {rows.map((row) => {
@@ -88,6 +105,29 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
                       color={isSaved ? theme.semantic.action : theme.text.tertiary}
                     />
                   </Pressable>
+                  {/**
+                   * **The ⋯, smaller and quieter than the bookmark** (founder request,
+                   * 2026-11-22). Removing is the rare act, so it sits behind a menu rather
+                   * than as a second full-size glyph competing with Save. The same
+                   * `Sheet` + `SheetRow` menu the title page's ⋯ and a profile's menu use.
+                   */}
+                  {onRemove ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`More options for ${name}`}
+                      accessibilityHint="Remove it from Sent to You"
+                      accessibilityState={{ expanded: menuFor?.id === row.id }}
+                      onPress={() => setMenuFor(row)}
+                      style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+                      testID={`sent-more-${row.id}`}
+                    >
+                      <Ionicons
+                        name="ellipsis-horizontal"
+                        size={theme.layout.icon.sm}
+                        color={theme.text.tertiary}
+                      />
+                    </Pressable>
+                  ) : null}
                 </View>
               }
               divided
@@ -104,6 +144,25 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
           </View>
         );
       })}
+
+      {menuFor && onRemove ? (
+        <Sheet visible onClose={() => setMenuFor(null)} label={`Options for ${menuName}`}>
+          <View style={styles.menu} testID="sent-menu">
+            {/* The value line is the reassurance the act needs: it is the reader's own
+                list, and nobody is told. Undo follows on the screen. */}
+            <SheetRow
+              icon="remove-circle-outline"
+              label="Remove from Sent to You"
+              value={`${menuFor.senderName} won’t be told`}
+              onPress={() => {
+                const row = menuFor;
+                setMenuFor(null);
+                onRemove(row);
+              }}
+            />
+          </View>
+        </Sheet>
+      ) : null}
     </View>
   );
 }
@@ -129,6 +188,20 @@ const styles = StyleSheet.create({
   wrap: { position: 'relative' },
   unopened: { backgroundColor: theme.surface.raised },
   trailing: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  // A full 44pt box rather than slop: the bookmark's slop already reaches into the gap
+  // between the two, and two slops meeting there would make the press ambiguous.
+  more: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressed: { opacity: 0.7 },
+  menu: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+    paddingBottom: theme.space[6],
+  },
   dot: {
     width: 8,
     height: 8,

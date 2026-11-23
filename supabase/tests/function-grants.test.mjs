@@ -905,6 +905,14 @@ const ALLOWED = {
   // The same recipient-only read for `opened_at`, whose column grant 20261121000100 revokes
   // (FU1113-E O2): a sender could otherwise select it as a read receipt.
   'recommendation_opened_at(uuid)': ['authenticated'],
+
+  // 20261130001200, removing a received recommendation from Sent to You. Both write only
+  // `dismissed_at` on the caller's own delivered row (`recipient_id = auth.uid()`, not a
+  // parameter), with an operation id; somebody else's id, a pending row or an unknown id
+  // answers false, so neither is an oracle or a way to write about anybody else. Distinct
+  // from `dismiss_recommendation(uuid)` above, which throws away a pending request.
+  'dismiss_received_recommendation(uuid,uuid)': ['authenticated'],
+  'restore_received_recommendation(uuid,uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

@@ -106,6 +106,15 @@
  *      after it (WG5 in `races/watchlist-grouping.mjs`) finds no window holding its time and
  *      starts a second post in one half hour. The honest function is run first as a control
  *      and must leave one post.
+ *  22. `dismiss_received_recommendation` without its `dismissed_at is null` guard
+ *      (20261130001200). A second dismissal must report a row dismissed again and move
+ *      `dismissed_at` — the "first time wins" that `races/recommendation-dismiss.mjs` D1
+ *      asserts. The honest function is run first as a control.
+ *  23. `dismiss_received_recommendation` without its operation claim (20261130001200). Dismiss,
+ *      Undo, then the dismissal's lost reply replayed with the same id: the mutant removes
+ *      the recommendation again, which `races/recommendation-dismiss.mjs` D2 and
+ *      `recommendation-dismiss.test.mjs` reject. The honest function is run first as a
+ *      control and must leave it restored.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1920,6 +1929,93 @@ end; $$;
   results.push([
     'save reads its window instead of claiming it -> a save that began first but locked second starts a second post',
     (await scenario('mutant')) === 2,
+  ]);
+
+  await db.close();
+}
+
+// --- Mutants 22 and 23: dismiss_received_recommendation without its guard, then without its
+//     operation claim (20261130001200).
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const delivered = async (label) => {
+    const sender = await fx.createUser();
+    const recipient = await fx.createUser();
+    await fx.mutualFollow(sender, recipient);
+    const film = await fx.createMovie(`Mutant 22 ${label}`);
+    const s = await db.session('sender');
+    await s.actAs(sender);
+    const sent = (
+      await s.q(`select recommend_title($1, $2, $3) as r`, [crypto.randomUUID(), recipient, film])
+    ).rows[0].r;
+    await s.end();
+    const r = await db.session('recipient');
+    await r.actAs(recipient);
+    return { id: sent.id, r };
+  };
+  const dismissedAt = async (id) =>
+    (await db.rows(`select dismissed_at from title_recommendations where id = $1`, [id]))[0]
+      .dismissed_at;
+  const dismiss = async (r, id, op = crypto.randomUUID()) =>
+    (await r.q(`select dismiss_received_recommendation($1, $2) as r`, [op, id])).rows[0].r;
+  const restore = async (r, id) =>
+    (
+      await r.q(`select restore_received_recommendation($1, $2) as r`, [crypto.randomUUID(), id])
+    ).rows[0].r;
+
+  /** Twice in a row: does the second count the row again and move the time? */
+  const twice = async (label) => {
+    const { id, r } = await delivered(label);
+    await dismiss(r, id);
+    const first = await dismissedAt(id);
+    await r.q(`select pg_sleep(0.01)`);
+    const second = await dismiss(r, id);
+    const after = await dismissedAt(id);
+    await r.end();
+    return second.dismissed === true && +after !== +first;
+  };
+  /** Dismiss, Undo, replay of the dismissal's id: is it removed again? */
+  const replay = async (label) => {
+    const { id, r } = await delivered(label);
+    const op = crypto.randomUUID();
+    await dismiss(r, id, op);
+    await restore(r, id);
+    await dismiss(r, id, op);
+    const after = await dismissedAt(id);
+    await r.end();
+    return after !== null;
+  };
+
+  controls.push([
+    'dismissal guard in place -> a second dismissal changes nothing (D1 holds)',
+    !(await twice('honest-guard')),
+  ]);
+  controls.push([
+    'dismissal claim in place -> a replay after Undo leaves it restored (D2 holds)',
+    !(await replay('honest-claim')),
+  ]);
+
+  const [{ def }] = await db.rows(
+    `select pg_get_functiondef('dismiss_received_recommendation(uuid, uuid)'::regprocedure) as def`,
+  );
+  const guard = /\n\s*and r\.dismissed_at is null;/;
+  const claim =
+    /if not _claim_operation\(p_operation_id, 'dismiss_received_recommendation'\) then\s*return jsonb_build_object\('status', 'already_applied'\);\s*end if;/;
+  if (!guard.test(def)) throw new Error('mutant 22: the guard was not found');
+  if (!claim.test(def)) throw new Error('mutant 23: the claim was not found');
+
+  await db.sql(def.replace(guard, '; -- mutant 22'));
+  results.push([
+    'dismissal guard dropped -> a second dismissal counts the row again and moves dismissed_at',
+    await twice('mutant-guard'),
+  ]);
+
+  await db.sql(def.replace(claim, '-- mutant 23'));
+  results.push([
+    'dismissal claim dropped -> a replay after Undo removes the recommendation again',
+    await replay('mutant-claim'),
   ]);
 
   await db.close();

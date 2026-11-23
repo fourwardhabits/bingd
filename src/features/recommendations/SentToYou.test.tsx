@@ -8,6 +8,7 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
+import { resetDismissLanes } from './use-dismiss-received';
 import { resetMarkSentSeen } from './use-mark-sent-seen';
 import { SENT_LIMIT, relativeTime, resetSentToYouSource } from './use-sent-to-you';
 
@@ -22,6 +23,12 @@ let mockWatchlist: unknown[] = [];
  * screen down with it would prove nothing about what the bookmark does.
  */
 let mockRpcErrors: Record<string, unknown> = {};
+/**
+ * Recommendations the server holds as removed from Sent to You (20261130001200): written by a
+ * successful `dismiss_received_recommendation` / `restore_received_recommendation`, and left
+ * out of both list reads, as the recipient policy does.
+ */
+const mockDismissed = new Set<string>();
 /** How long an RPC takes to answer, in ms: a slow server, for the open-menu race. */
 const mockRpcDelayMs: Record<string, number> = {};
 /**
@@ -45,7 +52,15 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      const answer = { data: error ? null : (mockRpcResults[name] ?? null), error };
+      const id = (args as { p_recommendation_id?: string } | null)?.p_recommendation_id ?? '';
+      if (!error && name === 'dismiss_received_recommendation') mockDismissed.add(id);
+      if (!error && name === 'restore_received_recommendation') mockDismissed.delete(id);
+      const served = mockRpcResults[name] ?? null;
+      const data =
+        Array.isArray(served) && name.startsWith('recommendations_to_me')
+          ? served.filter((row: { id: string }) => !mockDismissed.has(row.id))
+          : served;
+      const answer = { data: error ? null : data, error };
       const delay = mockRpcDelayMs[name] ?? 0;
       return delay > 0
         ? new Promise((done) => setTimeout(() => done(answer), delay))
@@ -225,6 +240,8 @@ beforeEach(() => {
   mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   resetMarkSentSeen();
+  mockDismissed.clear();
+  resetDismissLanes();
   // Re-tapping's tests leave the tab unfocused, and an unfocused tab marks nothing.
   mockNavigation.focused = true;
 });
@@ -1239,5 +1256,177 @@ describe('the Sent to You count follows Movies / TV', () => {
 
     await waitFor(() => expect(view.getByRole('radio', { name: 'TV' })).toBeTruthy());
     expect(view.queryByTestId('compact-switch-indicator-tv', { includeHiddenElements: true })).toBeNull();
+  });
+});
+
+/**
+ * **Remove from Sent to You** (founder request, 2026-11-22; 20261130001200). The row's ⋯
+ * opens the menu, the one row there removes it at once, and the notice over the list offers
+ * Undo. It is a different act from seeing, opening, bookmarking, a request's Dismiss and For
+ * You's "not interested", and the tests below hold each of those apart.
+ */
+describe('removing a recommendation from Sent to You', () => {
+  const dismissals = () =>
+    mockRpc.mock.calls.filter(([name]) => name === 'dismiss_received_recommendation');
+  const restores = () =>
+    mockRpc.mock.calls.filter(([name]) => name === 'restore_received_recommendation');
+
+  const removeFromMenu = async (
+    view: Awaited<ReturnType<typeof renderWithProviders>>,
+    name = 'Inception',
+  ) => {
+    await fireEvent.press(await view.findByLabelText(`More options for ${name}`));
+    await fireEvent.press(await view.findByRole('button', { name: 'Remove from Sent to You' }));
+  };
+
+  beforeEach(() => {
+    mockRpcResults.dismiss_received_recommendation = { status: 'ok', dismissed: true };
+    mockRpcResults.restore_received_recommendation = { status: 'ok', restored: true };
+  });
+
+  it('offers it behind a compact ⋯ beside the bookmark, saying the sender is not told', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    const more = await view.findByLabelText('More options for Inception');
+    expect(more.props.accessibilityHint).toBe('Remove it from Sent to You');
+    expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
+
+    await fireEvent.press(more);
+    const row = await view.findByRole('button', { name: 'Remove from Sent to You' });
+    expect(row.props.accessibilityHint).toBe('Ada won’t be told');
+    // Opening the menu does nothing by itself.
+    expect(dismissals()).toHaveLength(0);
+  });
+
+  it('removes the row at once, with Undo, and calls nothing else', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Heat' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+
+    await removeFromMenu(view);
+
+    await waitFor(() => expect(view.queryByText('Inception (2010)')).toBeNull());
+    expect(view.getByText('Heat (2010)')).toBeTruthy();
+    expect(dismissals()).toEqual([
+      [
+        'dismiss_received_recommendation',
+        { p_operation_id: expect.stringMatching(/^operation-/), p_recommendation_id: 'r1' },
+      ],
+    ]);
+    expect(view.getByText('Removed “Inception” from Sent to You')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Undo' })).toBeTruthy();
+
+    // Not opened, not a pending request's dismiss, not For You's not-interested, not saved.
+    const others = mockRpc.mock.calls
+      .map(([name]) => name as string)
+      .filter((name) =>
+        /mark_recommendation_opened|add_recommendation|^dismiss_recommendation|dismiss_for_you|dismiss_all|watchlist|rank/.test(
+          name,
+        ),
+      );
+    expect(others).toEqual([]);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('Undo puts it back', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await removeFromMenu(view);
+    await waitFor(() => expect(view.getByText('Nothing sent your way yet')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    expect(restores()).toEqual([
+      [
+        'restore_received_recommendation',
+        { p_operation_id: expect.stringMatching(/^operation-/), p_recommendation_id: 'r1' },
+      ],
+    ]);
+    // A fresh id for the Undo: the dismissal's own id is spent.
+    expect(restores()[0][1].p_operation_id).not.toBe(dismissals()[0][1].p_operation_id);
+    expect(view.queryByText('Removed “Inception” from Sent to You')).toBeNull();
+  });
+
+  it('removes one sender’s recommendation of a title and keeps another sender’s', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({
+        id: 'r2',
+        sender_id: 'user-3',
+        sender_username: 'ben',
+        sender_display_name: 'Ben',
+      }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getAllByText('Inception (2010)')).toHaveLength(2));
+
+    const [adasMenu] = view.getAllByLabelText('More options for Inception');
+    if (!adasMenu) throw new Error('no ⋯ on the first row');
+    await fireEvent.press(adasMenu);
+    await fireEvent.press(await view.findByRole('button', { name: 'Remove from Sent to You' }));
+
+    await waitFor(() => expect(view.getAllByText('Inception (2010)')).toHaveLength(1));
+    expect(view.getByText(/Ben recommended this · /)).toBeTruthy();
+    expect(view.queryByText(/Ada recommended this · /)).toBeNull();
+    expect(dismissals()[0][1]).toMatchObject({ p_recommendation_id: 'r1' });
+  });
+
+  it('a refusal puts the row back and says so', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRpcErrors.dismiss_received_recommendation = { code: '42501', message: 'suspended' };
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await removeFromMenu(view);
+
+    await waitFor(() =>
+      expect(view.getByText('Your account cannot make changes right now.')).toBeTruthy(),
+    );
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
+  it('the bookmark saves without removing, and a saved row can still be removed', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await fireEvent.press(await view.findByLabelText('Add Inception to your watchlist'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()),
+    );
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(dismissals()).toHaveLength(0);
+
+    await removeFromMenu(view);
+    await waitFor(() => expect(view.queryByText('Inception (2010)')).toBeNull());
+    // Removing is not unsaving.
+    expect(
+      mockRpc.mock.calls.filter(
+        ([name, args]) =>
+          name === 'set_watchlist' && (args as { p_present: boolean }).p_present === false,
+      ),
+    ).toEqual([]);
+  });
+
+  it('opening a recommendation never removes it', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Inception (2010)'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', expect.anything()),
+    );
+    expect(dismissals()).toHaveLength(0);
   });
 });
