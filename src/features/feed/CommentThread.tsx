@@ -348,6 +348,19 @@ export function CommentThread({
   const [expanded, setExpanded] = useState(false);
   const focusedView = Boolean(focusThread) && !expanded;
   /**
+   * **Measurements belong to one shape of the list** (Codex review, PR #374). A push's
+   * comment can resolve after the whole conversation has laid out; the list then becomes
+   * the focused thread alone, and the offset recorded for that thread in the full list
+   * would land the scroll below it. So when the shape changes, the threads' offsets are
+   * forgotten and the scroll waits for where the thread is *now* (the offsets inside a
+   * thread — its replies, a reply — do not move with it and are kept). A layout effect,
+   * so it runs before both the arrival effect below and the native layout events.
+   */
+  const listShape = focusedView && focusThread ? `focused:${focusThread.root.id}` : 'all';
+  useLayoutEffect(() => {
+    layout.current.threads.clear();
+  }, [listShape]);
+  /**
    * **Reply mode on arrival**, set during render rather than in an effect so the first
    * frame that shows the comment already shows "Replying to …" — the same pattern the
    * per-activity reset above uses. Once per focused comment: Cancel returns to "Add a

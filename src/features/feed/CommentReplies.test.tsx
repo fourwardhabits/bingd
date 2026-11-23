@@ -670,6 +670,41 @@ describe('arriving at one comment (a notification)', () => {
     }
   });
 
+  it('waits for the focused thread’s new place when the target resolves after layout', async () => {
+    // Codex review, PR #374: a push's comment arrives after the whole list has laid out;
+    // the offset recorded for the thread in the full list must not steer the scroll.
+    mockCommentRows = [
+      ...conversation(),
+      comment({
+        id: 'r2',
+        parent_id: 'c2',
+        author_id: 'dee-id',
+        username: 'dee',
+        display_name: 'Dee',
+        body: 'Late answer',
+        created_at: minutesAgo(5),
+      }),
+    ];
+    const onFocusOffset = jest.fn();
+    const props = { ...base, scroll: 'inherited' as const, onFocusOffset };
+    const view = await settle(await renderWithProviders(<CommentThread {...props} />));
+
+    // The full list lays out: Cy's thread far down.
+    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(400));
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(900));
+    await fireEvent(view.getByTestId('comment-replies-c2'), 'layout', layout(200));
+    await fireEvent(view.getByTestId('comment-row-r2').parent!, 'layout', layout(0));
+
+    // The push's comment resolves: no scroll from the stale 900.
+    await view.rerender(<CommentThread {...props} focusCommentId="r2" />);
+    expect(onFocusOffset).not.toHaveBeenCalled();
+
+    // The thread reports its place in the focused list, and the scroll uses it.
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(40));
+    expect(onFocusOffset).toHaveBeenCalledTimes(1);
+    expect(onFocusOffset).toHaveBeenCalledWith(400 + Math.max(0, 40 + 200 + 0 - 160));
+  });
+
   it('says so, and still opens the conversation, when that comment has gone', async () => {
     const view = await SURFACES[1]!.render({ focusCommentId: 'deleted-one' });
     expect(view.getByText('That comment is no longer available.')).toBeTruthy();
