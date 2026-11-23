@@ -218,10 +218,15 @@ describe('§L.2 the goal trigger follows the events', () => {
 });
 
 describe('§L.2 + R2 the monthly leaderboard', () => {
-  it('is inert while the flag is off, fallback and all', async () => {
+  it('no longer reads the flag: off, the board still gives an undated row nothing', async () => {
+    // 20261130001300 deleted the flagged legacy arm (the recording-time fallback) once the
+    // flag had been true on staging and production since the T4 cutover. The flag stays
+    // for the diff below; the board no longer consults it.
     await board(false);
     await seen('Undated, created this month', []);
-    assert.equal(await boardCount(), 1, 'the fallback, still present');
+    assert.equal(await boardCount(), 0, 'no recording-time fallback, flag or no flag');
+    await seen('Dated, flag off', [[thisMonth(3), 'reader']]);
+    assert.equal(await boardCount(), 1, 'and the events arm answers with the flag off');
   });
 
   it('counts a native-dated viewing in the month', async () => {

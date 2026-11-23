@@ -1,18 +1,18 @@
-import { fireEvent, within } from '@testing-library/react-native';
+import { cleanup, fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
 import { medal as medalTokens, theme } from '@/ui/tokens';
 
-import { LeaderboardView } from './LeaderboardView';
+import { LeaderboardView, timeframeOptions } from './LeaderboardView';
 import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
 
 /**
  * **The Leaderboard's final polish** (founder, 2026-11-04): first place carries a small
  * Amber trophy that leaves the row exactly as it was.
  *
- * **Its categories and time range** behind one filter icon and sheet since the header
- * consistency pass (founder spec, 2026-11-22).
+ * **Its category and time range** are a dropdown and a switch above the LEADERBOARD
+ * heading since the 2026-11-23 brief.
  */
 
 const person = (over: Partial<LeaderboardEntry> = {}): LeaderboardEntry => ({
@@ -48,124 +48,248 @@ const board = (
     />,
   );
 
+let mockWindow = { width: 390, height: 800, scale: 2, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
+
 /**
- * **What and when, behind one filter icon** (header consistency, founder spec 2026-11-22):
- * the two dropdowns became `FilterIconButton`, a line naming both choices, and one sheet
- * (`LeaderboardFilterSheet`) holding the four types and the two periods as radio chips.
+ * **Category ▾ on the left, All time | This month on the right, LEADERBOARD under them**
+ * (founder brief 2026-11-23). The filter icon, its count, the summary line and the combined
+ * sheet are gone.
  */
-describe('the filters', () => {
-  const openSheet = async (view: Awaited<ReturnType<typeof board>>) => {
-    await fireEvent.press(view.getByTestId('leaderboard-filter-button'));
-    return {
-      type: within(await view.findByLabelText('Type')),
-      period: within(view.getByLabelText('Time period')),
-    };
-  };
-
-  it('is one 44pt icon beside a line naming both choices, on the default board', async () => {
-    const view = await board([]);
-    const filters = view.getByTestId('leaderboard-filters');
-    const button = within(filters).getByTestId('leaderboard-filter-button');
-    expect(button.props.accessibilityLabel).toBe('Leaderboard filters: All Titles, This month');
-    expect(button.props.accessibilityHint).toBe('Opens the title type and time period');
-    expect(StyleSheet.flatten(button.props.style)).toMatchObject({ width: 44, height: 44 });
-    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
-    expect(view.queryAllByRole('menuitem')).toHaveLength(0);
-    expect(view.queryAllByRole('tab')).toHaveLength(0);
-
-    const summary = within(filters).getByTestId('leaderboard-filter-summary', {
-      includeHiddenElements: true,
-    });
-    for (const word of ['All Titles', 'This month']) {
-      const text = within(summary).getByText(word, { includeHiddenElements: true });
-      expect((StyleSheet.flatten(text.props.style) as TextStyle).color).toBe(
-        theme.text.secondary,
-      );
-    }
+describe('the controls', () => {
+  beforeEach(() => {
+    mockWindow = { width: 390, height: 800, scale: 2, fontScale: 1 };
   });
 
-  it('counts and colours what is not the default', async () => {
-    const view = await render(
-      <LeaderboardView
-        metric="reviews"
-        onChangeMetric={jest.fn()}
-        timeframe="all_time"
-        onChangeTimeframe={jest.fn()}
-        entries={[]}
-        standing={undefined}
-        loading={false}
-        onPressPerson={() => {}}
-      />,
-    );
-    const button = view.getByTestId('leaderboard-filter-button');
-    expect(button.props.accessibilityLabel).toBe(
-      'Leaderboard filters: Reviews, All time, 2 on',
-    );
-    expect(button.props.accessibilityState).toMatchObject({ selected: true });
-    expect(
-      within(
-        view.getByTestId('leaderboard-filter-button-count', { includeHiddenElements: true }),
-      ).getByText('2', { includeHiddenElements: true }),
-    ).toBeTruthy();
-    const summary = view.getByTestId('leaderboard-filter-summary', {
-      includeHiddenElements: true,
-    });
-    for (const word of ['Reviews', 'All time']) {
-      const text = within(summary).getByText(word, { includeHiddenElements: true });
-      expect((StyleSheet.flatten(text.props.style) as TextStyle).color).toBe(
-        theme.semantic.action,
-      );
-    }
-  });
+  const timeframeCells = (view: Awaited<ReturnType<typeof board>>) =>
+    within(view.getByTestId('leaderboard-timeframe')).getAllByRole('radio');
 
-  it('opens one sheet with the four types and the two periods, the current ones chosen', async () => {
+  it('draws the category dropdown, the timeframe switch and one heading, and no filter icon', async () => {
     const view = await board([]);
-    const { type, period } = await openSheet(view);
-
-    expect(type.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
+    const controls = view.getByTestId('leaderboard-controls');
+    const category = within(controls).getByTestId('leaderboard-category');
+    expect(category.props.accessibilityLabel).toBe('Showing All Titles');
+    expect(within(controls).getByTestId('leaderboard-category-label').props.children).toBe(
       'All Titles',
-      'Movies',
-      'TV Shows',
-      'Reviews',
-    ]);
-    expect(period.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
-      'This month',
+    );
+    expect(timeframeCells(view).map((cell) => cell.props.accessibilityLabel)).toEqual([
       'All time',
+      'This month',
     ]);
-    expect(
-      type.getByRole('radio', { name: 'All Titles' }).props.accessibilityState,
-    ).toMatchObject({
-      selected: true,
-    });
-    expect(
-      period.getByRole('radio', { name: 'This month' }).props.accessibilityState,
-    ).toMatchObject({ selected: true });
+    expect(view.getAllByText('LEADERBOARD')).toHaveLength(1);
+    expect(view.getByLabelText('Leaderboard').props.accessibilityRole).toBe('header');
+
+    expect(view.queryByTestId('leaderboard-filter-button')).toBeNull();
+    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
+    expect(view.queryByTestId('leaderboard-filter-summary')).toBeNull();
+    expect(view.queryByText(/·/)).toBeNull();
   });
 
-  it('chooses another type and period, and does not report the current ones again', async () => {
+  it('is the browsing pages’ marquee dropdown and their compact switch', async () => {
+    const view = await board([]);
+    // Marquee: Maroon DM Serif, the size Collection's Watched ▾ and For You's Recommended ▾ use.
+    const label = view.getByTestId('leaderboard-category-label');
+    const style = StyleSheet.flatten(label.props.style) as TextStyle;
+    expect(style.color).toBe(theme.semantic.action);
+    expect(style.fontFamily).toBe(theme.typography.title2.fontFamily);
+    expect(label.props.numberOfLines).toBeUndefined();
+    // The switch's chosen half: Parchment ground, Maroon word, nothing counted or badged.
+    const [allTime, thisMonth] = timeframeCells(view);
+    expect(allTime!.props.accessibilityState).toMatchObject({ selected: false });
+    expect(thisMonth!.props.accessibilityState).toMatchObject({ selected: true });
+    expect(
+      within(view.getByTestId('leaderboard-timeframe')).queryAllByTestId(/compact-switch-indicator/),
+    ).toHaveLength(0);
+  });
+
+  it('lists the four categories in order, marks the current one, and applies a choice at once', async () => {
     const onChangeMetric = jest.fn();
-    const onChangeTimeframe = jest.fn();
-    const view = await board([], onChangeMetric, onChangeTimeframe);
-    const { type, period } = await openSheet(view);
+    const view = await board([], onChangeMetric);
+    await fireEvent.press(view.getByTestId('leaderboard-category'));
+    const menu = within(await view.findByTestId('leaderboard-category-menu'));
+    expect(
+      menu
+        .getAllByRole('menuitem')
+        .map((item) => [item.props.accessibilityLabel, Boolean(item.props.accessibilityState?.selected)]),
+    ).toEqual([
+      ['All Titles', true],
+      ['Movies', false],
+      ['TV Shows', false],
+      ['Reviews', false],
+    ]);
 
-    await fireEvent.press(type.getByRole('radio', { name: 'All Titles' }));
-    await fireEvent.press(period.getByRole('radio', { name: 'This month' }));
+    await fireEvent.press(menu.getByRole('menuitem', { name: 'All Titles' }));
     expect(onChangeMetric).not.toHaveBeenCalled();
-    expect(onChangeTimeframe).not.toHaveBeenCalled();
 
-    await fireEvent.press(type.getByRole('radio', { name: 'Reviews' }));
-    await fireEvent.press(period.getByRole('radio', { name: 'All time' }));
-    expect(onChangeMetric).toHaveBeenCalledWith('reviews');
+    await fireEvent.press(view.getByTestId('leaderboard-category'));
+    await fireEvent.press(
+      within(await view.findByTestId('leaderboard-category-menu')).getByRole('menuitem', {
+        name: 'TV Shows',
+      }),
+    );
+    expect(onChangeMetric).toHaveBeenCalledWith('tv');
+  });
+
+  it('names whichever category is showing on the closed control', async () => {
+    for (const [metric, label] of [
+      ['titles', 'All Titles'],
+      ['movies', 'Movies'],
+      ['tv', 'TV Shows'],
+      ['reviews', 'Reviews'],
+    ] as const) {
+      const view = await render(
+        <LeaderboardView
+          metric={metric}
+          onChangeMetric={jest.fn()}
+          timeframe="all_time"
+          onChangeTimeframe={jest.fn()}
+          entries={[]}
+          standing={undefined}
+          loading={false}
+          onPressPerson={() => {}}
+        />,
+      );
+      expect(view.getByTestId('leaderboard-category-label').props.children).toBe(label);
+      await cleanup();
+    }
+  });
+
+  it('switches the timeframe, and does not report the one showing again', async () => {
+    const onChangeTimeframe = jest.fn();
+    const view = await board([], jest.fn(), onChangeTimeframe);
+    await fireEvent.press(within(view.getByTestId('leaderboard-timeframe')).getByRole('radio', { name: 'This month' }));
+    expect(onChangeTimeframe).not.toHaveBeenCalled();
+    await fireEvent.press(within(view.getByTestId('leaderboard-timeframe')).getByRole('radio', { name: 'All time' }));
     expect(onChangeTimeframe).toHaveBeenCalledWith('all_time');
   });
 
-  it('closes on Close', async () => {
-    const view = await board([]);
-    await openSheet(view);
-    await fireEvent.press(view.getByTestId('leaderboard-filter-close-press'));
-    expect(view.queryByLabelText('Type')).toBeNull();
+  it('puts the controls above the heading, and the heading above the rows', async () => {
+    const view = await board([person()]);
+    const ids = view.root!
+      .queryAll((node) =>
+        ['leaderboard-controls', 'leaderboard-heading', 'leaderboard-content'].includes(
+          String(node.props.testID),
+        ),
+      )
+      .map((node) => node.props.testID);
+    expect(ids.filter((id, i) => ids.indexOf(id) === i)).toEqual([
+      'leaderboard-controls',
+      'leaderboard-heading',
+      'leaderboard-content',
+    ]);
   });
 });
+
+/**
+ * **At 320pt, 360pt and a large text size** — without a layout engine, from the fonts.
+ *
+ * `ContentToolbar` wraps: the dropdown's words never truncate (no `numberOfLines`), and the
+ * switch drops onto a line of its own on the right gutter when the two do not share one. So
+ * what has to hold is (a) the row is that wrapping toolbar, and (b) each piece on its own
+ * fits the row at every width and size the app supports — the switch shortening This month
+ * to Month only where even alone it would not (`timeframeOptions`).
+ *
+ * Advance widths, Inter Medium 14pt and DM Serif Display, from the bundled TTFs (and the
+ * same numbers measured in Chromium through the web harness):
+ *
+ *     switch, 100%    49.7 + 74.9 text, + 42 padding/outline      = 166.5pt
+ *     switch, 200%    99.3 + 149.7 + 42 = 291  > 288 (320 - 2 x 16) -> "Month": 227pt
+ *     TV Shows ▾      21pt at 320: 91.1 + 24 chevron = 115.1; 22pt at 360: 119.5
+ *
+ *     320pt, 100%: 115.1 + 4 + 166.5 = 285.6 <= 288, one line (All Titles: 278.9)
+ *     360pt, 100%: 119.5 + 4 + 166.5 = 290 <= 328, one line
+ */
+describe('the control row at 320pt, 360pt and large text', () => {
+  const ROOM = (width: number) => width - 2 * theme.layout.gutter;
+
+  it('is the wrapping toolbar, its title never truncated and its tools on the right', async () => {
+    const view = await board([]);
+    const row = view.getByTestId('leaderboard-controls').children[0] as unknown as {
+      props: { style: unknown };
+    };
+    expect(StyleSheet.flatten(row.props.style as ViewStyle)).toMatchObject({
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      paddingLeft: theme.layout.gutter,
+      paddingRight: theme.layout.gutter,
+      columnGap: GAP,
+    });
+    expect(view.getByTestId('leaderboard-category-label').props.numberOfLines).toBeUndefined();
+  });
+
+  it('keeps This month wherever the switch fits on its own, and says Month only where it does not', () => {
+    expect(timeframeOptions(320, 1).map((o) => o.label)).toEqual(['All time', 'This month']);
+    expect(timeframeOptions(360, 1).map((o) => o.label)).toEqual(['All time', 'This month']);
+    expect(timeframeOptions(320, 1.5).map((o) => o.label)).toEqual(['All time', 'This month']);
+    expect(timeframeOptions(360, 2).map((o) => o.label)).toEqual(['All time', 'This month']);
+    expect(timeframeOptions(320, 2).map((o) => o.label)).toEqual(['All time', 'Month']);
+    // The value is the same either way.
+    expect(timeframeOptions(320, 2).map((o) => o.id)).toEqual(['all_time', 'month']);
+  });
+
+  it('fits the switch inside the row at every width and size, from the font', () => {
+    const switchWidth = (labels: readonly { label: string }[], scale: number) =>
+      labels.reduce((sum, o) => sum + Math.max(44, EM[o.label]! * 14 * 1.04 * scale + 16), 0) + 10;
+    for (const width of [320, 360, 390]) {
+      for (const scale of [1, 1.3, 1.5, 2]) {
+        expect({ width, scale, w: switchWidth(timeframeOptions(width, scale), scale) <= ROOM(width) }).toEqual({
+          width,
+          scale,
+          w: true,
+        });
+      }
+    }
+  });
+
+  it('shares one line at 100% on 320pt and 360pt for every category', () => {
+    const switchAt1 = EM['All time']! * 14 + 16 + EM['This month']! * 14 + 16 + 10;
+    for (const [width, size] of [
+      [320, 21],
+      [360, 22],
+    ] as const) {
+      for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
+        const dropdown = EM[label]! * size + 24;
+        expect({ width, label, fits: dropdown + GAP + switchAt1 <= ROOM(width) }).toEqual({
+          width,
+          label,
+          fits: true,
+        });
+      }
+    }
+  });
+
+  it('draws the short switch on a 320pt phone at 200% text, and the long one at 360pt', async () => {
+    mockWindow = { width: 320, height: 700, scale: 2, fontScale: 2 };
+    const narrow = await board([]);
+    expect(timeframeCellsOf(narrow)).toEqual(['All time', 'Month']);
+    await cleanup();
+    mockWindow = { width: 360, height: 780, scale: 2, fontScale: 2 };
+    const wide = await board([]);
+    expect(timeframeCellsOf(wide)).toEqual(['All time', 'This month']);
+  });
+});
+
+/** Em widths from the bundled TTFs (Inter Medium for the switch, DM Serif Display for ▾). */
+const EM: Record<string, number> = {
+  'All time': 3.547,
+  'This month': 5.347,
+  Month: 3.06,
+  'All Titles': 3.937,
+  Movies: 3.089,
+  'TV Shows': 4.34,
+  Reviews: 3.669,
+};
+
+/** The control row's least gap between the dropdown and the switch. */
+const GAP = theme.space[1];
+
+const timeframeCellsOf = (view: Awaited<ReturnType<typeof board>>) =>
+  within(view.getByTestId('leaderboard-timeframe'))
+    .getAllByRole('radio')
+    .map((cell) => cell.props.accessibilityLabel as string);
 
 /**
  * **Gold, silver and bronze, filled** (founder Preview QA, 2026-11-07): ranks 1–3 are a
