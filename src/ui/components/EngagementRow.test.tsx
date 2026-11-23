@@ -7,9 +7,9 @@ import {
   actionCount,
   ENGAGEMENT_EDGE,
   EngagementRow,
+  wordsWidth,
   type ActivityReaction,
 } from './EngagementRow';
-import { estimateTextWidth } from './ReactionSummary';
 
 /**
  * **One engagement row for every Feed post** (founder, 2026-11-19): labelled Like, Comment,
@@ -178,11 +178,53 @@ describe('the layout', () => {
   it('fits the three words at 320pt and 1.3x text, counts free to drop below', () => {
     const row = 320 - 16 * 2 - 2 - 12 * 2;
     const font = theme.typography.footnote.fontSize * 1.3;
-    const words = ['Liked', 'Comment', 'Share'].map(
-      (w) => theme.layout.icon.sm + theme.space[1] + estimateTextWidth(w, font),
+    expect(wordsWidth(['Liked', 'Comment', 'Share'], font)).toBeLessThanOrEqual(row);
+    // And the bound is honest: past it, the words genuinely do not fit.
+    expect(wordsWidth(['Liked', 'Comment', 'Share'], font * 1.1)).toBeGreaterThan(row);
+  });
+
+  /**
+   * The last resort (Codex review): with no counts to drop and text large enough that
+   * the bare words overflow the row, the row wraps onto a second line rather than pushing
+   * Share out of the card, where the card would clip it.
+   */
+  it('wraps the row when even the bare words cannot fit it, and only then', async () => {
+    const view = await render(
+      <EngagementRow
+        {...base}
+        reaction={reaction()}
+        onPressComments={jest.fn()}
+        onPressShare={jest.fn()}
+        spreadInset={12}
+      />,
     );
-    const total = words.reduce((sum, w) => sum + w, 0) + theme.space[2] * 2;
-    expect(total).toBeLessThanOrEqual(row);
+    const row = () => view.getByTestId('row-actions');
+    expect(style(row()).flexWrap).toBeUndefined();
+    const font = theme.typography.footnote.fontSize * 2;
+    const needed = wordsWidth(['Like', 'Comment', 'Share'], font);
+    // A 320pt card's row at 200% text: too narrow for the words, so it wraps.
+    await fireEvent(row(), 'layout', {
+      nativeEvent: { layout: { width: 262 + 24, height: 44 } },
+    });
+    expect(262).toBeLessThan(needed);
+    expect(style(row()).flexWrap).toBe('wrap');
+    for (const id of ['row-like', 'row-comment', 'row-share']) {
+      expect(style(view.getByTestId(id)).flexShrink).toBe(0);
+      expect(style(view.getByTestId(id)).minHeight).toBeGreaterThanOrEqual(44);
+    }
+    // Wide enough again (a tablet): one line.
+    await fireEvent(row(), 'layout', { nativeEvent: { layout: { width: 900, height: 44 } } });
+    expect(style(row()).flexWrap).toBeUndefined();
+  });
+
+  it('wraps a pair too, rather than break a word, at extreme sizes', async () => {
+    const view = await render(
+      <EngagementRow {...base} reaction={reaction()} onPressComments={jest.fn()} />,
+    );
+    const row = () => view.getByTestId('row-actions');
+    await fireEvent(row(), 'layout', { nativeEvent: { layout: { width: 120, height: 44 } } });
+    expect(style(row()).flexWrap).toBe('wrap');
+    expect(style(view.getByTestId('row-comment')).flexGrow).toBe(0);
   });
 
   it('draws every label in full at 320pt and 1.3x text with (12K) and (1.2K)', async () => {

@@ -1,5 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { theme } from '../tokens';
 import { ReactionSlot } from './ReactionControl';
@@ -127,17 +136,49 @@ export function EngagementRow({
 }: EngagementRowProps) {
   const canReact = reaction != null && reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
+  const { fontScale } = useWindowDimensions();
+  const [rowWidth, setRowWidth] = useState<number | null>(null);
 
-  const present = [canReact, onPressComments, onPressSave, onPressShare].filter(Boolean).length;
-  if (!present) return null;
-  const spread = present >= 3;
+  // The words each present action shows, for the last-resort wrap below.
+  const words = [
+    canReact ? (mine ? (reaction.mineLabel ?? 'Reacted') : 'Like') : null,
+    onPressComments ? 'Comment' : null,
+    onPressSave ? (saved ? 'Saved' : 'Save') : null,
+    onPressShare ? 'Share' : null,
+  ].filter((word): word is string => word != null);
+  if (!words.length) return null;
+
+  /**
+   * **The last resort: the row wraps** (Codex review, 2026-11-23). A word never shrinks or
+   * breaks, so at very large text on a narrow phone even the bare words can be wider than
+   * the row, and a row that cannot wrap pushes its last action out of the card, where the
+   * card clips it. When the words alone (each beside its icon, counts left to drop below)
+   * cannot fit the row as measured, the actions are content-sized and the row wraps onto a
+   * second line instead. Ordinary text sizes never reach it: at 320pt the three words fit
+   * up to about 133% text, at 360pt up to about 164%.
+   */
+  const wraps =
+    rowWidth != null &&
+    wordsWidth(words, theme.typography.footnote.fontSize * fontScale) > rowWidth;
+  const spread = words.length >= 3 || wraps;
   /** An action's box: an equal column for a pair, its own width when spread. */
   const boxFor = (count: number) =>
     !spread ? styles.action : actionCount(count) ? styles.spreadShrinks : styles.spreadFixed;
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width } = event.nativeEvent.layout;
+    const inner = width - (spread ? spreadInset * 2 : ENGAGEMENT_EDGE * 2);
+    if (inner !== rowWidth) setRowWidth(inner);
+  };
 
   return (
     <View
-      style={[styles.row, style, spread && [styles.spread, { paddingHorizontal: spreadInset }]]}
+      style={[
+        styles.row,
+        style,
+        spread && [styles.spread, { paddingHorizontal: spreadInset }],
+        wraps && styles.wrap,
+      ]}
+      onLayout={onLayout}
       testID={`${testID}-actions`}
     >
       {canReact ? (
@@ -299,6 +340,41 @@ export function actionCount(count: number): string | null {
   return `${Math.floor(n / 1000)}K`;
 }
 
+/**
+ * The actions' words in Inter Regular (the `footnote` face), as a fraction of the font
+ * size, from the bundled TTF's `hmtx` advance widths. Any other word is estimated at
+ * 0.66em a character, which is above Inter's widest common letters, so it errs wide.
+ */
+const WORD_EM: Record<string, number> = {
+  Like: 1.939,
+  Liked: 2.552,
+  Reacted: 3.882,
+  Comment: 4.583,
+  Save: 2.348,
+  Saved: 2.96,
+  Share: 2.754,
+  Laugh: 2.923,
+  Wow: 2.403,
+  Sad: 1.815,
+  Agree: 2.846,
+  Disagree: 4.209,
+};
+
+/**
+ * The width the actions' bare words need in one row: each word beside its 20pt icon and
+ * 4pt gap, `space[2]` between actions, plus 1% for pixel rounding (the advances are exact,
+ * and kerning only tightens these words). Counts are left out on
+ * purpose: they can drop below their words, a word cannot.
+ */
+export function wordsWidth(words: string[], fontSize: number): number {
+  const text = words.reduce(
+    (sum, word) => sum + (WORD_EM[word] ?? [...word].length * 0.66) * fontSize,
+    0,
+  );
+  const chrome = words.length * (theme.layout.icon.sm + theme.space[1]);
+  return (text + chrome + theme.space[2] * (words.length - 1)) * 1.01;
+}
+
 /** " 4 reactions." for the spoken label, or nothing with none. */
 const spokenReactions = (count: number) =>
   count >= 1
@@ -335,6 +411,8 @@ const styles = StyleSheet.create({
    * and the row's free space goes between them (`space-between`).
    */
   spread: { justifyContent: 'space-between', gap: theme.space[2] },
+  /** The last resort (`wraps`): onto a second line rather than out of the card. */
+  wrap: { flexWrap: 'wrap', rowGap: 0 },
   spreadFixed: {
     flexGrow: 0,
     flexShrink: 0,
