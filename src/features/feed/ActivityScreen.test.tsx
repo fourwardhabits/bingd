@@ -1075,6 +1075,21 @@ describe('a notification that names one comment', () => {
     await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
   });
 
+  it('opens the whole conversation when a new top-level comment is posted from it', async () => {
+    // Codex review, PR #374: a new root is a thread the focused view would not show.
+    mockParams = { id: 'event-1', comment: 'c3' };
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/^Replying to Cy/)).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Cancel reply to Cy' }));
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'A thought of my own');
+    await fireEvent.press(view.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(view.getByTestId('comment-thread-c1')).toBeTruthy());
+    expect(mockWrites.find((w) => w.name === 'add_comment')!.args.p_parent_id).toBeNull();
+    expect(view.getByRole('button', { name: 'Show only this conversation' })).toBeTruthy();
+  });
+
   it('stays on Add a comment once the reader cancels, through a refetch', async () => {
     mockParams = { id: 'event-1', comment: 'c3' };
     const view = await renderWithProviders(<ActivityScreen />);

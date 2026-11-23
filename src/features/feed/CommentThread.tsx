@@ -556,7 +556,15 @@ export function CommentThread({
     }
 
     newIntent();
-    if (stillHere(opening)) reset();
+    if (stillHere(opening)) {
+      /**
+       * A new top-level comment is a thread of its own, which the focused view would not
+       * show — so it would seem to vanish the moment it was posted (Codex review, PR #374).
+       * Posting one opens the whole conversation, where it now is.
+       */
+      if (!wasEditing && !wasReplyingTo) setExpanded(true);
+      reset();
+    }
   };
 
   const beginEdit = (comment: Comment) => {
