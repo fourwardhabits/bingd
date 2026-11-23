@@ -1,10 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
-import { FeedHeading } from '@/features/feed/FeedHeading';
 import {
   Avatar,
-  ContentToolbar,
   Divider,
   EmptyState,
   MediumSelector,
@@ -100,61 +98,49 @@ export function LeaderboardView({
   return (
     <View style={styles.body}>
       {/**
-       * **The controls, then the heading, then the board** (founder brief 2026-11-23).
+       * **A compact two-row header** (founder layout correction, 2026-11-23).
        *
-       *                                               [Feed] [Trophy] [People]
+       *     LEADERBOARD                              [Feed] [Trophy] [People]
        *     All Titles ▾                          [ All time | This month ]
-       *     LEADERBOARD
        *     1  ● Ada  @ada                                                12
        *
-       * The mode toggle keeps its row and its place, opposite nothing in this mode (see
-       * `app/(tabs)/feed.tsx`). Under it, what the board counts and over when:
+       * Row 1 is the Feed tab's content header (`app/(tabs)/feed.tsx`): LEADERBOARD, the
+       * tab's one `FeedHeading`, opposite the mode toggle, as TRENDING NOW and DISCOVER
+       * PEOPLE are. This component draws row 2 and the board under it:
        *
-       * - **The category is the browsing pages' dropdown** — For You's Recommended ▾ and
-       *   Collection's Watched ▾, `MediumSelector` at the `marquee` size, with its small
-       *   anchored menu. All Titles, Movies, TV Shows, Reviews; a choice applies at once,
-       *   and the closed control always names the category showing.
-       * - **The timeframe is `CompactSwitch`**, the Movies | TV control from the same two
-       *   pages: All time | This month, the chosen half on Parchment in Maroon. Neither half
-       *   is a filter that is "on", so nothing is counted, badged or summarised.
+       * - **The category is `MediumSelector` at its `filter` size**: Inter Medium 14pt in
+       *   secondary ink with a small chevron, and the same small anchored menu as the
+       *   browsing pages' dropdowns. Quiet on purpose, so it does not compete with the
+       *   heading above it. All Titles, Movies, TV Shows, Reviews; a choice applies at
+       *   once, and the closed control always names the category showing.
+       * - **The timeframe is `CompactSwitch`**: All time | This month, the chosen half on
+       *   Parchment in Maroon. Neither half is a filter that is "on", so nothing is
+       *   counted, badged or summarised.
        *
-       * They share `ContentToolbar`, the row whose title never truncates: when both do not
-       * fit (a large text size) the switch wraps onto a line of its own and stays on the
-       * right gutter. Its least gap is 4pt rather than 8, so the longest category, TV Shows,
-       * still shares a 320pt line at 100% (114 + 4 + 166.5 of 288pt, measured in Chromium).
-       *
-       * LEADERBOARD is the Feed tab's one section heading (`FeedHeading`, the 2026-11-22
-       * heading system), moved here from the toggle's row so it names the list directly
-       * under it and there is only ever one.
+       * The row wraps: the dropdown sits on the left gutter, the switch on the right one,
+       * and when the two do not share a line (a large text size) the switch drops onto
+       * its own line, still on the right. No top padding of its own, so it sits directly
+       * under the toggle's row.
        */}
-      <View testID="leaderboard-controls">
-        <ContentToolbar
-          edgeInset={0}
-          gap={theme.space[1]}
-          title={
-            <MediumSelector
-              size="marquee"
-              value={metric}
-              options={METRIC_OPTIONS}
-              onChange={onChangeMetric}
-              accessibilityHint="Choose what the leaderboard counts"
-              testID="leaderboard-category"
-            />
-          }
-        >
-          <View testID="leaderboard-timeframe">
-            <CompactSwitch
-              accessibilityLabel="Time period"
-              options={timeframeOptions(window.width, window.fontScale)}
-              value={timeframe}
-              onChange={onChangeTimeframe}
-            />
-          </View>
-        </ContentToolbar>
-      </View>
-
-      <View testID="leaderboard-heading">
-        <FeedHeading title="Leaderboard" />
+      <View style={styles.controls} testID="leaderboard-controls">
+        <View style={styles.category}>
+          <MediumSelector
+            size="filter"
+            value={metric}
+            options={METRIC_OPTIONS}
+            onChange={onChangeMetric}
+            accessibilityHint="Choose what the leaderboard counts"
+            testID="leaderboard-category"
+          />
+        </View>
+        <View style={styles.timeframe} testID="leaderboard-timeframe">
+          <CompactSwitch
+            accessibilityLabel="Time period"
+            options={timeframeOptions(window.width, window.fontScale)}
+            value={timeframe}
+            onChange={onChangeTimeframe}
+          />
+        </View>
       </View>
 
       {/**
@@ -471,6 +457,23 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
+  /**
+   * Row 2 of the board's header: the category on the left gutter, the timeframe on the
+   * right one. It wraps rather than squeezing either: the dropdown never truncates below the
+   * row's width, and the switch keeps its place on the right gutter when it drops a line.
+   * Under it, the first row after the content step less the switch's own 8pt of slack.
+   */
+  controls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[2],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[1],
+  },
+  category: { flexShrink: 1, maxWidth: '100%' },
+  timeframe: { marginLeft: 'auto', flexShrink: 1, maxWidth: '100%' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

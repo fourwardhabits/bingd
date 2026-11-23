@@ -11,8 +11,8 @@ import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
  * **The Leaderboard's final polish** (founder, 2026-11-04): first place carries a small
  * Amber trophy that leaves the row exactly as it was.
  *
- * **Its category and time range** are a dropdown and a switch above the LEADERBOARD
- * heading since the 2026-11-23 brief.
+ * **Its category and time range** are a quiet dropdown and a switch under the LEADERBOARD
+ * heading's row since the 2026-11-23 brief and its layout correction.
  */
 
 const person = (over: Partial<LeaderboardEntry> = {}): LeaderboardEntry => ({
@@ -55,9 +55,10 @@ jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
 }));
 
 /**
- * **Category ▾ on the left, All time | This month on the right, LEADERBOARD under them**
- * (founder brief 2026-11-23). The filter icon, its count, the summary line and the combined
- * sheet are gone.
+ * **Category ▾ on the left, All time | This month on the right** (founder brief 2026-11-23,
+ * and its layout correction): row 2 of the board's header. LEADERBOARD is row 1, beside the
+ * mode toggle, drawn by the Feed screen (`FeedMode.test.tsx`). The filter icon, its count,
+ * the summary line and the combined sheet are gone.
  */
 describe('the controls', () => {
   beforeEach(() => {
@@ -67,20 +68,19 @@ describe('the controls', () => {
   const timeframeCells = (view: Awaited<ReturnType<typeof board>>) =>
     within(view.getByTestId('leaderboard-timeframe')).getAllByRole('radio');
 
-  it('draws the category dropdown, the timeframe switch and one heading, and no filter icon', async () => {
+  it('draws the category dropdown and the timeframe switch, no heading and no filter icon', async () => {
     const view = await board([]);
     const controls = view.getByTestId('leaderboard-controls');
     const category = within(controls).getByTestId('leaderboard-category');
     expect(category.props.accessibilityLabel).toBe('Showing All Titles');
-    expect(within(controls).getByTestId('leaderboard-category-label').props.children).toBe(
-      'All Titles',
-    );
+    expect(categoryText(view)).toBe('All Titles');
     expect(timeframeCells(view).map((cell) => cell.props.accessibilityLabel)).toEqual([
       'All time',
       'This month',
     ]);
-    expect(view.getAllByText('LEADERBOARD')).toHaveLength(1);
-    expect(view.getByLabelText('Leaderboard').props.accessibilityRole).toBe('header');
+    // The heading is the Feed screen's, on the toggle's row: never a second one here.
+    expect(view.queryByText('LEADERBOARD')).toBeNull();
+    expect(view.queryByTestId('leaderboard-heading')).toBeNull();
 
     expect(view.queryByTestId('leaderboard-filter-button')).toBeNull();
     expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
@@ -88,14 +88,19 @@ describe('the controls', () => {
     expect(view.queryByText(/·/)).toBeNull();
   });
 
-  it('is the browsing pages’ marquee dropdown and their compact switch', async () => {
+  it('is a quiet neutral dropdown, so it does not compete with the heading, and the compact switch', async () => {
     const view = await board([]);
-    // Marquee: Maroon DM Serif, the size Collection's Watched ▾ and For You's Recommended ▾ use.
-    const label = view.getByTestId('leaderboard-category-label');
+    // `MediumSelector` at `filter`: Inter Medium 14pt, secondary ink, a small chevron. Not
+    // the Maroon serif marquee, and no ground or border of its own.
+    const label = within(view.getByTestId('leaderboard-category')).getByText('All Titles');
     const style = StyleSheet.flatten(label.props.style) as TextStyle;
-    expect(style.color).toBe(theme.semantic.action);
-    expect(style.fontFamily).toBe(theme.typography.title2.fontFamily);
-    expect(label.props.numberOfLines).toBeUndefined();
+    expect(style.color).toBe(theme.text.secondary);
+    expect(style.color).not.toBe(theme.semantic.action);
+    expect(style.fontFamily).toBe(theme.typography.subhead.fontFamily);
+    expect(style.fontSize).toBe(14);
+    const button = StyleSheet.flatten(view.getByTestId('leaderboard-category').props.style) as ViewStyle;
+    expect(button.backgroundColor).toBeUndefined();
+    expect(button.borderWidth).toBeUndefined();
     // The switch's chosen half: Parchment ground, Maroon word, nothing counted or badged.
     const [allTime, thisMonth] = timeframeCells(view);
     expect(allTime!.props.accessibilityState).toMatchObject({ selected: false });
@@ -152,7 +157,10 @@ describe('the controls', () => {
           onPressPerson={() => {}}
         />,
       );
-      expect(view.getByTestId('leaderboard-category-label').props.children).toBe(label);
+      expect(categoryText(view)).toBe(label);
+      expect(view.getByTestId('leaderboard-category').props.accessibilityLabel).toBe(
+        `Showing ${label}`,
+      );
       await cleanup();
     }
   });
@@ -166,18 +174,15 @@ describe('the controls', () => {
     expect(onChangeTimeframe).toHaveBeenCalledWith('all_time');
   });
 
-  it('puts the controls above the heading, and the heading above the rows', async () => {
+  it('puts the controls directly above the rows', async () => {
     const view = await board([person()]);
     const ids = view.root!
       .queryAll((node) =>
-        ['leaderboard-controls', 'leaderboard-heading', 'leaderboard-content'].includes(
-          String(node.props.testID),
-        ),
+        ['leaderboard-controls', 'leaderboard-content'].includes(String(node.props.testID)),
       )
       .map((node) => node.props.testID);
     expect(ids.filter((id, i) => ids.indexOf(id) === i)).toEqual([
       'leaderboard-controls',
-      'leaderboard-heading',
       'leaderboard-content',
     ]);
   });
@@ -186,38 +191,41 @@ describe('the controls', () => {
 /**
  * **At 320pt, 360pt and a large text size** — without a layout engine, from the fonts.
  *
- * `ContentToolbar` wraps: the dropdown's words never truncate (no `numberOfLines`), and the
- * switch drops onto a line of its own on the right gutter when the two do not share one. So
- * what has to hold is (a) the row is that wrapping toolbar, and (b) each piece on its own
- * fits the row at every width and size the app supports — the switch shortening This month
- * to Month only where even alone it would not (`timeframeOptions`).
+ * The row wraps: the dropdown on the left gutter, the switch on the right one, dropping onto
+ * a line of its own when the two do not share one. So what has to hold is (a) the row is
+ * that wrapping row, and (b) each piece on its own fits the row at every width and size the
+ * app supports — the switch shortening This month to Month only where even alone it would
+ * not (`timeframeOptions`).
  *
- * Advance widths, Inter Medium 14pt and DM Serif Display, from the bundled TTFs (and the
- * same numbers measured in Chromium through the web harness):
+ * Advance widths, Inter Medium 14pt, from the bundled TTF (and the switch measured in
+ * Chromium through the web harness):
  *
  *     switch, 100%    49.7 + 74.9 text, + 42 padding/outline      = 166.5pt
  *     switch, 200%    99.3 + 149.7 + 42 = 291  > 288 (320 - 2 x 16) -> "Month": 227pt
- *     TV Shows ▾      21pt at 320: 91.1 + 24 chevron = 115.1; 22pt at 360: 119.5
+ *     TV Shows ▾      67.9 + 8 + 16 chevron = 91.9 (the widest category)
  *
- *     320pt, 100%: 115.1 + 4 + 166.5 = 285.6 <= 288, one line (All Titles: 278.9)
- *     360pt, 100%: 119.5 + 4 + 166.5 = 290 <= 328, one line
+ *     320pt, 100%: 91.9 + 8 + 166.5 = 266.4 <= 288, one line for every category
  */
 describe('the control row at 320pt, 360pt and large text', () => {
   const ROOM = (width: number) => width - 2 * theme.layout.gutter;
 
-  it('is the wrapping toolbar, its title never truncated and its tools on the right', async () => {
+  it('is one wrapping row on the gutters, with no top padding of its own', async () => {
     const view = await board([]);
-    const row = view.getByTestId('leaderboard-controls').children[0] as unknown as {
-      props: { style: unknown };
-    };
-    expect(StyleSheet.flatten(row.props.style as ViewStyle)).toMatchObject({
+    const row = view.getByTestId('leaderboard-controls');
+    const style = StyleSheet.flatten(row.props.style as ViewStyle);
+    expect(style).toMatchObject({
       flexDirection: 'row',
       flexWrap: 'wrap',
-      paddingLeft: theme.layout.gutter,
-      paddingRight: theme.layout.gutter,
+      alignItems: 'center',
+      paddingHorizontal: theme.layout.gutter,
       columnGap: GAP,
+      minHeight: theme.layout.minTapTarget,
     });
-    expect(view.getByTestId('leaderboard-category-label').props.numberOfLines).toBeUndefined();
+    expect(style.paddingTop ?? 0).toBe(0);
+    // The switch keeps the right gutter on its own line too.
+    expect(
+      StyleSheet.flatten(view.getByTestId('leaderboard-timeframe').props.style as ViewStyle),
+    ).toMatchObject({ marginLeft: 'auto', maxWidth: '100%' });
   });
 
   it('keeps This month wherever the switch fits on its own, and says Month only where it does not', () => {
@@ -246,18 +254,22 @@ describe('the control row at 320pt, 360pt and large text', () => {
 
   it('shares one line at 100% on 320pt and 360pt for every category', () => {
     const switchAt1 = EM['All time']! * 14 + 16 + EM['This month']! * 14 + 16 + 10;
-    for (const [width, size] of [
-      [320, 21],
-      [360, 22],
-    ] as const) {
+    for (const width of [320, 360]) {
       for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
-        const dropdown = EM[label]! * size + 24;
+        // The label at 14pt, the selector's 8pt gap and its 16pt chevron.
+        const dropdown = EM[label]! * 14 * 1.04 + 8 + 16;
         expect({ width, label, fits: dropdown + GAP + switchAt1 <= ROOM(width) }).toEqual({
           width,
           label,
           fits: true,
         });
       }
+    }
+  });
+
+  it('keeps the dropdown inside the row at 200% text on 320pt', () => {
+    for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
+      expect(EM[label]! * 14 * 1.04 * 2 + 8 + 16).toBeLessThanOrEqual(ROOM(320));
     }
   });
 
@@ -272,19 +284,29 @@ describe('the control row at 320pt, 360pt and large text', () => {
   });
 });
 
-/** Em widths from the bundled TTFs (Inter Medium for the switch, DM Serif Display for ▾). */
+/** Em widths from the bundled Inter Medium TTF (the switch's and the dropdown's face). */
 const EM: Record<string, number> = {
   'All time': 3.547,
   'This month': 5.347,
   Month: 3.06,
-  'All Titles': 3.937,
-  Movies: 3.089,
-  'TV Shows': 4.34,
-  Reviews: 3.669,
+  'All Titles': 4.103,
+  Movies: 3.469,
+  'TV Shows': 4.848,
+  Reviews: 4.017,
 };
 
 /** The control row's least gap between the dropdown and the switch. */
-const GAP = theme.space[1];
+const GAP = theme.space[2];
+
+/** The words on the closed category dropdown. */
+const categoryText = (view: Awaited<ReturnType<typeof board>>) =>
+  view
+    .getByTestId('leaderboard-category')
+    .queryAll((node: { type: unknown; props: { children?: unknown } }) =>
+      node.type === 'Text' && typeof node.props.children === 'string',
+    )
+    .map((node: { props: { children?: unknown } }) => node.props.children)
+    .find((text: unknown) => typeof text === 'string' && text.length > 1);
 
 const timeframeCellsOf = (view: Awaited<ReturnType<typeof board>>) =>
   within(view.getByTestId('leaderboard-timeframe'))
