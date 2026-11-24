@@ -2702,6 +2702,21 @@ describe('a season, and its episodes', () => {
     return within(view.getByTestId('episode-sheet'));
   };
 
+  it('waits for the videos facet before its own episode read (one provider request, Codex #378)', async () => {
+    // A filled-in season with no videos facet yet: the facet is the only reason left to
+    // enrich it, so the fallback read must not go out until the facet has answered.
+    holdReadsOf('media_cache');
+    const view = await openSeason();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
+
+    releaseReadsOf('media_cache');
+    await waitFor(() => expect(view.getByTestId('episode-rail')).toBeTruthy());
+    expect(mockFetchSeasonEpisodes).toHaveBeenCalledTimes(1);
+  });
+
   it('shows episodes as one compact rail: number and title, and no synopsis', async () => {
     // Founder hotfix, 2026-11-07: the synopses made a season page excessively long.
     const view = await openSeason();
@@ -7033,5 +7048,46 @@ describe('Write a review, routed', () => {
     await composer(view);
     expect(view.queryByText(/Log another watch/)).toBeNull();
     expect(sentAny(NOT_A_REVIEW)).toEqual([]);
+  });
+});
+
+/**
+ * The title-scoped reads leave with the title row, not after it (perf, 2026-11-24).
+ *
+ * They keyed on the row's id, so scores, reviews, the watch count, credits and trailers
+ * could only be asked for once the row had come back — a second wave a round trip later,
+ * 0.17 s to 3.1 s behind the first on the founder's Android Preview. The row is parked
+ * here, so every request that arrives is one that no longer waits for it.
+ */
+describe('a title page opening', () => {
+  it('asks for the scores, reviews and personal reads while the title row is in flight', async () => {
+    holdReadsOf('media_items');
+    const view = await renderWithProviders(<TitleScreen />);
+
+    await waitFor(() => {
+      const asked = mockRpc.mock.calls.map(([name]) => name);
+      expect(asked).toEqual(
+        expect.arrayContaining([
+          'community_score',
+          'following_score',
+          'title_reviews_v2',
+          'title_review_count',
+        ]),
+      );
+    });
+    // Credits and trailers (`media_cache`) and the watch count (`watch_events`) as well.
+    expect(mockReads.media_cache ?? 0).toBeGreaterThanOrEqual(2);
+    expect(mockReads.watch_events ?? 0).toBeGreaterThanOrEqual(1);
+    // …all keyed on the id the row is read by, so every invalidation still reaches them.
+    for (const [name, args] of mockRpc.mock.calls) {
+      if (name === 'community_score' || name === 'title_review_count') {
+        expect(args).toEqual(expect.objectContaining({ p_media_item_id: 'film-1' }));
+      }
+    }
+    // Discriminating: the row itself really is still parked.
+    expect(view.queryByText(/^Inception/)).toBeNull();
+
+    releaseReadsOf('media_items');
+    await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());
   });
 });

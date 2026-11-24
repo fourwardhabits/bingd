@@ -567,9 +567,34 @@ export default function TitleScreen() {
   };
 
   const titleId = data?.title?.id ?? null;
-  const credits = useCredits(titleId);
+  /**
+   * **The title-scoped reads start from the route, not from the title row** (perf,
+   * 2026-11-24).
+   *
+   * Every read below that needs nothing but the id — credits, trailers, the watch count,
+   * reviews and their count, both scores — used to key on `titleId`, which is the *title
+   * row's* id. So none of them could leave until that row had come back, and the page
+   * filled in two waves: artwork and metadata, then a round trip later the scores, the
+   * reviews and the personal line. On the founder's Android Preview the gap between the
+   * waves was 0.17 s on a quiet link and 1.7–3.1 s on a busy one, because OkHttp sends at
+   * most five requests to one host at a time and the second wave queued behind the edge
+   * calls the first wave had started (`docs/perf/preview-slowdown-2026-11-24.md`).
+   *
+   * The row is read by this same id (`.eq('id', id)`), so the two are the same value
+   * whenever the row exists, and every key below is unchanged — an invalidation that
+   * names `['title-reviews', id]` reaches exactly what it reached before. What differs is
+   * only *when* the request leaves. A title the reader cannot see answers these reads with
+   * the same nothing it always did: each is authorised by the server per caller. Every
+   * link here is built from a media item id, so the one cost of not waiting is a
+   * hand-mangled link spending a few refused reads beside the refused title read.
+   *
+   * The reads that need the row's *content* — the season list (kind), episodes (kind and
+   * enrichment), Similar (kind, parent) — still wait for it.
+   */
+  const routeTitleId = hasId ? id : null;
+  const credits = useCredits(routeTitleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
-  const videos = useTitleVideos(titleId);
+  const videos = useTitleVideos(routeTitleId);
   /**
    * How many viewings the reader has of this title (§J.2), for the personal-context
    * line far below.
@@ -580,7 +605,7 @@ export default function TitleScreen() {
    * renders. ESLint caught it; the device symptom would have been a crash on the first
    * title that failed to load.
    */
-  const watchCount = useWatchCount(profile.id, titleId ?? '');
+  const watchCount = useWatchCount(profile.id, routeTitleId ?? '');
   /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
@@ -598,7 +623,7 @@ export default function TitleScreen() {
    * are the public notes on this exact series row, never its seasons' (`title_reviews_v2`
    * keys on the one `media_item_id`).
    */
-  const reviews = useTitleReviews(titleId, serverSortOf(reviewSort));
+  const reviews = useTitleReviews(routeTitleId, serverSortOf(reviewSort));
   /**
    * The Most Helpful list, for the Cinematic Editorial page's Reviews preview and for the
    * sheet's Rating order, which re-orders it (post-QA sprint 2, 2026-11-05).
@@ -609,15 +634,15 @@ export default function TitleScreen() {
    * "From your circle" read: the preview supersedes that line, and Following stays a
    * filter inside the sheet.
    */
-  const helpfulReviews = useTitleReviews(immersive ? titleId : null, 'top_desc');
+  const helpfulReviews = useTitleReviews(immersive ? routeTitleId : null, 'top_desc');
   /**
    * The number on the tab, read separately from the list. Asked of every kind, a whole
    * show included, for the reason the list above gives.
    */
-  const reviewCount = useTitleReviewCount(titleId);
+  const reviewCount = useTitleReviewCount(routeTitleId);
   const setHelpful = useSetReviewHelpful(titleId);
-  const community = useCommunityScore(titleId, profile.id);
-  const following = useFollowingScore(titleId, profile.id);
+  const community = useCommunityScore(routeTitleId, profile.id);
+  const following = useFollowingScore(routeTitleId, profile.id);
   const watched = useWatched(profile.id);
   /**
    * Who recommended this to the reader, and what they said (20260929000100).
@@ -722,7 +747,16 @@ export default function TitleScreen() {
    */
   const showsEpisodes =
     data?.title?.kind === 'season' && (immersive || tab === null || tab === 'episodes');
-  const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
+  /**
+   * **And not before the videos facet has answered** (Codex, #378). Since a season is no
+   * longer thin for want of a runtime, the videos facet can be the only reason to enrich
+   * it. Until that read answers, `enriching` says false; if the fallback were enabled in
+   * that window, a null facet would then start an enrichment beside it, and both reach
+   * `tmdb.seasonDetail`: two provider requests on a first visit where one seeds the other.
+   * A failed read counts as answered, so a broken facet never parks the rail.
+   */
+  const videosFacetAnswered = !videos.isPending;
+  const episodes = useSeasonEpisodes(titleId, showsEpisodes && videosFacetAnswered && !enriching);
   /**
    * The Similar tab's data, when it is the tab being shown.
    *

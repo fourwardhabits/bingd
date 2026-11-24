@@ -20,9 +20,20 @@ export type EnrichableTitle = {
  * A row is thin when the screen has visible holes in it.
  *
  * Artwork and an overview are what the title screen is mostly made of, so either
- * being absent is reason enough. Runtime is checked for the two rankable kinds
- * because `TitleMetadata` renders it beside the year and a missing one leaves a
- * stray separator.
+ * being absent is reason enough. Runtime is checked for a film, because
+ * `TitleMetadata` renders it beside the year and a missing one leaves a stray
+ * separator.
+ *
+ * **Not for a season, which has no runtime to fill** (perf, 2026-11-24). This used to
+ * ask the same of "the two rankable kinds", and a season row never carries one: the
+ * adapter's `fromSeasonDetail` writes no `runtime_minutes`, and on 2026-11-24 every
+ * season on staging (1,833 of 1,833) and production (2,359 of 2,359) had none. So every
+ * season was thin forever, and every visit to one called `detail` — a live TMDB read and
+ * four writes — held the episode list behind it, and then invalidated the title, its
+ * credits, trailers and season list, which refetched on the way back. A season with
+ * artwork and an overview is now as complete as it can be made; one that has never been
+ * asked about trailers or credits is still asked once, by the videos-facet reason the
+ * caller passes (`alsoWhen` below).
  *
  * A season is allowed through without a tmdb id of its own: TMDB reaches a season
  * as /tv/{series}/season/{n}, so what matters is the id on its parent, and the
@@ -32,7 +43,7 @@ function isThin(title: EnrichableTitle) {
   if (title.kind !== 'season' && !title.tmdb_id) return false;
   if (!title.poster_path) return true;
   if (!title.overview) return true;
-  if (title.kind !== 'series' && !title.runtime_minutes) return true;
+  if (title.kind === 'movie' && !title.runtime_minutes) return true;
   return false;
 }
 
