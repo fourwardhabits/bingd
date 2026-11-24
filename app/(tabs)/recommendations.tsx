@@ -778,7 +778,14 @@ export default function RecommendationsScreen() {
     title: item.title,
     year: item.year,
     kind: item.kind,
-    posterUri: posterUri(item.posterPath, 'card'),
+    /**
+     * **TMDB's `w342`, not `w500`** (perf, 2026-11-24). A tile is a third of the window
+     * less the gutters and gaps: 105–128 pt across phones, 116 pt on a 393 pt screen, so
+     * 315–348 px at 2.6–3x. `w342` (342 × 513) covers that within 2%; `w500` (500 × 750)
+     * is 53% more pixels to fetch and decode for detail the tile cannot show. It is the
+     * size Collection's identical wall already uses (`posterUri`'s default).
+     */
+    posterUri: posterUri(item.posterPath, 'row'),
     // Read live from the watchlist query, not carried on the slate. That is
     // what lets a bookmark redraw one icon instead of replacing the wall —
     // see `toggleSaveById`.
@@ -1231,6 +1238,7 @@ export default function RecommendationsScreen() {
                   onPressTile={openTile}
                   onToggleSave={toggleSaveTile}
                   onDismissTile={dismissTile}
+                  prioritizeFirstScreen
                 />
               )}
 

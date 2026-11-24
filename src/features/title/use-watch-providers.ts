@@ -59,6 +59,15 @@ export function useWatchProviders(mediaItemId: string | null) {
     enabled: Boolean(mediaItemId),
     staleTime: PROVIDERS_STALE_MS,
     retry: false,
+    /**
+     * **And no second attempt from a second observer** (Codex, #381). The title screen
+     * observes this query from the route id so it leaves with the scores, and the block
+     * observes it again once the row is back. With the default `retryOnMount`, a failure in
+     * between would be retried by the block's mount: two adapter requests in one page
+     * opening, which is what `retry: false` exists to prevent. A failed answer is kept
+     * until the cache lets it go (five minutes unobserved), then asked for afresh.
+     */
+    retryOnMount: false,
     queryFn: (): Promise<WatchAvailability> => fetchWatchProviders(mediaItemId!, region),
   });
 }
