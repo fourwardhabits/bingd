@@ -4,6 +4,7 @@ import { StyleSheet, type ViewStyle } from 'react-native';
 import { theme } from '../tokens';
 
 import {
+  firstScreenTileCount,
   PosterGrid,
   PosterShelf,
   seasonPillLabel,
@@ -46,6 +47,57 @@ describe('PosterGrid', () => {
     );
 
     expect(view.queryByText('TOP RANKED')).toBeNull();
+  });
+});
+
+/**
+ * **The first screen of a wall loads first** (perf, 2026-11-24). For You asks for twenty
+ * posters at once; the ones the reader can see are marked `high` for the image loader.
+ */
+describe('which posters a wall asks for first', () => {
+  const wall: PosterTile[] = Array.from({ length: 30 }, (_, index) => ({
+    id: `t${index}`,
+    title: `Title ${index}`,
+    posterUri: `https://image.tmdb.org/t/p/w342/${index}.jpg`,
+  }));
+
+  type Node = { props?: Record<string, unknown>; children?: (Node | string)[] | null };
+  /** Each loaded poster's priority, in drawn order. `expo-image` arrays its `source`. */
+  const priorities = (view: Awaited<ReturnType<typeof render>>) => {
+    const out: unknown[] = [];
+    const walk = (node: Node | string | null) => {
+      if (!node || typeof node === 'string') return;
+      const [source] = (node.props?.source as { uri?: string }[] | undefined) ?? [];
+      if (source?.uri) out.push(node.props?.priority ?? 'normal');
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(view.toJSON() as Node);
+    return out;
+  };
+
+  it('counts whole rows plus the one the bottom edge cuts', () => {
+    // A 393 pt phone: tiles of 116 pt are 174 pt tall, 180 pt a row with the gap. An
+    // 852 pt window holds four rows and part of a fifth.
+    expect(firstScreenTileCount(852, 116, 6, 3)).toBe(15);
+    // Exactly four rows is four rows, not five.
+    expect(firstScreenTileCount(720, 116, 6, 3)).toBe(12);
+    expect(firstScreenTileCount(852, 0, 6, 3)).toBe(0);
+  });
+
+  it('marks the tiles that fit in one window height high, and leaves the rest alone', async () => {
+    const view = await render(
+      <PosterGrid tiles={wall} onPressTile={() => {}} prioritizeFirstScreen />,
+    );
+    const drawn = priorities(view);
+    expect(drawn).toHaveLength(30);
+    // The test window is 750 × 1334: 235 pt tiles, 358.5 pt rows, so four rows of three.
+    expect(drawn.slice(0, 12)).toEqual(Array(12).fill('high'));
+    expect(drawn.slice(12)).toEqual(Array(18).fill('normal'));
+  });
+
+  it('changes nothing on a wall that did not ask', async () => {
+    const view = await render(<PosterGrid tiles={wall} onPressTile={() => {}} />);
+    expect(priorities(view)).toEqual(Array(30).fill('normal'));
   });
 });
 

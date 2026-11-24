@@ -236,6 +236,40 @@ describe('the control row (C2)', () => {
   });
 });
 
+/**
+ * **The wall's artwork** (perf, 2026-11-24): TMDB's `w342`, which covers a third-of-a-phone
+ * tile at 3x, rather than `w500`; and the first screen of tiles marked `high` for the
+ * loader, so they are not served behind the ones below the fold.
+ */
+describe('the wall asks for its posters at the size it draws them', () => {
+  type Node = { props?: Record<string, unknown>; children?: (Node | string)[] | null };
+  const posters = (view: View) => {
+    const out: { uri: string; priority: unknown }[] = [];
+    const walk = (node: Node | string | null) => {
+      if (!node || typeof node === 'string') return;
+      const [source] = (node.props?.source as { uri?: string }[] | undefined) ?? [];
+      if (source?.uri) out.push({ uri: source.uri, priority: node.props?.priority });
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(view.toJSON() as Node);
+    return out;
+  };
+
+  it('requests w342, first screen first', async () => {
+    const cobalt = SLATE[0] as { posterPath: string | null };
+    cobalt.posterPath = '/cobalt.jpg';
+    try {
+      const view = await open();
+      await waitFor(() => expect(posters(view)).toHaveLength(1));
+      expect(posters(view)).toEqual([
+        { uri: 'https://image.tmdb.org/t/p/w342/cobalt.jpg', priority: 'high' },
+      ]);
+    } finally {
+      cobalt.posterPath = null;
+    }
+  });
+});
+
 describe('list mode is the wall, drawn as rows (C3)', () => {
   it('holds the same recommendation ids in the same order as poster mode', async () => {
     const view = await open();

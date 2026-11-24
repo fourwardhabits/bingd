@@ -12,6 +12,12 @@ export type PosterProps = {
   width?: number | 'fill';
   /** Blurhash from the catalog, used as the placeholder while artwork loads. */
   blurhash?: string | null;
+  /**
+   * Which loads go first when several are queued (expo-image's own `priority`). A wall
+   * marks the tiles on its first screen `high`, so they are not served behind artwork the
+   * reader cannot see yet. Best effort, and a no-op for a poster already in the cache.
+   */
+  priority?: 'low' | 'normal' | 'high';
 };
 
 /**
@@ -22,7 +28,7 @@ export type PosterProps = {
  * the page. Never render this full-bleed, behind text, or edge to edge — the
  * title-page hero is the app's one full-bleed surface and it is not a Poster.
  */
-export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps) {
+export function Poster({ uri, title, size = 'sm', width, blurhash, priority }: PosterProps) {
   const { height } = theme.poster[size];
   const responsive = typeof width === 'number' || width === 'fill';
   const frameWidth = width === 'fill' ? '100%' : width ?? theme.poster[size].width;
@@ -50,6 +56,7 @@ export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps
           // the new one loads rather than standing in for it (2026-09-16).
           recyclingKey={uri}
           placeholder={blurhash ? { blurhash } : undefined}
+          priority={priority}
           contentFit="cover"
           transition={theme.duration.state}
           style={[styles.fill, { borderRadius: radius }]}

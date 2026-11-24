@@ -276,7 +276,30 @@ export type PosterGridProps = {
    * title page's sheet (title-page sprint, 2026-11-06). Columns are sized inside it.
    */
   gutter?: number;
+  /**
+   * **Load the first screen of posters first** (perf, 2026-11-24). For You opens on this
+   * grid with twenty tiles at once, and every one of them asks for its artwork in the same
+   * moment, alongside whatever the other tabs are loading. This marks the tiles that fit
+   * in one window height `high`, so the loader starts them ahead of the rest; the others
+   * keep the default. Order only: nothing is fetched that was not before.
+   */
+  prioritizeFirstScreen?: boolean;
 };
+
+/**
+ * How many tiles of a three-across grid fit in one window height: whole rows, plus the
+ * row cut by the bottom edge. A tile is `width` wide at the poster's 2:3 and `gap` apart.
+ */
+export function firstScreenTileCount(
+  windowHeight: number,
+  cardWidth: number,
+  gap: number,
+  columns: number,
+) {
+  if (cardWidth <= 0) return 0;
+  const rowHeight = cardWidth / theme.layout.aspect.poster + gap;
+  return Math.ceil(windowHeight / rowHeight) * columns;
+}
 
 /**
  * Three across, tight gutters, no titles.
@@ -294,11 +317,15 @@ export function PosterGrid({
   onDismissTile,
   onLongPressTile,
   gutter = theme.layout.gutter,
+  prioritizeFirstScreen = false,
 }: PosterGridProps) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
 
   const cardWidth = Math.floor((width - gutter * 2 - gap * (columns - 1)) / columns);
+  const firstScreen = prioritizeFirstScreen
+    ? firstScreenTileCount(height, cardWidth, gap, columns)
+    : 0;
 
   if (tiles.length === 0) return null;
 
@@ -312,11 +339,12 @@ export function PosterGrid({
         />
       ) : null}
       <View style={[styles.gridRows, { gap, paddingHorizontal: gutter }]}>
-        {tiles.map((tile) => (
+        {tiles.map((tile, index) => (
           <Tile
             key={tile.id}
             tile={tile}
             width={cardWidth}
+            priority={index < firstScreen ? 'high' : undefined}
             onPress={() => onPressTile(tile)}
             onLongPress={onLongPressTile ? () => onLongPressTile(tile) : undefined}
             onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
@@ -553,6 +581,7 @@ function Tile({
   accessibilityHint,
   badge,
   saveLabels,
+  priority,
 }: {
   tile: PosterTile;
   width: number;
@@ -568,6 +597,8 @@ function Tile({
   badge?: string | null;
   /** The bookmark's words, where they differ from For You's (the Feed's rails). */
   saveLabels?: SaveLabels;
+  /** Passed to the artwork's loader; see `PosterGrid`'s `prioritizeFirstScreen`. */
+  priority?: 'high';
 }) {
   const { score } = tile;
   const average = tile.scoreSource === 'average';
@@ -607,6 +638,7 @@ function Tile({
           title={tile.title}
           blurhash={tile.blurhash}
           width={width}
+          priority={priority}
         />
         {badge ? (
           <View
