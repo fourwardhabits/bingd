@@ -9,6 +9,7 @@ import { theme } from '@/ui/tokens';
 import { addDays, addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 import { emptyLogState } from './use-log-state';
+import { releaseRankingHold } from '@/features/ranking/open-first';
 import {
   WHEN_SESSION_IDLE_MS,
   carriedWhen,
@@ -4245,5 +4246,48 @@ describe('the show decision a season ranking left open', () => {
 
     expect(callsTo('keep_show')).toHaveLength(0);
     expect(onUpdateShow).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The post-log refresh waits for the first comparison (perf, 2026-11-24).
+ *
+ * It was asked for before the ranking sheet's `rank_start`, and on Android — five requests
+ * per host at a time, first in first out — `rank_start` then queued behind forty to sixty
+ * refetches: 1.7–2.7 s of "Working out what to ask…" on the founder's Preview.
+ */
+describe('the refresh after a first log', () => {
+  afterEach(() => releaseRankingHold());
+
+  const invalidated = (spy: jest.SpyInstance, key: readonly unknown[]) =>
+    spy.mock.calls.some(
+      ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
+    );
+
+  it('waits for the ranking session to answer, then runs in full', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start', expect.anything()));
+
+    // Handed over, not sent: nothing a collection change touches has been refetched yet.
+    expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(false);
+    expect(invalidated(spy, queryKeys.feed('user-1'))).toBe(false);
+
+    // The ranking sheet's first answer releases it.
+    await act(async () => releaseRankingHold());
+    expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(true);
+    expect(invalidated(spy, queryKeys.feed('user-1'))).toBe(true);
+    expect(invalidated(spy, queryKeys.title('film-a'))).toBe(true);
+  });
+
+  it('is not held when there is no comparison to wait for', async () => {
+    const sheet = await open(filmA);
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(true));
   });
 });
