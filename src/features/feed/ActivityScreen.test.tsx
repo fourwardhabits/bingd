@@ -286,7 +286,7 @@ describe('the reactions on the post above the conversation', () => {
    * repeated above the thread. What a reaction *is* stays — the summary, and who reacted —
    * read from the same shared summary the Feed reads.
    */
-  it('shows who reacted to the post, and opens them, with no action row', async () => {
+  it('shows who reacted to the post, and opens them, with only a Like', async () => {
     mockReactions.summary = summary({
       total: 1,
       kinds: ['love'],
@@ -306,9 +306,10 @@ describe('the reactions on the post above the conversation', () => {
     const who = await waitFor(() =>
       view.getByLabelText('Priya Raman likes this. See who reacted.'),
     );
-    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    // The Like alone (2026-11-24): no Comment, no Share above the conversation.
+    expect(view.getByLabelText(/^React to Anna's activity/)).toBeTruthy();
     expect(view.queryByLabelText(/^Share/)).toBeNull();
-    expect(view.queryByTestId('feed-card-actions')).toBeNull();
+    expect(view.queryByTestId('feed-card-comment')).toBeNull();
 
     await act(async () => {
       fireEvent.press(who as never);
@@ -347,6 +348,37 @@ describe('the reactions on the post above the conversation', () => {
         view.getByLabelText('You and Priya Raman like this. See who reacted.'),
       ).toBeTruthy(),
     );
+  });
+
+  /**
+   * **A reaction from the conversation** (founder, 2026-11-24): the Feed's own Like — the
+   * same hook, mutation and picker — so the count here and on the Feed are one number.
+   */
+  it('likes the post on a tap, and takes it back on the next', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    const like = await waitFor(() => view.getByLabelText(/^React to Anna's activity/));
+    fireEvent.press(like as never);
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
+
+    mockReactions.set = [];
+    mockReactions.summary = summary({ mine: 'love' });
+    const again = await renderWithProviders(<ActivityScreen />);
+    const liked = await waitFor(() => again.getByLabelText(/^Liked\. You reacted to Sinners/));
+    fireEvent.press(liked as never);
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', null]]));
+  });
+
+  it('changes the reaction from the picker on a long press', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    const like = await waitFor(() => view.getByLabelText(/^React to Anna's activity/));
+    fireEvent(like as never, 'longPress');
+    await waitFor(() => expect(view.getByLabelText('Liked')).toBeTruthy());
+  });
+
+  it('offers the Like on the reader’s own post too', async () => {
+    mockEvent = event({ actorId: 'viewer-1', actorUsername: 'sai', actorName: 'Sai' });
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/^React to Sai's activity/)).toBeTruthy());
   });
 
   it('stays quiet on an activity nobody has reacted to', async () => {
@@ -533,6 +565,9 @@ describe('the seam between the post and the conversation', () => {
       if (!node || typeof node !== 'object') return;
       if (Array.isArray(node)) return node.forEach(walk);
       const element = node as { props?: Record<string, unknown>; children?: unknown[] };
+      // The post's own card is the Feed's component, styled by the Feed; the seam is what
+      // lies between it and the thread, so its insides are not this test's business.
+      if (element.props?.testID === 'feed-card') return;
       out.push({
         style: (StyleSheet.flatten(element.props?.style) ?? {}) as ViewStyle,
         children: element.children ?? [],
@@ -991,7 +1026,7 @@ describe('a notification that names one comment', () => {
     expect(marked(view, 'c3')).toBe(true);
 
     // Reply mode, to Cy, in Bo's thread — without opening the keyboard.
-    expect(view.getByText("Replying to Cy · in Bo's thread")).toBeTruthy();
+    expect(view.getByText('Replying to Cy')).toBeTruthy();
     expect(view.getByLabelText('Your reply to Cy').props.placeholder).toBe('Reply to Cy…');
     expect(view.getByRole('button', { name: 'Reply' })).toBeTruthy();
     // The focus mock is shared by every native component, so ask which one was focused.
@@ -1053,9 +1088,7 @@ describe('a notification that names one comment', () => {
   it('targets the root’s author for a notification about a root', async () => {
     mockParams = { id: 'event-1', comment: 'c2' };
     const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() =>
-      expect(view.getByText('Replying to Bo · under their comment')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Replying to Bo')).toBeTruthy());
   });
 
   it('opens in reply mode from a push (?notification=), found in the inbox', async () => {
@@ -1064,7 +1097,7 @@ describe('a notification that names one comment', () => {
     const view = await renderWithProviders(<ActivityScreen />);
 
     await waitFor(() => expect(marked(view, 'c3')).toBe(true));
-    expect(view.getByText("Replying to Cy · in Bo's thread")).toBeTruthy();
+    expect(view.getByText('Replying to Cy')).toBeTruthy();
   });
 
   it('opens in reply mode from a mention', async () => {

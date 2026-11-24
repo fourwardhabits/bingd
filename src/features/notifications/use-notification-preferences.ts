@@ -82,7 +82,9 @@ export const SECTIONS: readonly NotificationSection[] = [
       {
         key: 'comments',
         label: 'Comments',
-        description: 'Somebody comments on something you logged.',
+        // Covers every `comment` and `mention` row (`_notification_category`): a remark
+        // on your post, a reply to you, the post's author following up, a mention.
+        description: 'Comments on your posts, replies to you and mentions.',
       },
       {
         key: 'reactions',

@@ -1,6 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  Animated,
+  Modal,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
@@ -130,7 +138,45 @@ export type SheetProps = {
    * the keyboard.
    */
   size?: SheetSize;
+  /**
+   * **Swipe to expand and to dismiss** (founder iPhone QA, 2026-11-24). Opt-in; every
+   * other sheet is exactly as it was.
+   *
+   * The grab area — the handle and `header` — answers a vertical drag: up expands the
+   * sheet from its content height to the standard 85% (`STANDARD_SHEET_FRACTION`), down
+   * collapses an expanded sheet or, from its content height, dismisses it (`onClose`, the
+   * same way out as the backdrop and Android Back). Only the grab area drags, so a scroll
+   * inside the content is never mistaken for a dismissal, and a plain tap on something in
+   * the header (its Close) is still a tap. Content that should grow into the expanded
+   * height reads `useSheetExpanded()`.
+   */
+  draggable?: boolean;
+  /** Drawn in the grab area under the handle: a title and a Close, for a `draggable` sheet. */
+  header?: ReactNode;
 };
+
+/** Whether a `draggable` sheet has been swiped up to its expanded height. */
+const SheetExpandedContext = createContext(false);
+export const useSheetExpanded = () => useContext(SheetExpandedContext);
+
+/** How far a drag must travel to count, and how fast a flick must be. */
+const DRAG_THRESHOLD = 60;
+const FLICK_VELOCITY = 0.8;
+
+/**
+ * What a released drag on a `draggable` sheet's grab area means, decided apart from the
+ * gesture plumbing so it can be stated and tested on its own: down collapses an expanded
+ * sheet and closes one at its content height; up expands; anything short is nothing.
+ */
+export function dragOutcome(
+  dy: number,
+  vy: number,
+  expanded: boolean,
+): 'close' | 'collapse' | 'expand' | 'stay' {
+  if (dy > DRAG_THRESHOLD || vy > FLICK_VELOCITY) return expanded ? 'collapse' : 'close';
+  if (dy < -DRAG_THRESHOLD || vy < -FLICK_VELOCITY) return expanded ? 'stay' : 'expand';
+  return 'stay';
+}
 
 export type SheetSize = 'content' | 'standard';
 
@@ -185,6 +231,8 @@ export function Sheet({
   footer,
   density = 'short',
   size = 'content',
+  draggable = false,
+  header,
 }: SheetProps) {
   const keyboard = useKeyboardHeight();
   const bottomInset = useStableBottomInset();
@@ -251,6 +299,39 @@ export function Sheet({
   if (visible && !asked) setAsked(true);
   const held = !visible && asked && !shown;
 
+  /**
+   * The drag. `expanded` is state because the height and the content's room render from
+   * it; the drag's own offset is an `Animated.Value`, because following a finger through
+   * React state would re-render the sheet on every frame. The responder follows `onClose`
+   * and `expanded`; nothing re-renders during a drag, so it is never replaced mid-gesture.
+   */
+  const [expanded, setExpanded] = useState(false);
+  if (!visible && expanded && !held) setExpanded(false);
+  const [drag] = useState(() => new Animated.Value(0));
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) =>
+          Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+        onPanResponderMove: (_, g) => {
+          // Only a downward drag moves the sheet; an upward one is answered on release.
+          drag.setValue(Math.max(0, g.dy));
+        },
+        onPanResponderRelease: (_, g) => {
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
+          const outcome = dragOutcome(g.dy, g.vy, expanded);
+          if (outcome === 'close') onClose();
+          else if (outcome === 'collapse') setExpanded(false);
+          else if (outcome === 'expand') setExpanded(true);
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
+        },
+      }),
+    [drag, expanded, onClose],
+  );
+  const grows = draggable && expanded;
+
   return (
     <Modal
       visible={visible || held}
@@ -305,34 +386,48 @@ export function Sheet({
           accessibilityElementsHidden
           importantForAccessibility="no"
         />
-        <View
+        <Animated.View
           testID="sheet-body"
           style={[
             styles.sheet,
-            standard && { height: standardHeight },
+            (standard || grows) && { height: standardHeight },
             { paddingBottom: footer !== undefined ? bottomInset : bottomPadding },
+            draggable && { transform: [{ translateY: drag }] },
           ]}
           accessibilityLabel={label}
         >
-          <View
-            style={styles.handle}
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-          />
-          <BottomInsetPaidContext.Provider value>
-            {structured ? (
+          {draggable ? (
+            <View testID="sheet-grab" {...responder.panHandlers}>
               <View
-                testID="sheet-content"
-                style={standard ? styles.contentDense : styles.content}
-              >
-                {children}
-              </View>
-            ) : (
-              children
-            )}
-            {footer !== undefined ? <View testID="sheet-footer">{footer}</View> : null}
-          </BottomInsetPaidContext.Provider>
-        </View>
+                style={styles.handle}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              {header}
+            </View>
+          ) : (
+            <View
+              style={styles.handle}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+          )}
+          <SheetExpandedContext.Provider value={grows}>
+            <BottomInsetPaidContext.Provider value>
+              {structured || grows ? (
+                <View
+                  testID="sheet-content"
+                  style={standard || grows ? styles.contentDense : styles.content}
+                >
+                  {children}
+                </View>
+              ) : (
+                children
+              )}
+              {footer !== undefined ? <View testID="sheet-footer">{footer}</View> : null}
+            </BottomInsetPaidContext.Provider>
+          </SheetExpandedContext.Provider>
+        </Animated.View>
       </View>
     </Modal>
   );

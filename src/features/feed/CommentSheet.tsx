@@ -1,4 +1,8 @@
-import { Sheet } from '@/ui/components';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, StyleSheet } from 'react-native';
+
+import { Sheet, SheetHeader } from '@/ui/components';
+import { theme } from '@/ui/tokens';
 
 import { CommentThread } from './CommentThread';
 
@@ -46,8 +50,38 @@ export function CommentSheet({
   if (!eventId) return null;
 
   return (
-    <Sheet visible onClose={onClose} label="Comments">
+    /**
+     * **Swipe and an obvious way out** (founder iPhone QA, 2026-11-24). The sheet opens at
+     * its content's height; dragging the top edge up grows it to the standard 85% for a long
+     * conversation, and dragging down — or the ✕ beside the title, or Android Back, or the
+     * backdrop — closes it. iOS has no Back, so the ✕ is always there. Closing never posts
+     * and never loses words: an unsent draft is kept for this activity (`keepDraft`).
+     */
+    <Sheet
+      visible
+      onClose={onClose}
+      label="Comments"
+      draggable
+      header={
+        <SheetHeader
+          title="Comments"
+          accessory={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close comments"
+              onPress={onClose}
+              hitSlop={(theme.layout.minTapTarget - theme.layout.icon.md) / 2}
+              style={({ pressed }) => pressed && styles.pressed}
+              testID="comment-sheet-close"
+            >
+              <Ionicons name="close" size={theme.layout.icon.md} color={theme.text.secondary} />
+            </Pressable>
+          }
+        />
+      }
+    >
       <CommentThread
+        keepDraft
         eventId={eventId}
         mediaItemId={mediaItemId}
         title={title}
@@ -59,3 +93,7 @@ export function CommentSheet({
     </Sheet>
   );
 }
+
+const styles = StyleSheet.create({
+  pressed: { opacity: 0.6 },
+});

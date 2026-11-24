@@ -21,6 +21,7 @@ import {
   ReactionControl,
   SpoilerNote,
   Text,
+  useSheetExpanded,
 } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
@@ -90,7 +91,33 @@ export type CommentThreadProps = {
    * the list scrolls itself and this is not called.
    */
   onFocusOffset?: (y: number) => void;
+  /**
+   * Keep an unsent draft when this conversation closes, and bring it back when the same
+   * activity is opened again (the Feed's sheet, founder iPhone QA 2026-11-24): a swipe down
+   * must never post what was typed, and must never silently lose it either.
+   */
+  keepDraft?: boolean;
 };
+
+/**
+ * **Unsent drafts, per account and activity.** Memory only, for this run of the app: a
+ * draft is a moment's work, not something to write to disk. It keeps everything the
+ * composer needs to carry on exactly where it stopped — the words, the spoiler claim, the
+ * reply or edit target, the mentions the author picked, and the operation id, so a retry
+ * after an ambiguous failure still cannot post twice.
+ */
+type HeldDraft = {
+  draft: string;
+  spoilers: boolean;
+  replyingTo: Comment | null;
+  editing: Comment | null;
+  known: [string, string][];
+  attempt: string | null;
+};
+const heldDrafts = new Map<string, HeldDraft>();
+const heldKey = (viewerId: string, eventId: string | null) => `${viewerId}:${eventId ?? ''}`;
+/** For tests: start every case from no held drafts. */
+export const forgetHeldDrafts = () => heldDrafts.clear();
 
 /** How long a notification's comment stays marked after the conversation opens. */
 export const FOCUS_HIGHLIGHT_MS = 2500;
@@ -149,16 +176,22 @@ export function CommentThread({
   scroll,
   focusCommentId = null,
   onFocusOffset,
+  keepDraft = false,
 }: CommentThreadProps) {
   const comments = useComments(eventId, viewerId);
+  const sheetExpanded = useSheetExpanded();
   const { add, edit, remove, react, busy, reacting } = useCommentWrites(viewerId);
 
-  const [draft, setDraft] = useState('');
-  const [spoilers, setSpoilers] = useState(false);
+  const heldFor = (id: string | null) =>
+    keepDraft ? heldDrafts.get(heldKey(viewerId, id)) : undefined;
+  const [draft, setDraft] = useState(() => heldFor(eventId)?.draft ?? '');
+  const [spoilers, setSpoilers] = useState(() => heldFor(eventId)?.spoilers ?? false);
   // Which comment is being rewritten, if any. Editing reuses the one composer rather
   // than growing a second one inside the row: two text inputs that can both be focused
   // is how a draft ends up submitted against the wrong comment.
-  const [editing, setEditing] = useState<Comment | null>(null);
+  const [editing, setEditing] = useState<Comment | null>(
+    () => heldFor(eventId)?.editing ?? null,
+  );
   /**
    * Which comment Reply was tapped on, if any.
    *
@@ -169,7 +202,9 @@ export function CommentThread({
    * composer would make the banner vanish while the draft stayed. The copy is the state
    * the reader started from, which is the thing the banner is describing.
    */
-  const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Comment | null>(
+    () => heldFor(eventId)?.replyingTo ?? null,
+  );
   /**
    * The server said the comment being replied to is gone (`add_comment`'s `P0002 no such
    * comment`) before this reader's list had caught up. The list is the other way to know —
@@ -302,15 +337,48 @@ export function CommentThread({
      * risk in the gap: the draft is emptied in the same commit, and a mention can only
      * be resolved out of text that is no longer there.
      */
-    known.current = new Map();
+    const held = heldFor(composer.eventId);
+    known.current = new Map(held?.known ?? []);
+    // A held draft carries the id its last attempt used; anything else starts afresh.
+    attempt.current = held?.attempt ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening, by design
   }, [composer.opening]);
 
+  /**
+   * **What a closing conversation keeps** (`keepDraft`). Mirrored after every commit, and
+   * saved under the activity it belongs to when this composer stops being that activity's —
+   * on close (unmount) or when the surface moves to another activity. An empty composer
+   * leaves nothing behind.
+   */
+  const latest = useRef<HeldDraft | null>(null);
+  useLayoutEffect(() => {
+    latest.current = {
+      draft,
+      spoilers,
+      replyingTo,
+      editing,
+      known: [...known.current.entries()],
+      attempt: attempt.current,
+    };
+  });
+  useLayoutEffect(() => {
+    if (!keepDraft || !eventId) return;
+    const key = heldKey(viewerId, eventId);
+    return () => {
+      const last = latest.current;
+      if (last && (last.draft.trim() || last.replyingTo || last.editing))
+        heldDrafts.set(key, last);
+      else heldDrafts.delete(key);
+    };
+  }, [keepDraft, viewerId, eventId]);
+
   if (composer.eventId !== eventId) {
+    const held = heldFor(eventId);
     setComposer({ eventId, opening: composer.opening + 1 });
-    setDraft('');
-    setSpoilers(false);
-    setEditing(null);
-    setReplyingTo(null);
+    setDraft(held?.draft ?? '');
+    setSpoilers(held?.spoilers ?? false);
+    setEditing(held?.editing ?? null);
+    setReplyingTo(held?.replyingTo ?? null);
     setReplyGone(null);
     setCaret(0);
   }
@@ -549,7 +617,7 @@ export function CommentThread({
         if (stillHere(opening)) {
           setReplyGone(wasReplyingTo.id);
           AccessibilityInfo.announceForAccessibility?.(
-            `${wasReplyingTo.authorName}'s comment is no longer available. Your text is kept.`,
+            `${wasReplyingTo.authorName}'s comment is no longer available. Your text is still here.`,
           );
           void comments.refetch();
         }
@@ -565,6 +633,9 @@ export function CommentThread({
     }
 
     newIntent();
+    // Posted: whatever was held for this activity — including a copy saved because the
+    // sheet closed while this was in flight — is spent, and must not come back.
+    if (keepDraft) heldDrafts.delete(heldKey(viewerId, eventId));
     if (stillHere(opening)) {
       /**
        * A new top-level comment is a thread of its own, which the focused view would not
@@ -731,24 +802,6 @@ export function CommentThread({
     (replyGone === replyingTo.id ||
       (comments.data !== undefined && (!liveTarget || liveTarget.deleted))),
   );
-  const targetThread = replyingTo ? threadOf(threads, replyingTo.id) : null;
-  /**
-   * Where the reply will appear, in words: under the comment for a root, or in whose
-   * thread for a reply — the server attaches every reply to its thread's root (one level),
-   * so a reply to a reply shows in the root's thread, addressed to the person tapped.
-   */
-  const replyPlace = !target
-    ? null
-    : !targetThread || targetThread.root.id === target.id
-      ? 'under their comment'
-      : targetThread.root.deleted
-        ? 'in this thread'
-        : targetThread.root.authorId === target.authorId
-          ? 'in their thread'
-          : targetThread.root.authorId === viewerId
-            ? 'in your thread'
-            : `in ${targetThread.root.authorName}'s thread`;
-
   const rowProps = (comment: Comment) => ({
     comment,
     masked: shouldMask({
@@ -805,7 +858,7 @@ export function CommentThread({
           kind="nothingYet"
           compact
           title="No comments yet"
-          body="Say something about this."
+          body="Be the first to comment."
         />
       </View>
     ) : (
@@ -901,7 +954,9 @@ export function CommentThread({
          */
         <ScrollView
           ref={list}
-          style={styles.list}
+          // Grown with the sheet when it is swiped up (`Sheet` `draggable`): the cap is
+          // for the sheet's content height, not for a sheet the reader asked to be tall.
+          style={[styles.list, sheetExpanded && styles.listExpanded]}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
         >
@@ -962,9 +1017,12 @@ export function CommentThread({
           /**
            * **The reply indicator** (founder, 2026-11-22): one line above the SAME input —
            * there is one composer, and Reply only changes what it says. It tells the reader
-           * what they are writing (a reply), to whom (the person they tapped — on a
-           * reply-to-a-reply that is the reply's author, never the thread's), and where it
-           * will appear. Its ✕ is the Cancel: back to "Add a comment" / Post.
+           * what they are writing (a reply) and to whom (the person they tapped — on a
+           * reply-to-a-reply that is the reply's author, never the thread's). Just "Replying
+           * to {Name}" since 2026-11-24: the founder found "· under their comment" / "· in
+           * X's thread" explained the threading instead of the reply; the row being answered
+           * is marked in the list, which says where. Its ✕ is the Cancel: back to "Add a
+           * comment" / Post.
            *
            * **When the comment being answered has gone** — deleted, or its author no longer
            * visible to this reader, deliberately one sentence for all of them — the same
@@ -979,8 +1037,8 @@ export function CommentThread({
           >
             {targetUnavailable ? (
               <Text variant="caption" tone="secondary" style={styles.bannerCopy}>
-                {target.authorName}’s comment is no longer available, so this can’t be sent as a
-                reply. Dismiss to post it as a new comment.
+                {target.authorName}’s comment is no longer available. Tap ✕ to post yours as a
+                new comment.
               </Text>
             ) : (
               <Text
@@ -993,7 +1051,6 @@ export function CommentThread({
                 <Text variant="caption" style={styles.bannerName}>
                   {target.authorName}
                 </Text>
-                {replyPlace ? ` · ${replyPlace}` : ''}
               </Text>
             )}
             <Pressable
@@ -1035,7 +1092,7 @@ export function CommentThread({
             editing
               ? 'Editing your comment'
               : replyingTo && target
-                ? `A reply to ${target.authorName}, shown ${replyPlace ?? 'in their thread'}`
+                ? `A reply to ${target.authorName}`
                 : 'A new comment on this activity, not a reply'
           }
           placeholder={
@@ -1117,7 +1174,7 @@ export function CommentThread({
             disabled={!draft.trim() || over || busy || targetUnavailable}
             disabledReason={
               targetUnavailable
-                ? 'The comment you were replying to is no longer available.'
+                ? 'The comment you were replying to is gone.'
                 : over
                   ? `A comment is limited to ${COMMENT_MAX_LENGTH} characters.`
                   : busy
@@ -1390,6 +1447,7 @@ const styles = StyleSheet.create({
    * its intrinsic height, and nothing here has to know the keyboard exists.
    */
   list: { flexShrink: 1, maxHeight: 360 },
+  listExpanded: { flexGrow: 1, maxHeight: '100%' },
   listContent: { paddingBottom: theme.space[3] },
   flow: { paddingBottom: theme.space[2] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[3] },

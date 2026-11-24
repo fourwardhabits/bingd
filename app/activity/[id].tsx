@@ -360,7 +360,9 @@ export default function ActivityScreen() {
           {takesFeedCard(event) ? (
             <FeedCard
               leading
-              actions={false}
+              // The Like alone — the Feed's control, mutation and picker — and no Comment
+              // or Share: the discussion below is this page's other action (2026-11-24).
+              actions="reaction"
               actorName={event.actorName}
               actorAvatarUri={event.actorAvatarUri}
               onPressActor={
@@ -397,12 +399,24 @@ export default function ActivityScreen() {
               }
               onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
               // Read-only here: the summary and who reacted. Reacting is the Feed's row.
-              reaction={activityReaction({
-                summary: reactionsResolved ? summary : null,
-                viewerId,
-                onToggle: () => void toggleDefault(),
-                onOpenDetail: () => setDetailOpen(true),
-              })}
+              reaction={{
+                ...activityReaction({
+                  summary: reactionsResolved ? summary : null,
+                  viewerId,
+                  onToggle: () => void toggleDefault(),
+                  onOpenPicker: () => setPickerOpen(true),
+                  onOpenDetail: () => setDetailOpen(true),
+                  picker: pickerOpen ? (
+                    <ReactionPill
+                      current={summary?.mine ?? null}
+                      onChoose={(kind) => void choose(kind)}
+                      onDismiss={() => setPickerOpen(false)}
+                    />
+                  ) : null,
+                }),
+                // A read that has not landed draws no Like rather than an unreacted one.
+                canReact: reactionsResolved,
+              }}
               rail={rail}
             />
           ) : (

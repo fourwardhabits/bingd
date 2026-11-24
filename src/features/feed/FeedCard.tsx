@@ -104,8 +104,12 @@ export type FeedCardProps = {
    * `false`: there the discussion and the composer *are* the actions, and a Like · Comment ·
    * Share row above a thread would be a second, redundant set. The reaction summary stays —
    * it is part of what the post is — and so do the headline, artwork, score and review.
+   *
+   * `'reaction'` (founder, 2026-11-24): the Like alone, the Feed's own control with its
+   * picker, content-sized at the leading edge — so a post can be reacted to from its
+   * conversation without a second Comment button or a Share above the thread.
    */
-  actions?: boolean;
+  actions?: boolean | 'reaction';
 };
 
 /**
@@ -186,7 +190,12 @@ export function FeedCard({
   return (
     <FeedPostSurface
       leading={leading}
-      style={[styles.card, !actions && styles.cardWithoutActions]}
+      style={[
+        styles.card,
+        // No action row at the foot (none, or a Like that cannot be offered yet).
+        (actions === false || (actions === 'reaction' && reaction.canReact === false)) &&
+          styles.cardWithoutActions,
+      ]}
       testID="feed-card"
     >
       {/* 1. Who did what, and when. */}
@@ -339,11 +348,21 @@ export function FeedCard({
             <View style={styles.picker}>{reaction.picker}</View>
           ) : null}
 
-          {actions && ACTION_DIVIDER === 'inset' ? (
+          {actions === true && ACTION_DIVIDER === 'inset' ? (
             <View style={styles.divider} testID="feed-card-divider" />
           ) : null}
 
-          {actions ? (
+          {actions === 'reaction' ? (
+            <EngagementRow
+              actorName={actorName}
+              subject={filmName}
+              reaction={reaction}
+              compact
+              style={styles.actions}
+              spreadInset={FEED_CARD.inset}
+              testID="feed-card"
+            />
+          ) : actions ? (
             <EngagementRow
               actorName={actorName}
               subject={filmName}

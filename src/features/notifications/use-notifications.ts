@@ -1100,7 +1100,7 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
           return { lead: 'replied under your comment on', subject, tail: null };
         }
         if (row.commentInThread) {
-          return { lead: 'replied in a thread on your', subject, tail: noun };
+          return { lead: 'replied to a comment on your', subject, tail: noun };
         }
         /**
          * The author following up under their own post. It is not "your" anything — the
@@ -1164,7 +1164,7 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
         : row.commentUnderMine
           ? 'replied under your comment'
           : row.commentInThread
-          ? 'replied in a thread on your activity'
+          ? 'replied to a comment on your activity'
           : row.commentIsFollowUp
             ? 'also commented on their activity'
             : 'commented on your activity',

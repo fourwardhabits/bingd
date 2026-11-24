@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
 import { CommentSheet } from './CommentSheet';
-import { CommentThread, FOCUS_HIGHLIGHT_MS } from './CommentThread';
+import { CommentThread, FOCUS_HIGHLIGHT_MS, forgetHeldDrafts } from './CommentThread';
 
 /**
  * Reply versus new comment (founder, 2026-11-22), and the controlled reproduction behind it.
@@ -144,6 +144,7 @@ const SURFACES: Surface[] = [
 const adds = () => mockWrites.filter((write) => write.name === 'add_comment');
 
 beforeEach(() => {
+  forgetHeldDrafts();
   mockCommentRows = conversation();
   mockWrites.length = 0;
   mockWriteResults = [];
@@ -195,7 +196,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
 
     await fireEvent.press(view.getByLabelText('Reply to Anna'));
 
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     const box = view.getByLabelText('Your reply to Anna');
     expect(box.props.placeholder).toBe('Reply to Anna…');
     expect(view.getByRole('button', { name: 'Reply' })).toBeTruthy();
@@ -222,7 +223,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
 
     // Bo, not Anna — the visible context never implies the reply went to the root's
     // author — and where it will appear, since the server keeps one level.
-    expect(view.getByText("Replying to Bo · in Anna's thread")).toBeTruthy();
+    expect(view.getByText('Replying to Bo')).toBeTruthy();
     // No @mention is inserted: the box starts empty, and the server notifies Bo directly
     // (`add_comment` files `reply_to` against the comment tapped).
     expect(view.getByLabelText('Your reply to Bo').props.value).toBe('');
@@ -260,7 +261,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     await fireEvent.press(view.getByLabelText('Reply to Cy'));
 
     expect(view.queryByText(/Replying to Anna/)).toBeNull();
-    expect(view.getByText('Replying to Cy · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Cy')).toBeTruthy();
 
     await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'Agreed, Cy');
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
@@ -281,7 +282,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
     await waitFor(() => expect(mockThreadReads).toBeGreaterThan(reads));
 
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     expect(view.getByLabelText('Your reply to Anna').props.value).toBe('half-written');
 
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
@@ -301,7 +302,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
 
     // A dropped connection is not a deletion: the list stays, and so does the reply.
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     expect(view.getByText('What did you think of the ending?')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Reply' })).not.toBeDisabled();
   });
@@ -416,9 +417,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
     mockWriteGate = null;
 
-    await waitFor(() =>
-      expect(view.getByText('Replying to Cy · under their comment')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Replying to Cy')).toBeTruthy());
     expect(view.queryByText(/no longer available/)).toBeNull();
     await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'for Cy');
     expect(view.getByRole('button', { name: 'Reply' })).not.toBeDisabled();
@@ -473,7 +472,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     await waitFor(() => expect(mockThreadReads).toBeGreaterThan(reads));
 
     // Still a reply to Anna, with the words kept.
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     mockWriteResults = [{ data: { status: 'already_applied' }, error: null }];
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
     await waitFor(() => expect(adds()).toHaveLength(2));
@@ -510,8 +509,13 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     expect(within(view.getByRole('button', { name: 'Reply' })).getByText('Reply')).toBeTruthy();
     // (2) To whom: the person tapped, by name.
     expect(banner).toHaveTextContent(/Replying to Bo/);
-    // (3) Where: in Anna's thread (one level), and the row answered is marked.
-    expect(banner).toHaveTextContent(/in Anna's thread$/);
+    // (3) Where: the row being answered is marked in the list (the indicator names only
+    // the person since 2026-11-24 — "Replying to Bo", nothing about threads).
+    expect(banner).toHaveTextContent(/^Replying to Bo$/);
+    expect(
+      (StyleSheet.flatten(view.getByTestId('comment-row-r1').props.style) as ViewStyle)
+        .backgroundColor,
+    ).toBe(theme.surface.sunken);
     // (4) How to cancel: the indicator's own ✕, named for what it does; and how to
     // switch — every other comment still offers its own Reply.
     expect(view.getByRole('button', { name: 'Cancel reply to Bo' })).toBeTruthy();
@@ -519,7 +523,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     expect(view.getByLabelText('Reply to Cy')).toBeTruthy();
     // And for a screen reader the mode is in the names and hints, not only on screen.
     expect(view.getByLabelText('Your reply to Bo').props.accessibilityHint).toBe(
-      "A reply to Bo, shown in Anna's thread",
+      'A reply to Bo',
     );
     await fireEvent.changeText(view.getByLabelText('Your reply to Bo'), 'x');
     expect(view.getByRole('button', { name: 'Reply' }).props.accessibilityHint).toBe(
@@ -640,7 +644,7 @@ describe('arriving at one comment (a notification)', () => {
       expect(style().backgroundColor).toBe(theme.surface.sunken);
       // Since 2026-11-23: arriving from a notification starts a reply to that comment's
       // author — without opening the keyboard — and shows only its conversation.
-      expect(view.getByText("Replying to Bo · in Anna's thread")).toBeTruthy();
+      expect(view.getByText('Replying to Bo')).toBeTruthy();
       expect(view.getByLabelText('Your reply to Bo').props.placeholder).toBe('Reply to Bo…');
       // The focus mock is shared by every native component, so ask which one was focused.
       expect(

@@ -4,6 +4,7 @@ import { Alert, StyleSheet, type ViewStyle } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { CommentSheet } from './CommentSheet';
+import { forgetHeldDrafts } from './CommentThread';
 import { DEFAULT_REACTION, REACTIONS, REACTION_GLYPH } from './use-reactions';
 
 /**
@@ -180,6 +181,8 @@ const confirmLastAlert = (text: string) => {
 };
 
 beforeEach(() => {
+  // Unsent drafts are held per activity for the life of the app; each case starts clean.
+  forgetHeldDrafts();
   mockCommentRows = [];
   mockReactorRows = [];
   mockRpcCalls.length = 0;
@@ -287,6 +290,22 @@ describe('the Feed interaction, unchanged', () => {
     // (design-system.md §8). A page would have neither.
     expect(view.getByLabelText('Comments')).toBeTruthy();
     expect(view.getByText(/recontextualises/)).toBeTruthy();
+  });
+
+  /**
+   * **An obvious way out** (founder iPhone QA, 2026-11-24): iOS has no Back button, so the
+   * sheet carries a titled header with a Close, and its top edge is the swipe area.
+   */
+  it('has a title and a Close in the swipe area, and Close closes it', async () => {
+    const onClose = jest.fn();
+    const view = await open({ onClose });
+
+    expect(view.getByRole('header', { name: 'Comments' })).toBeTruthy();
+    expect(view.getByTestId('sheet-grab')).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Close comments'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Closing sends nothing.
+    expect(mockRpcCalls).toHaveLength(0);
   });
 
   it('draws nothing at all when no activity is open', async () => {
@@ -564,7 +583,12 @@ describe('the composer belongs to one activity', () => {
     expect(mockRpcCalls[0]!.args.p_feed_event_id).toBe('e2');
   });
 
-  it('clears the draft when the sheet is closed and reopened', async () => {
+  /**
+   * **Closing keeps an unsent draft** (founder iPhone QA, 2026-11-24). A swipe down never
+   * posts and never silently loses words: reopening the same activity brings them back,
+   * reply target and all. Another activity starts clean.
+   */
+  it('keeps an unsent draft when the sheet is closed and reopened', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
     await fireEvent.changeText(view.getByLabelText('Add a comment'), 'unsent');
@@ -578,9 +602,44 @@ describe('the composer belongs to one activity', () => {
       onPressPerson: jest.fn(),
     };
     await view.rerender(<CommentSheet eventId={null} {...props} />);
+    // Nothing was sent by closing.
+    expect(mockRpcCalls).toHaveLength(0);
+    await view.rerender(<CommentSheet eventId="e2" {...props} />);
+    expect(view.queryByDisplayValue('unsent')).toBeNull();
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
     await view.rerender(<CommentSheet eventId="e1" {...props} />);
 
-    expect(view.queryByDisplayValue('unsent')).toBeNull();
+    expect(view.getByDisplayValue('unsent')).toBeTruthy();
+  });
+
+  it('keeps a reply in progress, target included, across a close', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+    await fireEvent.press(view.getByLabelText('Reply to Anna'));
+    await fireEvent.changeText(view.getByLabelText('Your reply to Anna'), 'half a reply');
+
+    const props = {
+      mediaItemId: FILM,
+      title: 'Sinners',
+      viewerId: VIEWER,
+      watched: new Set<string>(),
+      onClose: jest.fn(),
+      onPressPerson: jest.fn(),
+    };
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
+    expect(view.getByDisplayValue('half a reply')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+    expect(mockRpcCalls[0]!.args.p_parent_id).toBe('c1');
+
+    // Posted: it does not come back.
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    expect(view.queryByDisplayValue('half a reply')).toBeNull();
   });
 });
 
@@ -708,7 +767,6 @@ describe('an opening, not an activity id', () => {
   });
 });
 
-
 /**
  * Reporting a comment.
  *
@@ -747,7 +805,9 @@ describe('reporting a comment', () => {
     await fireEvent.press(view.getByLabelText("Report Anna's comment"));
     await fireEvent.press(view.getByText('Harassment or bullying'));
 
-    await waitFor(() => expect(mockRpcCalls.filter((c) => c.name === 'report')).toHaveLength(1));
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((c) => c.name === 'report')).toHaveLength(1),
+    );
     const call = mockRpcCalls.find((c) => c.name === 'report');
 
     /**
@@ -795,7 +855,9 @@ describe('reporting a comment', () => {
     await waitFor(() => expect(alertTitles).toContain('Thanks for telling us'));
     // The server's receipt cannot distinguish "filed" from "you already reported this",
     // deliberately — so the confirmation must not assert either.
-    expect(alertTitles.concat(alertMessages).join(' ')).not.toMatch(/already|first|new report/i);
+    expect(alertTitles.concat(alertMessages).join(' ')).not.toMatch(
+      /already|first|new report/i,
+    );
   });
 
   /**
@@ -841,7 +903,8 @@ describe('reporting a comment', () => {
  * seventh meaning added there has to appear here without this file being edited.
  */
 describe('reacting to a comment', () => {
-  const reactionCalls = () => mockRpcCalls.filter((call) => call.name === 'set_comment_reaction');
+  const reactionCalls = () =>
+    mockRpcCalls.filter((call) => call.name === 'set_comment_reaction');
 
   /** The arguments of the one reaction write, failing loudly if none was made. */
   const reactionArgs = (index = 0) => {
@@ -962,12 +1025,12 @@ describe('reacting to a comment', () => {
 
     expect(view.getByText('5')).toBeTruthy();
     for (const kind of ['love', 'funny', 'wow'] as const) {
-      expect(view.getByText(REACTION_GLYPH[kind], { includeHiddenElements: true })).toBeTruthy();
+      expect(
+        view.getByText(REACTION_GLYPH[kind], { includeHiddenElements: true }),
+      ).toBeTruthy();
     }
     // The fourth is not drawn: three is the cap `ActivityRow` sets.
-    expect(
-      view.queryByText(REACTION_GLYPH.moved, { includeHiddenElements: true }),
-    ).toBeNull();
+    expect(view.queryByText(REACTION_GLYPH.moved, { includeHiddenElements: true })).toBeNull();
   });
 
   it('shows no count at all on a comment nobody has reacted to', async () => {
@@ -993,7 +1056,13 @@ describe('reacting to a comment', () => {
   it('reacts to a reply exactly as it does to a root', async () => {
     mockCommentRows = [
       comment(),
-      comment({ id: 'c2', parent_id: 'c1', body: 'Agreed.', username: 'bo', display_name: 'Bo' }),
+      comment({
+        id: 'c2',
+        parent_id: 'c1',
+        body: 'Agreed.',
+        username: 'bo',
+        display_name: 'Bo',
+      }),
     ];
     const view = await open();
 
@@ -1012,7 +1081,13 @@ describe('reacting to a comment', () => {
   it('offers nothing to react to on a retracted comment', async () => {
     mockCommentRows = [
       comment({ deleted_at: new Date().toISOString(), body: null }),
-      comment({ id: 'c2', parent_id: 'c1', body: 'Still here.', username: 'bo', display_name: 'Bo' }),
+      comment({
+        id: 'c2',
+        parent_id: 'c1',
+        body: 'Still here.',
+        username: 'bo',
+        display_name: 'Bo',
+      }),
     ];
     const view = await open();
 
@@ -1040,7 +1115,13 @@ describe('who reacted to a comment', () => {
     });
 
   const reactors = [
-    { user_id: 'u1', username: 'abisola', display_name: 'Abisola', avatar_path: null, kind: 'funny' },
+    {
+      user_id: 'u1',
+      username: 'abisola',
+      display_name: 'Abisola',
+      avatar_path: null,
+      kind: 'funny',
+    },
     { user_id: 'u2', username: 'ravi', display_name: 'Ravi', avatar_path: null, kind: 'love' },
   ];
 
@@ -1049,7 +1130,9 @@ describe('who reacted to a comment', () => {
     mockReactorRows = reactors;
     const view = await open();
 
-    await act(async () => fireEvent(view.getByLabelText('2 reactions. See who reacted.'), 'longPress'));
+    await act(async () =>
+      fireEvent(view.getByLabelText('2 reactions. See who reacted.'), 'longPress'),
+    );
 
     // Person and meaning together — the founder's "Abisola ❤️" list, as the feed
     // already draws it.
@@ -1068,7 +1151,9 @@ describe('who reacted to a comment', () => {
    * alert, and other people's reactions still open the list.
    */
   it('offers the author a reaction on their own comment, and saves it with no alert', async () => {
-    mockCommentRows = [{ ...reacted(), author_id: VIEWER, username: 'sai', display_name: 'Sai' }];
+    mockCommentRows = [
+      { ...reacted(), author_id: VIEWER, username: 'sai', display_name: 'Sai' },
+    ];
     mockReactorRows = reactors;
     const view = await open();
 
@@ -1144,7 +1229,13 @@ describe('who reacted to a comment', () => {
     mockCommentRows = [{ ...reacted(), reaction_count: 3 }];
     mockReactorRows = [
       ...reactors,
-      { user_id: AUTHOR, username: 'anna', display_name: 'Anna', avatar_path: null, kind: 'love' },
+      {
+        user_id: AUTHOR,
+        username: 'anna',
+        display_name: 'Anna',
+        avatar_path: null,
+        kind: 'love',
+      },
     ];
     const view = await open();
 
@@ -1198,11 +1289,19 @@ describe('who reacted to a comment', () => {
       }),
     ];
     mockReactorRows = [
-      { user_id: 'u3', username: 'silky', display_name: 'Silky', avatar_path: null, kind: 'wow' },
+      {
+        user_id: 'u3',
+        username: 'silky',
+        display_name: 'Silky',
+        avatar_path: null,
+        kind: 'wow',
+      },
     ];
     const view = await open();
 
-    await act(async () => fireEvent(view.getByLabelText('1 reaction. See who reacted.'), 'longPress'));
+    await act(async () =>
+      fireEvent(view.getByLabelText('1 reaction. See who reacted.'), 'longPress'),
+    );
 
     await waitFor(() =>
       expect(view.getByLabelText('Silky, Wow. Open their profile.')).toBeTruthy(),
