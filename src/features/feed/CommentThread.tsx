@@ -635,7 +635,13 @@ export function CommentThread({
     newIntent();
     // Posted: whatever was held for this activity — including a copy saved because the
     // sheet closed while this was in flight — is spent, and must not come back.
-    if (keepDraft) heldDrafts.delete(heldKey(viewerId, eventId));
+    // Only that copy: a draft written since — reopened and changed, which mints a new
+    // intent — carries another operation id and is the reader's newer work (Codex review,
+    // PR #374).
+    if (keepDraft) {
+      const key = heldKey(viewerId, eventId);
+      if (heldDrafts.get(key)?.attempt === operationId) heldDrafts.delete(key);
+    }
     if (stillHere(opening)) {
       /**
        * A new top-level comment is a thread of its own, which the focused view would not

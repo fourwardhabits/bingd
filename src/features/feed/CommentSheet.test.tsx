@@ -612,6 +612,38 @@ describe('the composer belongs to one activity', () => {
     expect(view.getByDisplayValue('unsent')).toBeTruthy();
   });
 
+  it('does not let a slow post that lands later drop a newer draft', async () => {
+    let release: (() => void) | null = null;
+    mockRpcGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const props = {
+      mediaItemId: FILM,
+      title: 'Sinners',
+      viewerId: VIEWER,
+      watched: new Set<string>(),
+      onClose: jest.fn(),
+      onPressPerson: jest.fn(),
+    };
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'first');
+    await fireEvent.press(view.getByText('Post'));
+
+    // Closed while it is in flight, reopened, and something newer written and kept.
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'second thought');
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+
+    release!();
+    mockRpcGate = null;
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    expect(view.getByDisplayValue('second thought')).toBeTruthy();
+  });
+
   it('keeps a reply in progress, target included, across a close', async () => {
     mockCommentRows = [comment()];
     const view = await open();
