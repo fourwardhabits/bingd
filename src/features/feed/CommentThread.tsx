@@ -374,7 +374,9 @@ export function CommentThread({
     if (!keepDraft || !eventId) return;
     const key = heldKey(viewerId, eventId);
     return () => {
-      const last = latest.current;
+      // The operation id read live, not from the last commit: a Post pressed just before
+      // the close has set it without a render in between.
+      const last = latest.current && { ...latest.current, attempt: attempt.current };
       const posted = last?.attempt != null && postedOperations.has(last.attempt);
       if (last && !posted && (last.draft.trim() || last.replyingTo || last.editing)) {
         heldDrafts.set(key, last);

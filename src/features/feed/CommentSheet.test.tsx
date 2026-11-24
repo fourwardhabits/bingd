@@ -670,15 +670,14 @@ describe('the composer belongs to one activity', () => {
     release!();
     mockRpcGate = null;
     await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
-    // Let the landed post finish its own bookkeeping (it refreshes the thread first).
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    // Closing now must not keep the posted words as an unsent draft. The landed post does
+    // its bookkeeping after refreshing the thread, so on a slow runner the first close may
+    // still come before it: close and reopen until it has, which it must.
+    await waitFor(async () => {
+      await view.rerender(<CommentSheet eventId={null} {...props} />);
+      await view.rerender(<CommentSheet eventId="e1" {...props} />);
+      expect(view.queryByDisplayValue('said once')).toBeNull();
     });
-
-    // Closing now must not keep the posted words as an unsent draft.
-    await view.rerender(<CommentSheet eventId={null} {...props} />);
-    await view.rerender(<CommentSheet eventId="e1" {...props} />);
-    expect(view.queryByDisplayValue('said once')).toBeNull();
   });
 
   it('keeps a reply in progress, target included, across a close', async () => {
