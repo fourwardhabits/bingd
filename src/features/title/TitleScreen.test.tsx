@@ -65,11 +65,20 @@ let mockSeasonListError: unknown = null;
  * page has no series, and a read with `parent_id = null` is one Postgres refuses (22P02).
  */
 const mockSeasonListReads: unknown[] = [];
+/**
+ * Every request in the order it was sent: an RPC by name, a table read by table (and by
+ * facet, for `media_cache`), the availability edge call as `watch-providers`. The order is
+ * what Android's five-at-a-time queue serves them in (perf, 2026-11-24).
+ */
+const mockAsked: string[] = [];
+const mockAsk = (table: string, filters: Record<string, unknown>) =>
+  mockAsked.push(typeof filters.facet === 'string' ? `${table}:${filters.facet}` : table);
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
+      mockAsked.push(name);
       const error = mockRpcErrors[name] ?? null;
       // A result may be a function of the call's arguments — the circle's `following` read
       // and the Reviews tab's read are one RPC told apart by `p_sort`.
@@ -104,8 +113,14 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         limit: () => chain,
         gt: () => chain,
-        single: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
-        maybeSingle: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
+        single: () => {
+          mockAsk(table, filters);
+          return held(table, () => ({ data: rows()[0] ?? null, error: null }));
+        },
+        maybeSingle: () => {
+          mockAsk(table, filters);
+          return held(table, () => ({ data: rows()[0] ?? null, error: null }));
+        },
         // `count` as well as `data`: `useCredits` first asks whether the cache has
         // any rows at all, with a head-only count query, and a mock that answered
         // only `data` made every cast list read as empty.
@@ -114,6 +129,7 @@ jest.mock('@/lib/supabase', () => ({
         // the call, which is exactly why a page that only misbehaves during a fetch had
         // no test until now.
         then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          mockAsk(table, filters);
           if (table === 'media_items' && filters.kind === 'season' && 'parent_id' in filters) {
             mockSeasonListReads.push(filters.parent_id);
             // What PostgREST answers for `parent_id=eq.null` on a uuid column.
@@ -231,7 +247,10 @@ const mockFetchWatchProviders = jest.fn();
 jest.mock('@/lib/tmdb-adapter', () => ({
   ...jest.requireActual('@/lib/tmdb-adapter'),
   fetchSeasonEpisodes: (...args: unknown[]) => mockFetchSeasonEpisodes(...args),
-  fetchWatchProviders: (...args: unknown[]) => mockFetchWatchProviders(...args),
+  fetchWatchProviders: (...args: unknown[]) => {
+    mockAsked.push('watch-providers');
+    return mockFetchWatchProviders(...args);
+  },
   /**
    * Since 2026-09-13 a film opens on Similar, so every film in this file asks for its
    * similar titles on arrival, and a cold facet reaches this. It is answered with "nothing
@@ -357,6 +376,7 @@ beforeEach(() => {
   mockRpcErrors = {};
   mockSeasonListError = null;
   mockSeasonListReads.length = 0;
+  mockAsked.length = 0;
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   mockSelects.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
@@ -7086,6 +7106,54 @@ describe('a title page opening', () => {
     }
     // Discriminating: the row itself really is still parked.
     expect(view.queryByText(/^Inception/)).toBeNull();
+
+    releaseReadsOf('media_items');
+    await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());
+  });
+
+  it('asks where to watch while the title row is in flight, and only once', async () => {
+    holdReadsOf('media_items');
+    const view = await renderWithProviders(<TitleScreen />);
+
+    await waitFor(() => expect(mockFetchWatchProviders).toHaveBeenCalledWith('film-1', 'US'));
+    // Discriminating: before this, the block's own hook was the only one, and it mounts
+    // only once the row is back.
+    expect(view.queryByText(/^Inception/)).toBeNull();
+
+    releaseReadsOf('media_items');
+    await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());
+    // The block reads the answer already in the cache rather than asking again.
+    expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends what is drawn above the tabs before what is drawn below them', async () => {
+    holdReadsOf('media_items');
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(mockAsked).toContain('title_reviews_v2'));
+
+    const at = (request: string) => {
+      const index = mockAsked.indexOf(request);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    // The row, the reader's own state and the director line's credits lead, as before.
+    expect(mockAsked.slice(0, 5)).toEqual([
+      'media_items',
+      'user_media',
+      'rankings',
+      'watchlist',
+      'media_cache:credits',
+    ]);
+    // Then both scores, straight after: sixth and seventh, where they were tenth and
+    // eleventh behind the watch count and the review list.
+    expect(mockAsked.slice(5, 7)).toEqual(['community_score', 'following_score']);
+    // The trailers, the tab's count and availability ahead of what is drawn far below.
+    const above = ['media_cache:videos', 'title_review_count', 'watch-providers'];
+    for (const first of above) {
+      for (const second of ['watch_events', 'title_reviews_v2']) {
+        expect(at(first)).toBeLessThan(at(second));
+      }
+    }
 
     releaseReadsOf('media_items');
     await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());

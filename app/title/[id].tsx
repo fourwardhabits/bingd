@@ -106,6 +106,7 @@ import {
   type ReviewOrder,
   type TitleReview,
 } from '@/features/title/use-title-reviews';
+import { useWatchProviders } from '@/features/title/use-watch-providers';
 import { EpisodeRail } from '@/features/title/EpisodeRail';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
 import { useSimilarTitles } from '@/features/title/use-similar-titles';
@@ -592,9 +593,40 @@ export default function TitleScreen() {
    * enrichment), Similar (kind, parent) — still wait for it.
    */
   const routeTitleId = hasId ? id : null;
+  /**
+   * **What is drawn above the tabs is asked for first** (perf, 2026-11-24, after #378).
+   *
+   * Android sends at most five requests to one host at a time, first in, first out, and a
+   * title page opens with a dozen. The order these hooks are declared in is the order the
+   * requests leave, so it is the order the page fills in. The community score was tenth in
+   * line and the circle's eleventh, behind the watch count and the review list that are
+   * drawn far below them — so on the founder's Preview they landed a queue turn or two
+   * after the artwork they sit under.
+   *
+   * So: the row and the reader's own state (above), the credits behind the director line,
+   * both scores, the trailers (a season's episode fallback waits on them), the review
+   * count on the tab and Where to Watch; then the watch count and the review list. Only the
+   * order moved: every key, `enabled` and invalidation is what it was.
+   */
   const credits = useCredits(routeTitleId);
-  const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
+  const community = useCommunityScore(routeTitleId, profile.id);
+  const following = useFollowingScore(routeTitleId, profile.id);
   const videos = useTitleVideos(routeTitleId);
+  /**
+   * The number on the tab, read separately from the list. Asked of every kind, a whole
+   * show included, for the reason the list below gives.
+   */
+  const reviewCount = useTitleReviewCount(routeTitleId);
+  /**
+   * **Where to Watch leaves with the row** (perf, 2026-11-24). `WhereToWatch` reads this
+   * same query, and it is drawn on every kind of title on both layouts — but only once the
+   * row is back, so its edge call used to leave a round trip later and queue behind the
+   * whole first burst. Observing it here, by the id the row is read by, sends it with the
+   * scores; the block still draws nothing until there is an answer, and still asks once
+   * per title per region per twelve hours (`use-watch-providers.ts`).
+   */
+  useWatchProviders(routeTitleId);
+  const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   /**
    * How many viewings the reader has of this title (§J.2), for the personal-context
    * line far below.
@@ -635,14 +667,7 @@ export default function TitleScreen() {
    * filter inside the sheet.
    */
   const helpfulReviews = useTitleReviews(immersive ? routeTitleId : null, 'top_desc');
-  /**
-   * The number on the tab, read separately from the list. Asked of every kind, a whole
-   * show included, for the reason the list above gives.
-   */
-  const reviewCount = useTitleReviewCount(routeTitleId);
   const setHelpful = useSetReviewHelpful(titleId);
-  const community = useCommunityScore(routeTitleId, profile.id);
-  const following = useFollowingScore(routeTitleId, profile.id);
   const watched = useWatched(profile.id);
   /**
    * Who recommended this to the reader, and what they said (20260929000100).
