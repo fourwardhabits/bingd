@@ -83,6 +83,11 @@ jobs:
       # refuses unless both hashes are the live store binaries.
       platform: all
       message: ${{ inputs.message }}
-      # The local path never uploaded maps, and this change moves where an update is bundled,
-      # not what happens around it.
-      upload_sentry_sourcemaps: false
+      # Source maps for the OTA bundle (2026-11-24). Every production user runs an OTA, and
+      # without its map a crash shows minified output. The maps are matched by Debug ID, which
+      # metro.config.js (Sentry's serializer) writes into each bundle. The token is the
+      # production EAS environment's SENTRY_AUTH_TOKEN, the one the store builds already
+      # upload with (fourward-habits/bingd-react-native). The upload runs after the publish:
+      # a failed upload can fail this job with the update already live, so the release check
+      # is `release-manifest live production`, and setting this back to false is the off switch.
+      upload_sentry_sourcemaps: true
