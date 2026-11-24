@@ -353,3 +353,60 @@ describe('a season enrichment and the Episodes cache', () => {
     expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A season with its artwork and overview is complete (perf, 2026-11-24).
+ *
+ * `isThin` asked every rankable kind for a runtime, and a season row never has one — the
+ * adapter's `fromSeasonDetail` writes none, and on 2026-11-24 not one season on staging
+ * or production carried one. So every visit to every season called `detail`, held the
+ * episode list behind it, and invalidated the page on the way back.
+ */
+describe('a season that is already filled in', () => {
+  const complete = {
+    id: 'season-2',
+    kind: 'season' as const,
+    tmdb_id: null,
+    poster_path: '/season.jpg',
+    overview: 'The second season.',
+    runtime_minutes: null,
+  };
+
+  beforeEach(() => {
+    mockEnrichTitle.mockReset();
+    mockFetchSeasonEpisodes.mockReset();
+    mockEnrichTitle.mockResolvedValue({ enriched: true });
+    mockFetchSeasonEpisodes.mockResolvedValue([]);
+  });
+
+  it('is not enriched for want of a runtime it can never have', async () => {
+    const { result } = await renderHookWithProviders(() => {
+      const { enriching } = useTitleEnrichment(complete);
+      return { enriching, episodes: useSeasonEpisodes('season-2', !enriching) };
+    });
+
+    expect(result.current.enriching).toBe(false);
+    // The episode list asks for itself straight away rather than waiting on `detail`.
+    await waitFor(() => expect(mockFetchSeasonEpisodes).toHaveBeenCalledWith('season-2'));
+    expect(mockEnrichTitle).not.toHaveBeenCalled();
+  });
+
+  it('is still enriched when it has never been asked about trailers', async () => {
+    // The caller's second reason — no videos facet at all — is unchanged, so a season
+    // whose credits and trailers were never fetched is still filled in once.
+    await renderHookWithProviders(() => useTitleEnrichment(complete, true));
+    await waitFor(() => expect(mockEnrichTitle).toHaveBeenCalledWith('season-2'));
+  });
+
+  it('is still enriched when its overview is missing', async () => {
+    await renderHookWithProviders(() => useTitleEnrichment({ ...complete, overview: null }));
+    await waitFor(() => expect(mockEnrichTitle).toHaveBeenCalledWith('season-2'));
+  });
+
+  it('still asks a film for its runtime', async () => {
+    await renderHookWithProviders(() =>
+      useTitleEnrichment({ ...complete, id: 'film-9', kind: 'movie', tmdb_id: 9 }),
+    );
+    await waitFor(() => expect(mockEnrichTitle).toHaveBeenCalledWith('film-9'));
+  });
+});
