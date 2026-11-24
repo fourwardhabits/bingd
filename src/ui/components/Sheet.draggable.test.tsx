@@ -63,6 +63,9 @@ describe('a draggable sheet', () => {
     );
 
     expect(view.getByTestId('sheet-grab')).toBeTruthy();
+    // The content sits in its wrapper from the start, so expanding restyles it and never
+    // remounts it — a composer keeps its words through a resize.
+    expect(view.getByTestId('expanded').parent?.props.testID).toBe('sheet-content');
     expect(view.getByTestId('expanded').props.children).toBe('false');
     await fireEvent.press(view.getByLabelText('Close comments'));
     expect(onClose).toHaveBeenCalledTimes(1);

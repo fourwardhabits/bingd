@@ -414,7 +414,10 @@ export function Sheet({
           )}
           <SheetExpandedContext.Provider value={grows}>
             <BottomInsetPaidContext.Provider value>
-              {structured || grows ? (
+              {/* A draggable sheet always has the wrapper, so expanding or collapsing only
+                  restyles it: changing the tree would remount the content — a composer and
+                  its unsent words with it (Codex review, PR #374). */}
+              {structured || draggable ? (
                 <View
                   testID="sheet-content"
                   style={standard || grows ? styles.contentDense : styles.content}
