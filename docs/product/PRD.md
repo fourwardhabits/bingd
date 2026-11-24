@@ -3219,6 +3219,35 @@ and conflating them is the easy mistake:
 So a fresh launch opens Feed, and tapping the trophy opens the board on the timeframe
 they last chose.
 
+#### As built — 2026-11-23: one control row, and a title counted once
+
+Founder brief "Leaderboard UI & Counting Refinement". It supersedes the 2026-08-29
+dropdown heading, the 2026-08-30 month fallback above, and the 2026-11-22 filter sheet.
+
+**Layout.** The mode toggle keeps its row; in Leaderboard mode nothing sits opposite it.
+Under it, one control row: the category as the browsing pages' marquee dropdown (All
+Titles, Movies, TV Shows, Reviews) on the left, and `All time | This month` as the compact
+switch on the right, wrapping onto its own line when the two do not fit. Then LEADERBOARD,
+the Feed tab's one section heading, then the rows. No filter icon, badge or summary line.
+
+**Defaults and memory.** All Titles and **All time** by default; a reader's stored
+timeframe (This month included) is kept. Category and timeframe are both remembered per
+account, locally (`leaderboard.metric`, `leaderboard.timeframe`); the mode still is not.
+
+**Counting** (`20261130001300`, `_leaderboard_counts`, shared by `leaderboard` and
+`my_leaderboard_standing`). A point is a **distinct watched title**, never a ranking
+operation. Movies, whole shows and seasons are separate units: All Titles counts all three,
+TV Shows counts shows and seasons, Movies counts films; a show and its first season are
+two. Watched means a collection row not marked in progress with a watch event of its own
+that is not show-promotion bookkeeping, so placing a show from its seasons' average (and
+its Undo) counts nothing. **All time** counts each such title once, dated or not, and still
+excludes rows whose provenance is `imported` (a ranked or rewatched import is native). **This
+month** counts titles with a native-dated viewing (`today_default`, `reader`,
+`unattributed`) in the UTC month: no fallback to a recording time, no credit for diary
+dates, rankings, corrections or a backlog entry logged as "Earlier". Reviews are unchanged.
+The one limit: a title logged today with the sheet's Today kept is believed to have been
+watched today; the board never supplies a date nobody gave.
+
 #### The leaderboard is not an exception to discoverability — amended 2026-08-30
 
 A private account the reader has not been approved by **is on the board**, as a minimal

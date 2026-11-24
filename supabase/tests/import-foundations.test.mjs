@@ -47,12 +47,26 @@ const count = async (table, where = 'true') => {
   return rows[0].n;
 };
 
-const logWatch = (user, item, source = 'in_app') =>
-  t.sql(
+/**
+ * A collection row of the given provenance. A native one is logged the way the app logs a
+ * watch today (`log_title` with the sheet's Today kept: a `today_default` event on the UTC
+ * date), because since R2 and 20261130001300 the monthly board reads the watch event, not
+ * the row's recording time. An imported one keeps the undated event the backstop gives it.
+ */
+const logWatch = async (user, item, source = 'in_app') => {
+  await t.sql(
     `insert into user_media (user_id, media_item_id, bucket, source)
      values ($1, $2, 'loved', $3::content_source)`,
     [user, item, source],
   );
+  if (source === 'in_app') {
+    await t.sql(
+      `insert into watch_events (user_id, media_item_id, watched_on, basis)
+       values ($1, $2, (now() at time zone 'UTC')::date, 'today_default')`,
+      [user, item],
+    );
+  }
+};
 
 /**
  * The caller's own count, through the public surface.

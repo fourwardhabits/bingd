@@ -11,16 +11,16 @@ import { FEED_CARD } from '@/features/feed/FeedPostSurface';
 import FeedScreen from '../../../app/(tabs)/feed';
 
 /**
- * The Feed ↔ Leaderboard toggle, the timeframe selector, and the board's rows.
+ * The Feed ↔ Leaderboard toggle, the board's category dropdown and timeframe switch, and
+ * the board's rows.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS FILE GUARDS
  *
- * **Two preferences that must not be conflated.** The founder was explicit: the
- * *timeframe* is remembered across launches and the *mode* is not. They live one line
- * apart in `feed.tsx`, they are both stored-preference-shaped, and swapping them would
- * mean the app opening on a scoreboard instead of the homepage. Every persistence test
- * below asserts one and denies the other.
+ * **Preferences that must not be conflated.** The founder was explicit: the board's
+ * *category and timeframe* are remembered across launches, per account, and the *mode* is
+ * not. Swapping them would mean the app opening on a scoreboard instead of the homepage.
+ * Every persistence test below asserts one and denies the other.
  *
  * **Where the toggle is.** It spent a day in the app bar and the founder's physical
  * review moved it. The app bar is the one row identical on every tab, so a control that
@@ -168,6 +168,7 @@ const pressBack = () => {
 };
 
 const TIMEFRAME_KEY = 'user-1.leaderboard.timeframe';
+const METRIC_KEY = 'user-1.leaderboard.metric';
 
 /** Board rows and standings, keyed `metric|timeframe` so the views cannot be confused. */
 const mockBoard: Record<string, unknown[]> = {};
@@ -235,54 +236,68 @@ const open = async () => {
 };
 
 /**
- * **The board's filter icon** (header consistency, founder spec 2026-11-22). It replaced the
- * two dropdowns, and its spoken name carries both choices — `Leaderboard filters: All
- * Titles, This month` — so a test reads the board's state off the one control.
+ * **The board's two controls** (founder brief 2026-11-23): the category dropdown, which
+ * names the category showing (`Showing All Titles`), and the All time | This month switch,
+ * whose selected half is the timeframe. A test reads the board's state off those two.
  */
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const showing = (value: string) => new RegExp(`^Leaderboard filters: .*\\b${escape(value)}\\b`);
-const FILTERS = /^Leaderboard filters: /;
+const TIMEFRAMES = ['All time', 'This month'];
 
-const toBoard = async (view: View, expecting = 'This month') => {
-  await fireEvent.press(view.getByLabelText('Leaderboard'));
-  await waitFor(() => expect(view.getByLabelText(showing(expecting))).toBeTruthy());
-};
+const categoryShowing = (view: View) =>
+  String(view.getByTestId('leaderboard-category').props.accessibilityLabel).replace(
+    /^Showing /,
+    '',
+  );
 
-/** Open the filter sheet, and the one of its two radio groups asked for. */
-const openFilters = async (view: View, group: 'Type' | 'Time period') => {
-  await fireEvent.press(view.getByTestId('leaderboard-filter-button'));
-  return within(await view.findByLabelText(group));
-};
-
-const closeFilters = async (view: View) => {
-  await fireEvent.press(view.getByTestId('leaderboard-filter-close-press'));
-  await waitFor(() => expect(view.queryByTestId('leaderboard-filter-scroll')).toBeNull());
-};
-
-/** Choose a content type in the filter sheet, and close it again. */
-const chooseMetric = async (view: View, to: string) => {
-  const group = await openFilters(view, 'Type');
-  await fireEvent.press(group.getByRole('radio', { name: to }));
-  await closeFilters(view);
-};
-
-/** The sheet's content types, read and closed again on the current entry. */
-const metricMenu = async (view: View) => {
-  const group = await openFilters(view, 'Type');
-  const names = group
+const timeframeShowing = (view: View) =>
+  within(view.getByTestId('leaderboard-timeframe'))
     .getAllByRole('radio')
+    .filter((cell) => cell.props.accessibilityState?.selected)
+    .map((cell) => cell.props.accessibilityLabel as string);
+
+/** The board is showing this category or timeframe. */
+const expectShowing = (view: View, value: string) =>
+  TIMEFRAMES.includes(value)
+    ? expect(timeframeShowing(view)).toEqual([value])
+    : expect(categoryShowing(view)).toBe(value);
+
+/** No board on screen: neither of its controls is mounted. */
+const expectNoBoard = (view: View) => expect(view.queryByTestId('leaderboard-controls')).toBeNull();
+
+const toBoard = async (view: View, expecting = 'All time') => {
+  await fireEvent.press(view.getByLabelText('Leaderboard'));
+  await waitFor(() => expectShowing(view, expecting));
+};
+
+/** Open the category dropdown's menu. */
+const openCategories = async (view: View) => {
+  await fireEvent.press(view.getByTestId('leaderboard-category'));
+  return within(await view.findByTestId('leaderboard-category-menu'));
+};
+
+/** Choose a category in the dropdown; the menu closes on the choice. */
+const chooseMetric = async (view: View, to: string) => {
+  const menu = await openCategories(view);
+  await fireEvent.press(menu.getByRole('menuitem', { name: to }));
+  await waitFor(() => expectShowing(view, to));
+};
+
+/** The dropdown's categories, read and closed again on the current entry. */
+const metricMenu = async (view: View) => {
+  const menu = await openCategories(view);
+  const names = menu
+    .getAllByRole('menuitem')
     .map((item) => item.props.accessibilityLabel as string);
-  await closeFilters(view);
+  await fireEvent.press(view.getAllByLabelText('Close').at(-1)!);
   return names;
 };
 
-/** Choose a time period in the filter sheet, and close it again. */
+/** Choose a time period on the switch. */
 const chooseTimeframe = async (view: View, from: string, to: string) => {
-  expect(view.getByLabelText(showing(from))).toBeTruthy();
-  const group = await openFilters(view, 'Time period');
-  await fireEvent.press(group.getByRole('radio', { name: to }));
-  await closeFilters(view);
-  await waitFor(() => expect(view.getByLabelText(showing(to))).toBeTruthy());
+  expectShowing(view, from);
+  await fireEvent.press(
+    within(view.getByTestId('leaderboard-timeframe')).getByRole('radio', { name: to }),
+  );
+  await waitFor(() => expectShowing(view, to));
 };
 
 // ---------------------------------------------------------------------------
@@ -339,7 +354,7 @@ describe('the toggle', () => {
     const view = await open();
 
     expect(view.getByLabelText('Recent activity')).toBeTruthy();
-    expect(view.queryByLabelText(showing('This month'))).toBeNull();
+    expectNoBoard(view);
   });
 
   it('switches to the Leaderboard on the trophy', async () => {
@@ -358,7 +373,7 @@ describe('the toggle', () => {
     await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText(showing('This month'))).toBeNull();
+    expectNoBoard(view);
   });
 
   it('does not read the board until it is opened', async () => {
@@ -375,81 +390,92 @@ describe('the toggle', () => {
  * This is what the founder's §2 is about, and every test here exists because the obvious
  * implementation gets one of the two wrong.
  */
-describe('the timeframe, remembered — and the mode, not', () => {
-  it('opens the board on This month when nothing has been chosen', async () => {
+describe('the category and timeframe, remembered — and the mode, not', () => {
+  it('opens the board on All Titles and All time when nothing has been chosen', async () => {
     const view = await open();
     await toBoard(view);
+    expectShowing(view, 'All Titles');
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
         p_metric: 'titles',
-        p_timeframe: 'month',
+        p_timeframe: 'all_time',
         p_limit: 50,
       }),
     );
+    expect(mockRpc).not.toHaveBeenCalledWith('leaderboard', expect.objectContaining({ p_timeframe: 'month' }));
   });
 
-  it('offers exactly the two timeframes', async () => {
+  it('offers exactly the two timeframes, All time first', async () => {
     // Week and year were ruled out. Asserted as an absence so neither arrives without a
     // decision.
     const view = await open();
     await toBoard(view);
-    const group = await openFilters(view, 'Time period');
+    const group = within(view.getByTestId('leaderboard-timeframe'));
 
     expect(group.getAllByRole('radio').map((item) => item.props.accessibilityLabel)).toEqual([
-      'This month',
       'All time',
+      'This month',
     ]);
     expect(view.queryByText('This week')).toBeNull();
     expect(view.queryByText('This year')).toBeNull();
   });
 
-  it('re-reads the board on All time, and says so in the heading', async () => {
-    mockBoard['titles|all_time'] = [entry({ display_name: 'Bea', username: 'bea' })];
+  it('re-reads the board on This month', async () => {
+    mockBoard['titles|month'] = [entry({ display_name: 'Bea', username: 'bea' })];
     const view = await open();
     await toBoard(view);
 
-    await chooseTimeframe(view, 'This month', 'All time');
+    await chooseTimeframe(view, 'All time', 'This month');
 
     await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
     expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
       p_metric: 'titles',
-      p_timeframe: 'all_time',
+      p_timeframe: 'month',
       p_limit: 50,
     });
   });
 
-  it('records the choice, so the next visit starts there', async () => {
+  it('records both choices, so the next visit starts there', async () => {
     const view = await open();
     await toBoard(view);
-    await chooseTimeframe(view, 'This month', 'All time');
+    await chooseTimeframe(view, 'All time', 'This month');
+    await chooseMetric(view, 'TV Shows');
 
-    await waitFor(() =>
-      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'all_time' }),
-    );
+    await waitFor(() => {
+      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'month' });
+      expect(mockPrefWrites).toContainEqual({ name: METRIC_KEY, value: 'tv' });
+    });
   });
 
-  it('keeps All time when the board is left and reopened', async () => {
+  it('keeps both when the board is left and reopened', async () => {
     const view = await open();
     await toBoard(view);
-    await chooseTimeframe(view, 'This month', 'All time');
+    await chooseTimeframe(view, 'All time', 'This month');
+    await chooseMetric(view, 'Reviews');
 
     await fireEvent.press(view.getByLabelText('Feed'));
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    await toBoard(view, 'All time');
+    await toBoard(view, 'This month');
+    expectShowing(view, 'Reviews');
+    expect(mockRpc).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ p_metric: 'reviews', p_timeframe: 'month' }),
+    );
   });
 
   /**
    * The pair the founder drew a line between, in one test.
    *
    * A fresh launch opens **Feed** — the mode is not remembered — and tapping Trophy opens
-   * on **All time**, because the timeframe is. Getting either half backwards is the
+   * on **Movies / This month**, because those are. Getting either half backwards is the
    * mistake this section exists to catch.
    */
-  it('opens on Feed after a relaunch, and on the remembered timeframe when asked', async () => {
+  it('opens on Feed after a relaunch, and on the remembered board when asked', async () => {
     const first = await open();
     await toBoard(first);
-    await chooseTimeframe(first, 'This month', 'All time');
+    await chooseTimeframe(first, 'All time', 'This month');
+    await chooseMetric(first, 'Movies');
     // `cleanup()` rather than `unmount()`: the library unmounts every rendered tree again
     // after the test, and one already unmounted by hand makes that pass throw — which
     // breaks the *next* test for a reason that has nothing to do with what it asserts.
@@ -458,47 +484,67 @@ describe('the timeframe, remembered — and the mode, not', () => {
     const second = await open();
 
     expect(second.getByLabelText('Recent activity')).toBeTruthy();
-    expect(second.queryByLabelText(FILTERS)).toBeNull();
+    expectNoBoard(second);
 
-    await toBoard(second, 'All time');
+    await toBoard(second, 'This month');
+    expectShowing(second, 'Movies');
   });
 
-  it('records This month again when the reader switches back', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+  it('keeps an existing This month preference, stored before this release', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
     const view = await open();
-    await toBoard(view, 'All time');
+    await toBoard(view, 'This month');
+    expectShowing(view, 'All Titles');
+  });
 
-    await chooseTimeframe(view, 'All time', 'This month');
+  it('records All time again when the reader switches back', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
+    const view = await open();
+    await toBoard(view, 'This month');
+
+    await chooseTimeframe(view, 'This month', 'All time');
 
     await waitFor(() =>
-      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'month' }),
+      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'all_time' }),
     );
   });
 
-  it('ignores a stored value the selector has no option for', async () => {
+  it('ignores a stored value the controls have no option for', async () => {
     mockPrefStore[TIMEFRAME_KEY] = 'this_week';
+    mockPrefStore[METRIC_KEY] = 'watched';
     const view = await open();
     await toBoard(view);
+    expectShowing(view, 'All Titles');
   });
 
-  it('gives a second account the default rather than the first one’s choice', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+  it('gives a second account the defaults rather than the first one’s choices', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
+    mockPrefStore[METRIC_KEY] = 'reviews';
     const view = await open();
-    await toBoard(view, 'All time');
+    await toBoard(view, 'This month');
+    expectShowing(view, 'Reviews');
     await cleanup();
 
     mockProfile.id = 'user-2';
     const second = await open();
     await toBoard(second);
+    expectShowing(second, 'All Titles');
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      'leaderboard',
+      expect.objectContaining({ p_metric: 'reviews', p_timeframe: 'all_time' }),
+    );
   });
 
-  it('falls back to This month when the preference read fails', async () => {
+  it('falls back to the defaults when the preference read fails', async () => {
     // A store that refuses should cost the reader their preference, not hand them the
     // previous account's — the cross-account leak `CollectionScreen` records.
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
+    mockPrefStore[METRIC_KEY] = 'movies';
     mockPrefFailing.add(TIMEFRAME_KEY);
+    mockPrefFailing.add(METRIC_KEY);
     const view = await open();
     await toBoard(view);
+    expectShowing(view, 'All Titles');
   });
 });
 
@@ -527,8 +573,8 @@ describe('the board is people only', () => {
         .map((cell) => cell.props.accessibilityState?.selected),
     ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
-    expect(view.getByLabelText(showing('This month'))).toBeTruthy();
-    expect(view.getByLabelText(showing('All Titles'))).toBeTruthy();
+    expectShowing(view, 'All time');
+    expectShowing(view, 'All Titles');
     expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
   });
 
@@ -568,7 +614,7 @@ describe('switching metrics keeps the board still', () => {
   it('starts every state in one content container, at the same top', async () => {
     // Titles has people on it; Reviews has nobody. The two states that used to start at
     // different heights.
-    mockBoard['titles|month'] = [entry()];
+    mockBoard['titles|all_time'] = [entry()];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -578,7 +624,7 @@ describe('switching metrics keeps the board still', () => {
     expect(styleOf(withRows).marginTop ?? 0).toBe(0);
 
     await chooseMetric(view, 'Reviews');
-    await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('No reviews here yet.')).toBeTruthy());
 
     const empty = view.getByTestId('leaderboard-content');
     expect(styleOf(empty).paddingTop ?? 0).toBe(0);
@@ -626,7 +672,7 @@ describe('switching metrics keeps the board still', () => {
      * down; bound to `isRefetching`, it went true for every metric switch that kept the
      * previous board. Asserted while the next metric is still in flight.
      */
-    mockBoard['titles|month'] = [entry()];
+    mockBoard['titles|all_time'] = [entry()];
     const base = mockRpc.getMockImplementation()!;
     mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
       name === 'leaderboard' && args.p_metric === 'movies' ? new Promise(() => {}) : base(name, args),
@@ -650,7 +696,7 @@ describe('switching metrics keeps the board still', () => {
      * independently and the spinner is observed at each step: on at the pull, still on with
      * one answer in, off only when the second arrives.
      */
-    mockBoard['titles|month'] = [entry()];
+    mockBoard['titles|all_time'] = [entry()];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -687,8 +733,8 @@ describe('switching metrics keeps the board still', () => {
   it('never pins a standing beside the previous metric’s rows', async () => {
     // Review 82: the board and the standing resolve independently. Here the new metric's
     // standing answers while the board is still parked, so the rows on screen are Titles'.
-    mockBoard['titles|month'] = [entry()];
-    mockStanding['movies|month'] = { metric_count: 3, rank: 40, entrants: 50 };
+    mockBoard['titles|all_time'] = [entry()];
+    mockStanding['movies|all_time'] = { metric_count: 3, rank: 40, entrants: 50 };
     const base = mockRpc.getMockImplementation()!;
     mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
       name === 'leaderboard' && args.p_metric === 'movies' ? new Promise(() => {}) : base(name, args),
@@ -714,15 +760,15 @@ describe('switching metrics keeps the board still', () => {
     // section header on sparse metrics only.
     const view = await open();
     await toBoard(view);
-    await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('No watches here yet.')).toBeTruthy());
 
-    const title = view.getByText('No watches yet this month.');
+    const title = view.getByText('No watches here yet.');
     expect((styleOf(title) as TextStyle).fontSize).toBeLessThan(22);
   });
 
   it('keeps the current rows on screen while the next metric loads, instead of a skeleton', async () => {
-    mockBoard['titles|month'] = [entry()];
-    mockBoard['movies|month'] = [entry({ username: 'bea', display_name: 'Bea' })];
+    mockBoard['titles|all_time'] = [entry()];
+    mockBoard['movies|all_time'] = [entry({ username: 'bea', display_name: 'Bea' })];
     // The movies read is parked, so the moment between pressing the chip and the answer
     // is observable — the moment the board used to collapse.
     let release: () => void = () => {};
@@ -775,18 +821,18 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    expect(view.getByLabelText(showing('All Titles'))).toBeTruthy();
+    expectShowing(view, 'All Titles');
     expect(await metricMenu(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
     expect(view.queryByText('Watched')).toBeNull();
   });
 
-  it('re-reads the board on a chip, without resetting the timeframe', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
-    mockBoard['titles|all_time'] = [entry()];
-    mockBoard['reviews|all_time'] = [entry({ username: 'bea', display_name: 'Bea' })];
+  it('re-reads the board on a category, without resetting the timeframe', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
+    mockBoard['titles|month'] = [entry()];
+    mockBoard['reviews|month'] = [entry({ username: 'bea', display_name: 'Bea' })];
 
     const view = await open();
-    await toBoard(view, 'All time');
+    await toBoard(view, 'This month');
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     await chooseMetric(view, 'Reviews');
@@ -794,9 +840,37 @@ describe('the metrics', () => {
     await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
     expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
       p_metric: 'reviews',
-      p_timeframe: 'all_time',
+      p_timeframe: 'month',
       p_limit: 50,
     });
+    expectShowing(view, 'This month');
+  });
+
+  it('reads each of the four categories on both timeframes', async () => {
+    const view = await open();
+    await toBoard(view);
+    for (const timeframe of ['all_time', 'month'] as const) {
+      if (timeframe === 'month') await chooseTimeframe(view, 'All time', 'This month');
+      for (const [label, metric] of [
+        ['Movies', 'movies'],
+        ['TV Shows', 'tv'],
+        ['Reviews', 'reviews'],
+        ['All Titles', 'titles'],
+      ] as const) {
+        await chooseMetric(view, label);
+        await waitFor(() =>
+          expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
+            p_metric: metric,
+            p_timeframe: timeframe,
+            p_limit: 50,
+          }),
+        );
+        expect(mockRpc).toHaveBeenCalledWith('my_leaderboard_standing', {
+          p_metric: metric,
+          p_timeframe: timeframe,
+        });
+      }
+    }
   });
 });
 
@@ -804,7 +878,7 @@ describe('the metrics', () => {
 
 describe('the row', () => {
   it('draws rank, name, handle and count', async () => {
-    mockBoard['titles|month'] = [entry({ metric_count: 12, rank: 1 })];
+    mockBoard['titles|all_time'] = [entry({ metric_count: 12, rank: 1 })];
     const view = await open();
     await toBoard(view);
 
@@ -814,7 +888,7 @@ describe('the row', () => {
   });
 
   it('puts Match and its evidence on the second line', async () => {
-    mockBoard['titles|month'] = [entry({ match_percent: 91, shared_count: 37 })];
+    mockBoard['titles|all_time'] = [entry({ match_percent: 91, shared_count: 37 })];
     const view = await open();
     await toBoard(view);
 
@@ -822,7 +896,7 @@ describe('the row', () => {
   });
 
   it('says Match TBD, with the count, when there is no score yet', async () => {
-    mockBoard['titles|month'] = [entry({ match_percent: null, shared_count: 3 })];
+    mockBoard['titles|all_time'] = [entry({ match_percent: null, shared_count: 3 })];
     const view = await open();
     await toBoard(view);
 
@@ -835,7 +909,7 @@ describe('the row', () => {
    * be the feature appearing broken. "You" instead.
    */
   it('shows You on the reader’s own row, and never a self-Match', async () => {
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
     ];
     const view = await open();
@@ -846,7 +920,7 @@ describe('the row', () => {
   });
 
   it('opens that person’s profile from any part of the row', async () => {
-    mockBoard['titles|month'] = [entry({ match_percent: 91, shared_count: 37 })];
+    mockBoard['titles|all_time'] = [entry({ match_percent: 91, shared_count: 37 })];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -859,7 +933,7 @@ describe('the row', () => {
   });
 
   it('opens the reader’s own profile from their own row', async () => {
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
     ];
     const view = await open();
@@ -874,7 +948,7 @@ describe('the row', () => {
   it('keeps the count when the name and handle are both long', async () => {
     // The count is the other thing this screen is for; a long display name must cost the
     // handle its width, never the number.
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({
         display_name: 'Abisola Oluwaseun Adeyemi-Fitzgerald',
         username: 'abisolaoluwaseunadeyemi',
@@ -889,7 +963,7 @@ describe('the row', () => {
   });
 
   it('gives tied people the same rank, as the server reported it', async () => {
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({ user_id: 'u-1', username: 'ada', display_name: 'Ada', rank: 1, metric_count: 5 }),
       entry({ user_id: 'u-2', username: 'bea', display_name: 'Bea', rank: 1, metric_count: 5 }),
       entry({ user_id: 'u-3', username: 'cy', display_name: 'Cy', rank: 3, metric_count: 2 }),
@@ -903,8 +977,8 @@ describe('the row', () => {
   });
 
   it('pins the reader’s standing when they are past the end of the page', async () => {
-    mockBoard['titles|month'] = [entry()];
-    mockStanding['titles|month'] = { metric_count: 2, rank: 84, entrants: 96 };
+    mockBoard['titles|all_time'] = [entry()];
+    mockStanding['titles|all_time'] = { metric_count: 2, rank: 84, entrants: 96 };
 
     const view = await open();
     await toBoard(view);
@@ -915,10 +989,10 @@ describe('the row', () => {
   });
 
   it('does not pin a second copy of a row already on screen', async () => {
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
     ];
-    mockStanding['titles|month'] = { metric_count: 9, rank: 1, entrants: 1 };
+    mockStanding['titles|all_time'] = { metric_count: 9, rank: 1, entrants: 1 };
 
     const view = await open();
     await toBoard(view);
@@ -928,8 +1002,8 @@ describe('the row', () => {
   });
 
   it('pins nothing for somebody who has done nothing', async () => {
-    mockBoard['titles|month'] = [entry()];
-    mockStanding['titles|month'] = { metric_count: 0, rank: null, entrants: 1 };
+    mockBoard['titles|all_time'] = [entry()];
+    mockStanding['titles|all_time'] = { metric_count: 0, rank: null, entrants: 1 };
 
     const view = await open();
     await toBoard(view);
@@ -971,7 +1045,7 @@ describe('a private account on the board', () => {
     });
 
   it('shows the row, with its position and its count', async () => {
-    mockBoard['titles|month'] = [privateEntry({ rank: 2, metric_count: 7 })];
+    mockBoard['titles|all_time'] = [privateEntry({ rank: 2, metric_count: 7 })];
     const view = await open();
     await toBoard(view);
 
@@ -984,7 +1058,7 @@ describe('a private account on the board', () => {
   });
 
   it('says Private to a screen reader and draws no Match line', async () => {
-    mockBoard['titles|month'] = [privateEntry()];
+    mockBoard['titles|all_time'] = [privateEntry()];
     const view = await open();
     await toBoard(view);
 
@@ -1002,7 +1076,7 @@ describe('a private account on the board', () => {
     // The specific defect the hook used to have: `shared_count ?? 0`. Harmless while
     // every row was readable, and a claim about a collection this reader has never been
     // let into once they are not.
-    mockBoard['titles|month'] = [privateEntry()];
+    mockBoard['titles|all_time'] = [privateEntry()];
     const view = await open();
     await toBoard(view);
 
@@ -1013,7 +1087,7 @@ describe('a private account on the board', () => {
   it('routes a tap to the profile, where the locked shell and Follow live', async () => {
     // The same destination as any other row. The shell is what refuses — nothing here
     // decides privacy, and a special case would be a second place for it to be wrong.
-    mockBoard['titles|month'] = [privateEntry()];
+    mockBoard['titles|all_time'] = [privateEntry()];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
@@ -1023,7 +1097,7 @@ describe('a private account on the board', () => {
   });
 
   it('tells the reader where the tap goes before they take it', async () => {
-    mockBoard['titles|month'] = [privateEntry()];
+    mockBoard['titles|all_time'] = [privateEntry()];
     const view = await open();
     await toBoard(view);
 
@@ -1037,7 +1111,7 @@ describe('a private account on the board', () => {
     // Private and viewable: the distinction the two flags exist for. Same visibility as
     // the rows above, opposite treatment, because approval is what Match is computed
     // across — and a client keying off `visibility` alone would get this one wrong.
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       privateEntry({ viewable: true, match_percent: 74, shared_count: 21 }),
     ];
     const view = await open();
@@ -1049,7 +1123,7 @@ describe('a private account on the board', () => {
   });
 
   it('marks no lock on a public account, and none on the reader themselves', async () => {
-    mockBoard['titles|month'] = [
+    mockBoard['titles|all_time'] = [
       entry({ user_id: 'u-1', username: 'ada', display_name: 'Ada', rank: 1 }),
       entry({
         user_id: 'user-1',
@@ -1074,8 +1148,8 @@ describe('a private account on the board', () => {
   it('counts the private row in the board the pinned standing is measured against', async () => {
     // `entrants` comes from the same population, so the denominator and the list agree.
     // They disagreed in the other direction before and were consistent; both moved.
-    mockBoard['titles|month'] = [entry({ rank: 1 }), privateEntry({ rank: 2 })];
-    mockStanding['titles|month'] = { metric_count: 1, rank: 3, entrants: 3 };
+    mockBoard['titles|all_time'] = [entry({ rank: 1 }), privateEntry({ rank: 2 })];
+    mockStanding['titles|all_time'] = { metric_count: 1, rank: 3, entrants: 3 };
 
     const view = await open();
     await toBoard(view);
@@ -1088,8 +1162,8 @@ describe('a private account on the board', () => {
     // The un-relaunched-server case, which is the mirror of the un-relaunched-phone rule
     // this project already follows: no `viewable` column means "as readable as it always
     // was", never "mute the whole board".
-    mockBoard['titles|month'] = [entry({ match_percent: 88, shared_count: 12 })];
-    delete (mockBoard['titles|month'][0] as Record<string, unknown>).viewable;
+    mockBoard['titles|all_time'] = [entry({ match_percent: 88, shared_count: 12 })];
+    delete (mockBoard['titles|all_time'][0] as Record<string, unknown>).viewable;
 
     const view = await open();
     await toBoard(view);
@@ -1105,20 +1179,23 @@ describe('an empty and sparse beta', () => {
     const view = await open();
     await toBoard(view);
 
-    await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('No watches here yet.')).toBeTruthy());
     expect(view.getByText('You could take the first spot.')).toBeTruthy();
 
     await chooseMetric(view, 'Reviews');
-    await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('No reviews here yet.')).toBeTruthy());
     expect(view.getByText('Yours could be the first.')).toBeTruthy();
+
+    await chooseMetric(view, 'TV Shows');
+    await waitFor(() => expect(view.getByText('No shows or seasons here yet.')).toBeTruthy());
   });
 
-  it('drops the “yet” on an all-time board, where it would read oddly', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+  it('says “yet this month” on the monthly board', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'month';
     const view = await open();
-    await toBoard(view, 'All time');
+    await toBoard(view, 'This month');
 
-    await waitFor(() => expect(view.getByText('No watches here yet.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
   });
 });
 
@@ -1174,7 +1251,7 @@ describe('the hardware back button', () => {
     expect(pressBack()).toBe(true);
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText(showing('This month'))).toBeNull();
+    expectNoBoard(view);
   });
 
   it('leaves the press alone on the Feed, so normal back behaviour is untouched', async () => {
@@ -1182,18 +1259,19 @@ describe('the hardware back button', () => {
     expect(pressBack()).toBe(false);
   });
 
-  it('keeps the remembered timeframe, which is a different preference', async () => {
-    // The mode is not persisted and the timeframe is (§2/§6). Leaving the board by Back
-    // must not be mistaken for a third thing that resets one of them.
+  it('keeps the remembered category and timeframe, which are a different preference', async () => {
+    // The mode is not persisted and the board's choices are (§2/§6). Leaving the board by
+    // Back must not be mistaken for a third thing that resets one of them.
     const view = await open();
     await toBoard(view);
-    await chooseTimeframe(view, 'This month', 'All time');
+    await chooseTimeframe(view, 'All time', 'This month');
+    await chooseMetric(view, 'Movies');
 
     expect(pressBack()).toBe(true);
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
-    await toBoard(view, 'All time');
-    expect(view.getByLabelText(showing('All time'))).toBeTruthy();
+    await toBoard(view, 'This month');
+    expectShowing(view, 'Movies');
   });
 });
 
@@ -1219,7 +1297,7 @@ describe('re-tapping the Feed tab', () => {
     pressFeedTab();
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
-    expect(view.queryByLabelText(showing('This month'))).toBeNull();
+    expectNoBoard(view);
   });
 
   it('changes nothing when the reader is already on the Feed root', async () => {
@@ -1241,19 +1319,18 @@ describe('re-tapping the Feed tab', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText(showing('This month'))).toBeTruthy());
+    await waitFor(() => expectShowing(view, 'All time'));
   });
 
   it('keeps the remembered timeframe, exactly as Back does', async () => {
     const view = await open();
     await toBoard(view);
-    await chooseTimeframe(view, 'This month', 'All time');
+    await chooseTimeframe(view, 'All time', 'This month');
 
     pressFeedTab();
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
 
-    await toBoard(view, 'All time');
-    expect(view.getByLabelText(showing('All time'))).toBeTruthy();
+    await toBoard(view, 'This month');
   });
 
   it('does not record a second leaderboard view for the return trip', async () => {
@@ -1297,14 +1374,12 @@ describe('the content header gutter', () => {
     return total;
   };
 
-  it('puts the filter line on the page gutter', async () => {
+  it('puts the category dropdown and the heading on the page gutter', async () => {
     const view = await open();
     await toBoard(view);
 
-    const summary = view.getByTestId('leaderboard-filter-summary', {
-      includeHiddenElements: true,
-    });
-    expect(leftInsetOf(summary)).toBe(theme.layout.gutter);
+    expect(leftInsetOf(view.getByTestId('leaderboard-category'))).toBe(theme.layout.gutter);
+    expect(leftInsetOf(view.getByText('LEADERBOARD'))).toBe(theme.layout.gutter);
   });
 
   /**
@@ -1378,7 +1453,7 @@ describe('the People mode', () => {
     await toPeople(view);
 
     expect(view.queryByLabelText('Recent activity')).toBeNull();
-    expect(view.queryByLabelText(showing('This month'))).toBeNull();
+    expectNoBoard(view);
   });
 
   it('leaves the feed exactly where it was on the way back', async () => {
@@ -1609,11 +1684,15 @@ describe('the Feed headings', () => {
     expect(view.queryByText('TRENDING NOW')).toBeNull();
   });
 
-  it('names the board LEADERBOARD in the same style, not shrunk to fit', async () => {
+  it('names the board LEADERBOARD in the same style, once, beside the mode toggle', async () => {
     const view = await open();
     await toBoard(view);
+    expect(view.getAllByText('LEADERBOARD')).toHaveLength(1);
     const heading = view.getByText('LEADERBOARD');
     expect(treatment(heading)).toEqual(SHARED);
+    const row = view.getByTestId('feed-content-header');
+    expect(within(row).getByText('LEADERBOARD')).toBeTruthy();
+    expect(within(row).getByLabelText('Feed mode')).toBeTruthy();
   });
 
   it('names People DISCOVER PEOPLE in the same style, not shrunk to fit', async () => {
@@ -1627,149 +1706,120 @@ describe('the Feed headings', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * **The board's filters, behind one icon** (header consistency, founder spec 2026-11-22).
+ * **The board's controls** (founder brief 2026-11-23, and its layout correction).
  *
- * The two dropdowns became `FilterIconButton` and one sheet. What must not change is the
- * board: the same values, the same reads. What must be true of the new control is that a
- * non-default board is never filtered invisibly.
+ *     LEADERBOARD                              [Feed] [Trophy] [People]
+ *     All Titles ▾                          [ All time | This month ]
+ *
+ * A compact two-row header. The filter icon, its count and the "All Titles · This month"
+ * line are gone, and so is the combined sheet. The category is a quiet `MediumSelector`
+ * (`filter` size) and the timeframe is `CompactSwitch`; LEADERBOARD is the one heading, in
+ * the toggle's row as TRENDING NOW and DISCOVER PEOPLE are.
  */
-describe('the board filter', () => {
-  const styleOf = (node: { props: { style?: unknown } }) =>
-    StyleSheet.flatten(node.props.style as TextStyle) as TextStyle;
-
-  it('replaces the two dropdowns with one icon and a line naming both choices', async () => {
+describe('the board controls', () => {
+  it('draws no filter icon, no count and no summary line', async () => {
     const view = await open();
     await toBoard(view);
-
-    expect(view.queryByTestId('leaderboard-metric')).toBeNull();
-    expect(view.queryByTestId('leaderboard-timeframe')).toBeNull();
-    expect(view.queryByLabelText(/^Showing /)).toBeNull();
-
-    const button = view.getByTestId('leaderboard-filter-button');
-    expect(button.props.accessibilityRole).toBe('button');
-    expect(button.props.accessibilityLabel).toBe('Leaderboard filters: All Titles, This month');
-    expect(button.props.accessibilityState).toMatchObject({ selected: false });
-    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
-    const summary = view.getByTestId('leaderboard-filter-summary', {
-      includeHiddenElements: true,
-    });
-    expect(
-      within(summary).getByText('All Titles', { includeHiddenElements: true }),
-    ).toBeTruthy();
-    expect(
-      within(summary).getByText('This month', { includeHiddenElements: true }),
-    ).toBeTruthy();
-  });
-
-  it('marks a changed board on the icon, in its name and in the line', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
-    const view = await open();
-    await toBoard(view, 'All time');
-
-    const once = view.getByTestId('leaderboard-filter-button');
-    expect(once.props.accessibilityLabel).toBe(
-      'Leaderboard filters: All Titles, All time, 1 on',
-    );
-    expect(once.props.accessibilityState).toMatchObject({ selected: true });
-    expect(
-      within(
-        view.getByTestId('leaderboard-filter-button-count', { includeHiddenElements: true }),
-      ).getByText('1', { includeHiddenElements: true }),
-    ).toBeTruthy();
-    const summary = view.getByTestId('leaderboard-filter-summary', {
-      includeHiddenElements: true,
-    });
-    const changed = within(summary).getByText('All time', { includeHiddenElements: true });
-    expect(styleOf(changed).color).toBe(theme.semantic.action);
-    const unchanged = within(summary).getByText('All Titles', { includeHiddenElements: true });
-    expect(styleOf(unchanged).color).toBe(theme.text.secondary);
-
     await chooseMetric(view, 'Movies');
-    await waitFor(() =>
-      expect(view.getByTestId('leaderboard-filter-button').props.accessibilityLabel).toBe(
-        'Leaderboard filters: Movies, All time, 2 on',
-      ),
-    );
+    await chooseTimeframe(view, 'All time', 'This month');
+
+    expect(view.queryByTestId('leaderboard-filter-button')).toBeNull();
+    expect(view.queryByTestId('leaderboard-filter-button-count')).toBeNull();
+    expect(view.queryByTestId('leaderboard-filter-summary')).toBeNull();
+    expect(view.queryByLabelText(/^Leaderboard filters/)).toBeNull();
+    expect(view.queryByText(/ · /)).toBeNull();
+    expect(view.queryByLabelText(/filters/i)).toBeNull();
   });
 
-  it('holds both filters in one sheet, each a radio group with one choice on', async () => {
+  it('puts the category on the left and the timeframe on the right of one row, under the heading row', async () => {
     const view = await open();
     await toBoard(view);
+    const controls = view.getByTestId('leaderboard-controls');
+    expect(within(controls).getByTestId('leaderboard-category')).toBeTruthy();
+    expect(within(controls).getByTestId('leaderboard-timeframe')).toBeTruthy();
 
-    const type = await openFilters(view, 'Type');
+    // Tree order is reading order: the heading, the mode toggle, the controls, the rows.
+    const order = view.root!
+      .queryAll(
+        (node) =>
+          (node.props.accessibilityRole === 'header' && node.props.accessibilityLabel === 'Leaderboard') ||
+          node.props.accessibilityLabel === 'Feed mode' ||
+          node.props.testID === 'leaderboard-controls' ||
+          node.props.testID === 'leaderboard-content',
+      )
+      .map((node) => node.props.testID ?? node.props.accessibilityLabel);
+    expect(order.filter((x, i) => order.indexOf(x) === i)).toEqual([
+      'Leaderboard',
+      'Feed mode',
+      'leaderboard-controls',
+      'leaderboard-content',
+    ]);
+    expect(view.queryByTestId('leaderboard-heading')).toBeNull();
+  });
+
+  it('keeps the controls out of the heading row, and the heading out of the controls', async () => {
+    const view = await open();
+    await toBoard(view);
+    const row = view.getByTestId('feed-content-header');
+    expect(within(row).queryByTestId('leaderboard-category')).toBeNull();
+    expect(within(row).queryByTestId('leaderboard-timeframe')).toBeNull();
+    expect(within(view.getByTestId('leaderboard-controls')).queryByText('LEADERBOARD')).toBeNull();
+  });
+
+  it('closed, the dropdown always names the category showing', async () => {
+    const view = await open();
+    await toBoard(view);
+    for (const label of ['Movies', 'TV Shows', 'Reviews', 'All Titles']) {
+      await chooseMetric(view, label);
+      expect(within(view.getByTestId('leaderboard-category')).getByText(label)).toBeTruthy();
+      expect(view.queryByTestId('leaderboard-category-menu')).toBeNull();
+    }
+  });
+
+  it('marks the category showing in the open menu', async () => {
+    const view = await open();
+    await toBoard(view);
+    await chooseMetric(view, 'TV Shows');
+    const menu = await openCategories(view);
     expect(
-      type
-        .getAllByRole('radio')
-        .map((item) => [
-          item.props.accessibilityLabel,
-          item.props.accessibilityState?.selected,
-        ]),
+      menu
+        .getAllByRole('menuitem')
+        .map((item) => [item.props.accessibilityLabel, Boolean(item.props.accessibilityState?.selected)]),
     ).toEqual([
-      ['All Titles', true],
+      ['All Titles', false],
       ['Movies', false],
-      ['TV Shows', false],
+      ['TV Shows', true],
       ['Reviews', false],
     ]);
-    const period = within(view.getByLabelText('Time period'));
-    expect(
-      period
-        .getAllByRole('radio')
-        .map((item) => [
-          item.props.accessibilityLabel,
-          item.props.accessibilityState?.selected,
-        ]),
-    ).toEqual([
-      ['This month', true],
-      ['All time', false],
-    ]);
-    // Every chip answers a 44pt press: 32pt drawn and the chip slop around it.
-    for (const chip of [...type.getAllByRole('radio'), ...period.getAllByRole('radio')]) {
-      expect(chip.props.hitSlop).toEqual(theme.layout.chipHitSlop);
-    }
-    await closeFilters(view);
   });
 
-  it('applies on the press, with the same reads the dropdowns made', async () => {
+  it('treats re-choosing the category or timeframe on screen as no change', async () => {
     const view = await open();
     await toBoard(view);
-    const group = await openFilters(view, 'Type');
-    mockRpc.mockClear();
-
-    await fireEvent.press(group.getByRole('radio', { name: 'TV Shows' }));
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
-        p_metric: 'tv',
-        p_timeframe: 'month',
-        p_limit: 50,
-      }),
-    );
-    // Still open, the choice shown as made.
-    expect(
-      within(view.getByLabelText('Type')).getByRole('radio', { name: 'TV Shows' }).props
-        .accessibilityState,
-    ).toMatchObject({ selected: true });
-    await closeFilters(view);
-  });
-
-  it('treats re-choosing the value already on as no change', async () => {
-    const view = await open();
-    await toBoard(view);
-    mockTrack.mockClear();
-    mockPrefWrites.length = 0;
-
-    const type = await openFilters(view, 'Type');
-    await fireEvent.press(type.getByRole('radio', { name: 'All Titles' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('leaderboard', expect.anything()));
+    const reads = mockRpc.mock.calls.length;
+    const menu = await openCategories(view);
+    await fireEvent.press(menu.getByRole('menuitem', { name: 'All Titles' }));
     await fireEvent.press(
-      within(view.getByLabelText('Time period')).getByRole('radio', {
-        name: 'This month',
-      }),
+      within(view.getByTestId('leaderboard-timeframe')).getByRole('radio', { name: 'All time' }),
     );
-    await closeFilters(view);
-
-    expect(mockTrack).not.toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'leaderboard_metric_selected' }),
-    );
+    expect(mockRpc.mock.calls.length).toBe(reads);
     expect(mockPrefWrites).toHaveLength(0);
+    expect(
+      mockTrack.mock.calls.filter(
+        ([event]) => (event as { name: string }).name === 'leaderboard_metric_selected',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('draws neither timeframe as an active filter: one chosen half, Maroon on Parchment', async () => {
+    const view = await open();
+    await toBoard(view);
+    const cells = within(view.getByTestId('leaderboard-timeframe')).getAllByRole('radio');
+    expect(cells.map((cell) => Boolean(cell.props.accessibilityState?.selected))).toEqual([
+      true,
+      false,
+    ]);
+    expect(view.queryByTestId(/count/)).toBeNull();
   });
 });

@@ -242,8 +242,9 @@ export function Section({
  * One option in a facet: a hairline chip, filled Maroon when chosen. Shared as `Section`.
  *
  * `checkbox` (the default, and every Collection facet): one of several that may be on
- * together. `radio`: exactly one of its section is on — the Leaderboard's type and time
- * period (`LeaderboardFilterSheet`). The chip is drawn the same either way; what changes is
+ * together. `radio`: exactly one of its section is on (added for the Leaderboard's combined
+ * sheet, which the 2026-11-23 brief replaced with a dropdown and a switch; kept, unused, for
+ * the next single-choice section). The chip is drawn the same either way; what changes is
  * what a screen reader is told (`radio`, `selected`) and the target, which takes the slop
  * `SortMenu`'s radio chips use (`chipHitSlop`) so the 32pt chip answers 44pt.
  */
