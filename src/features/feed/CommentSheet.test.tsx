@@ -644,6 +644,43 @@ describe('the composer belongs to one activity', () => {
     expect(view.getByDisplayValue('second thought')).toBeTruthy();
   });
 
+  it('does not save a draft again once the post it held has landed', async () => {
+    let release: (() => void) | null = null;
+    mockRpcGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const props = {
+      mediaItemId: FILM,
+      title: 'Sinners',
+      viewerId: VIEWER,
+      watched: new Set<string>(),
+      onClose: jest.fn(),
+      onPressPerson: jest.fn(),
+    };
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'said once');
+    await fireEvent.press(view.getByText('Post'));
+
+    // Closed mid-flight and reopened: the words are back, unchanged.
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    expect(view.getByDisplayValue('said once')).toBeTruthy();
+
+    release!();
+    mockRpcGate = null;
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+    // Let the landed post finish its own bookkeeping (it refreshes the thread first).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Closing now must not keep the posted words as an unsent draft.
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+    expect(view.queryByDisplayValue('said once')).toBeNull();
+  });
+
   it('keeps a reply in progress, target included, across a close', async () => {
     mockCommentRows = [comment()];
     const view = await open();

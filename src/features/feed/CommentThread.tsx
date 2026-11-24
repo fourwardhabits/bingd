@@ -115,9 +115,18 @@ type HeldDraft = {
   attempt: string | null;
 };
 const heldDrafts = new Map<string, HeldDraft>();
+/**
+ * Operation ids whose comment has been posted. A composer reopened while its post was still
+ * in flight holds that post's words and id; once the post lands, closing it must not save
+ * them again as unsent (Codex review, PR #374). Text changed since carries a new id.
+ */
+const postedOperations = new Set<string>();
 const heldKey = (viewerId: string, eventId: string | null) => `${viewerId}:${eventId ?? ''}`;
 /** For tests: start every case from no held drafts. */
-export const forgetHeldDrafts = () => heldDrafts.clear();
+export const forgetHeldDrafts = () => {
+  heldDrafts.clear();
+  postedOperations.clear();
+};
 
 /** How long a notification's comment stays marked after the conversation opens. */
 export const FOCUS_HIGHLIGHT_MS = 2500;
@@ -366,9 +375,10 @@ export function CommentThread({
     const key = heldKey(viewerId, eventId);
     return () => {
       const last = latest.current;
-      if (last && (last.draft.trim() || last.replyingTo || last.editing))
+      const posted = last?.attempt != null && postedOperations.has(last.attempt);
+      if (last && !posted && (last.draft.trim() || last.replyingTo || last.editing)) {
         heldDrafts.set(key, last);
-      else heldDrafts.delete(key);
+      } else heldDrafts.delete(key);
     };
   }, [keepDraft, viewerId, eventId]);
 
@@ -639,6 +649,7 @@ export function CommentThread({
     // intent — carries another operation id and is the reader's newer work (Codex review,
     // PR #374).
     if (keepDraft) {
+      postedOperations.add(operationId);
       const key = heldKey(viewerId, eventId);
       if (heldDrafts.get(key)?.attempt === operationId) heldDrafts.delete(key);
     }
