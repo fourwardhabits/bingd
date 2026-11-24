@@ -7126,6 +7126,22 @@ describe('a title page opening', () => {
     expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1);
   });
 
+  it('does not ask again from the block when the early request failed', async () => {
+    // Codex, #381: the block mounts once the row is back and observes the same query. A
+    // failure in between must not become a second adapter request in the same opening.
+    mockFetchWatchProviders.mockRejectedValue(new Error('BG502'));
+    holdReadsOf('media_items');
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+
+    releaseReadsOf('media_items');
+    await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());
+    await act(async () => {});
+    expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1);
+    expect(view.queryByTestId('where-to-watch')).toBeNull();
+  });
+
   it('sends what is drawn above the tabs before what is drawn below them', async () => {
     holdReadsOf('media_items');
     const view = await renderWithProviders(<TitleScreen />);
