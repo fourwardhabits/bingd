@@ -219,8 +219,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // **1.2.0 on 2026-11-19, for the store refresh: the App Store name `bingd` and the new
   // screenshots.** Apple only lets the name and screenshots change on an editable version, and
   // 1.1.0 (15) has been on the App Store since 2026-09-26, so its train is closed. The binary
-  // embeds `main` as of 2026-11-20 (`68095e9`: production `1c24b5c`, #319 and #321, plus
-  // #328's server-only change), built on EAS by `.eas/workflows/store-build.yml`. A minor, by the
+  // embeds `main` as of 2026-11-25 (`32790c48`: production through #378 and #381, plus #380's
+  // Sentry source-map setup), re-cut from #330's 2026-11-20 commit so a new install starts on
+  // the current app, built on EAS by `.eas/workflows/store-build.yml`. A minor, by the
   // same rule as 1.1.0: everything since `9d9683a` shipped by OTA (grouped feed, Requests,
   // Sent to You, labelled engagement) is new to a store binary. This moves the runtime on
   // both platforms; the 1.1.0 binaries keep `8ea562b7` / `ec79e181` and their OTAs.
