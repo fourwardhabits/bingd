@@ -202,14 +202,14 @@ describe('a generic row whose comment turns out to be a reply', () => {
     expect(said(shaped)).not.toMatch(/replied to your comment/);
   });
 
-  it('says it replied in a thread on my post when the thread is somebody else’s', () => {
+  it('says it replied to a comment on my post when the thread is somebody else’s', () => {
     const shaped = withCommentShape(
       row({ kind: 'comment' }),
       shapes({ isReply: true, rootAuthorId: 'someone-else' }),
       VIEWER,
     );
-    expect(said(shaped)).toBe('replied in a thread on your Crazy Rich Asians watch');
-    expect(said(shaped, null)).toBe('replied in a thread on your activity');
+    expect(said(shaped)).toBe('replied to a comment on your Crazy Rich Asians watch');
+    expect(said(shaped, null)).toBe('replied to a comment on your activity');
   });
 
   it('never calls a top-level comment a reply', () => {

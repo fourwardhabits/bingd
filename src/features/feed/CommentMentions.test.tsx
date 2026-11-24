@@ -4,6 +4,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
 import { CommentSheet } from './CommentSheet';
+import { forgetHeldDrafts } from './CommentThread';
 
 /**
  * @mentions, from the composer's side — `20260830000100`.
@@ -127,6 +128,7 @@ const lastWrite = (name: string) =>
   [...mockRpcCalls].reverse().find((call) => call.name === name)?.args;
 
 beforeEach(() => {
+  forgetHeldDrafts();
   mockCommentRows = [];
   mockCandidateRows = [candidate()];
   mockRpcCalls.length = 0;
@@ -219,7 +221,10 @@ describe('what reaches the server', () => {
   });
 
   it('sends several, once each', async () => {
-    mockCandidateRows = [candidate(), candidate({ id: 'abi-id', username: 'abisola', display_name: 'Abisola' })];
+    mockCandidateRows = [
+      candidate(),
+      candidate({ id: 'abi-id', username: 'abisola', display_name: 'Abisola' }),
+    ];
     const view = await open();
     const input = composerOf(view);
 
@@ -476,7 +481,9 @@ describe('a mention in a posted comment', () => {
 
     const name = view.getByLabelText('ravi, open profile');
     expect(name.props.children).toBe('@ravi');
-    const style = Array.isArray(name.props.style) ? Object.assign({}, ...name.props.style.flat()) : name.props.style;
+    const style = Array.isArray(name.props.style)
+      ? Object.assign({}, ...name.props.style.flat())
+      : name.props.style;
     expect(style.color).toBe(theme.semantic.action);
     expect(style.fontWeight).toBe('600');
 
@@ -485,7 +492,10 @@ describe('a mention in a posted comment', () => {
   });
 
   it('opens that person’s profile when the name is tapped', async () => {
-    const { view, onPressPerson } = await threadWith({ body: 'hey @ravi, what do you think', mentions: [ravi] });
+    const { view, onPressPerson } = await threadWith({
+      body: 'hey @ravi, what do you think',
+      mentions: [ravi],
+    });
 
     await fireEvent.press(view.getByLabelText('ravi, open profile'));
     expect(onPressPerson).toHaveBeenCalledWith('ravi');
@@ -493,7 +503,10 @@ describe('a mention in a posted comment', () => {
 
   /** The whole comment must not become a button; only the six characters that are a name. */
   it('makes only the name tappable, not the comment', async () => {
-    const { view, onPressPerson } = await threadWith({ body: 'hey @ravi, what do you think', mentions: [ravi] });
+    const { view, onPressPerson } = await threadWith({
+      body: 'hey @ravi, what do you think',
+      mentions: [ravi],
+    });
 
     await fireEvent.press(view.getByText(/what do you think/));
     expect(onPressPerson).not.toHaveBeenCalled();
@@ -505,7 +518,10 @@ describe('a mention in a posted comment', () => {
   });
 
   it('links the same person twice when the body names them twice', async () => {
-    const { view, onPressPerson } = await threadWith({ body: '@ravi ... @ravi', mentions: [ravi] });
+    const { view, onPressPerson } = await threadWith({
+      body: '@ravi ... @ravi',
+      mentions: [ravi],
+    });
 
     const names = view.getAllByLabelText('ravi, open profile');
     expect(names).toHaveLength(2);
@@ -531,7 +547,10 @@ describe('a mention in a posted comment', () => {
    * this reader may see.
    */
   it('leaves a handle the server did not confirm as ordinary text', async () => {
-    const { view, onPressPerson } = await threadWith({ body: '@stranger thoughts?', mentions: [] });
+    const { view, onPressPerson } = await threadWith({
+      body: '@stranger thoughts?',
+      mentions: [],
+    });
 
     expect(view.queryByLabelText('stranger, open profile')).toBeNull();
     expect(view.getByText('@stranger thoughts?')).toBeTruthy();
@@ -543,7 +562,11 @@ describe('a mention in a posted comment', () => {
    * already does. Nothing here should resurrect a name out of text that has gone.
    */
   it('draws no link on a comment whose author has retracted it', async () => {
-    const { view } = await threadWith({ body: null, deleted_at: new Date().toISOString(), mentions: [] });
+    const { view } = await threadWith({
+      body: null,
+      deleted_at: new Date().toISOString(),
+      mentions: [],
+    });
     expect(view.queryByLabelText('ravi, open profile')).toBeNull();
   });
 
