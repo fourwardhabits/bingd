@@ -64,6 +64,7 @@ import {
   type PlacedMovement,
   type SessionStep,
 } from './session';
+import { releaseRankingHold } from './open-first';
 import { seedPivotCard } from './pivot-card';
 import { groupFirstRanking } from './backlog';
 import { TitleRecallSheet } from './TitleRecallSheet';
@@ -885,10 +886,15 @@ function Session({
       // its id. A first placement keeps it — it may be a resumed session carrying answers
       // (`keepsSession`); a re-rank's is cancelled, or the next open would resume it.
       if (next.state === 'comparing' && !keepsSession(subject)) void rankCancel(next.sessionId);
-    });
+    })
+      // The Log sheet's post-log refresh waits for this first answer (`open-first.ts`),
+      // so the comparison is not queued behind it. Released however the open ends.
+      .finally(releaseRankingHold);
 
     return () => {
       live = false;
+      // A sheet closed before its first answer has nothing left to wait for.
+      releaseRankingHold();
     };
   }, [subject, apply, withIntent]);
 

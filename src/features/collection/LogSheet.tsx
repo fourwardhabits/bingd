@@ -56,6 +56,7 @@ import {
 import { logTitle, setWatchDate } from '@/features/watch-history/writes';
 import { useWatchCount } from '@/features/watch-history/use-watch-history';
 import { watchCountLabel } from '@/features/watch-history/watch-history';
+import { holdUntilRankingOpens } from '@/features/ranking/open-first';
 import { keepShow } from '@/features/ranking/session';
 import {
   KEEP_SHOW_RANKING,
@@ -1090,7 +1091,17 @@ function Body({
       });
     }
 
-    refresh();
+    /**
+     * **The refresh waits for the comparison it would otherwise delay** (perf, 2026-11-24).
+     *
+     * Asked for here, it went out ahead of the ranking sheet's `rank_start` and — on
+     * Android, where OkHttp sends five requests per host at a time — held the first
+     * comparison back by 1.7–2.7 s on the founder's Preview. Handed to
+     * `holdUntilRankingOpens`, it runs the moment that first answer arrives, or after a
+     * ceiling if no sheet opens. Without `onRank` there is no comparison to wait for.
+     */
+    if (onRank) holdUntilRankingOpens(refresh);
+    else refresh();
     onRank?.(chosen, 'start', {
       freshLog: result.outcome === 'ok' && (Boolean(result.created) || createdByDetails),
     });

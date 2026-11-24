@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { queryKeys } from '@/lib/query';
+import { holdUntilRankingOpens, releaseRankingHold } from './open-first';
 import { theme, typography } from '@/ui/tokens';
 
 import {
@@ -3707,5 +3708,48 @@ describe('the reveal’s finish label', () => {
     expect(onFinishLog).toHaveBeenCalledWith(
       expect.objectContaining({ score: 8.7, position: 3, category: 'movies' }),
     );
+  });
+});
+
+/**
+ * `rank_start` goes first (perf, 2026-11-24). The Log sheet hands its post-log refresh to
+ * `holdUntilRankingOpens`; this sheet is what lets it go, once the first answer is in.
+ */
+describe('what waits for the first comparison', () => {
+  afterEach(() => releaseRankingHold());
+
+  it('is released when rank_start answers, and not before', async () => {
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) =>
+      name === 'rank_start'
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve(comparison()),
+    );
+    const refresh = jest.fn();
+    holdUntilRankingOpens(refresh);
+
+    const sheet = await openSheet();
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    // The question is out and unanswered: the refresh is still behind it.
+    expect(refresh).not.toHaveBeenCalled();
+
+    await act(async () => answer(comparison()));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(await sheet.findByText('Which did you like more?')).toBeTruthy();
+  });
+
+  it('is released when the sheet closes before the first answer', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      name === 'rank_start' ? new Promise(() => {}) : Promise.resolve(comparison()),
+    );
+    const refresh = jest.fn();
+    holdUntilRankingOpens(refresh);
+
+    const sheet = await openSheet();
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    await act(async () => sheet.unmount());
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
