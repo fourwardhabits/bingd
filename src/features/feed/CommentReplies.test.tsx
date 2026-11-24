@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
 import { CommentSheet } from './CommentSheet';
-import { CommentThread, FOCUS_HIGHLIGHT_MS } from './CommentThread';
+import { CommentThread, FOCUS_HIGHLIGHT_MS, forgetHeldDrafts } from './CommentThread';
 
 /**
  * Reply versus new comment (founder, 2026-11-22), and the controlled reproduction behind it.
@@ -144,6 +144,7 @@ const SURFACES: Surface[] = [
 const adds = () => mockWrites.filter((write) => write.name === 'add_comment');
 
 beforeEach(() => {
+  forgetHeldDrafts();
   mockCommentRows = conversation();
   mockWrites.length = 0;
   mockWriteResults = [];
@@ -195,7 +196,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
 
     await fireEvent.press(view.getByLabelText('Reply to Anna'));
 
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     const box = view.getByLabelText('Your reply to Anna');
     expect(box.props.placeholder).toBe('Reply to Anna…');
     expect(view.getByRole('button', { name: 'Reply' })).toBeTruthy();
@@ -222,7 +223,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
 
     // Bo, not Anna — the visible context never implies the reply went to the root's
     // author — and where it will appear, since the server keeps one level.
-    expect(view.getByText("Replying to Bo · in Anna's thread")).toBeTruthy();
+    expect(view.getByText('Replying to Bo')).toBeTruthy();
     // No @mention is inserted: the box starts empty, and the server notifies Bo directly
     // (`add_comment` files `reply_to` against the comment tapped).
     expect(view.getByLabelText('Your reply to Bo').props.value).toBe('');
@@ -260,7 +261,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     await fireEvent.press(view.getByLabelText('Reply to Cy'));
 
     expect(view.queryByText(/Replying to Anna/)).toBeNull();
-    expect(view.getByText('Replying to Cy · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Cy')).toBeTruthy();
 
     await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'Agreed, Cy');
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
@@ -281,7 +282,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
     await waitFor(() => expect(mockThreadReads).toBeGreaterThan(reads));
 
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     expect(view.getByLabelText('Your reply to Anna').props.value).toBe('half-written');
 
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
@@ -301,7 +302,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
 
     // A dropped connection is not a deletion: the list stays, and so does the reply.
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     expect(view.getByText('What did you think of the ending?')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Reply' })).not.toBeDisabled();
   });
@@ -416,9 +417,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     });
     mockWriteGate = null;
 
-    await waitFor(() =>
-      expect(view.getByText('Replying to Cy · under their comment')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Replying to Cy')).toBeTruthy());
     expect(view.queryByText(/no longer available/)).toBeNull();
     await fireEvent.changeText(view.getByLabelText('Your reply to Cy'), 'for Cy');
     expect(view.getByRole('button', { name: 'Reply' })).not.toBeDisabled();
@@ -473,7 +472,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     await waitFor(() => expect(mockThreadReads).toBeGreaterThan(reads));
 
     // Still a reply to Anna, with the words kept.
-    expect(view.getByText('Replying to Anna · under their comment')).toBeTruthy();
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
     mockWriteResults = [{ data: { status: 'already_applied' }, error: null }];
     await fireEvent.press(view.getByRole('button', { name: 'Reply' }));
     await waitFor(() => expect(adds()).toHaveLength(2));
@@ -510,8 +509,13 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     expect(within(view.getByRole('button', { name: 'Reply' })).getByText('Reply')).toBeTruthy();
     // (2) To whom: the person tapped, by name.
     expect(banner).toHaveTextContent(/Replying to Bo/);
-    // (3) Where: in Anna's thread (one level), and the row answered is marked.
-    expect(banner).toHaveTextContent(/in Anna's thread$/);
+    // (3) Where: the row being answered is marked in the list (the indicator names only
+    // the person since 2026-11-24 — "Replying to Bo", nothing about threads).
+    expect(banner).toHaveTextContent(/^Replying to Bo$/);
+    expect(
+      (StyleSheet.flatten(view.getByTestId('comment-row-r1').props.style) as ViewStyle)
+        .backgroundColor,
+    ).toBe(theme.surface.sunken);
     // (4) How to cancel: the indicator's own ✕, named for what it does; and how to
     // switch — every other comment still offers its own Reply.
     expect(view.getByRole('button', { name: 'Cancel reply to Bo' })).toBeTruthy();
@@ -519,7 +523,7 @@ describe.each(SURFACES)('on $name', ({ render }) => {
     expect(view.getByLabelText('Reply to Cy')).toBeTruthy();
     // And for a screen reader the mode is in the names and hints, not only on screen.
     expect(view.getByLabelText('Your reply to Bo').props.accessibilityHint).toBe(
-      "A reply to Bo, shown in Anna's thread",
+      'A reply to Bo',
     );
     await fireEvent.changeText(view.getByLabelText('Your reply to Bo'), 'x');
     expect(view.getByRole('button', { name: 'Reply' }).props.accessibilityHint).toBe(
@@ -617,8 +621,10 @@ describe('arriving at one comment (a notification)', () => {
     nativeEvent: { layout: { x: 0, y, width: 320, height: 80 } },
   });
 
-  it('scrolls to the thread, marks the comment briefly, and starts no reply', async () => {
+  it('scrolls to the thread, marks the comment briefly, and starts a reply without the keyboard', async () => {
     jest.useFakeTimers();
+    const focus = jest.spyOn(TextInput.prototype, 'focus');
+    focus.mockClear();
     try {
       const onFocusOffset = jest.fn();
       const view = await SURFACES[1]!.render({ focusCommentId: 'r1', onFocusOffset });
@@ -636,20 +642,88 @@ describe('arriving at one comment (a notification)', () => {
       const style = () =>
         StyleSheet.flatten(view.getByTestId('comment-row-r1').props.style) as ViewStyle;
       expect(style().backgroundColor).toBe(theme.surface.sunken);
-      // Not a reply in progress: the default composer, and Reply on that comment works.
-      expect(view.getByLabelText('Add a comment')).toBeTruthy();
-      expect(view.queryByText(/^Replying to/)).toBeNull();
+      // Since 2026-11-23: arriving from a notification starts a reply to that comment's
+      // author — without opening the keyboard — and shows only its conversation.
+      expect(view.getByText('Replying to Bo')).toBeTruthy();
+      expect(view.getByLabelText('Your reply to Bo').props.placeholder).toBe('Reply to Bo…');
+      // The focus mock is shared by every native component, so ask which one was focused.
+      expect(
+        focus.mock.contexts.some((c) => (c as TextInput | undefined)?.props?.placeholder),
+      ).toBe(false);
+      expect(view.queryByTestId('comment-thread-c2')).toBeNull();
+      expect(view.getByText('See all 3 comments')).toBeTruthy();
 
       await act(async () => {
         jest.advanceTimersByTime(FOCUS_HIGHLIGHT_MS + 10);
       });
+      // The notification's mark is over, but the row stays marked as the comment being
+      // replied to — until the reply is cancelled.
+      expect(style().backgroundColor).toBe(theme.surface.sunken);
+      await fireEvent.press(view.getByRole('button', { name: 'Cancel reply to Bo' }));
       expect(style().backgroundColor).toBeUndefined();
 
-      await fireEvent.press(view.getByLabelText('Reply to Bo'));
+      // An explicit Reply still focuses, as before.
+      await fireEvent.press(view.getAllByLabelText('Reply to Bo')[0]!);
       expect(view.getByText(/^Replying to Bo/)).toBeTruthy();
+      expect(
+        focus.mock.contexts.some((c) => (c as TextInput | undefined)?.props?.placeholder),
+      ).toBe(true);
     } finally {
+      focus.mockRestore();
       jest.useRealTimers();
     }
+  });
+
+  it('waits for the focused thread’s new place when the target resolves after layout', async () => {
+    // Codex review, PR #374: a push's comment arrives after the whole list has laid out;
+    // the offset recorded for the thread in the full list must not steer the scroll.
+    mockCommentRows = [
+      ...conversation(),
+      comment({
+        id: 'r2',
+        parent_id: 'c2',
+        author_id: 'dee-id',
+        username: 'dee',
+        display_name: 'Dee',
+        body: 'Late answer',
+        created_at: minutesAgo(5),
+      }),
+    ];
+    const onFocusOffset = jest.fn();
+    const props = { ...base, scroll: 'inherited' as const, onFocusOffset };
+    const view = await settle(await renderWithProviders(<CommentThread {...props} />));
+
+    // The full list lays out: Cy's thread far down.
+    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(400));
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(900));
+    await fireEvent(view.getByTestId('comment-replies-c2'), 'layout', layout(200));
+    await fireEvent(view.getByTestId('comment-row-r2').parent!, 'layout', layout(0));
+
+    // The push's comment resolves: no scroll from the stale 900.
+    await view.rerender(<CommentThread {...props} focusCommentId="r2" />);
+    expect(onFocusOffset).not.toHaveBeenCalled();
+
+    // The thread reports its place in the focused list, and the scroll uses it.
+    await fireEvent(view.getByTestId('comment-thread-c2'), 'layout', layout(40));
+    expect(onFocusOffset).toHaveBeenCalledTimes(1);
+    expect(onFocusOffset).toHaveBeenCalledWith(400 + Math.max(0, 40 + 200 + 0 - 160));
+  });
+
+  it('keeps its measurements when focusing draws the same list (one thread)', async () => {
+    // Codex review, PR #374: nothing moves, so no new layout would ever arrive.
+    mockCommentRows = conversation().filter((row) => row.id !== 'c2');
+    const onFocusOffset = jest.fn();
+    const props = { ...base, scroll: 'inherited' as const, onFocusOffset };
+    const view = await settle(await renderWithProviders(<CommentThread {...props} />));
+
+    await fireEvent(view.getByTestId('comment-thread-c1').parent!, 'layout', layout(400));
+    await fireEvent(view.getByTestId('comment-thread-c1'), 'layout', layout(0));
+    await fireEvent(view.getByTestId('comment-replies-c1'), 'layout', layout(300));
+    await fireEvent(view.getByTestId('comment-row-r1').parent!, 'layout', layout(0));
+
+    await view.rerender(<CommentThread {...props} focusCommentId="r1" />);
+    expect(view.queryByText(/^See all/)).toBeNull();
+    expect(onFocusOffset).toHaveBeenCalledWith(400 + (0 + 300 + 0 - 160));
   });
 
   it('says so, and still opens the conversation, when that comment has gone', async () => {

@@ -57,6 +57,12 @@ export type EngagementRowProps = {
   saved?: boolean;
   /** The Recommend sheet, which ends in "Share off bingd". Only where a title can be sent. */
   onPressShare?: () => void;
+  /**
+   * Content-sized actions from the leading edge rather than equal columns (default false).
+   * For a host that draws one action on its own — the Comments page's Like (2026-11-24) —
+   * where a single equal column would centre a lone button across the whole card.
+   */
+  compact?: boolean;
   /** Margins or padding from the host, so the columns sit on its gutters. */
   style?: StyleProp<ViewStyle>;
   /**
@@ -133,6 +139,7 @@ export function EngagementRow({
   style,
   spreadInset = ENGAGEMENT_EDGE,
   testID = 'engagement',
+  compact = false,
 }: EngagementRowProps) {
   const canReact = reaction != null && reaction.canReact !== false;
   const mine = canReact ? (reaction.mineGlyph ?? null) : null;
@@ -160,7 +167,7 @@ export function EngagementRow({
   const wraps =
     rowWidth != null &&
     wordsWidth(words, theme.typography.footnote.fontSize * fontScale) > rowWidth;
-  const spread = words.length >= 3 || wraps;
+  const spread = compact || words.length >= 3 || wraps;
   /** An action's box: an equal column for a pair, its own width when spread. */
   const boxFor = (count: number) =>
     !spread ? styles.action : actionCount(count) ? styles.spreadShrinks : styles.spreadFixed;

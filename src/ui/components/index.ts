@@ -107,6 +107,7 @@ export {
   SheetHeader,
   SheetRow,
   STANDARD_SHEET_FRACTION,
+  useSheetExpanded,
   useStandardSheetHeight,
   type SheetSize,
   type SheetHeaderProps,
