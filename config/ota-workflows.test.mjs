@@ -205,15 +205,30 @@ describe('the OTA workflows', () => {
     assert.doesNotMatch(publish, /\n {6}platform: (?:ios|all)\n/);
   });
 
-  it('the two differ only in the lane and the publish platform, once the comments are gone', () => {
-    const normal = (lane, platform) => {
+  it('the two differ only in the lane, the publish platform and the source-map upload, once the comments are gone', () => {
+    const normal = (lane, platform, upload) => {
       const yaml = withoutComments(read(lane));
       assert.match(yaml, new RegExp(`\\n {6}platform: ${platform}\\n`));
+      assert.match(yaml, new RegExp(`\\n {6}upload_sentry_sourcemaps: ${upload}\\n`));
       return yaml
         .replaceAll(lane, 'LANE')
-        .replace(`\n      platform: ${platform}\n`, '\n      platform: PLATFORM\n');
+        .replace(`\n      platform: ${platform}\n`, '\n      platform: PLATFORM\n')
+        .replace(`\n      upload_sentry_sourcemaps: ${upload}\n`, '\n      upload_sentry_sourcemaps: UPLOAD\n');
     };
-    assert.equal(normal('production', 'all'), normal('preview', 'android'));
+    assert.equal(normal('production', 'all', 'true'), normal('preview', 'android', 'false'));
+  });
+
+  /**
+   * Production uploads the OTA bundle's source maps; Preview does not. Production users all
+   * run an OTA, so without its map every production stack is minified. The preview EAS
+   * environment has no SENTRY_AUTH_TOKEN, so an upload there would fail the publish.
+   */
+  it('production uploads its OTA source maps, matched by the Debug ID Sentry\'s Metro serializer writes', () => {
+    assert.match(job(read('production'), 'publish'), /\n {6}upload_sentry_sourcemaps: true\n/);
+    assert.match(job(read('preview'), 'publish'), /\n {6}upload_sentry_sourcemaps: false\n/);
+    const metro = readFileSync(new URL('../metro.config.js', import.meta.url), 'utf8');
+    assert.match(metro, /require\('@sentry\/react-native\/metro'\)/);
+    assert.match(metro, /module\.exports = getSentryExpoConfig\(__dirname\)/);
   });
 
   it('names both live store binaries by full runtime', () => {
