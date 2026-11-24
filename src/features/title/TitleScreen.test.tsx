@@ -2702,6 +2702,21 @@ describe('a season, and its episodes', () => {
     return within(view.getByTestId('episode-sheet'));
   };
 
+  it('waits for the videos facet before its own episode read (one provider request, Codex #378)', async () => {
+    // A filled-in season with no videos facet yet: the facet is the only reason left to
+    // enrich it, so the fallback read must not go out until the facet has answered.
+    holdReadsOf('media_cache');
+    const view = await openSeason();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
+
+    releaseReadsOf('media_cache');
+    await waitFor(() => expect(view.getByTestId('episode-rail')).toBeTruthy());
+    expect(mockFetchSeasonEpisodes).toHaveBeenCalledTimes(1);
+  });
+
   it('shows episodes as one compact rail: number and title, and no synopsis', async () => {
     // Founder hotfix, 2026-11-07: the synopses made a season page excessively long.
     const view = await openSeason();

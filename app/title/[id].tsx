@@ -747,7 +747,16 @@ export default function TitleScreen() {
    */
   const showsEpisodes =
     data?.title?.kind === 'season' && (immersive || tab === null || tab === 'episodes');
-  const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
+  /**
+   * **And not before the videos facet has answered** (Codex, #378). Since a season is no
+   * longer thin for want of a runtime, the videos facet can be the only reason to enrich
+   * it. Until that read answers, `enriching` says false; if the fallback were enabled in
+   * that window, a null facet would then start an enrichment beside it, and both reach
+   * `tmdb.seasonDetail`: two provider requests on a first visit where one seeds the other.
+   * A failed read counts as answered, so a broken facet never parks the rail.
+   */
+  const videosFacetAnswered = !videos.isPending;
+  const episodes = useSeasonEpisodes(titleId, showsEpisodes && videosFacetAnswered && !enriching);
   /**
    * The Similar tab's data, when it is the tab being shown.
    *
