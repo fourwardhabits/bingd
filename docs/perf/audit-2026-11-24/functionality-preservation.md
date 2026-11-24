@@ -42,7 +42,7 @@ This register is for whoever implements an approved remedy. For every candidate 
 
 ## 3. Persisted cache: the guarantees it must keep (if ever approved)
 1. **Per account.** The store key includes the account id and the runtime. The store is **deleted on `SIGNED_OUT` and on the local sign-out path, before `queryClient.clear()`**, and nothing is restored until `getSession()` resolves to the same user.
-2. **Allowlist only.** Feed, rankings/collection, own profile, For You and title rows. **Excluded:** owner-only data (`log-state`, watch history, goals, private notes), unless encrypted.
+2. **Allowlist only, at field level (Codex pass 2).** Excluding owner-only *keys* is not enough. `useLoggedCollection` keeps `watched_on` (`use-collection.ts:353–359, 409–415`), and the title's personal query carries watch dates and possibly private notes (`app/title/[id].tsx:527–544`). Persist only catalogue-only title keys and an explicit **sanitised projection** of the collection and Feed payloads, or encrypt them. Add a test that inspects the serialised store for private dates and notes.
 3. **Restored entries are stale.** `staleTime` is 0 on hydrate and `maxAge` is at most 24 h, so the first burst reconciles them.
 4. **Tests must cover:** account A signs out and B signs in on the same device, and nothing of A appears; reinstall; token expiry during restore.
 
