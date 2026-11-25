@@ -222,11 +222,18 @@ export function PosterRail({
       testID={testID}
     >
       {tiles.length
-        ? tiles.map((tile) => (
+        ? tiles.map((tile, index) => (
             <Tile
               key={tile.id}
               tile={tile}
               width={cardWidth}
+              // **Visible first** (perf P8, 2026-11-25). A rail mounts all of its tiles (up to
+              // 12), but only three and part of a fourth are on screen until the reader swipes.
+              // The ones past the peek load at the image loader's low priority, so they queue
+              // behind the artwork the reader can see, here and on the next card, instead of
+              // ahead of it. Order only: every tile still loads, nothing is deferred or
+              // unmounted, and a tile already in the cache draws at once.
+              priority={index > RAIL_COLUMNS ? 'low' : undefined}
               onPress={() => onPressTile(tile)}
               onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
               saveLabels={onToggleSave ? FEED_SAVE_LABELS : undefined}
@@ -598,7 +605,7 @@ function Tile({
   /** The bookmark's words, where they differ from For You's (the Feed's rails). */
   saveLabels?: SaveLabels;
   /** Passed to the artwork's loader; see `PosterGrid`'s `prioritizeFirstScreen`. */
-  priority?: 'high';
+  priority?: 'high' | 'low';
 }) {
   const { score } = tile;
   const average = tile.scoreSource === 'average';

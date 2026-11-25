@@ -48,6 +48,14 @@ describe('the trending shelf', () => {
     expect(view.getByLabelText('A Film, 2026')).toBeTruthy();
   });
 
+  it('asks for its posters at w342 (perf P8)', async () => {
+    mockTrending.mockReturnValue({ data: { items, stale: false } });
+    const view = await shelf();
+    await waitFor(() => expect(view.getByLabelText('A Film, 2026')).toBeTruthy());
+    expect(JSON.stringify(view.toJSON())).toContain('https://image.tmdb.org/t/p/w342/a.jpg');
+    expect(JSON.stringify(view.toJSON())).not.toContain('/w500/');
+  });
+
   it('renders nothing at all when the list is genuinely empty', async () => {
     // Not an empty state. A discovery strip with nothing to say should cost the social
     // feed no vertical space, which is the ordering PRD §14 asks for.
