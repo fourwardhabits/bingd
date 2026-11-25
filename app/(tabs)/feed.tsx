@@ -454,7 +454,15 @@ export default function FeedScreen() {
         id: row.mediaItemId,
         title: row.title,
         year: row.year,
-        posterUri: posterUri(row.posterPath, 'card'),
+        /**
+         * **TMDB's `w342`, not `w500`** (perf P8, 2026-11-25). A rail tile is 65–95 pt across
+         * supported phones (three whole posters and a 0.7 peek inside the card; no tablets),
+         * so 130–285 px at 2–3x. `w342` covers that with at least 20% to spare; `w500` was
+         * 2.1× the pixels to fetch and decode for detail the tile cannot show, on up to 12
+         * tiles per grouped post. It is also the size Collection and For You use, so a poster
+         * seen there is already in the disk cache here.
+         */
+        posterUri: posterUri(row.posterPath, 'row'),
         // The author's score on a ranked title; a save carries none.
         score: row.action === 'saved' ? null : row.score,
         season: row.seasonNumber,
