@@ -1,10 +1,14 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
-import { queryKeys } from '@/lib/query';
+import { createQueryClient, queryKeys } from '@/lib/query';
+import {
+  invalidateAfterCollectionChange,
+  invalidateRankingsBesides,
+} from '@/features/collection/invalidate';
 import { holdUntilRankingOpens, releaseRankingHold } from './open-first';
 import { theme, typography } from '@/ui/tokens';
 
@@ -3752,4 +3756,459 @@ describe('what waits for the first comparison', () => {
     await act(async () => sheet.unmount());
     expect(refresh).toHaveBeenCalledTimes(1);
   });
+});
+
+/**
+ * **One refresh per ranking** (perf P4, 2026-11-25).
+ *
+ * The Log sheet's post-log refresh names its title (`HoldOwner`). A session for that title
+ * keeps it while the comparisons run, so the first `rank_answer` is not queued behind it;
+ * a placement stands in for it, because the placement's own refresh covers every key it
+ * does but the other ranked pools, which `supersededBy` is told to refresh; and every
+ * other end of the session runs it in full, exactly once.
+ */
+describe('the post-log refresh, through the session', () => {
+  /** Every invalidation any client makes, recorded from before the sheet mounts. */
+  let spy: jest.SpyInstance;
+  beforeEach(() => {
+    spy = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+  });
+  afterEach(() => {
+    spy.mockRestore();
+    releaseRankingHold();
+  });
+  const count = (key: readonly unknown[]) =>
+    spy.mock.calls.filter(([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key))
+      .length;
+
+  const filmQ = { id: 'film-q', kind: 'movie', title: 'Film Q', poster_path: null };
+  /** Cards keep the app's own retention, as in "the next comparison after an answer". */
+  const open = async (props: Partial<RankingSheetProps> = {}) => {
+    const sheet = await openSheet(props);
+    sheet.client.setQueryDefaults(['comparison-card'], { gcTime: 5 * 60_000 });
+    return sheet;
+  };
+  const held = (mediaItemId = 'film-a') => {
+    const refresh = jest.fn();
+    const remainder = jest.fn();
+    holdUntilRankingOpens(refresh, { mediaItemId, supersededBy: remainder });
+    return { refresh, remainder };
+  };
+  const answer = async (sheet: Awaited<ReturnType<typeof openSheet>>, opponent: string) => {
+    await sheet.ready(opponent);
+    await fireEvent.press(sheet.card('Film A'));
+  };
+
+  it('is not run when the session opens, nor while it compares', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', pivot_card: filmQ }));
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await answer(sheet, 'Film P');
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    await sheet.ready('Film Q');
+    expect(refresh).not.toHaveBeenCalled();
+    expect(remainder).not.toHaveBeenCalled();
+  });
+
+  it('is superseded by the placement: one refresh, plus the other pools', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', pivot_card: filmQ }), placement);
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await answer(sheet, 'Film P');
+    await answer(sheet, 'Film Q');
+    await waitFor(() => expect(remainder).toHaveBeenCalledTimes(1));
+    expect(remainder).toHaveBeenCalledWith('movies');
+    // The placement's own refresh ran, once.
+    expect(count(queryKeys.collection('user-1'))).toBe(1);
+    expect(count(queryKeys.rankings('user-1', 'movies'))).toBe(1);
+
+    await act(async () => sheet.unmount());
+    expect(refresh).not.toHaveBeenCalled();
+    expect(remainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('is superseded by an empty band, which places from rank_start itself', async () => {
+    answering(placement);
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await waitFor(() => expect(remainder).toHaveBeenCalledWith('movies'));
+    await act(async () => sheet.unmount());
+    expect(refresh).not.toHaveBeenCalled();
+    expect(remainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs once when the reader closes before the first comparison', async () => {
+    mockRpc.mockImplementation((name: string) =>
+      name === 'rank_start' ? new Promise(() => {}) : Promise.resolve(comparison()),
+    );
+    const { refresh, remainder } = held();
+    const sheet = await open();
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+
+    await fireEvent.press(sheet.close());
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await act(async () => sheet.unmount());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(remainder).not.toHaveBeenCalled();
+  });
+
+  it('runs once when the reader closes after several comparisons', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', pivot_card: filmQ }));
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await answer(sheet, 'Film P');
+    await sheet.ready('Film Q');
+    expect(refresh).not.toHaveBeenCalled();
+
+    await fireEvent.press(sheet.close());
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // A first placement keeps its session for Rank to resume: nothing else changed.
+    expect(callsTo('rank_cancel')).toHaveLength(0);
+    await act(async () => sheet.unmount());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(remainder).not.toHaveBeenCalled();
+  });
+
+  it('runs once when the sheet unmounts mid-session', async () => {
+    answering(comparison());
+    const { refresh } = held();
+    const sheet = await open();
+    await sheet.ready('Film P');
+
+    await act(async () => sheet.unmount());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs at once when rank_start is refused, since log_title has still written', async () => {
+    answering({
+      data: null,
+      error: { code: '23505', message: 'title is already ranked; use rank_rebucket to move it' },
+    });
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await act(async () => sheet.unmount());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(remainder).not.toHaveBeenCalled();
+  });
+
+  it('is not repeated when a lost rank_start reply already refreshed in full', async () => {
+    answering({ data: null, error: { code: '', message: 'TypeError: fail' } }, comparison());
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await waitFor(() => expect(remainder).toHaveBeenCalledWith(undefined));
+    // The sheet's own category-less refresh: the identical call the Log sheet held.
+    expect(count(queryKeys.collection('user-1'))).toBe(1);
+    expect(count(queryKeys.rankings('user-1', 'tv_shows'))).toBe(1);
+
+    // Recovery is unchanged: the retry goes out under the same operation id.
+    await fireEvent.press(await sheet.findByText('Try again'));
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(2));
+    expect((callsTo('rank_start')[1][1] as Record<string, unknown>).p_operation_id).toBe(
+      (callsTo('rank_start')[0][1] as Record<string, unknown>).p_operation_id,
+    );
+    await act(async () => sheet.unmount());
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('stays held through a refused answer, and leaving runs it once', async () => {
+    answering(comparison(), { data: null, error: { code: '22023', message: 'pivot is gone' } });
+    const { refresh } = held();
+    const sheet = await open();
+
+    await answer(sheet, 'Film P');
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    await waitFor(() => expect(sheet.getByText('pivot is gone')).toBeTruthy());
+    expect(refresh).not.toHaveBeenCalled();
+
+    await fireEvent.press(sheet.close());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('is superseded once when an answer’s reply is lost, and not run on leaving', async () => {
+    answering(comparison(), { data: null, error: { code: '', message: 'TypeError: fail' } });
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await answer(sheet, 'Film P');
+    await waitFor(() => expect(remainder).toHaveBeenCalledWith(undefined));
+    expect(count(queryKeys.collection('user-1'))).toBe(1);
+
+    await fireEvent.press(sheet.close());
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    await act(async () => sheet.unmount());
+    expect(refresh).not.toHaveBeenCalled();
+    expect(count(queryKeys.collection('user-1'))).toBe(1);
+  });
+
+  it('sends one answer for a double tap, and supersedes once', async () => {
+    answering(comparison(), placement);
+    const { refresh, remainder } = held();
+    const sheet = await open();
+
+    await sheet.ready('Film P');
+    await act(async () => {
+      fireEvent.press(sheet.card('Film A'));
+      fireEvent.press(sheet.card('Film A'));
+    });
+    await waitFor(() => expect(remainder).toHaveBeenCalledTimes(1));
+    expect(callsTo('rank_answer')).toHaveLength(1);
+    await act(async () => sheet.unmount());
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('lets a hold for another title go when this session opens, as before', async () => {
+    answering(comparison(), placement);
+    const other = held('film-z');
+    const sheet = await open();
+
+    await sheet.ready('Film P');
+    expect(other.refresh).toHaveBeenCalledTimes(1);
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() =>
+      expect(mockTrack).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'ranking_completed' }),
+      ),
+    );
+    // This title's placement is not that title's refresh.
+    expect(other.remainder).not.toHaveBeenCalled();
+    expect(other.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets an unowned hold go when this session opens, as before', async () => {
+    answering(comparison());
+    const refresh = jest.fn();
+    holdUntilRankingOpens(refresh);
+    const sheet = await open();
+
+    await sheet.ready('Film P');
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a re-rank still refreshes nothing until it places', async () => {
+    answering(comparison());
+    const sheet = await open({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.close());
+    await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
+    expect(count(queryKeys.collection('user-1'))).toBe(0);
+    expect(count(queryKeys.rankings('user-1', 'movies'))).toBe(0);
+  });
+});
+
+/**
+ * **Request behaviour of one Log → Rank → placement** (perf P4, 2026-11-25) [sim].
+ *
+ * The audit's queue method (`docs/perf/audit-2026-11-24/evidence/client-evidence.md` §4):
+ * every request goes to one host through a first-in-first-out dispatcher with Android
+ * OkHttp's five slots, and each takes a uniform 165 ms — the device round trip from the
+ * 11-24 edge logs. JS time, payload size and server variance are not modelled, so these are
+ * [sim] numbers, not device ones.
+ *
+ * The mounted app is stood in for by one observer on every key the post-log refresh
+ * touches (recorded from the helper itself, so it cannot fall behind it), on the
+ * production `createQueryClient()`. One observer is one request here; the real screens
+ * make more (47 / 45 per refresh [local-bench]), so the counts are a lower bound.
+ *
+ * `released at rank_start` is #378's behaviour, reproduced by letting the hold go the
+ * moment `rank_start` answers, exactly where `.finally(releaseRankingHold)` did.
+ */
+describe('one Log → Rank → placement, on five slots [sim]', () => {
+  const RTT = 165;
+  const SLOTS = 5;
+  type Entry = { name: string; enq: number; start?: number; end?: number };
+  const net = { inFlight: 0, queue: [] as (() => void)[], t0: Date.now(), log: [] as Entry[] };
+  const at = () => Date.now() - net.t0;
+  const dispatch = <T,>(name: string, value: () => T): Promise<T> => {
+    const entry: Entry = { name, enq: at() };
+    net.log.push(entry);
+    const run = () =>
+      new Promise<T>((resolve) => {
+        entry.start = at();
+        net.inFlight += 1;
+        setTimeout(() => {
+          entry.end = at();
+          net.inFlight -= 1;
+          net.queue.shift()?.();
+          resolve(value());
+        }, RTT);
+      });
+    if (net.inFlight < SLOTS) return run();
+    return new Promise<T>((resolve) => net.queue.push(() => void run().then(resolve)));
+  };
+  const pause = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)));
+  const drain = async () => {
+    for (let quiet = 0; quiet < 4; ) {
+      await pause(60);
+      quiet = net.inFlight === 0 && net.queue.length === 0 ? quiet + 1 : 0;
+    }
+  };
+
+  /** Every key the post-log refresh hands the client, read off the helper itself. */
+  const refreshKeys = (() => {
+    const scratch = new QueryClient();
+    const spy = jest.spyOn(scratch, 'invalidateQueries');
+    invalidateAfterCollectionChange(scratch, 'user-1', 'film-a');
+    const keys = spy.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    return [...new Set(keys)].map((key) => JSON.parse(key) as readonly unknown[]);
+  })();
+  /**
+   * The one key the helper itself invalidates twice in a single call (`goals`, audit
+   * F-CLI-4), so it refetches twice inside one refresh. Not this change's to fix: P4 is
+   * about the second refresh, and this is inside the first.
+   */
+  const INSIDE_ONE_REFRESH = [`q:${JSON.stringify(['goals', 'user-1'])}`];
+  const filmQ = { id: 'film-q', kind: 'movie', title: 'Film Q', poster_path: null };
+  const band = [{ mediaItemId: 'film-p', title: 'Film P', kind: 'movie', posterPath: null }];
+  const MOVIES_BAND = JSON.stringify(queryKeys.rankings('user-1', 'movies'));
+
+  afterEach(() => releaseRankingHold());
+
+  const rank = async (policy: 'released at rank_start' | 'kept', cachedBand: boolean) => {
+    const client = createQueryClient();
+    const observers = refreshKeys.map((key) => {
+      const observer = new QueryObserver(client, {
+        queryKey: key,
+        queryFn: () =>
+          dispatch(`q:${JSON.stringify(key)}`, () =>
+            cachedBand && JSON.stringify(key) === MOVIES_BAND ? band : [],
+          ),
+      });
+      return observer.subscribe(() => {});
+    });
+    await drain();
+    net.log.length = 0;
+    net.t0 = Date.now();
+
+    // What the Log sheet hands over after `log_title` (`LogSheet.tsx`, pinned in its tests).
+    holdUntilRankingOpens(() => invalidateAfterCollectionChange(client, 'user-1', 'film-a'), {
+      mediaItemId: 'film-a',
+      supersededBy: (category) => invalidateRankingsBesides(client, 'user-1', category),
+    });
+
+    let answers = 0;
+    mockRpc.mockImplementation((name: string) => {
+      const reply =
+        name === 'rank_start'
+          ? comparison()
+          : name === 'rank_answer'
+            ? (answers += 1) === 1
+              ? comparison({ pivot: 'film-q', pivot_card: filmQ })
+              : placement
+            : { data: null, error: null };
+      const sent = dispatch(`rpc:${name}`, () => reply);
+      if (policy === 'released at rank_start' && name === 'rank_start') {
+        void sent.then(() => releaseRankingHold());
+      }
+      return sent;
+    });
+    mockPivotRead.mockImplementation(() =>
+      dispatch('from:media_items', () => ({
+        data: { id: 'film-p', title: 'Film P', poster_path: null },
+        error: null,
+      })),
+    );
+
+    const view = await render(
+      <QueryClientProvider client={client}>
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <RankingSheet subject={subject} onClose={jest.fn()} surface="search" />
+        </SafeAreaProvider>
+      </QueryClientProvider>,
+    );
+    const ready = (title: string) =>
+      waitFor(
+        () =>
+          expect(view.getByLabelText(`Choose ${title}`).props.accessibilityState.disabled).toBe(
+            false,
+          ),
+        { interval: 5, timeout: 10_000 },
+      );
+
+    // The reader taps as soon as each comparison can be answered.
+    await ready('Film P');
+    const answerable = at();
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+    await ready('Film Q');
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+    await waitFor(
+      () =>
+        expect(mockTrack).toHaveBeenCalledWith(
+          expect.objectContaining({ name: 'ranking_completed' }),
+        ),
+      { timeout: 10_000 },
+    );
+    await drain();
+
+    const named = (name: string) => net.log.filter((entry) => entry.name === name);
+    const [first, second] = named('rpc:rank_answer');
+    const rtt = (entry: Entry | undefined) => (entry?.end ?? NaN) - (entry?.enq ?? NaN);
+    const refetches = net.log.filter((entry) => entry.name.startsWith('q:'));
+    const perKey = new Map<string, number>();
+    for (const entry of refetches) perKey.set(entry.name, (perKey.get(entry.name) ?? 0) + 1);
+    const rankStart = named('rpc:rank_start')[0];
+
+    await act(async () => view.unmount());
+    for (const unsubscribe of observers) unsubscribe();
+    client.clear();
+
+    const result = {
+      // Broad cycles: the Feed key is refreshed by the broad helper and by nothing else here.
+      broadCycles: perKey.get(`q:${JSON.stringify(['feed', 'user-1'])}`) ?? 0,
+      requests: refetches.length,
+      duplicates: [...perKey].filter(([, n]) => n > 1).map(([name]) => name),
+      untouched: refreshKeys.filter((key) => !perKey.has(`q:${JSON.stringify(key)}`)).length,
+      answerableAfterRankStart: answerable - (rankStart?.end ?? NaN),
+      firstAnswerRtt: rtt(first),
+      secondAnswerRtt: rtt(second),
+    };
+    if (process.env.P4_SIM_REPORT) {
+      // eslint-disable-next-line no-console
+      console.log(`[sim] ${policy}, band ${cachedBand ? 'cached' : 'miss'}`, result);
+    }
+    return result;
+  };
+
+  it('refreshes once, and every surface still refetches exactly once', async () => {
+    const before = await rank('released at rank_start', true);
+    const after = await rank('kept', true);
+
+    expect(before.broadCycles).toBe(2);
+    expect(after.broadCycles).toBe(1);
+    // About half the requests, with nothing left out and nothing fetched twice.
+    expect(after.requests).toBe(refreshKeys.length + INSIDE_ONE_REFRESH.length);
+    expect(before.requests).toBeGreaterThanOrEqual(2 * refreshKeys.length - 2);
+    expect(after.duplicates).toEqual(INSIDE_ONE_REFRESH);
+    expect(before.duplicates.length).toBeGreaterThan(refreshKeys.length - 5);
+    expect(after.untouched).toBe(0);
+  }, 60_000);
+
+  it('sends the first answer straight out instead of behind the refresh', async () => {
+    const before = await rank('released at rank_start', true);
+    const after = await rank('kept', true);
+
+    // One round trip, plus jest's own time; #378's release queued it for several.
+    expect(after.firstAnswerRtt).toBeLessThan(2 * RTT);
+    expect(before.firstAnswerRtt).toBeGreaterThan(3 * RTT);
+    expect(after.secondAnswerRtt).toBeLessThan(2 * RTT);
+  }, 60_000);
+
+  it('makes an uncached comparison answerable one read after rank_start', async () => {
+    const before = await rank('released at rank_start', false);
+    const after = await rank('kept', false);
+
+    // The card's `media_items` read is the only request out (Codex, audit pass 2).
+    expect(after.answerableAfterRankStart).toBeLessThan(2 * RTT);
+    expect(before.answerableAfterRankStart).toBeGreaterThan(3 * RTT);
+    expect(after.firstAnswerRtt).toBeLessThan(2 * RTT);
+  }, 60_000);
 });

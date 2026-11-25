@@ -64,7 +64,11 @@ import {
   type PlacedMovement,
   type SessionStep,
 } from './session';
-import { releaseRankingHold } from './open-first';
+import {
+  keepRankingHoldThroughSession,
+  releaseRankingHold,
+  supersedeRankingHold,
+} from './open-first';
 import { seedPivotCard } from './pivot-card';
 import { groupFirstRanking } from './backlog';
 import { TitleRecallSheet } from './TitleRecallSheet';
@@ -686,6 +690,9 @@ function Session({
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id, {
           category: next.category,
         });
+        // That was the Log sheet's held post-log refresh too, but for the other ranked
+        // pools, so the held one is not run on top of it (perf P4, `open-first.ts`).
+        supersedeRankingHold(subject.id, next.category);
         /**
          * `ranking_completed`, and **only here**.
          *
@@ -798,6 +805,8 @@ function Session({
          * title between them — `invalidate.ts` refreshes both when it is not told.
          */
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
+        // The identical call the Log sheet holds, so it is not repeated at the end.
+        supersedeRankingHold(subject.id, undefined);
       }
     },
     [profile.id, queryClient, subject.id, subject.kind, subject.mode, surface],
@@ -848,6 +857,8 @@ function Session({
         (operationId) => open(subject.id, subject.bucket, operationId),
         outcomeUnknown,
       );
+    // Whether this session took the Log sheet's held refresh with it (`open-first.ts`).
+    let kept = false;
     void attempt().then((next) => {
       /**
        * **Nothing is reconciled here any more, and that is a deletion rather than an
@@ -879,6 +890,21 @@ function Session({
         setLastAttempt({ run: attempt, skip: false });
         setBusy(false);
         apply(next);
+        /**
+         * **The held post-log refresh stays held while the comparisons run** (perf P4).
+         *
+         * Let go here, it went out with the first comparison and queued ahead of its
+         * `rank_answer` on Android's five slots — and then the placement refreshed the
+         * same keys again. So a session that is now asking keeps it: the placement
+         * supersedes it (`apply`), and any other end — Close, back, a failure, the sheet
+         * unmounting — runs it (`close`, the cleanup below). An opening that is not a
+         * comparison lets it go now: a failure must still reconcile what `log_title`
+         * wrote, and an empty-band placement has already superseded it in `apply`.
+         */
+        if (next.state === 'comparing') {
+          keepRankingHoldThroughSession(subject.id);
+          kept = true;
+        }
         return;
       }
 
@@ -888,12 +914,16 @@ function Session({
       if (next.state === 'comparing' && !keepsSession(subject)) void rankCancel(next.sessionId);
     })
       // The Log sheet's post-log refresh waits for this first answer (`open-first.ts`),
-      // so the comparison is not queued behind it. Released however the open ends.
-      .finally(releaseRankingHold);
+      // so the comparison is not queued behind it. Released however the open ends, unless
+      // the session it opened has taken it.
+      .finally(() => {
+        if (!kept) releaseRankingHold();
+      });
 
     return () => {
       live = false;
-      // A sheet closed before its first answer has nothing left to wait for.
+      // A sheet that goes away without placing — before its first answer, mid-session, on
+      // a failure — runs what it was holding. After a placement nothing is left to run.
       releaseRankingHold();
     };
   }, [subject, apply, withIntent]);
@@ -938,6 +968,9 @@ function Session({
     // Already gone reads as success, so this is safe when the server finalised the session
     // under a request that was still in flight.
     if (sessionId && !keepsSession(subject)) await rankCancel(sessionId);
+    // Leaving without a placement reconciles the log now, not when a caller that keeps this
+    // mounted (onboarding's `visible`) gets round to unmounting it. A no-op after `placed`.
+    releaseRankingHold();
     onClose();
   };
 

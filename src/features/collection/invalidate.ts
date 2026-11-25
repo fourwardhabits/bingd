@@ -321,6 +321,33 @@ export function invalidateAfterCollectionChange(
   invalidateAwards(queryClient, userId);
 }
 
+const POOLS = ['movies', 'tv_seasons', 'tv_shows'] as const;
+
+/**
+ * What `invalidateAfterCollectionChange` **without** a category covers that the same call
+ * **with** `category` does not: the ranked lists of the other pools. Nothing, when
+ * `category` is not a pool, because the call then refreshed all three itself.
+ *
+ * It exists for one hand-over (perf P4, `ranking/open-first.ts`). The Log sheet's refresh
+ * after a first log is the category-less call; when the ranking it leads into places, the
+ * ranking sheet's own refresh is the call with the placed category, over the same title,
+ * after both writes. Those two calls differ only in the ranked-list branch at the top of
+ * that function, so this and the placement's refresh together are, key for key, the
+ * refresh the Log sheet was holding. `invalidate.test.ts` checks that by recording both
+ * sides, so a key added to one branch alone fails there rather than going stale.
+ */
+export function invalidateRankingsBesides(
+  queryClient: QueryClient,
+  userId: string,
+  category: string | undefined,
+) {
+  if (!POOLS.some((pool) => pool === category)) return;
+  for (const pool of POOLS) {
+    if (pool === category) continue;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.rankings(userId, pool) });
+  }
+}
+
 /**
  * Everything that stops being true when a title goes on or off the watchlist.
  *

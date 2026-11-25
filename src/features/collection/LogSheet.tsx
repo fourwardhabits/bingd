@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { invalidateAfterCollectionChange } from './invalidate';
+import { invalidateAfterCollectionChange, invalidateRankingsBesides } from './invalidate';
 import { asRankingCategory, CATEGORY_NAME } from './use-collection';
 import { diagnose } from '@/lib/diagnose';
 import { queryKeys } from '@/lib/query';
@@ -1097,11 +1097,22 @@ function Body({
      * Asked for here, it went out ahead of the ranking sheet's `rank_start` and — on
      * Android, where OkHttp sends five requests per host at a time — held the first
      * comparison back by 1.7–2.7 s on the founder's Preview. Handed to
-     * `holdUntilRankingOpens`, it runs the moment that first answer arrives, or after a
-     * ceiling if no sheet opens. Without `onRank` there is no comparison to wait for.
+     * `holdUntilRankingOpens`, it waits out the session that ranking opens (perf P4,
+     * 2026-11-25), or a ceiling if no session takes it. Without `onRank` there is no
+     * comparison to wait for.
+     *
+     * **A placement stands in for it.** The ranking sheet's own refresh on `placed` is this
+     * same call over this same title with the placed category, made after both writes, so
+     * all it leaves out is the other two ranked pools — which is what `supersededBy` runs.
+     * Every other end of the session (Close, back, a failure, an unmount) runs this in full.
      */
-    if (onRank) holdUntilRankingOpens(refresh);
-    else refresh();
+    if (onRank) {
+      holdUntilRankingOpens(refresh, {
+        mediaItemId: title.id,
+        supersededBy: (category) =>
+          invalidateRankingsBesides(queryClient, profile.id, category),
+      });
+    } else refresh();
     onRank?.(chosen, 'start', {
       freshLog: result.outcome === 'ok' && (Boolean(result.created) || createdByDetails),
     });

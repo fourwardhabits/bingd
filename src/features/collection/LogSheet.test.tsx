@@ -9,7 +9,11 @@ import { theme } from '@/ui/tokens';
 import { addDays, addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 import { emptyLogState } from './use-log-state';
-import { releaseRankingHold } from '@/features/ranking/open-first';
+import {
+  keepRankingHoldThroughSession,
+  releaseRankingHold,
+  supersedeRankingHold,
+} from '@/features/ranking/open-first';
 import {
   WHEN_SESSION_IDLE_MS,
   carriedWhen,
@@ -4281,6 +4285,79 @@ describe('the refresh after a first log', () => {
     expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(true);
     expect(invalidated(spy, queryKeys.feed('user-1'))).toBe(true);
     expect(invalidated(spy, queryKeys.title('film-a'))).toBe(true);
+  });
+
+  /**
+   * Perf P4 (2026-11-25): the hold names this title, so the ranking session for it keeps
+   * it, and a placement stands in for it with only the ranked pools it left out.
+   */
+  it('is kept through this title’s session, and run in full if it ends unplaced', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalled());
+
+    await act(async () => keepRankingHoldThroughSession('film-a'));
+    expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(false);
+
+    await act(async () => releaseRankingHold());
+    expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(true);
+    expect(invalidated(spy, queryKeys.logState('user-1', 'film-a'))).toBe(true);
+  });
+
+  it('is replaced on placement by the other two ranked pools alone', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalled());
+    await act(async () => keepRankingHoldThroughSession('film-a'));
+
+    // The ranking sheet has just run its own refresh for the placement in Movies.
+    spy.mockClear();
+    await act(async () => supersedeRankingHold('film-a', 'movies'));
+    const keys = spy.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    expect(keys.sort()).toEqual(
+      [
+        JSON.stringify(queryKeys.rankings('user-1', 'tv_seasons')),
+        JSON.stringify(queryKeys.rankings('user-1', 'tv_shows')),
+      ].sort(),
+    );
+
+    // And nothing is left to run when the sheet goes.
+    spy.mockClear();
+    await act(async () => releaseRankingHold());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('names a season by its own id, and leaves its own pool to the placement', async () => {
+    const season: LoggableTitle = {
+      ...filmA,
+      id: 'season-2',
+      title: 'Show · Season 2',
+      kind: 'season',
+    };
+    const onRank = jest.fn();
+    const sheet = await open(season, { onRank });
+    const spy = jest.spyOn(sheet.client, 'invalidateQueries');
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalled());
+    // A placement of some other title is not this one's.
+    await act(async () => supersedeRankingHold('film-a', 'movies'));
+    expect(spy).not.toHaveBeenCalled();
+
+    await act(async () => supersedeRankingHold('season-2', 'tv_seasons'));
+    const keys = spy.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    expect(keys.sort()).toEqual(
+      [
+        JSON.stringify(queryKeys.rankings('user-1', 'movies')),
+        JSON.stringify(queryKeys.rankings('user-1', 'tv_shows')),
+      ].sort(),
+    );
   });
 
   it('is not held when there is no comparison to wait for', async () => {
