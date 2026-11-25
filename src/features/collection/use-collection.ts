@@ -434,9 +434,13 @@ export function useLoggedCollection(userId: string, { enabled = true }: { enable
   });
 }
 
-export function useWatchlist(userId: string) {
+export function useWatchlist(userId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: [...queryKeys.collection(userId), 'watchlist'],
+    // Optional, default on: every existing caller is unchanged. The person page holds the
+    // read until its filmography is back, so it does not compete with it; the key is the
+    // same either way, so a watchlist already in the cache still draws at once.
+    enabled: options.enabled ?? true,
     queryFn: async (): Promise<LoggedEntry[]> => {
       const { data, error } = await readAllByKey<any>(
         (cursor, limit) =>

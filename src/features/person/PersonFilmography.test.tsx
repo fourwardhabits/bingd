@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -104,6 +104,16 @@ beforeEach(() => {
 const open = async (name = 'Brad Pitt') => {
   const view = await renderWithProviders(<PersonScreen />);
   await waitFor(() => expect(view.getByTestId('person-name')).toHaveTextContent(name));
+  // The rows' bookmarks are what `rowTitles` reads, and the watchlist behind them is asked
+  // for only once the filmography is back (`app/person/[id].tsx`, "critical data first").
+  await waitFor(() => {
+    expect(view.client.getQueryState(['collection', 'user-1', 'watchlist'])?.status).toBe(
+      'success',
+    );
+    expect(view.client.isFetching()).toBe(0);
+  });
+  // React Query tells the screen on its next tick, so let that render land.
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
   return view;
 };
 

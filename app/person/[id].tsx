@@ -45,10 +45,11 @@ import { FilmographyFilterSheet } from '@/features/person/FilmographyFilterSheet
 import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
 import { birthLine } from '@/features/person/identity';
+import { personGroundRange } from '@/features/person/hero-geometry';
+import { personPreview } from '@/features/person/preview';
 import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
-import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { backdropUri, posterUri, profileUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
@@ -177,7 +178,7 @@ export default function PersonScreen() {
   const [shown, setShown] = useState(PAGE);
 
   const hero = usePersonHero(id ?? null, detail?.credits ?? null);
-  const top = usePersonTopBar(hero !== null);
+  const top = usePersonTopBar();
   // Read once, so the bar closes over a value rather than over a query result that could
   // be refetched to null between renders.
   const name = detail?.name ?? null;
@@ -190,16 +191,32 @@ export default function PersonScreen() {
    * show ranks in its own pool (`tv_shows`) and is logged like a film, so a ranked or
    * logged show says so here exactly as its title page does (RC review, 2026-11-11).
    * The season pool is not read: a season is never a credit row.
+   *
+   * **Asked for only once the person's own read has answered** (loading investigation
+   * 2026-11-25, remedy 1). These are library-wide reads, several with a `media_items`
+   * embed, and they decorate rows that do not exist yet — so asking for them at mount only
+   * put them in the same five-slot queue as `person_cache` and the credited titles, the
+   * reads the page is actually waiting on. For a cached person that read is both of those,
+   * so the decorations follow the filmography; for one the cache has never held it is the
+   * empty `person_cache` answer, so they run while the adapter does, which is the slow step
+   * there and is not competing with them for anything the reader is looking at.
+   *
+   * The keys are unchanged: whatever the rest of the app has already read is returned at
+   * once, and only the network request waits. Every control that depends on one of these
+   * still waits for it to be read (the bookmark on the watchlist, `+` on `rankingsKnown`,
+   * the row label on `stateLabel`'s pending rule), so a row never offers a state it has
+   * not been told.
    */
-  const watchlist = useWatchlist(viewer.id);
-  const watched = useWatched(viewer.id);
-  const rankedMovies = useRankedCollection(viewer.id, 'movies');
-  const rankedShows = useRankedCollection(viewer.id, 'tv_shows');
+  const decorate = !person.isPending;
+  const watchlist = useWatchlist(viewer.id, { enabled: decorate });
+  const watched = useWatched(viewer.id, { enabled: decorate });
+  const rankedMovies = useRankedCollection(viewer.id, 'movies', { enabled: decorate });
+  const rankedShows = useRankedCollection(viewer.id, 'tv_shows', { enabled: decorate });
   /**
    * The reader's score per title: **Search's own read** (`useMyScores`, `app/(tabs)/log.tsx`),
    * so a filmography row draws exactly the score circle Search draws for the same title.
    */
-  const myScores = useMyScores(viewer.id);
+  const myScores = useMyScores(viewer.id, decorate);
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
@@ -316,7 +333,7 @@ export default function PersonScreen() {
    * unknown outcome and the failure alert are unchanged; the title's own cache is still
    * invalidated here, as it was.
    */
-  const watchlistToggle = useWatchlistToggle(viewer.id, 'title');
+  const watchlistToggle = useWatchlistToggle(viewer.id, 'title', { enabled: decorate });
   const toggleWatchlist = async (credit: PersonCredit) => {
     const result = await watchlistToggle.toggle(credit.mediaItemId);
     if (!result) return;
@@ -343,7 +360,7 @@ export default function PersonScreen() {
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
-  const logged = useLoggedCollection(viewer.id);
+  const logged = useLoggedCollection(viewer.id, { enabled: decorate });
   const unfinished = useMemo(
     () =>
       new Map(
@@ -413,6 +430,17 @@ export default function PersonScreen() {
   // "nothing here yet" in the meantime is what independent review 13 found two concurrent
   // readers stuck on.
   const loading = person.isPending || awaitingClaim || (fetching && !detail);
+  /**
+   * The name and portrait the reader tapped on a cast rail or in people search, drawn while
+   * the page loads (remedy 2; `features/person/preview.ts`). Read only in the loading state
+   * and only for this route's id: it decides nothing — not whether to ask the adapter, not
+   * the claim wait, not an error or an empty state — and the person's own record replaces
+   * it entirely the moment it arrives.
+   */
+  const preview = loading ? personPreview(id) : null;
+  // What the identity block draws: the record once it is here, the tapped preview while
+  // the page loads, and nothing (an empty portrait ring) when neither is known.
+  const identity = loading ? preview : detail;
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -434,19 +462,68 @@ export default function PersonScreen() {
         scrollEventThrottle={16}
       >
         {/* One of their own films behind them, chosen from credits already on the page
-            (`pickPersonBackdrop`), or the branded band when none has a backdrop — and
-            while the credits load, so the page never draws a broken image. */}
-        <TitleHero uri={hero} collapsedHeight={top.collapsedHero} topInset={top.topInset} />
+            (`pickPersonBackdrop`), or the branded field when none has a backdrop — and
+            while the credits load, so the page never draws a broken image.
+
+            **The frame is its final 16:9 from the first frame** (`reserveFrame`): the
+            backdrop is only known once the credits land, and a hero that grew then
+            pushed the portrait and name down under the reader (founder QA, Android
+            Preview, 2026-11-25). Now the artwork appears in space already held for it.
+
+            **A hard lower edge, and no cross-fade** (`hardEdge`, founder QA the same
+            day): the field and the backdrop end on the same clean line, so the
+            portrait visibly straddles one boundary in both states. */}
+        <TitleHero uri={hero} reserveFrame hardEdge topInset={top.topInset} />
+
+        {/* **One identity block for the loading and loaded states**, at the same place in
+            the tree, so the record arriving updates the portrait and name in place
+            rather than remounting them somewhere else. While loading it carries the
+            tapped preview (`features/person/preview.ts`) or an empty portrait ring;
+            once the record is here, only the record. Not drawn in the error and
+            "Nothing here yet" states, exactly as before. */}
+        {loading || (!person.isError && detail) ? (
+          <View
+            style={styles.identity}
+            onLayout={top.onIdentityLayout}
+            testID={loading ? 'person-identity-loading' : 'person-identity'}
+          >
+            {/* The portrait straddles the hero's hard lower edge, as a poster does on a
+                title page, ringed in Paper so its edge reads against the artwork or the
+                field. */}
+            <View style={styles.portrait}>
+              {identity ? (
+                <Avatar size="lg" uri={profileUri(identity.profilePath)} name={identity.name} />
+              ) : (
+                <View style={styles.portraitPlaceholder} />
+              )}
+            </View>
+            {identity ? (
+              <Text
+                variant="title1"
+                accessibilityRole="header"
+                testID={loading ? 'person-preview-name' : 'person-name'}
+              >
+                {identity.name}
+              </Text>
+            ) : null}
+            {/* **At most `Born 1959 · Japan`** (founder spec §6, 2026-11-13), where it was
+                `Acting · born 1974 · Los Angeles, California, USA`: the hierarchy is
+                name → biography → filmography, and this line is the one piece of
+                context kept between the first two. Absent entirely rather than a dash
+                when TMDB has neither fact (`birthLine`). Below the name, so its arrival
+                moves nothing above it. */}
+            {!loading && detail && birthLine(detail) ? (
+              <Text variant="footnote" tone="tertiary" testID="person-meta">
+                {birthLine(detail)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {loading ? (
           // The loading language, under the page's own top rather than a blank screen
           // (design-system.md §11b, "Every first load shows the loading language").
-          <View testID="person-loading">
-            <View style={[styles.identity, styles.identityPlaceholder]}>
-              <View style={styles.portrait}>
-                <View style={styles.portraitPlaceholder} />
-              </View>
-            </View>
+          <View testID="person-loading" style={styles.loadingRows}>
             <SkeletonRow count={6} />
           </View>
         ) : person.isError ? (
@@ -474,31 +551,6 @@ export default function PersonScreen() {
           </View>
         ) : (
           <>
-            <View
-              style={styles.identity}
-              onLayout={top.onIdentityLayout}
-              testID="person-identity"
-            >
-              {/* The portrait straddles the band, as a poster does on a title page with
-                  no artwork, ringed in Paper so its edge reads against the band. */}
-              <View style={styles.portrait}>
-                <Avatar size="lg" uri={profileUri(detail.profilePath)} name={detail.name} />
-              </View>
-              <Text variant="title1" accessibilityRole="header" testID="person-name">
-                {detail.name}
-              </Text>
-              {/* **At most `Born 1959 · Japan`** (founder spec §6, 2026-11-13), where it was
-                  `Acting · born 1974 · Los Angeles, California, USA`: the hierarchy is
-                  name → biography → filmography, and this line is the one piece of
-                  context kept between the first two. Absent entirely rather than a dash
-                  when TMDB has neither fact (`birthLine`). */}
-              {birthLine(detail) ? (
-                <Text variant="footnote" tone="tertiary" testID="person-meta">
-                  {birthLine(detail)}
-                </Text>
-              ) : null}
-            </View>
-
             {detail.biography ? (
               <Biography text={detail.biography} truncated={detail.biographyTruncated} />
             ) : null}
@@ -631,7 +683,13 @@ export default function PersonScreen() {
                         // Their character on the Cast side and their jobs on the Crew side,
                         // so a film they did both on never shows "Director" under Cast.
                         secondary={shownRole === 'cast' ? credit.role : credit.crewRole}
-                        tertiary={stateLabel(credit, { saved, ranked, watched: watched.data })}
+                        tertiary={stateLabel(credit, {
+                          saved,
+                          ranked,
+                          watched: watched.data,
+                          rankedPending: rankedMovies.isPending || rankedShows.isPending,
+                          watchedPending: watched.isPending,
+                        })}
                         divided={
                           index < visible.length - 1 &&
                           index + 1 !== boundary &&
@@ -798,8 +856,8 @@ const TITLE_FADE = 24;
  * **Chosen once per person, then kept.** The first answer for this person is pinned for
  * the life of the page, so a background refresh of a stale filmography — or a re-render
  * with a rebuilt credits array — never swaps the picture under the reader. Until there is
- * an answer (credits loading, or none with a backdrop) the hero is the branded band, and
- * `TitleHero`'s image fades in over the band's own Parchment when one arrives.
+ * an answer (credits loading, or none with a backdrop) the hero is the branded field at its
+ * full height, and `TitleHero`'s image fades in over that Parchment when one arrives.
  */
 function usePersonHero(personId: string | null, credits: PersonCredit[] | null) {
   const picked = useMemo(
@@ -818,17 +876,17 @@ function usePersonHero(personId: string | null, credits: PersonCredit[] | null) 
  * The person page's top bar arithmetic.
  *
  * Two values, because the page has two edges to cross. **The ground** arrives over the
- * last stretch of the hero, exactly as `useHeroReveal` does it for a title or a list —
- * over the collapsed band when there is no artwork (from the top, as before), and over the
- * last `REVEAL_WINDOW` of the 16:9 backdrop when there is — so the bar is Paper by the time
- * the hero has gone, and never lays Paper over a picture that is still on screen.
+ * last `REVEAL_WINDOW` of the hero, exactly as `useHeroReveal` does it for a title or a
+ * list. The hero is always the full 16:9 frame here (`reserveFrame`), artwork or not, so
+ * this range no longer changes when a backdrop arrives: the bar is Paper by the time the
+ * hero has gone, and never lays Paper over a picture that is still on screen.
  *
  * **The name** arrives only once the large name has passed under the bar — measured off
  * the identity block by `useDetailHeader`, the rule every detail page follows — because
  * here the name sits under a portrait that hangs below the hero, and fading it in with the
  * ground would put it in the bar while the large one is still on screen.
  */
-function usePersonTopBar(hasArtwork: boolean) {
+function usePersonTopBar() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const header = useDetailHeader();
@@ -836,12 +894,10 @@ function usePersonTopBar(hasArtwork: boolean) {
   const [identityBottom, setIdentityBottom] = useState<number | null>(null);
 
   const barHeight = insets.top + NAV_BAR_HEIGHT;
-  // `useHeroReveal`'s arithmetic. With no artwork it is [0, HERO_COLLAPSED_BAND] exactly,
-  // the range this page has always used.
-  const groundEnd = hasArtwork
-    ? Math.max(width / theme.layout.aspect.backdrop - barHeight, 2)
-    : HERO_COLLAPSED_BAND;
-  const groundStart = Math.max(groundEnd - REVEAL_WINDOW, 0);
+  // `useHeroReveal`'s arithmetic over the 16:9 frame. **The same range with and without
+  // artwork**, because the frame is the same height either way (`reserveFrame`): the bar
+  // is Paper by the time the hero has gone, whether a backdrop ever arrives or not.
+  const [groundStart, groundEnd] = personGroundRange(width, barHeight);
   const ground = scrollY.interpolate({
     inputRange: [groundStart, groundEnd],
     outputRange: [0, 1],
@@ -875,7 +931,6 @@ function usePersonTopBar(hasArtwork: boolean) {
     revealed: header.revealed,
     onScroll,
     onIdentityLayout,
-    collapsedHero: barHeight + HERO_COLLAPSED_BAND,
     topInset: insets.top,
   };
 }
@@ -1014,11 +1069,22 @@ const BIOGRAPHY_ESTIMATE = 160;
  */
 function stateLabel(
   credit: PersonCredit,
-  state: { saved: Set<string>; ranked: Set<string>; watched: Set<string> | undefined },
+  state: {
+    saved: Set<string>;
+    ranked: Set<string>;
+    watched: Set<string> | undefined;
+    rankedPending: boolean;
+    watchedPending: boolean;
+  },
 ) {
+  // The labels outrank one another, so a lower one waits while a higher one is still being
+  // read: a ranked film is never called "Watched" for the moment before the rankings land.
+  // Only *pending* waits; a read that failed falls through exactly as before.
   if (credit.kind === 'movie' || credit.kind === 'series') {
     if (state.ranked.has(credit.mediaItemId)) return 'Ranked';
+    if (state.rankedPending) return null;
     if (state.watched?.has(credit.mediaItemId)) return 'Watched';
+    if (state.watchedPending) return null;
   }
   if (state.saved.has(credit.mediaItemId)) return 'On your watchlist';
   return null;
@@ -1042,7 +1108,9 @@ const styles = StyleSheet.create({
     marginTop: -(PORTRAIT / 2 + RING),
     gap: theme.space[1],
   },
-  identityPlaceholder: { paddingBottom: theme.space[4] },
+  // The loading gap under the identity, carried by the skeleton rather than by the
+  // identity block, so the block's own style is identical loading and loaded.
+  loadingRows: { paddingTop: theme.space[4] },
   portrait: {
     alignSelf: 'flex-start',
     borderRadius: theme.radius.full,

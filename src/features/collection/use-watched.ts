@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
  * Own rows only, which `user_media_own` enforces anyway. The question is always
  * "have *I* seen this", asked about the person looking at the screen.
  */
-export function useWatched(userId: string) {
+export function useWatched(userId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['watched', userId],
     /**
@@ -39,7 +39,11 @@ export function useWatched(userId: string) {
      * the direction `use-watched`'s own header argues for. This removes the request
      * rather than the protection.
      */
-    enabled: Boolean(userId),
+    //
+    // `options.enabled` is optional and defaults on, so every other caller is unchanged.
+    // The person page holds the read until its filmography is back; the key is the same,
+    // so a set already in the cache is still returned while it waits.
+    enabled: (options.enabled ?? true) && Boolean(userId),
     // The set changes only when this user logs something, and every log invalidates
     // the collection key. A minute of staleness costs a spoiler being masked for a
     // viewer who has just this moment watched the thing.

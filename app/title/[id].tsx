@@ -88,6 +88,7 @@ import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { GenreLine } from '@/features/title/GenreLine';
 import { TrailerRail } from '@/features/title/TrailerRail';
 import { trailerPreviewsByDefault } from '@/features/title/trailer-previews';
+import { rememberPersonPreview } from '@/features/person/preview';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonCountLabel } from '@/features/title/season-count';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -956,6 +957,16 @@ export default function TitleScreen() {
       })),
     [credits.data],
   );
+  /**
+   * The name and portrait a cast member was just drawn with, for the person page to show
+   * while its own reads answer (`features/person/preview.ts`). Public TMDB credit data only.
+   */
+  const rememberMember = (member: { id: string; name: string }) =>
+    rememberPersonPreview(member.id, {
+      name: member.name,
+      profilePath:
+        credits.data?.cast.find((person) => person.id === member.id)?.profilePath ?? null,
+    });
 
   if (!hasId) {
     // No top edge: the root layout's native-stack header is still showing here (only the
@@ -2088,7 +2099,10 @@ export default function TitleScreen() {
         {activeTab === 'cast' ? (
           <CastStrip
             cast={cast}
-            onPressMember={(member) => router.push(`/person/${member.id}`)}
+            onPressMember={(member) => {
+              rememberMember(member);
+              router.push(`/person/${member.id}`);
+            }}
           />
         ) : null}
 
@@ -2584,7 +2598,10 @@ export default function TitleScreen() {
             <CastStrip
               compact
               cast={cast.slice(0, CAST_PREVIEW)}
-              onPressMember={(member) => router.push(`/person/${member.id}`)}
+              onPressMember={(member) => {
+                rememberMember(member);
+                router.push(`/person/${member.id}`);
+              }}
             />,
             {
               action:
@@ -2757,6 +2774,7 @@ export default function TitleScreen() {
                 }
                 onPress={() => {
                   setCastOpen(false);
+                  rememberMember(member);
                   router.push(`/person/${member.id}`);
                 }}
                 style={({ pressed }) => [styles.castRow, pressed && styles.pressed]}
