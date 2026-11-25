@@ -68,6 +68,7 @@ import {
   keepRankingHoldThroughSession,
   releaseRankingHold,
   supersedeRankingHold,
+  type HoldSession,
 } from './open-first';
 import { seedPivotCard } from './pivot-card';
 import { groupFirstRanking } from './backlog';
@@ -638,6 +639,13 @@ function Session({
   const detectStreak = useStreakAdvance(profile.id);
   const celebrate = useCelebrationHandoff();
 
+  /**
+   * This session, as far as the Log sheet's held refresh is concerned (`open-first.ts`): it
+   * lets go only of what it took or what nobody has, never of what a newer session is
+   * keeping.
+   */
+  const [holdSession] = useState<HoldSession>(() => ({}));
+
   const apply = useCallback(
     (next: SessionStep) => {
       /**
@@ -902,7 +910,7 @@ function Session({
          * wrote, and an empty-band placement has already superseded it in `apply`.
          */
         if (next.state === 'comparing') {
-          keepRankingHoldThroughSession(subject.id);
+          keepRankingHoldThroughSession(subject.id, holdSession);
           kept = true;
         }
         return;
@@ -915,18 +923,20 @@ function Session({
     })
       // The Log sheet's post-log refresh waits for this first answer (`open-first.ts`),
       // so the comparison is not queued behind it. Released however the open ends, unless
-      // the session it opened has taken it.
+      // the session it opened has taken it — or the sheet has already gone, in which case
+      // its cleanup let go of everything it could, and an answer landing now must not let
+      // go of a hold some newer session has taken (Codex review, PR 387).
       .finally(() => {
-        if (!kept) releaseRankingHold();
+        if (live && !kept) releaseRankingHold(holdSession);
       });
 
     return () => {
       live = false;
       // A sheet that goes away without placing — before its first answer, mid-session, on
       // a failure — runs what it was holding. After a placement nothing is left to run.
-      releaseRankingHold();
+      releaseRankingHold(holdSession);
     };
-  }, [subject, apply, withIntent]);
+  }, [subject, apply, withIntent, holdSession]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0, skip = false) => {
     /**
@@ -970,7 +980,7 @@ function Session({
     if (sessionId && !keepsSession(subject)) await rankCancel(sessionId);
     // Leaving without a placement reconciles the log now, not when a caller that keeps this
     // mounted (onboarding's `visible`) gets round to unmounting it. A no-op after `placed`.
-    releaseRankingHold();
+    releaseRankingHold(holdSession);
     onClose();
   };
 

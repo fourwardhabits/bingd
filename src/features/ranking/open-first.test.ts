@@ -67,6 +67,7 @@ describe('a hold kept through its session', () => {
     jest.useRealTimers();
   });
 
+  const session = {};
   const owned = (mediaItemId = 'film-a') => {
     const task = jest.fn();
     const remainder = jest.fn();
@@ -76,7 +77,7 @@ describe('a hold kept through its session', () => {
 
   it('outlives the ceiling once its session has taken it', () => {
     const { task } = owned();
-    keepRankingHoldThroughSession('film-a');
+    keepRankingHoldThroughSession('film-a', session);
     jest.advanceTimersByTime(HOLD_CEILING_MS * 10);
     expect(task).not.toHaveBeenCalled();
 
@@ -90,7 +91,7 @@ describe('a hold kept through its session', () => {
     expect(task).toHaveBeenCalledTimes(1);
 
     // A session that turns up late finds nothing to keep or supersede.
-    keepRankingHoldThroughSession('film-a');
+    keepRankingHoldThroughSession('film-a', session);
     supersedeRankingHold('film-a', 'movies');
     releaseRankingHold();
     expect(task).toHaveBeenCalledTimes(1);
@@ -99,7 +100,7 @@ describe('a hold kept through its session', () => {
 
   it('is replaced by its remainder when its title places, and never runs after', () => {
     const { task, remainder } = owned();
-    keepRankingHoldThroughSession('film-a');
+    keepRankingHoldThroughSession('film-a', session);
     supersedeRankingHold('film-a', 'tv_seasons');
     expect(remainder).toHaveBeenCalledTimes(1);
     expect(remainder).toHaveBeenCalledWith('tv_seasons');
@@ -125,7 +126,7 @@ describe('a hold kept through its session', () => {
     const unowned = jest.fn();
     holdUntilRankingOpens(unowned);
 
-    keepRankingHoldThroughSession('film-z');
+    keepRankingHoldThroughSession('film-z', session);
     expect(mine.task).toHaveBeenCalledTimes(1);
     expect(unowned).toHaveBeenCalledTimes(1);
 
@@ -136,13 +137,38 @@ describe('a hold kept through its session', () => {
   it('keeps only its own title when several are held', () => {
     const mine = owned('film-a');
     const other = owned('film-b');
-    keepRankingHoldThroughSession('film-a');
+    keepRankingHoldThroughSession('film-a', session);
     expect(other.task).toHaveBeenCalledTimes(1);
     expect(mine.task).not.toHaveBeenCalled();
 
     supersedeRankingHold('film-a', 'movies');
     expect(mine.remainder).toHaveBeenCalledTimes(1);
     expect(other.remainder).not.toHaveBeenCalled();
+  });
+
+  it('is let go only by the session that kept it (Codex review, PR 387)', () => {
+    const abandoned = {};
+    const newer = {};
+    const mine = owned('film-a');
+    keepRankingHoldThroughSession('film-a', newer);
+
+    // An opening abandoned earlier, whose answer lands now, lets go of nothing it did not take.
+    releaseRankingHold(abandoned);
+    expect(mine.task).not.toHaveBeenCalled();
+    // Nor does it take a hold another session already has.
+    keepRankingHoldThroughSession('film-a', abandoned);
+    releaseRankingHold(abandoned);
+    expect(mine.task).not.toHaveBeenCalled();
+
+    releaseRankingHold(newer);
+    expect(mine.task).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a session go of holds nobody has taken, as before', () => {
+    const unowned = jest.fn();
+    holdUntilRankingOpens(unowned);
+    releaseRankingHold(session);
+    expect(unowned).toHaveBeenCalledTimes(1);
   });
 
   it('keeps going when a remainder throws', () => {

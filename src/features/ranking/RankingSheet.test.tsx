@@ -3983,6 +3983,50 @@ describe('the post-log refresh, through the session', () => {
     expect(other.refresh).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * Codex review, PR 387: an opening the reader abandoned while `rank_start` was in flight
+   * must not, when its answer finally lands, let go of the hold a newer session has taken —
+   * for another title or for the same one reopened.
+   */
+  for (const [label, next] of [
+    ['another title', { ...subject, id: 'film-b', title: 'Film B' }],
+    ['the same title, reopened', subject],
+  ] as const) {
+    it(`is left alone by an abandoned opening that answers late (${label})`, async () => {
+      const late: ((value: unknown) => void)[] = [];
+      let starts = 0;
+      mockRpc.mockImplementation((name: string) => {
+        if (name !== 'rank_start') return Promise.resolve(comparison());
+        starts += 1;
+        // The first opening's answer is held back; the second answers at once.
+        return starts === 1
+          ? new Promise((resolve) => late.push(resolve))
+          : Promise.resolve(comparison());
+      });
+
+      const first = held();
+      const a = await open();
+      await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+      await act(async () => a.unmount());
+      // Abandoned before its first answer: its own hold ran, once, as before.
+      expect(first.refresh).toHaveBeenCalledTimes(1);
+
+      const second = held(next.id);
+      const b = await open({ subject: next });
+      await b.ready('Film P');
+      expect(second.refresh).not.toHaveBeenCalled();
+
+      // The abandoned opening's answer lands now.
+      await act(async () => late[0]?.(comparison()));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(second.refresh).not.toHaveBeenCalled();
+      expect(first.refresh).toHaveBeenCalledTimes(1);
+
+      await act(async () => b.unmount());
+      expect(second.refresh).toHaveBeenCalledTimes(1);
+    });
+  }
+
   it('lets an unowned hold go when this session opens, as before', async () => {
     answering(comparison());
     const refresh = jest.fn();

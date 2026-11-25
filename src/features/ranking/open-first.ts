@@ -73,7 +73,15 @@ export type HoldOwner = {
   supersededBy: (category: string | undefined) => void;
 };
 
-type Held = { task: () => void; owner: HoldOwner | null; kept: boolean };
+/**
+ * Which ranking session has taken a hold: any object, compared by identity. A session keeps
+ * only what it took, and lets go only of what it took or what nobody has, so a session that
+ * has gone — an opening abandoned while `rank_start` was still in flight, whose answer lands
+ * later — can never let go of a hold a newer session is keeping (Codex review, PR 387).
+ */
+export type HoldSession = object;
+
+type Held = { task: () => void; owner: HoldOwner | null; keptBy: HoldSession | null };
 
 let held: Held[] = [];
 let ceiling: ReturnType<typeof setTimeout> | null = null;
@@ -88,7 +96,7 @@ const run = (work: () => void) => {
 
 /** Arms the ceiling while something is waiting for a session, and disarms it once nothing is. */
 const syncCeiling = () => {
-  const waiting = held.some((entry) => !entry.kept);
+  const waiting = held.some((entry) => entry.keptBy === null);
   if (waiting && ceiling === null) ceiling = setTimeout(releaseUnkept, HOLD_CEILING_MS);
   if (!waiting && ceiling !== null) {
     clearTimeout(ceiling);
@@ -100,8 +108,8 @@ const syncCeiling = () => {
 function releaseUnkept(): void {
   if (ceiling !== null) clearTimeout(ceiling);
   ceiling = null;
-  const due = held.filter((entry) => !entry.kept);
-  held = held.filter((entry) => entry.kept);
+  const due = held.filter((entry) => entry.keptBy === null);
+  held = held.filter((entry) => entry.keptBy !== null);
   for (const entry of due) run(entry.task);
   syncCeiling();
 }
@@ -113,19 +121,21 @@ function releaseUnkept(): void {
  * placement of that title supersedes it (see the header).
  */
 export function holdUntilRankingOpens(task: () => void, owner?: HoldOwner): void {
-  held.push({ task, owner: owner ?? null, kept: false });
+  held.push({ task, owner: owner ?? null, keptBy: null });
   syncCeiling();
 }
 
 /**
- * `rank_start` opened a session for `mediaItemId`, and its comparison is on screen.
+ * `rank_start` opened `session` for `mediaItemId`, and its comparison is on screen.
  *
- * The holds for that title stay held — without the ceiling — until the session ends.
- * Everything else held runs now, which is what this moment always meant for it.
+ * The holds for that title that nobody has taken stay held — without the ceiling — until
+ * that session ends. Everything else nobody has taken runs now, which is what this moment
+ * always meant for it.
  */
-export function keepRankingHoldThroughSession(mediaItemId: string): void {
+export function keepRankingHoldThroughSession(mediaItemId: string, session: HoldSession): void {
   for (const entry of held) {
-    if (entry.owner?.mediaItemId === mediaItemId) entry.kept = true;
+    if (entry.keptBy === null && entry.owner?.mediaItemId === mediaItemId)
+      entry.keptBy = session;
   }
   releaseUnkept();
 }
@@ -143,10 +153,17 @@ export function supersedeRankingHold(mediaItemId: string, category: string | und
   for (const entry of mine) run(() => entry.owner?.supersededBy(category));
 }
 
-/** Runs everything held, once. Safe to call when nothing is held. */
-export function releaseRankingHold(): void {
-  const tasks = held;
-  held = [];
+/**
+ * Runs what is held, once. Safe to call when nothing is held.
+ *
+ * With `session`: what that session kept, and what nobody has taken — never what another
+ * session is keeping. Without: everything.
+ */
+export function releaseRankingHold(session?: HoldSession): void {
+  const due = held.filter(
+    (entry) => session === undefined || entry.keptBy === null || entry.keptBy === session,
+  );
+  held = held.filter((entry) => !due.includes(entry));
   syncCeiling();
-  for (const entry of tasks) run(entry.task);
+  for (const entry of due) run(entry.task);
 }

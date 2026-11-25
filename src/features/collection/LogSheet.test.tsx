@@ -4299,7 +4299,7 @@ describe('the refresh after a first log', () => {
     await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(onRank).toHaveBeenCalled());
 
-    await act(async () => keepRankingHoldThroughSession('film-a'));
+    await act(async () => keepRankingHoldThroughSession('film-a', {}));
     expect(invalidated(spy, queryKeys.collection('user-1'))).toBe(false);
 
     await act(async () => releaseRankingHold());
@@ -4314,7 +4314,7 @@ describe('the refresh after a first log', () => {
 
     await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(onRank).toHaveBeenCalled());
-    await act(async () => keepRankingHoldThroughSession('film-a'));
+    await act(async () => keepRankingHoldThroughSession('film-a', {}));
 
     // The ranking sheet has just run its own refresh for the placement in Movies.
     spy.mockClear();
