@@ -148,6 +148,27 @@ and that no approval path exists. Until the founder changes those, an agent may 
 `ota-production.yml` only on the founder's direct instruction for that specific release, and must
 ask before merging. That instruction names one commit and covers one publish.
 
+### Release cadence (founder policy, 2026-11-25)
+
+**No more than one routine Production OTA per day.**
+
+Why: every Production OTA makes each active user's app reload on their next return to it, and the reload empties every in-memory cache. During 11-20..11-24, 16 OTAs (about 3.8 a day) roughly doubled the founder's cold starts (5.1 → 9.25 launches a day). That made the slow first open happen twice as often (performance audit P3, `docs/perf/audit-2026-11-24/`).
+
+**Routine changes are batched.** Compatible, approved changes ship together in that day's single OTA. Each change keeps its own PR, merge commit and release-record line, so a later regression can still be traced to one change.
+
+**Exceptions** may ship as an additional OTA the same day:
+- critical crashes;
+- authentication or sign-in failures;
+- data-integrity problems;
+- significant security or privacy issues;
+- any other urgent issue the founder explicitly approves for an extra release.
+
+Each exception follows the same release checks as a routine OTA, and the release record says which exception it was. A rollback (`safe-update-runbook.md` §4) counts as an exception.
+
+**Preview:** prefer one stable candidate per founder QA session. Do not publish again while the founder is testing unless the candidate is broken; a republish reloads the Preview app and empties its caches too.
+
+This is a process rule. Nothing enforces it automatically.
+
 ### Readiness, before any production publish
 
 Report one line, then wait for the approval the policy requires:
