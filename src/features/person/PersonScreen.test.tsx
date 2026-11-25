@@ -8,12 +8,29 @@ import { TitleRowActions } from '@/features/collection/TitleRowActions';
 import { forgetPersonPreviews, rememberPersonPreview } from '@/features/person/preview';
 import { expectRowFitsNarrow, naturalWidth } from '@/test-utils/narrow-row';
 import { renderWithProviders } from '@/test-utils/render';
+import { heroFrameHeight } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
 // app-directory.test.ts.
 import PersonScreen from '../../../app/person/[id]';
+
+/**
+ * The window width, for the hero-geometry tests only: null leaves React Native's own value,
+ * so every other test here renders exactly as it did.
+ */
+let mockWindowWidth: number | null = null;
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => {
+  const actual = jest.requireActual('react-native/Libraries/Utilities/useWindowDimensions');
+  return {
+    __esModule: true,
+    default: () =>
+      mockWindowWidth === null
+        ? actual.default()
+        : { width: mockWindowWidth, height: 844, scale: 2, fontScale: 1 },
+  };
+});
 
 const mockPush = jest.fn();
 const mockCachePerson = jest.fn(() => Promise.resolve({ id: 6193, written: 0 }));
@@ -1290,8 +1307,11 @@ describe('critical data first', () => {
       const release = holdReads('person_cache');
       const view = await renderWithProviders(<PersonScreen />);
 
-      const loading = view.getByTestId('person-loading');
-      expect(within(loading).getByTestId('person-preview-name')).toHaveTextContent(TAPPED.name);
+      expect(view.getByTestId('person-loading')).toBeTruthy();
+      const identity = view.getByTestId('person-identity-loading');
+      expect(within(identity).getByTestId('person-preview-name')).toHaveTextContent(
+        TAPPED.name,
+      );
       expect(portraits(view)).toEqual(['https://image.tmdb.org/t/p/w185/tapped.jpg']);
       // The filmography is still the skeleton: the preview is the identity only.
       expect(view.queryByText('Filmography')).toBeNull();
@@ -1458,5 +1478,121 @@ describe('at 320pt and the largest text size (C9)', () => {
         theme.layout.minTapTarget,
       );
     }
+  });
+});
+
+/**
+ * **The hero holds its final size from the first frame** (founder QA, Android Preview,
+ * 2026-11-25: the portrait and name sat high while loading and dropped when the backdrop
+ * arrived).
+ *
+ * What a unit test can prove is the geometry React Native is *told*: the frame's height
+ * before and after the artwork, that the identity is the same element in both states, and
+ * that the top bar's reveal range does not move. Whether a device draws that without a
+ * visible shift — image decode, the fade — is the Preview QA step, not this file.
+ */
+describe('a stable person hero', () => {
+  const WIDTHS = [320, 360, 390, 430] as const;
+  const WIDE = '/inception-wide.jpg';
+
+  afterEach(() => {
+    mockWindowWidth = null;
+  });
+
+  /** Lets the reads queued by the last render answer. */
+  const settle = () => act(async () => {});
+
+  const frameHeight = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    StyleSheet.flatten(view.getByTestId('hero-frame').props.style).height;
+
+  /** Every image source drawn inside the hero frame. */
+  const heroImages = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const out: string[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      const element = node as { props?: { source?: unknown }; children?: unknown[] };
+      const source = element.props?.source as { uri?: string } | { uri?: string }[] | undefined;
+      for (const entry of Array.isArray(source) ? source : source ? [source] : []) {
+        if (entry.uri) out.push(entry.uri);
+      }
+      (element.children ?? []).forEach(walk);
+    };
+    walk(view.getByTestId('hero-frame'));
+    return out;
+  };
+
+  it.each(WIDTHS)(
+    'is width × 9/16 before and after the backdrop lands, and the identity stays put (%ipt)',
+    async (width) => {
+      mockWindowWidth = width;
+      tableRows.media_items = items.map((item) =>
+        item.id === 'film-1' ? { ...item, backdrop_path: WIDE } : item,
+      );
+      rememberPersonPreview('6193', { name: 'Leo, as tapped', profilePath: '/leo.jpg' });
+      const release = holdReads('person_cache');
+      const view = await renderWithProviders(<PersonScreen />);
+
+      // Loading: the frame is already its final height, with no artwork in it yet.
+      expect(frameHeight(view)).toBe(heroFrameHeight(width));
+      expect(frameHeight(view)).toBeCloseTo((width * 9) / 16, 6);
+      expect(heroImages(view)).toEqual([]);
+      const loadingIdentity = view.getByTestId('person-identity-loading');
+
+      release();
+      await waitFor(() => expect(view.getByTestId('person-name')).toBeTruthy());
+      await waitFor(() => expect(heroImages(view)).toHaveLength(1));
+
+      // Loaded: the artwork is inside the same frame, at the same height.
+      expect(heroImages(view)[0]).toContain(WIDE);
+      expect(frameHeight(view)).toBe(heroFrameHeight(width));
+      // The same element, updated in place rather than remounted somewhere else: the test
+      // renderer hands back one instance per mounted component.
+      expect(view.getByTestId('person-identity')).toBe(loadingIdentity);
+    },
+  );
+
+  it('keeps the full-height branded field when no credit has a backdrop', async () => {
+    mockWindowWidth = 390;
+    const release = holdReads('person_cache');
+    const view = await renderWithProviders(<PersonScreen />);
+    const before = frameHeight(view);
+
+    release();
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await settle();
+
+    // The fixture's titles carry no backdrop: the page has loaded and has no artwork, and
+    // the hero has not collapsed to the band it used to.
+    expect(heroImages(view)).toEqual([]);
+    expect(frameHeight(view)).toBe(before);
+    expect(before).toBe(heroFrameHeight(390));
+    expect(StyleSheet.flatten(view.getByTestId('hero-frame').props.style).backgroundColor).toBe(
+      theme.surface.sunken,
+    );
+  });
+
+  it('holds the frame for a person loaded from nothing (no preview, cache miss)', async () => {
+    mockWindowWidth = 360;
+    tableRows.person_cache = [];
+    mockCachePerson.mockImplementationOnce(() => new Promise(() => {}));
+    const view = await renderWithProviders(<PersonScreen />);
+    await settle();
+
+    // A deep link onto a person never opened: no name, an empty portrait ring, and the
+    // frame at its final height all the same.
+    expect(view.getByTestId('person-identity-loading')).toBeTruthy();
+    expect(view.queryByTestId('person-preview-name')).toBeNull();
+    expect(frameHeight(view)).toBe(heroFrameHeight(360));
+  });
+
+  it('draws no identity over the could-not-load state, and keeps the frame', async () => {
+    mockWindowWidth = 390;
+    mockFailAfter = { table: 'person_cache', successes: 0 };
+    const view = await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(view.getByText('Could not load this person')).toBeTruthy());
+    expect(view.queryByTestId('person-identity')).toBeNull();
+    expect(view.queryByTestId('person-identity-loading')).toBeNull();
+    expect(frameHeight(view)).toBe(heroFrameHeight(390));
   });
 });

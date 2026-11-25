@@ -41,7 +41,32 @@ export type TitleHeroProps = {
    * that has its own opaque bar — and then no scrim is drawn at all.
    */
   topInset?: number;
+  /**
+   * Hold the full 16:9 frame even while there is no artwork (`false` by default).
+   *
+   * **For a page whose artwork arrives after its first frame** (the person page, whose
+   * backdrop is chosen from credits that load with the person). Without it the hero is
+   * the short band until `uri` arrives, then the 16:9 frame, and everything under it moves
+   * down — the jump the founder saw on Android Preview, 2026-11-25. With it the frame is
+   * its final height from the first render: the branded Parchment field with the same
+   * bottom fade, the image fading into it when there is one, and the field kept for good
+   * when there is none, so the page never collapses after it has loaded either.
+   *
+   * The top scrim is drawn only over artwork, as without this prop: over the bare field
+   * the chrome already has its contrast.
+   */
+  reserveFrame?: boolean;
 };
+
+/**
+ * The hero frame's height at a given window width: the backdrop's own 16:9.
+ *
+ * Exported so a page that lays things out against the hero (the person page's top bar)
+ * uses the same number the frame does, rather than a second copy of the ratio.
+ */
+export function heroFrameHeight(width: number): number {
+  return width / BACKDROP_RATIO;
+}
 
 /**
  * The app's one full-bleed surface (design-system.md §1, §7).
@@ -61,6 +86,7 @@ export function TitleHero({
   collapsedHeight = 72,
   blurred = false,
   topInset = 0,
+  reserveFrame = false,
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
@@ -78,40 +104,46 @@ export function TitleHero({
    * chrome overlays the artwork now, with `TopScrim` for contrast, so the frame is the
    * image and the image is the frame.
    */
-  const height = width / BACKDROP_RATIO;
+  const height = heroFrameHeight(width);
 
   // No artwork at all is still common — the seed catalogue ships without any. A short
   // warm band is not a failure state and does not pretend to be an image: no grey box,
   // and never a poster stretched to fill.
-  if (!uri) return <View style={[styles.collapsed, { height: collapsedHeight }]} />;
+  if (!uri && !reserveFrame) {
+    return <View style={[styles.collapsed, { height: collapsedHeight }]} />;
+  }
 
   return (
-    <View style={[styles.frame, { height }]}>
-      <Image
-        source={{ uri }}
-        placeholder={blurhash ? { blurhash } : undefined}
-        contentFit="cover"
-        /**
-         * **Top centre, not centre.**
-         *
-         * The image box is held to 16:9, so a standard backdrop is not cropped at
-         * all — but not every artwork is standard. Anything taller than 16:9 (the
-         * blurred poster fallback most of all, and the odd non-conforming backdrop)
-         * is width-scaled by `cover` and cropped vertically, and anchoring to the
-         * top keeps the part somebody composed while the loss goes under the fade.
-         */
-        contentPosition="top center"
-        transition={theme.duration.navigation}
-        // `blurRadius` is expo-image's own, so this costs no new native module and
-        // no fingerprint change. Held down at 0.9 opacity as well: a blurred poster
-        // at full strength is still the most saturated thing on a Paper page, and the
-        // point is a field for the real poster to sit on, not a second subject.
-        blurRadius={blurred ? POSTER_BLUR : 0}
-        style={[styles.fill, blurred && styles.dimmed]}
-        accessibilityIgnoresInvertColors
-      />
+    // The same frame element with and without artwork, so the image mounts into a view
+    // that is already its final size rather than replacing it (`reserveFrame`).
+    <View style={[styles.frame, { height }]} testID={reserveFrame ? 'hero-frame' : undefined}>
+      {uri ? (
+        <Image
+          source={{ uri }}
+          placeholder={blurhash ? { blurhash } : undefined}
+          contentFit="cover"
+          /**
+           * **Top centre, not centre.**
+           *
+           * The image box is held to 16:9, so a standard backdrop is not cropped at
+           * all — but not every artwork is standard. Anything taller than 16:9 (the
+           * blurred poster fallback most of all, and the odd non-conforming backdrop)
+           * is width-scaled by `cover` and cropped vertically, and anchoring to the
+           * top keeps the part somebody composed while the loss goes under the fade.
+           */
+          contentPosition="top center"
+          transition={theme.duration.navigation}
+          // `blurRadius` is expo-image's own, so this costs no new native module and
+          // no fingerprint change. Held down at 0.9 opacity as well: a blurred poster
+          // at full strength is still the most saturated thing on a Paper page, and the
+          // point is a field for the real poster to sit on, not a second subject.
+          blurRadius={blurred ? POSTER_BLUR : 0}
+          style={[styles.fill, blurred && styles.dimmed]}
+          accessibilityIgnoresInvertColors
+        />
+      ) : null}
       <Scrim height={height} />
-      {topInset > 0 ? <TopScrim height={topInset + NAV_BAR_HEIGHT} /> : null}
+      {uri && topInset > 0 ? <TopScrim height={topInset + NAV_BAR_HEIGHT} /> : null}
     </View>
   );
 }

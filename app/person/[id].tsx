@@ -45,11 +45,11 @@ import { FilmographyFilterSheet } from '@/features/person/FilmographyFilterSheet
 import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
 import { birthLine } from '@/features/person/identity';
+import { personGroundRange } from '@/features/person/hero-geometry';
 import { personPreview } from '@/features/person/preview';
 import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
-import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { backdropUri, posterUri, profileUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
@@ -178,7 +178,7 @@ export default function PersonScreen() {
   const [shown, setShown] = useState(PAGE);
 
   const hero = usePersonHero(id ?? null, detail?.credits ?? null);
-  const top = usePersonTopBar(hero !== null);
+  const top = usePersonTopBar();
   // Read once, so the bar closes over a value rather than over a query result that could
   // be refetched to null between renders.
   const name = detail?.name ?? null;
@@ -438,6 +438,9 @@ export default function PersonScreen() {
    * it entirely the moment it arrives.
    */
   const preview = loading ? personPreview(id) : null;
+  // What the identity block draws: the record once it is here, the tapped preview while
+  // the page loads, and nothing (an empty portrait ring) when neither is known.
+  const identity = loading ? preview : detail;
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -459,28 +462,63 @@ export default function PersonScreen() {
         scrollEventThrottle={16}
       >
         {/* One of their own films behind them, chosen from credits already on the page
-            (`pickPersonBackdrop`), or the branded band when none has a backdrop — and
-            while the credits load, so the page never draws a broken image. */}
-        <TitleHero uri={hero} collapsedHeight={top.collapsedHero} topInset={top.topInset} />
+            (`pickPersonBackdrop`), or the branded field when none has a backdrop — and
+            while the credits load, so the page never draws a broken image.
+
+            **The frame is its final 16:9 from the first frame** (`reserveFrame`): the
+            backdrop is only known once the credits land, and a hero that grew then
+            pushed the portrait and name down under the reader (founder QA, Android
+            Preview, 2026-11-25). Now the artwork fades into space already held for it. */}
+        <TitleHero uri={hero} reserveFrame topInset={top.topInset} />
+
+        {/* **One identity block for the loading and loaded states**, at the same place in
+            the tree, so the record arriving updates the portrait and name in place
+            rather than remounting them somewhere else. While loading it carries the
+            tapped preview (`features/person/preview.ts`) or an empty portrait ring;
+            once the record is here, only the record. Not drawn in the error and
+            "Nothing here yet" states, exactly as before. */}
+        {loading || (!person.isError && detail) ? (
+          <View
+            style={[styles.identity, loading && styles.identityPlaceholder]}
+            onLayout={top.onIdentityLayout}
+            testID={loading ? 'person-identity-loading' : 'person-identity'}
+          >
+            {/* The portrait straddles the hero, as a poster does on a title page,
+                ringed in Paper so its edge reads against the artwork or the field. */}
+            <View style={styles.portrait}>
+              {identity ? (
+                <Avatar size="lg" uri={profileUri(identity.profilePath)} name={identity.name} />
+              ) : (
+                <View style={styles.portraitPlaceholder} />
+              )}
+            </View>
+            {identity ? (
+              <Text
+                variant="title1"
+                accessibilityRole="header"
+                testID={loading ? 'person-preview-name' : 'person-name'}
+              >
+                {identity.name}
+              </Text>
+            ) : null}
+            {/* **At most `Born 1959 · Japan`** (founder spec §6, 2026-11-13), where it was
+                `Acting · born 1974 · Los Angeles, California, USA`: the hierarchy is
+                name → biography → filmography, and this line is the one piece of
+                context kept between the first two. Absent entirely rather than a dash
+                when TMDB has neither fact (`birthLine`). Below the name, so its arrival
+                moves nothing above it. */}
+            {!loading && detail && birthLine(detail) ? (
+              <Text variant="footnote" tone="tertiary" testID="person-meta">
+                {birthLine(detail)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {loading ? (
           // The loading language, under the page's own top rather than a blank screen
           // (design-system.md §11b, "Every first load shows the loading language").
           <View testID="person-loading">
-            <View style={[styles.identity, styles.identityPlaceholder]}>
-              <View style={styles.portrait}>
-                {preview ? (
-                  <Avatar size="lg" uri={profileUri(preview.profilePath)} name={preview.name} />
-                ) : (
-                  <View style={styles.portraitPlaceholder} />
-                )}
-              </View>
-              {preview ? (
-                <Text variant="title1" accessibilityRole="header" testID="person-preview-name">
-                  {preview.name}
-                </Text>
-              ) : null}
-            </View>
             <SkeletonRow count={6} />
           </View>
         ) : person.isError ? (
@@ -508,31 +546,6 @@ export default function PersonScreen() {
           </View>
         ) : (
           <>
-            <View
-              style={styles.identity}
-              onLayout={top.onIdentityLayout}
-              testID="person-identity"
-            >
-              {/* The portrait straddles the band, as a poster does on a title page with
-                  no artwork, ringed in Paper so its edge reads against the band. */}
-              <View style={styles.portrait}>
-                <Avatar size="lg" uri={profileUri(detail.profilePath)} name={detail.name} />
-              </View>
-              <Text variant="title1" accessibilityRole="header" testID="person-name">
-                {detail.name}
-              </Text>
-              {/* **At most `Born 1959 · Japan`** (founder spec §6, 2026-11-13), where it was
-                  `Acting · born 1974 · Los Angeles, California, USA`: the hierarchy is
-                  name → biography → filmography, and this line is the one piece of
-                  context kept between the first two. Absent entirely rather than a dash
-                  when TMDB has neither fact (`birthLine`). */}
-              {birthLine(detail) ? (
-                <Text variant="footnote" tone="tertiary" testID="person-meta">
-                  {birthLine(detail)}
-                </Text>
-              ) : null}
-            </View>
-
             {detail.biography ? (
               <Biography text={detail.biography} truncated={detail.biographyTruncated} />
             ) : null}
@@ -838,8 +851,8 @@ const TITLE_FADE = 24;
  * **Chosen once per person, then kept.** The first answer for this person is pinned for
  * the life of the page, so a background refresh of a stale filmography — or a re-render
  * with a rebuilt credits array — never swaps the picture under the reader. Until there is
- * an answer (credits loading, or none with a backdrop) the hero is the branded band, and
- * `TitleHero`'s image fades in over the band's own Parchment when one arrives.
+ * an answer (credits loading, or none with a backdrop) the hero is the branded field at its
+ * full height, and `TitleHero`'s image fades in over that Parchment when one arrives.
  */
 function usePersonHero(personId: string | null, credits: PersonCredit[] | null) {
   const picked = useMemo(
@@ -858,17 +871,17 @@ function usePersonHero(personId: string | null, credits: PersonCredit[] | null) 
  * The person page's top bar arithmetic.
  *
  * Two values, because the page has two edges to cross. **The ground** arrives over the
- * last stretch of the hero, exactly as `useHeroReveal` does it for a title or a list —
- * over the collapsed band when there is no artwork (from the top, as before), and over the
- * last `REVEAL_WINDOW` of the 16:9 backdrop when there is — so the bar is Paper by the time
- * the hero has gone, and never lays Paper over a picture that is still on screen.
+ * last `REVEAL_WINDOW` of the hero, exactly as `useHeroReveal` does it for a title or a
+ * list. The hero is always the full 16:9 frame here (`reserveFrame`), artwork or not, so
+ * this range no longer changes when a backdrop arrives: the bar is Paper by the time the
+ * hero has gone, and never lays Paper over a picture that is still on screen.
  *
  * **The name** arrives only once the large name has passed under the bar — measured off
  * the identity block by `useDetailHeader`, the rule every detail page follows — because
  * here the name sits under a portrait that hangs below the hero, and fading it in with the
  * ground would put it in the bar while the large one is still on screen.
  */
-function usePersonTopBar(hasArtwork: boolean) {
+function usePersonTopBar() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const header = useDetailHeader();
@@ -876,12 +889,10 @@ function usePersonTopBar(hasArtwork: boolean) {
   const [identityBottom, setIdentityBottom] = useState<number | null>(null);
 
   const barHeight = insets.top + NAV_BAR_HEIGHT;
-  // `useHeroReveal`'s arithmetic. With no artwork it is [0, HERO_COLLAPSED_BAND] exactly,
-  // the range this page has always used.
-  const groundEnd = hasArtwork
-    ? Math.max(width / theme.layout.aspect.backdrop - barHeight, 2)
-    : HERO_COLLAPSED_BAND;
-  const groundStart = Math.max(groundEnd - REVEAL_WINDOW, 0);
+  // `useHeroReveal`'s arithmetic over the 16:9 frame. **The same range with and without
+  // artwork**, because the frame is the same height either way (`reserveFrame`): the bar
+  // is Paper by the time the hero has gone, whether a backdrop ever arrives or not.
+  const [groundStart, groundEnd] = personGroundRange(width, barHeight);
   const ground = scrollY.interpolate({
     inputRange: [groundStart, groundEnd],
     outputRange: [0, 1],
@@ -915,7 +926,6 @@ function usePersonTopBar(hasArtwork: boolean) {
     revealed: header.revealed,
     onScroll,
     onIdentityLayout,
-    collapsedHero: barHeight + HERO_COLLAPSED_BAND,
     topInset: insets.top,
   };
 }

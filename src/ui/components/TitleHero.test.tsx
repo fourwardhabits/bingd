@@ -1,6 +1,20 @@
 import { render } from '@testing-library/react-native';
 
-import { TitleHero } from './TitleHero';
+import { TitleHero, heroFrameHeight } from './TitleHero';
+import { theme } from '../tokens';
+
+/** The window width for the reserved-frame tests; null leaves React Native's own. */
+let mockWindowWidth: number | null = null;
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => {
+  const actual = jest.requireActual('react-native/Libraries/Utilities/useWindowDimensions');
+  return {
+    __esModule: true,
+    default: () =>
+      mockWindowWidth === null
+        ? actual.default()
+        : { width: mockWindowWidth, height: 844, scale: 2, fontScale: 1 },
+  };
+});
 
 /**
  * The hero's fade, which the founder rejected twice.
@@ -184,5 +198,76 @@ describe('the hero fade', () => {
 
     expect(nodes.some((node) => node.props.source)).toBe(false);
     expect(nodes.some((node) => node.style.height === 96)).toBe(true);
+  });
+});
+
+/**
+ * `reserveFrame`: the person page's hero, which holds its final 16:9 before the backdrop
+ * is known (founder QA, Android Preview, 2026-11-25). Every other caller leaves it off, and
+ * the first test pins that their no-artwork band is exactly what it was.
+ */
+describe('the reserved frame', () => {
+  const WIDTHS = [320, 360, 390, 430] as const;
+
+  afterEach(() => {
+    mockWindowWidth = null;
+  });
+
+  const gradients = (nodes: Awaited<ReturnType<typeof treeOf>>) =>
+    nodes.map((node) => node.style.experimental_backgroundImage).filter(Boolean) as string[];
+
+  it('is off by default: no artwork is still the short band, as on title and list pages', async () => {
+    mockWindowWidth = 390;
+    const nodes = await treeOf(<TitleHero uri={null} collapsedHeight={96} topInset={47} />);
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.style.height).toBe(96);
+    expect(nodes[0]!.props.testID).toBeUndefined();
+    expect(gradients(nodes)).toEqual([]);
+  });
+
+  it.each(WIDTHS)('is width × 9/16 with and without artwork (%ipt)', async (width) => {
+    mockWindowWidth = width;
+    const empty = await treeOf(<TitleHero uri={null} reserveFrame topInset={47} />);
+    const filled = await treeOf(<TitleHero uri={BACKDROP} reserveFrame topInset={47} />);
+    const plain = await treeOf(<TitleHero uri={BACKDROP} topInset={47} />);
+
+    expect(empty[0]!.style.height).toBeCloseTo((width * 9) / 16, 6);
+    expect(empty[0]!.style.height).toBe(heroFrameHeight(width));
+    expect(filled[0]!.style.height).toBe(empty[0]!.style.height);
+    // The same frame a caller without the prop gets once it has artwork.
+    expect(plain[0]!.style.height).toBe(filled[0]!.style.height);
+  });
+
+  it('is the branded field with the bottom fade and no picture, until there is one', async () => {
+    mockWindowWidth = 390;
+    const nodes = await treeOf(<TitleHero uri={null} reserveFrame topInset={47} />);
+
+    expect(nodes[0]!.props.testID).toBe('hero-frame');
+    expect(nodes[0]!.style.backgroundColor).toBe(theme.surface.sunken);
+    expect(nodes.some((node) => node.props.source)).toBe(false);
+    // The bottom fade into Paper only: the top scrim is for chrome over artwork.
+    expect(gradients(nodes)).toHaveLength(1);
+    expect(gradients(nodes)[0]).toContain('to bottom');
+  });
+
+  it('draws the artwork, the bottom fade and the top scrim once a uri arrives', async () => {
+    mockWindowWidth = 390;
+    const plain = gradients(await treeOf(<TitleHero uri={BACKDROP} topInset={47} />));
+    const nodes = await treeOf(<TitleHero uri={BACKDROP} reserveFrame topInset={47} />);
+
+    expect(nodes.some((node) => node.props.source)).toBe(true);
+    // Exactly what a caller without the prop draws over artwork.
+    expect(gradients(nodes)).toEqual(plain);
+    expect(gradients(nodes)).toHaveLength(2);
+  });
+
+  it('keeps the frame element when the uri arrives, so the image mounts into it', async () => {
+    mockWindowWidth = 390;
+    const view = await render(<TitleHero uri={null} reserveFrame topInset={47} />);
+    const before = view.getByTestId('hero-frame');
+    await view.rerender(<TitleHero uri={BACKDROP} reserveFrame topInset={47} />);
+
+    expect(view.getByTestId('hero-frame')).toBe(before);
   });
 });

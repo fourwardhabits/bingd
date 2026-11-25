@@ -145,7 +145,7 @@ export { SkeletonGrid, type SkeletonGridProps } from './SkeletonGrid';
 export { SpoilerNote, type SpoilerNoteProps } from './SpoilerNote';
 export { StatRow, type StatItem } from './StatRow';
 export { Text } from './Text';
-export { TitleHero, type TitleHeroProps } from './TitleHero';
+export { TitleHero, heroFrameHeight, type TitleHeroProps } from './TitleHero';
 export { ToggleChip, type ToggleChipProps } from './ToggleChip';
 export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
