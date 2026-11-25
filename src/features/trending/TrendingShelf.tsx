@@ -64,7 +64,9 @@ export function TrendingShelf({ userId, onPressTitle, showTitle = true }: Trendi
         id: item.mediaItemId,
         title: item.title,
         year: item.year,
-        posterUri: posterUri(item.posterPath, 'card'),
+        // `w342`, not `w500` (perf P8, 2026-11-25): a shelf tile is 74–98 pt on supported
+        // phones, at most 279 px at 3x, which `w342` covers with room to spare.
+        posterUri: posterUri(item.posterPath, 'row'),
         score: scores.get(item.mediaItemId) ?? null,
       }))}
       onPressTile={(tile) => onPressTitle(tile.id)}

@@ -6,6 +6,7 @@ import { theme } from '../tokens';
 import {
   firstScreenTileCount,
   PosterGrid,
+  PosterRail,
   PosterShelf,
   seasonPillLabel,
   SeasonAverageBadge,
@@ -98,6 +99,46 @@ describe('which posters a wall asks for first', () => {
   it('changes nothing on a wall that did not ask', async () => {
     const view = await render(<PosterGrid tiles={wall} onPressTile={() => {}} />);
     expect(priorities(view)).toEqual(Array(30).fill('normal'));
+  });
+});
+
+/**
+ * **A rail loads what is on screen first** (perf P8, 2026-11-25): three posters and the peek
+ * keep the default priority, the rest of the rail asks at `low`. Order only; every tile loads.
+ */
+describe('which posters a rail asks for first', () => {
+  const rail: PosterTile[] = Array.from({ length: 12 }, (_, index) => ({
+    id: `r${index}`,
+    title: `Title ${index}`,
+    posterUri: `https://image.tmdb.org/t/p/w342/${index}.jpg`,
+  }));
+  type Node = { props?: Record<string, unknown>; children?: (Node | string)[] | null };
+  const loads = (view: Awaited<ReturnType<typeof render>>) => {
+    const out: { uri: string; priority: unknown }[] = [];
+    const walk = (node: Node | string | null) => {
+      if (!node || typeof node === 'string') return;
+      const [source] = (node.props?.source as { uri?: string }[] | undefined) ?? [];
+      if (source?.uri) out.push({ uri: source.uri, priority: node.props?.priority ?? 'normal' });
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(view.toJSON() as Node);
+    return out;
+  };
+
+  it('keeps the visible tiles at the default and asks for the rest at low', async () => {
+    const view = await render(<PosterRail label="Rail" tiles={rail} onPressTile={() => {}} width={340} />);
+    const drawn = loads(view);
+    // Every tile still mounts and still asks for its artwork, in order.
+    expect(drawn.map((tile) => tile.uri)).toEqual(rail.map((tile) => tile.posterUri));
+    expect(drawn.slice(0, 4).map((tile) => tile.priority)).toEqual(Array(4).fill('normal'));
+    expect(drawn.slice(4).map((tile) => tile.priority)).toEqual(Array(8).fill('low'));
+  });
+
+  it('never lowers anything on a rail short enough to be on screen', async () => {
+    const view = await render(
+      <PosterRail label="Rail" tiles={rail.slice(0, 4)} onPressTile={() => {}} width={340} />,
+    );
+    expect(loads(view).map((tile) => tile.priority)).toEqual(Array(4).fill('normal'));
   });
 });
 

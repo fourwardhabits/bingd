@@ -458,6 +458,55 @@ describe('a grouped ranking sitting', () => {
   });
 });
 
+/**
+ * **What the rail asks the image loader for** (perf P8, 2026-11-25). A rail tile is at most
+ * 285 px at 3x on a supported phone, so its posters are TMDB's `w342`, the size Collection and
+ * For You use; the single card's artwork keeps its own backdrop size.
+ */
+describe('the image sizes a grouped post asks for', () => {
+  type Node = { props?: Record<string, unknown>; children?: (Node | string)[] | null };
+  const sources = (root: Node | null) => {
+    const out: string[] = [];
+    const walk = (node: Node | string | null) => {
+      if (!node || typeof node === 'string') return;
+      const [source] = (node.props?.source as { uri?: string }[] | undefined) ?? [];
+      if (source?.uri) out.push(source.uri);
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(root);
+    return out;
+  };
+
+  it('requests every rail poster at w342, and draws the poster-less member as before', async () => {
+    mockRows = [event('w1', 'watchlist_added', DUNE, { payload: { count: 4 } })];
+    mockRpc.feed_group_previews = answer(WATCHLIST_MEMBERS);
+    const view = await renderWithProviders(<FeedScreen />);
+    const rail = await loadedRail(view, /^Dune/);
+
+    const uris = sources(view.toJSON() as Node);
+    const railUris = uris.filter((uri) => /\/p\d\.jpg$/.test(uri));
+    expect(railUris).toEqual([
+      'https://image.tmdb.org/t/p/w342/p0.jpg',
+      'https://image.tmdb.org/t/p/w342/p1.jpg',
+      'https://image.tmdb.org/t/p/w342/p2.jpg',
+    ]);
+    expect(uris.some((uri) => uri.includes('/w500/'))).toBe(false);
+    // Enemy has no poster: still a tile with its own label, and no image request for it.
+    expect(within(rail).getByLabelText('Enemy, 2021')).toBeTruthy();
+  });
+
+  it('keeps the single card’s artwork at its own size', async () => {
+    mockRows = [event('ranked', 'title_ranked', DUNE, { mediaId: 'ranked' })];
+    mockRpc.feed_group_previews = answer([]);
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() => expect(view.getByTestId('feed-card-artwork')).toBeTruthy());
+    // Unchanged by P8: the cinematic card's backdrop stays at w780.
+    expect(sources(view.toJSON() as Node)).toEqual([
+      'https://image.tmdb.org/t/p/w780/dune-wide.jpg',
+    ]);
+  });
+});
+
 describe('what keeps its cinematic card', () => {
   it('a single watchlist save, a legacy post and an ordinary ranking', async () => {
     mockRows = [
