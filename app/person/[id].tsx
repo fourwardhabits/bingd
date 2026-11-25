@@ -45,6 +45,7 @@ import { FilmographyFilterSheet } from '@/features/person/FilmographyFilterSheet
 import { pickPersonBackdrop } from '@/features/person/backdrop';
 import { shortened } from '@/features/person/biography';
 import { birthLine } from '@/features/person/identity';
+import { personPreview } from '@/features/person/preview';
 import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
@@ -190,16 +191,32 @@ export default function PersonScreen() {
    * show ranks in its own pool (`tv_shows`) and is logged like a film, so a ranked or
    * logged show says so here exactly as its title page does (RC review, 2026-11-11).
    * The season pool is not read: a season is never a credit row.
+   *
+   * **Asked for only once the person's own read has answered** (loading investigation
+   * 2026-11-25, remedy 1). These are library-wide reads, several with a `media_items`
+   * embed, and they decorate rows that do not exist yet — so asking for them at mount only
+   * put them in the same five-slot queue as `person_cache` and the credited titles, the
+   * reads the page is actually waiting on. For a cached person that read is both of those,
+   * so the decorations follow the filmography; for one the cache has never held it is the
+   * empty `person_cache` answer, so they run while the adapter does, which is the slow step
+   * there and is not competing with them for anything the reader is looking at.
+   *
+   * The keys are unchanged: whatever the rest of the app has already read is returned at
+   * once, and only the network request waits. Every control that depends on one of these
+   * still waits for it to be read (the bookmark on the watchlist, `+` on `rankingsKnown`,
+   * the row label on `stateLabel`'s pending rule), so a row never offers a state it has
+   * not been told.
    */
-  const watchlist = useWatchlist(viewer.id);
-  const watched = useWatched(viewer.id);
-  const rankedMovies = useRankedCollection(viewer.id, 'movies');
-  const rankedShows = useRankedCollection(viewer.id, 'tv_shows');
+  const decorate = !person.isPending;
+  const watchlist = useWatchlist(viewer.id, { enabled: decorate });
+  const watched = useWatched(viewer.id, { enabled: decorate });
+  const rankedMovies = useRankedCollection(viewer.id, 'movies', { enabled: decorate });
+  const rankedShows = useRankedCollection(viewer.id, 'tv_shows', { enabled: decorate });
   /**
    * The reader's score per title: **Search's own read** (`useMyScores`, `app/(tabs)/log.tsx`),
    * so a filmography row draws exactly the score circle Search draws for the same title.
    */
-  const myScores = useMyScores(viewer.id);
+  const myScores = useMyScores(viewer.id, decorate);
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
@@ -316,7 +333,7 @@ export default function PersonScreen() {
    * unknown outcome and the failure alert are unchanged; the title's own cache is still
    * invalidated here, as it was.
    */
-  const watchlistToggle = useWatchlistToggle(viewer.id, 'title');
+  const watchlistToggle = useWatchlistToggle(viewer.id, 'title', { enabled: decorate });
   const toggleWatchlist = async (credit: PersonCredit) => {
     const result = await watchlistToggle.toggle(credit.mediaItemId);
     if (!result) return;
@@ -343,7 +360,7 @@ export default function PersonScreen() {
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
-  const logged = useLoggedCollection(viewer.id);
+  const logged = useLoggedCollection(viewer.id, { enabled: decorate });
   const unfinished = useMemo(
     () =>
       new Map(
@@ -413,6 +430,14 @@ export default function PersonScreen() {
   // "nothing here yet" in the meantime is what independent review 13 found two concurrent
   // readers stuck on.
   const loading = person.isPending || awaitingClaim || (fetching && !detail);
+  /**
+   * The name and portrait the reader tapped on a cast rail or in people search, drawn while
+   * the page loads (remedy 2; `features/person/preview.ts`). Read only in the loading state
+   * and only for this route's id: it decides nothing — not whether to ask the adapter, not
+   * the claim wait, not an error or an empty state — and the person's own record replaces
+   * it entirely the moment it arrives.
+   */
+  const preview = loading ? personPreview(id) : null;
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -444,8 +469,17 @@ export default function PersonScreen() {
           <View testID="person-loading">
             <View style={[styles.identity, styles.identityPlaceholder]}>
               <View style={styles.portrait}>
-                <View style={styles.portraitPlaceholder} />
+                {preview ? (
+                  <Avatar size="lg" uri={profileUri(preview.profilePath)} name={preview.name} />
+                ) : (
+                  <View style={styles.portraitPlaceholder} />
+                )}
               </View>
+              {preview ? (
+                <Text variant="title1" accessibilityRole="header" testID="person-preview-name">
+                  {preview.name}
+                </Text>
+              ) : null}
             </View>
             <SkeletonRow count={6} />
           </View>
@@ -631,7 +665,13 @@ export default function PersonScreen() {
                         // Their character on the Cast side and their jobs on the Crew side,
                         // so a film they did both on never shows "Director" under Cast.
                         secondary={shownRole === 'cast' ? credit.role : credit.crewRole}
-                        tertiary={stateLabel(credit, { saved, ranked, watched: watched.data })}
+                        tertiary={stateLabel(credit, {
+                          saved,
+                          ranked,
+                          watched: watched.data,
+                          rankedPending: rankedMovies.isPending || rankedShows.isPending,
+                          watchedPending: watched.isPending,
+                        })}
                         divided={
                           index < visible.length - 1 &&
                           index + 1 !== boundary &&
@@ -1014,11 +1054,22 @@ const BIOGRAPHY_ESTIMATE = 160;
  */
 function stateLabel(
   credit: PersonCredit,
-  state: { saved: Set<string>; ranked: Set<string>; watched: Set<string> | undefined },
+  state: {
+    saved: Set<string>;
+    ranked: Set<string>;
+    watched: Set<string> | undefined;
+    rankedPending: boolean;
+    watchedPending: boolean;
+  },
 ) {
+  // The labels outrank one another, so a lower one waits while a higher one is still being
+  // read: a ranked film is never called "Watched" for the moment before the rankings land.
+  // Only *pending* waits; a read that failed falls through exactly as before.
   if (credit.kind === 'movie' || credit.kind === 'series') {
     if (state.ranked.has(credit.mediaItemId)) return 'Ranked';
+    if (state.rankedPending) return null;
     if (state.watched?.has(credit.mediaItemId)) return 'Watched';
+    if (state.watchedPending) return null;
   }
   if (state.saved.has(credit.mediaItemId)) return 'On your watchlist';
   return null;

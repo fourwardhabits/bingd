@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import { Alert, Linking, Share, StyleSheet } from 'react-native';
 
+import { personPreview } from '@/features/person/preview';
 import { renderWithProviders } from '@/test-utils/render';
 import { brand, theme } from '@/ui/tokens';
 
@@ -1342,6 +1343,11 @@ describe('the cast', () => {
 
     await fireEvent.press(view.getByLabelText('Leonardo DiCaprio, who plays Cobb'));
     expect(mockPush).toHaveBeenCalledWith('/person/6193');
+    // What the strip drew, for the person page to show while it loads.
+    expect(personPreview('6193')).toEqual({
+      name: 'Leonardo DiCaprio',
+      profilePath: '/leo.jpg',
+    });
   });
 
   it('still lists someone with no photograph', async () => {
@@ -4485,6 +4491,33 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
       await fireEvent.press(view.getByRole('button', { name: 'Close' }));
       await waitFor(() => expect(view.queryByTestId('cast-sheet')).toBeNull());
+    });
+
+    it('remembers who was opened from the strip or the full sheet, for their page', async () => {
+      const six = Array.from({ length: 6 }, (_, n) => ({
+        id: 9100 + n,
+        name: `Player ${n + 1}`,
+        character: null,
+        profile_path: n === 1 ? '/p2.jpg' : null,
+      }));
+      tableRows.media_cache = [{ ...credits, payload: { ...credits.payload, cast: six } }];
+      const view = await open();
+      // The compact strip on the page itself.
+      await fireEvent.press(
+        await waitFor(() => view.getByRole('button', { name: 'Player 1' })),
+      );
+      expect(mockPush).toHaveBeenCalledWith('/person/9100');
+      expect(personPreview('9100')).toEqual({ name: 'Player 1', profilePath: null });
+      // And the full sheet.
+      await fireEvent.press(
+        await waitFor(() => view.getByRole('button', { name: 'See all 6 cast members' })),
+      );
+      await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
+      await fireEvent.press(
+        within(view.getByTestId('cast-sheet-list')).getByRole('button', { name: 'Player 2' }),
+      );
+      expect(mockPush).toHaveBeenCalledWith('/person/9101');
+      expect(personPreview('9101')).toEqual({ name: 'Player 2', profilePath: '/p2.jpg' });
     });
 
     it('asks for nothing once another screen covers it, so the next screen keeps its own', async () => {

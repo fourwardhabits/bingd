@@ -17,9 +17,14 @@ import { track, type Surface } from '@/lib/analytics';
  * reconcile when the outcome is unknown, because `set_watchlist` can commit and lose its
  * reply.
  */
-export function useWatchlistToggle(userId: string, surface: Surface) {
+export function useWatchlistToggle(
+  userId: string,
+  surface: Surface,
+  // Passed through to `useWatchlist`; optional and on by default (see there).
+  options: { enabled?: boolean } = {},
+) {
   const queryClient = useQueryClient();
-  const watchlist = useWatchlist(userId);
+  const watchlist = useWatchlist(userId, options);
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
     [watchlist.data],

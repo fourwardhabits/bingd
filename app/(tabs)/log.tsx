@@ -17,6 +17,7 @@ import { mustReconcile, newOperationId, setWatchlist } from '@/features/collecti
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { allRows, type AllRow, type AllSection } from '@/features/search/all-sections';
 import { cooldownClock, providerQueryOf } from '@/features/search/provider-budget';
+import { rememberPersonPreview } from '@/features/person/preview';
 import { useCastSearch, type CastSearchResult } from '@/features/search/use-cast-search';
 import {
   seriesChildState,
@@ -405,6 +406,8 @@ export default function LogScreen() {
    */
   const openCast = (person: CastSearchResult) => {
     commitSelection(person.name);
+    // What this row already drew, for the person page to show while it loads.
+    rememberPersonPreview(person.id, { name: person.name, profilePath: person.profilePath });
     router.push(`/person/${person.id}`);
   };
 

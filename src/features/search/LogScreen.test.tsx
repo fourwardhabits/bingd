@@ -1,6 +1,7 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
+import { personPreview } from '@/features/person/preview';
 import { clearProviderCooldown } from '@/features/search/provider-budget';
 import { parentView, searchFieldSite, type Host } from '@/test-utils/hit-rect';
 import { renderWithProviders } from '@/test-utils/render';
@@ -1478,6 +1479,11 @@ describe('Cast search', () => {
 
     await fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledWith('/person/6193');
+    // The name and portrait this row drew, for the person page to show while it loads.
+    expect(personPreview('6193')).toEqual({
+      name: 'Leonardo DiCaprio',
+      profilePath: '/leo.jpg',
+    });
   });
 
   it('sends one normalised query, however it was capitalised or spaced', async () => {

@@ -1,7 +1,11 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import type { ReactNode } from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
+import { forgetPersonPreviews, rememberPersonPreview } from '@/features/person/preview';
 import { expectRowFitsNarrow, naturalWidth } from '@/test-utils/narrow-row';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -36,12 +40,31 @@ let mockFailAfter: { table: string; successes: number } | null = null;
  * missing, and a test on the helper would not have noticed.
  */
 const mockReads: Record<string, number> = {};
+/** Every table read, in the order the screen asked for it: the asked-order recorder. */
+const mockAsked: string[] = [];
+/**
+ * Reads held until a test releases them: asked for, recorded, and not answered. Unlike the
+ * throwing getter further down, a held read is *pending* rather than failed, which is the
+ * state a slow network actually puts a query in.
+ */
+const mockHeld: Record<string, Promise<void> | undefined> = {};
+const holdReads = (...tables: string[]) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  for (const table of tables) mockHeld[table] = gate;
+  return () => {
+    for (const table of tables) if (mockHeld[table] === gate) delete mockHeld[table];
+    release();
+  };
+};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
       mockReads[table] = (mockReads[table] ?? 0) + 1;
+      mockAsked.push(table);
+      const held = mockHeld[table];
       const filters: Record<string, unknown> = {};
       const failing = () => {
         if (!mockFailAfter || mockFailAfter.table !== table) return false;
@@ -70,13 +93,18 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         limit: () => chain,
         gt: () => chain,
-        maybeSingle: () =>
-          failing()
-            ? Promise.resolve({ data: null, error: { message: 'network down' } })
-            : Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        maybeSingle: () => {
+          const answer = (): Promise<{ data: unknown; error: { message: string } | null }> =>
+            failing()
+              ? Promise.resolve({ data: null, error: { message: 'network down' } })
+              : Promise.resolve({ data: rows()[0] ?? null, error: null });
+          return held ? held.then(answer) : answer();
+        },
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows(), error: null, count: rows().length }),
+        then: (resolve: (value: unknown) => unknown) => {
+          const answer = () => resolve({ data: rows(), error: null, count: rows().length });
+          return held ? held.then(answer) : answer();
+        },
       };
       return chain;
     },
@@ -196,11 +224,36 @@ beforeEach(() => {
   mockLogSheet.props = null;
   mockLogSheet.opened = [];
   mockRankingSubjects.length = 0;
+  mockAsked.length = 0;
+  for (const key of Object.keys(mockHeld)) delete mockHeld[key];
+  for (const key of Object.keys(mockReads)) delete mockReads[key];
+  forgetPersonPreviews();
 });
+
+/** Every library read behind the row decorations, by its (unchanged) key. */
+const LIBRARY_KEYS = [
+  ['collection', 'user-1', 'watchlist'],
+  ['watched', 'user-1'],
+  ['rankings', 'user-1', 'movies'],
+  ['rankings', 'user-1', 'tv_shows'],
+  ['my-scores', 'user-1'],
+  ['collection', 'user-1'],
+];
 
 const open = async () => {
   const view = await renderWithProviders(<PersonScreen />);
   await waitFor(() => expect(view.getByText('Leonardo DiCaprio')).toBeTruthy());
+  // And the reader's library behind the rows, which is asked for only once the filmography
+  // is back ("critical data first" below): "open" means the page has finished loading.
+  await waitFor(() => {
+    for (const key of LIBRARY_KEYS) {
+      expect(view.client.getQueryState(key)?.status).toBe('success');
+    }
+    expect(view.client.isFetching()).toBe(0);
+  });
+  // React Query tells the screen on its next tick (`notifyManager` batches on a timeout), so
+  // the cache can say "read" a moment before the rows have drawn it.
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
   return view;
 };
 
@@ -1038,6 +1091,275 @@ describe('the refined person page', () => {
       value: realRankings,
     });
     release();
+  });
+});
+
+/**
+ * **Critical data first** (loading investigation 2026-11-25, remedies 1 and 2).
+ *
+ * The filmography is the page; the reader's library is decoration on its rows. The library
+ * reads are library-wide, several carry a `media_items` embed, and on Android they share a
+ * five-slot queue with the two reads the page is waiting on — so they are asked for only
+ * once the filmography is back. These pin the order *and* what that must never cost: a
+ * decoration already read still draws with the rows, and a decoration not yet read draws
+ * nothing rather than a state it has not been told.
+ */
+describe('critical data first', () => {
+  /** Every library-wide table the row decorations read. */
+  const DECORATIONS = ['watchlist', 'user_media', 'rankings'];
+
+  const rankInception = () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+        media_items: items[0],
+      },
+    ];
+  };
+  const saveTitanic = () => {
+    tableRows.watchlist = [
+      { user_id: 'user-1', media_item_id: 'film-2', media_items: items[1] },
+    ];
+  };
+  const firstAsked = (tables: string[]) =>
+    Math.min(...tables.map((table) => mockAsked.indexOf(table)).filter((index) => index >= 0));
+  const settle = () =>
+    act(async () => void (await new Promise((resolve) => setTimeout(resolve, 50))));
+
+  /** One QueryClient across two visits, so the second can open on a warm library. */
+  const sharedClient = () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: Infinity } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          {children}
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    );
+    return { client, wrapper };
+  };
+
+  /** The portraits drawn (TMDB's w185 bucket), so the hero backdrop is not counted. */
+  const portraits = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const out: string[] = [];
+    const walk = (node: unknown) => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node === 'string') return;
+      const element = node as { props?: { source?: unknown }; children?: unknown[] };
+      const source = element.props?.source as { uri?: string } | { uri?: string }[] | undefined;
+      for (const entry of Array.isArray(source) ? source : source ? [source] : []) {
+        if (entry.uri?.includes('/w185/')) out.push(entry.uri);
+      }
+      (element.children ?? []).forEach(walk);
+    };
+    walk(view.toJSON());
+    return [...new Set(out)];
+  };
+
+  it('asks for no library read while person_cache is out, and for all of it once back', async () => {
+    const release = holdReads('person_cache');
+    const view = await renderWithProviders(<PersonScreen />);
+    await settle();
+
+    // Held: the only request the page has made is the one it is waiting on.
+    expect(mockAsked).toEqual(['person_cache']);
+    expect(view.getByTestId('person-loading')).toBeTruthy();
+
+    release();
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await waitFor(() => {
+      expect(mockReads.watchlist).toBe(1);
+      // Watched, and the logged collection's own read.
+      expect(mockReads.user_media).toBe(2);
+      // Ranked movies, ranked shows, my scores, and the logged collection's ranked ids.
+      expect(mockReads.rankings).toBe(4);
+    });
+    // The asked-order: both filmography reads, and only then the decorations.
+    expect(mockAsked.slice(0, 2)).toEqual(['person_cache', 'media_items']);
+    expect(firstAsked(DECORATIONS)).toBeGreaterThan(mockAsked.indexOf('media_items'));
+  });
+
+  it('asks for the library while the adapter fetches a person never cached', async () => {
+    // The empty `person_cache` answer is the critical read on a miss; the slow step after it
+    // is the adapter, which the decorations do not hold up. Asked then, they are ready by
+    // the time the filmography is.
+    tableRows.person_cache = [];
+    mockCachePerson.mockImplementationOnce(() => new Promise(() => {}));
+    await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(mockCachePerson).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(mockReads.watchlist).toBe(1);
+      expect(mockReads.user_media).toBe(2);
+      expect(mockReads.rankings).toBe(4);
+    });
+    expect(mockAsked[0]).toBe('person_cache');
+    expect(firstAsked(DECORATIONS)).toBeGreaterThan(0);
+  });
+
+  it('draws a cached library with the filmography, and refetches it only after', async () => {
+    rankInception();
+    saveTitanic();
+    const { client, wrapper } = sharedClient();
+    const first = await render(<PersonScreen />, { wrapper });
+    await waitFor(() => expect(first.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    await waitFor(() =>
+      expect(first.getByLabelText('Remove Titanic from Watchlist')).toBeTruthy(),
+    );
+    await first.unmount();
+
+    // A second visit: the library is in the client (and stale, at staleTime 0), the person
+    // is not. Every decoration refetch is held, so whatever the rows draw is the cache's.
+    client.removeQueries({ queryKey: ['person'] });
+    mockAsked.length = 0;
+    holdReads(...DECORATIONS);
+    const view = await render(<PersonScreen />, { wrapper });
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy();
+    expect(view.getByText('Ranked')).toBeTruthy();
+    expect(view.getByLabelText('Remove Titanic from Watchlist')).toBeTruthy();
+    expect(view.getByLabelText('Log Titanic')).toBeTruthy();
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+
+    await waitFor(() => expect(firstAsked(DECORATIONS)).toBeLessThan(Infinity));
+    expect(mockAsked.slice(0, 2)).toEqual(['person_cache', 'media_items']);
+    expect(firstAsked(DECORATIONS)).toBeGreaterThan(mockAsked.indexOf('media_items'));
+    client.clear();
+  });
+
+  it('draws nothing tappable and no label until what it depends on is read', async () => {
+    // Inception is ranked *and* watched; Titanic is saved. Nothing is cached.
+    rankInception();
+    saveTitanic();
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
+    const releaseRankings = holdReads('rankings');
+    const releaseRest = holdReads('watchlist', 'user_media');
+    const view = await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    // The rows are drawn; nothing about the reader is, because nothing has been read.
+    expect(view.queryByLabelText(/^Log /)).toBeNull();
+    expect(view.queryByLabelText(/Watchlist$/)).toBeNull();
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.queryByText('Ranked')).toBeNull();
+    expect(view.queryByText('Watched')).toBeNull();
+    expect(view.queryByText('On your watchlist')).toBeNull();
+
+    // The watchlist and the watched set land; the rankings are still out.
+    releaseRest();
+    await waitFor(() =>
+      expect(view.getByLabelText('Remove Titanic from Watchlist')).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(view.client.getQueryState(['watched', 'user-1'])?.status).toBe('success'),
+    );
+    await settle();
+    // Still no `+`: the page cannot yet tell a ranked title from an unranked one.
+    expect(view.queryByLabelText(/^Log /)).toBeNull();
+    // And a ranked film is not called "Watched" for the moment before its rankings land.
+    expect(view.queryByText('Watched')).toBeNull();
+    expect(view.queryByText('On your watchlist')).toBeNull();
+
+    releaseRankings();
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    expect(view.getByText('Ranked')).toBeTruthy();
+    expect(view.queryByText('Watched')).toBeNull();
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+    expect(view.queryByLabelText(/Inception (to|from) Watchlist/)).toBeNull();
+    await waitFor(() => expect(view.getByLabelText('Log Titanic')).toBeTruthy());
+    expect(view.getByText('On your watchlist')).toBeTruthy();
+  });
+
+  describe('the identity preview', () => {
+    const TAPPED = { name: 'Leo, as tapped', profilePath: '/tapped.jpg' };
+
+    it('draws the tapped name and portrait while loading; the record replaces it', async () => {
+      rememberPersonPreview('6193', TAPPED);
+      const release = holdReads('person_cache');
+      const view = await renderWithProviders(<PersonScreen />);
+
+      const loading = view.getByTestId('person-loading');
+      expect(within(loading).getByTestId('person-preview-name')).toHaveTextContent(TAPPED.name);
+      expect(portraits(view)).toEqual(['https://image.tmdb.org/t/p/w185/tapped.jpg']);
+      // The filmography is still the skeleton: the preview is the identity only.
+      expect(view.queryByText('Filmography')).toBeNull();
+
+      release();
+      await waitFor(() => expect(view.getByTestId('person-name')).toBeTruthy());
+      expect(view.queryByTestId('person-preview-name')).toBeNull();
+      expect(view.queryByText(TAPPED.name)).toBeNull();
+      expect(portraits(view)).toEqual(['https://image.tmdb.org/t/p/w185/leo.jpg']);
+    });
+
+    it('never draws a preview remembered for somebody else', async () => {
+      rememberPersonPreview('999', TAPPED);
+      holdReads('person_cache');
+      const view = await renderWithProviders(<PersonScreen />);
+
+      expect(view.getByTestId('person-loading')).toBeTruthy();
+      expect(view.queryByTestId('person-preview-name')).toBeNull();
+      expect(view.queryByText(TAPPED.name)).toBeNull();
+      expect(portraits(view)).toEqual([]);
+    });
+
+    it('is not drawn over the could-not-load state', async () => {
+      rememberPersonPreview('6193', TAPPED);
+      mockFailAfter = { table: 'person_cache', successes: 0 };
+      const view = await renderWithProviders(<PersonScreen />);
+
+      await waitFor(() => expect(view.getByText('Could not load this person')).toBeTruthy());
+      expect(view.queryByText(TAPPED.name)).toBeNull();
+      expect(portraits(view)).toEqual([]);
+      expect(mockCachePerson).not.toHaveBeenCalled();
+    });
+
+    it('is not drawn over Nothing here yet, and spends exactly the same requests', async () => {
+      // The person the cache has never held, and the adapter finds nothing: once without a
+      // preview and once with one. Same requests, same single adapter call, same end state.
+      tableRows.person_cache = [];
+      const visit = async () => {
+        for (const key of Object.keys(mockReads)) delete mockReads[key];
+        mockCachePerson.mockClear();
+        const view = await renderWithProviders(<PersonScreen />);
+        await waitFor(() => expect(view.getByText('Nothing here yet')).toBeTruthy());
+        await settle();
+        const spent = { reads: { ...mockReads }, adapter: mockCachePerson.mock.calls.length };
+        return { view, spent };
+      };
+
+      const without = await visit();
+      await without.view.unmount();
+      rememberPersonPreview('6193', TAPPED);
+      const withPreview = await visit();
+
+      expect(withPreview.view.queryByText(TAPPED.name)).toBeNull();
+      expect(portraits(withPreview.view)).toEqual([]);
+      expect(withPreview.spent).toEqual(without.spent);
+      expect(withPreview.spent.adapter).toBe(1);
+    });
+
+    it('changes nothing about a cached person: no adapter call, one read', async () => {
+      rememberPersonPreview('6193', TAPPED);
+      const view = await renderWithProviders(<PersonScreen />);
+
+      await waitFor(() => expect(view.getByTestId('person-name')).toBeTruthy());
+      await settle();
+      expect(mockCachePerson).not.toHaveBeenCalled();
+      expect(mockReads.person_cache).toBe(1);
+      expect(view.queryByText(TAPPED.name)).toBeNull();
+    });
   });
 });
 
