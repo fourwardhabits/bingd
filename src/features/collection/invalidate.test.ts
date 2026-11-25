@@ -7,6 +7,7 @@ import {
   invalidateAfterCollectionChange,
   invalidateAfterImport,
   invalidateAfterWatchlistChange,
+  invalidateRankingsBesides,
 } from './invalidate';
 
 /**
@@ -496,5 +497,82 @@ describe('the Reviews tab number', () => {
       invalidateAfterCollectionChange(client, USER, TITLE, { category: 'movies' }),
     );
     expect(has(set, KEYS.reviewCount)).toBe(true);
+  });
+});
+
+/**
+ * **The placement supersedes the post-log refresh, key for key** (perf P4, 2026-11-25).
+ *
+ * When a first log leads into a ranking that places, the Log sheet's held refresh — the
+ * category-less call — is not run. What runs instead is the ranking sheet's refresh for
+ * the placed category plus `invalidateRankingsBesides`. These tests record every filter
+ * both sides hand the client, including the awards helper's, so the proof does not depend
+ * on which keys a test happened to seed: a key added to only one branch of the helper
+ * fails here instead of going stale behind a ranking.
+ */
+describe('what a placement leaves for the post-log refresh', () => {
+  const recorded = (run: (client: QueryClient) => void) => {
+    const client = new QueryClient();
+    const spy = jest.spyOn(client, 'invalidateQueries');
+    run(client);
+    return new Set(spy.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey)));
+  };
+  const heldRefresh = recorded((client) =>
+    invalidateAfterCollectionChange(client, USER, TITLE),
+  );
+
+  for (const category of ['movies', 'tv_seasons', 'tv_shows']) {
+    it(`is nothing but the other pools after a placement in ${category}`, () => {
+      const placement = recorded((client) =>
+        invalidateAfterCollectionChange(client, USER, TITLE, { category }),
+      );
+      const remainder = recorded((client) => invalidateRankingsBesides(client, USER, category));
+
+      expect(new Set([...placement, ...remainder])).toEqual(heldRefresh);
+      // Narrow: two ranked lists, and none of them the one the placement refreshed.
+      expect([...remainder].sort()).toEqual(
+        ['movies', 'tv_seasons', 'tv_shows']
+          .filter((pool) => pool !== category)
+          .map((pool) => JSON.stringify(queryKeys.rankings(USER, pool)))
+          .sort(),
+      );
+      // And the held refresh covers nothing the two together miss.
+      for (const key of heldRefresh)
+        expect(placement.has(key) || remainder.has(key)).toBe(true);
+    });
+  }
+
+  it('is nothing at all when the placement named no pool, which refreshed all three', () => {
+    for (const category of [undefined, 'something_new']) {
+      const placement = recorded((client) =>
+        invalidateAfterCollectionChange(client, USER, TITLE, { category }),
+      );
+      expect(placement).toEqual(heldRefresh);
+      expect(recorded((client) => invalidateRankingsBesides(client, USER, category)).size).toBe(
+        0,
+      );
+    }
+  });
+
+  it('includes every surface the post-log refresh is for', () => {
+    // The list the P4 review asked about by name. Watch history, log-state, the Feed, Search
+    // badges (my-scores), the Watchlist (by the collection prefix), the title page,
+    // sent-to-you and the inbox.
+    for (const key of [
+      queryKeys.collection(USER),
+      queryKeys.myScores(USER),
+      queryKeys.title(TITLE),
+      queryKeys.logState(USER, TITLE),
+      queryKeys.watchHistory(USER, TITLE),
+      queryKeys.watchCount(USER, TITLE),
+      ['feed', USER],
+      ['actor-activity', USER],
+      ['notifications', USER],
+      ['sent-to-you', USER],
+      ['profile-watchlist', USER],
+      ['goals', USER],
+    ]) {
+      expect(heldRefresh.has(JSON.stringify(key))).toBe(true);
+    }
   });
 });
