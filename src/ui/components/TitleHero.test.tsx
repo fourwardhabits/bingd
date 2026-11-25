@@ -271,3 +271,57 @@ describe('the reserved frame', () => {
     expect(view.getByTestId('hero-frame')).toBe(before);
   });
 });
+
+/**
+ * `hardEdge`: the person page's clean lower boundary and instant artwork (founder QA,
+ * Android Preview, 2026-11-25). Off by default, so title and list pages keep the fade
+ * and the cross-fade.
+ */
+describe('the hard edge', () => {
+  afterEach(() => {
+    mockWindowWidth = null;
+  });
+
+  const gradients = (nodes: Awaited<ReturnType<typeof treeOf>>) =>
+    nodes.map((node) => node.style.experimental_backgroundImage).filter(Boolean) as string[];
+  /** The image's cross-fade in ms, whichever form expo-image was handed it in. */
+  const transitionOf = (nodes: Awaited<ReturnType<typeof treeOf>>) => {
+    const value = nodes.find((node) => node.props.source)?.props.transition as
+      | number
+      | { duration?: number }
+      | undefined;
+    return typeof value === 'object' ? value?.duration : value;
+  };
+
+  it('is off by default: the bottom fade and the cross-fade stay on title and list pages', async () => {
+    mockWindowWidth = 390;
+    const nodes = await treeOf(<TitleHero uri={BACKDROP} topInset={47} />);
+
+    expect(gradients(nodes).some((g) => g.includes('to bottom') && g.includes('100%)'))).toBe(true);
+    expect(gradients(nodes)).toHaveLength(2);
+    expect(transitionOf(nodes)).toBe(theme.duration.navigation);
+  });
+
+  it('ends on a clean line with no bottom fade, and draws the artwork without a cross-fade', async () => {
+    mockWindowWidth = 390;
+    const plain = gradients(await treeOf(<TitleHero uri={BACKDROP} topInset={47} />));
+    const nodes = await treeOf(<TitleHero uri={BACKDROP} reserveFrame hardEdge topInset={47} />);
+
+    // Only the top scrim under the chrome is left: the back control keeps its contrast.
+    expect(gradients(nodes)).toHaveLength(1);
+    expect(plain).toContain(gradients(nodes)[0]);
+    expect(gradients(nodes)[0]).toContain('0.38');
+    expect(transitionOf(nodes)).toBe(0);
+    expect(nodes[0]!.style.height).toBe(heroFrameHeight(390));
+  });
+
+  it('is the plain cream field, full height and hard-edged, when there is no artwork', async () => {
+    mockWindowWidth = 360;
+    const nodes = await treeOf(<TitleHero uri={null} reserveFrame hardEdge topInset={47} />);
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.style.height).toBe(heroFrameHeight(360));
+    expect(nodes[0]!.style.backgroundColor).toBe(theme.surface.sunken);
+    expect(gradients(nodes)).toEqual([]);
+  });
+});

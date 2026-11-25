@@ -1521,6 +1521,41 @@ describe('a stable person hero', () => {
     return out;
   };
 
+  /** The bottom fades drawn in the hero: the Paper ramp, not the top scrim under the chrome. */
+  const heroFades = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const out: string[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      const element = node as { props?: { style?: unknown }; children?: unknown[] };
+      const image = (StyleSheet.flatten(element.props?.style as never) ?? {}) as {
+        experimental_backgroundImage?: string;
+      };
+      if (image.experimental_backgroundImage?.includes('100%)') &&
+        !image.experimental_backgroundImage.includes('0.38')) {
+        out.push(image.experimental_backgroundImage);
+      }
+      (element.children ?? []).forEach(walk);
+    };
+    walk(view.getByTestId('hero-frame'));
+    return out;
+  };
+
+  /** The `transition` of each image in the hero frame. */
+  const heroTransitions = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const out: unknown[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      const element = node as { props?: { source?: unknown; transition?: unknown }; children?: unknown[] };
+      if (element.props?.source) {
+        const value = element.props.transition as number | { duration?: number } | undefined;
+        out.push(typeof value === 'object' ? value?.duration : value);
+      }
+      (element.children ?? []).forEach(walk);
+    };
+    walk(view.getByTestId('hero-frame'));
+    return out;
+  };
+
   it.each(WIDTHS)(
     'is width × 9/16 before and after the backdrop lands, and the identity stays put (%ipt)',
     async (width) => {
@@ -1537,6 +1572,8 @@ describe('a stable person hero', () => {
       expect(frameHeight(view)).toBeCloseTo((width * 9) / 16, 6);
       expect(heroImages(view)).toEqual([]);
       const loadingIdentity = view.getByTestId('person-identity-loading');
+      const loadingStyle = StyleSheet.flatten(loadingIdentity.props.style);
+      expect(heroFades(view)).toEqual([]);
 
       release();
       await waitFor(() => expect(view.getByTestId('person-name')).toBeTruthy());
@@ -1548,6 +1585,15 @@ describe('a stable person hero', () => {
       // The same element, updated in place rather than remounted somewhere else: the test
       // renderer hands back one instance per mounted component.
       expect(view.getByTestId('person-identity')).toBe(loadingIdentity);
+      // And laid out by exactly the same style in both states: the same pull-up over the
+      // hero's edge and the same gutters, so the portrait and the name sit at the same
+      // coordinates. (Its children's layout is the same Avatar and the same text style.)
+      expect(StyleSheet.flatten(view.getByTestId('person-identity').props.style)).toEqual(
+        loadingStyle,
+      );
+      // A hard edge: no bottom fade over the artwork, and no cross-fade into the frame.
+      expect(heroFades(view)).toEqual([]);
+      expect(heroTransitions(view)).toEqual([0]);
     },
   );
 
@@ -1569,6 +1615,8 @@ describe('a stable person hero', () => {
     expect(StyleSheet.flatten(view.getByTestId('hero-frame').props.style).backgroundColor).toBe(
       theme.surface.sunken,
     );
+    // The cream fallback ends on the same hard line.
+    expect(heroFades(view)).toEqual([]);
   });
 
   it('holds the frame for a person loaded from nothing (no preview, cache miss)', async () => {

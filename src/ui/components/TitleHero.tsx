@@ -56,6 +56,17 @@ export type TitleHeroProps = {
    * the chrome already has its contrast.
    */
   reserveFrame?: boolean;
+  /**
+   * End the hero on a clean line against the page instead of the bottom fade (`false`
+   * by default, so title and list pages keep the fade), and let the artwork appear as
+   * soon as it is decoded instead of cross-fading in.
+   *
+   * **The person page's treatment** (founder QA, Android Preview, 2026-11-25): a hard
+   * lower boundary, and no prolonged fade while the reserved frame fills. The portrait
+   * straddles that line exactly as a poster straddles the band on a title page with no
+   * artwork. The top scrim under the chrome is unchanged.
+   */
+  hardEdge?: boolean;
 };
 
 /**
@@ -87,6 +98,7 @@ export function TitleHero({
   blurred = false,
   topInset = 0,
   reserveFrame = false,
+  hardEdge = false,
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
@@ -132,7 +144,7 @@ export function TitleHero({
            * top keeps the part somebody composed while the loss goes under the fade.
            */
           contentPosition="top center"
-          transition={theme.duration.navigation}
+          transition={hardEdge ? 0 : theme.duration.navigation}
           // `blurRadius` is expo-image's own, so this costs no new native module and
           // no fingerprint change. Held down at 0.9 opacity as well: a blurred poster
           // at full strength is still the most saturated thing on a Paper page, and the
@@ -142,7 +154,7 @@ export function TitleHero({
           accessibilityIgnoresInvertColors
         />
       ) : null}
-      <Scrim height={height} />
+      {hardEdge ? null : <Scrim height={height} />}
       {uri && topInset > 0 ? <TopScrim height={topInset + NAV_BAR_HEIGHT} /> : null}
     </View>
   );

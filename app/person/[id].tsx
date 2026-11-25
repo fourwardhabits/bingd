@@ -468,8 +468,12 @@ export default function PersonScreen() {
             **The frame is its final 16:9 from the first frame** (`reserveFrame`): the
             backdrop is only known once the credits land, and a hero that grew then
             pushed the portrait and name down under the reader (founder QA, Android
-            Preview, 2026-11-25). Now the artwork fades into space already held for it. */}
-        <TitleHero uri={hero} reserveFrame topInset={top.topInset} />
+            Preview, 2026-11-25). Now the artwork appears in space already held for it.
+
+            **A hard lower edge, and no cross-fade** (`hardEdge`, founder QA the same
+            day): the field and the backdrop end on the same clean line, so the
+            portrait visibly straddles one boundary in both states. */}
+        <TitleHero uri={hero} reserveFrame hardEdge topInset={top.topInset} />
 
         {/* **One identity block for the loading and loaded states**, at the same place in
             the tree, so the record arriving updates the portrait and name in place
@@ -479,12 +483,13 @@ export default function PersonScreen() {
             "Nothing here yet" states, exactly as before. */}
         {loading || (!person.isError && detail) ? (
           <View
-            style={[styles.identity, loading && styles.identityPlaceholder]}
+            style={styles.identity}
             onLayout={top.onIdentityLayout}
             testID={loading ? 'person-identity-loading' : 'person-identity'}
           >
-            {/* The portrait straddles the hero, as a poster does on a title page,
-                ringed in Paper so its edge reads against the artwork or the field. */}
+            {/* The portrait straddles the hero's hard lower edge, as a poster does on a
+                title page, ringed in Paper so its edge reads against the artwork or the
+                field. */}
             <View style={styles.portrait}>
               {identity ? (
                 <Avatar size="lg" uri={profileUri(identity.profilePath)} name={identity.name} />
@@ -518,7 +523,7 @@ export default function PersonScreen() {
         {loading ? (
           // The loading language, under the page's own top rather than a blank screen
           // (design-system.md §11b, "Every first load shows the loading language").
-          <View testID="person-loading">
+          <View testID="person-loading" style={styles.loadingRows}>
             <SkeletonRow count={6} />
           </View>
         ) : person.isError ? (
@@ -1103,7 +1108,9 @@ const styles = StyleSheet.create({
     marginTop: -(PORTRAIT / 2 + RING),
     gap: theme.space[1],
   },
-  identityPlaceholder: { paddingBottom: theme.space[4] },
+  // The loading gap under the identity, carried by the skeleton rather than by the
+  // identity block, so the block's own style is identical loading and loaded.
+  loadingRows: { paddingTop: theme.space[4] },
   portrait: {
     alignSelf: 'flex-start',
     borderRadius: theme.radius.full,
