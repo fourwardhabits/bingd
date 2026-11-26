@@ -1,9 +1,10 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-20, 06:20Z**: production client is the OTA from `main` `1c24b5cd`; the database is at
-208 migrations, head `20261130000300` (#331); `main` is `ecd03517`. The store table is
-unchanged since the public listings of 2026-11-08.
+**2026-11-26**: the production client is OTA 9, from `main` `3245b91e` (2026-11-25); the database
+is at 217 migrations, head `20261130001300` (#376), equal to `main`. The store table is
+unchanged since the public listings of 2026-11-08. Rows not re-read on 2026-11-26 keep their
+own read dates.
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -40,18 +41,19 @@ still open drafts, but their heads were integrated into release 1115 (#307) and 
 
 | | |
 |---|---|
-| **Live application source** | `main` `1c24b5cd` (merge of #319, 2026-11-20): #321 *Who I watched with* picker and #319 Collection drag-to-rerank, on top of everything below. `main` is now `ecd03517`. #328, #329 and #331 changed no app code: #328 only the server's grouping rule (its client diff is a rename), #329 the email template, #331 a database job. So the installed client is `1c24b5cd`, and production behaviour is `ecd03517`'s. |
-| **Production OTA, 1.1.0** | Published 2026-11-20 from `1c24b5cd` (workflow run `01a1f6ba-87cd-78ec-8fe0-1dafcbddddfc`). Android update `01a1f6bf-421a-7843-b074-8a0ec05cd692`, group `0a3f0fcb-7f8d-438d-901b-a164e53f95bc`, runtime `ec79e181`; iOS update `01a1f6bf-421a-76fa-b92a-19bfb6d8118a`, group `16309eb2-6034-41c2-9ecc-df88f2dc957b`, runtime `8ea562b7`. Rollback: republish the `a3300bf0` pair, Android `e9ea7c27-d921-42b3-8acc-4e11c8a75d8b`, iOS `78bc77db-b45f-42a8-b96c-90ef70bfba2b`, and leave the database as is (the `a3300bf0` client works against it). Source: [`production-2026-11-20-319-321.md`](./production-2026-11-20-319-321.md). |
-| **DB migrations** | **208 applied**, head `20261130000300` (#331), equal to `main`'s 208 files. Read 2026-11-20 06:20Z. Earlier the same day: 206 at 02:43Z, 207 (#328) at 03:08Z. #319's three (`20261129000100`, `000200`, `000300`) were applied one at a time on 2026-11-20, every invariant re-checked after each. |
-| **pg_cron** | Six jobs, all active, the same on staging: `bingd-import-drain` (10 s), `bingd-import-maintenance` (1 min), `bingd-push-drain` (1 min), `bingd-release-refresh` (:07 hourly), `bingd-release-evaluate` (every 15 min), `bingd-welcome-dispatch` (:41 hourly, #331). Read 2026-11-20. `bingd-proactive-tick` is not scheduled. Diagram: [`../architecture/diagrams.md`](../architecture/diagrams.md) §7 |
+| **Live application source** | `main` `3245b91e` (merge of #388, 2026-11-25): the performance sprint's P3, P8, P4 and the #388 person page, on top of everything below. `main` and the installed client are the same commit. |
+| **Production OTA, 1.1.0** | **OTA 9**, published 2026-11-25 21:32Z from `3245b91e` (workflow run `01a2149a-c0b7-79a7-bfab-a1a6cac73a6f`) to backend `abheeqyjzekiowkztfxv`. Android update `01a2149f-9589-7b68-bbfe-7479c0a3b042`, group `5f210e97-b6f1-44c3-b06c-8dcf02e39d06`, runtime `ec79e181`; iOS update `01a2149f-9589-7539-8634-75908a6129f2`, group `295e3e33-4440-49f8-bdfe-93e772804e94`, runtime `8ea562b7`. Both runtimes are the 1.1.0 (15) store builds'. CI, the release gate, the cloud runtime check, the log scan and the Sentry source-map upload all passed. The founder's production smoke test passed. Rollback: republish OTA 8 from `32790c48`, Android group `c400a5a7-093d-4a5b-a8a4-21aecbc4ab0f`, iOS group `cec5a2d0-53db-46b3-809d-9725b76e7b17`, and leave the database as is. Source: [`production-2026-11-25-ota9.md`](./production-2026-11-25-ota9.md). |
+| **DB migrations** | **217 applied**, head `20261130001300` (#376, 2026-11-24), equal to `main`'s 217 files and to `config/production-migrations.json`. Read 2026-11-26 with `production-migrations.mjs check` (read-only). Nine have been applied since this page's 2026-11-20 read of 208; each is in the release table below and its own record. |
+| **pg_cron** | Six jobs, all active, the same on staging: `bingd-import-drain` (10 s), `bingd-import-maintenance` (1 min), `bingd-push-drain` (1 min), `bingd-release-refresh` (:07 hourly), `bingd-release-evaluate` (every 15 min), `bingd-welcome-dispatch` (:41 hourly, #331). Read 2026-11-20, and not re-read since. The release records add `bingd-ops-health` (#341, 2026-11-20) and `bingd-proactive-tick` (every 15 minutes, for the founder-only `watchlist_social` pilot, 2026-11-22: [`production-2026-11-23-370-373.md`](./production-2026-11-23-370-373.md)). Diagram: [`../architecture/diagrams.md`](../architecture/diagrams.md) §7 |
 | **Edge Functions** | `letterboxd-import` v4 (2026-11-15, `verify_jwt` on), `tmdb-adapter` v16, `push-sender` v6 (both 2026-11-12). Read 2026-11-15 (#307 release comment). |
 | **Production OTA, 1.0.1** | Unchanged: from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
-| **Preview OTA (staging backend)** | Last recorded: `integration/preview-1121` `5e5f55df` (`main` `68095e99` + #322 at `b2dba1a8`), on the `preview` channel: Android group `15c2a381`, runtime `2503ffaa`; iOS group `a8ceecc7`, runtime `ef07f4b8` ([`preview-2026-11-21-wsc.md`](./preview-2026-11-21-wsc.md)). The Preview before it, `219e2953` (#319 + #321), was released. Staging migrations: **209**, head `20261201000100` (#322's, staging only; read 2026-11-20). **Staging only.** |
+| **Preview OTA (staging backend)** | Android: `80206a18` (#388's final head, app code identical to production's `3245b91e`), group `ce253594`, runtime `2503ffaa`, 2026-11-25; it was released as OTA 9. iOS: unchanged since `646a4021` (group `6786367d`, runtime `ef07f4b8`), because `config/live-runtimes.json` lists no iOS Preview binary. The staging migration count was last read on 2026-11-20 (**209**, head `20261201000100`, #322's, staging only). **Staging only.** |
 
 ### Production releases since the last update of this page
 
-Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`), except #328 and #331,
-which were database migrations only. None needed a new binary.
+Each one is a paired OTA to the 1.1.0 runtimes (`ec79e181` / `8ea562b7`), except the rows marked
+database only. None needed a new binary. From 2026-11-22 the operator records number the OTAs
+(OTA 1 to OTA 9). Each row's details, gates and rollback are in the record it names.
 
 | Date | `main` | What it shipped | Migrations after | OTA groups (Android / iOS) |
 |---|---|---|---|---|
@@ -66,6 +68,23 @@ which were database migrations only. None needed a new binary.
 | 2026-11-20 | `68095e99` (#328), database only | Feed: two or more first rankings by one person inside one fixed 30-minute window are one post, whatever the watch date. `_ranking_is_historical` and `feed.ranking_backfill_days` removed. No consolidation run under the new rule | 207, head `20261130000200` | no OTA (client stays `1c24b5cd`) |
 | 2026-11-20 | `333c1a79` (#329) | Welcome email: the bingd. logo (served from bingd.app) and no photo; the workflow's schedule raised to six attempts an hour. Released by merging, because every Welcome run renders `main` | 207 | no OTA |
 | 2026-11-20 | `ecd03517` (#331), database only | Welcome dispatch: the `pg_cron` job `bingd-welcome-dispatch` asks GitHub to run the Welcome workflow hourly at :41. **Inert until the founder stores the production Vault token** `welcome_dispatch_github_token`: until then it returns `unconfigured` and makes no request, and the workflow's own GitHub schedule (six offsets an hour, `welcome-email.yml`) remains the trigger. Stop: `welcome.delivery_enabled` false, or `cron.unschedule('bingd-welcome-dispatch')` | 208, head `20261130000300` | no OTA |
+| 2026-11-20 | `e86596f2` (#333, #334, #336) | Secret-holding jobs only on `main`; hourly cron-history prune (`20261130000400`); title pages skip the whole-cache count. [Record](./production-2026-11-20-333-334-336.md) | 209 | `53f1fb74` / `b53d5847` |
+| 2026-11-20 | `d2803274` (#340, #341, #342), database only | The OTA gate refuses an unrecorded migration; job health and `bingd-ops-health` (`20261130000500`); the Feed-order index (`20261130000600`). [Record](./production-2026-11-20-340-341-342.md) | 211, head `20261130000600` | no OTA |
+| 2026-11-21 | `1101b029` (#350) | Title page: three actions, the ⋯ menu in the row. [Record](./production-2026-11-21-350.md) | 211 | `444ad1a4` / `acb7dd81` |
+| 2026-11-21 | `55db8b2b` (#347, #352) | A reviewed first ranking joins its half hour (`20261130000800`); title-page polish. [Record](./production-2026-11-21-347-352.md) | 212 | `bba85e4d` / `f0f16ddc` |
+| 2026-11-22 | `8e66e9ca` (#354) | An activity session is one post (`20261130000900`). [Record](./production-2026-11-21-354.md) | 213 | `e0641761` / `bf63c4e1` |
+| 2026-11-22 | `42236e5f` (#357, #358, #359) | Two posts per shared window; the reader's bookmark on every Feed poster (`20261130001000`); historical split. [Record](./production-2026-11-22-357.md) | 214 | `406e19cc` / `2b02f2ba` |
+| 2026-11-22 | `f942a716` (#362), then `0aa2677e` (#363) | Profile stats row inside the profile card, then its outline restored. No separate record; the groups are EAS's | 214 | `267291cb` / `638c330c`, then `64a1e28f` / `ddfb3ea8` |
+| 2026-11-22 | `ca4e89d2` (#364, #365), OTA 1 | Reviews on every movie, show and season; oldest-first comment threads with one reply composer. [Record](./production-2026-11-22-364-368.md) | 214 | `10d588eb` / `29fbcd9a` |
+| 2026-11-22 | `9f9aff68` (#367), database only | Proactive `watchlist_social` with a pilot allowlist (`20261130001100`). [Record](./production-2026-11-22-364-368.md) | 215 | no OTA |
+| 2026-11-22 | `41e6fcb5` (#366, #368, #367 client), OTA 2 | Feed tab headings and Leaderboard filter sheet; refined subtle Feed cards. [Record](./production-2026-11-23-370-373.md) | 215 | `c8fefbec` / `45c8e345` |
+| 2026-11-23 | `3d950174` (#370, #372, #373), OTA 3 | Feed polish and the app-wide heading system. [Record](./production-2026-11-23-370-373.md) | 215 | `0f356ad5` / `c70e408d` |
+| 2026-11-23 | `b11136d5` (#371), OTA 4 | Sent to You: remove a received recommendation, with Undo (`20261130001200`). [Record](./production-2026-11-23-370-373.md) | 216 | `270d468c` / `f9950392` |
+| 2026-11-24 | `7877a79a` (#376), OTA 5 | Leaderboard category dropdown, All time \| This month, a title counted once (`20261130001300`). [Record](./production-2026-11-24-376.md) | 217, head `20261130001300` | `a503106e` / `5e8da1f0` |
+| 2026-11-24 | `03b4769d` (#374), OTA 6 | Comments: notification reply in a focused thread, Like on the post, swipeable sheet. [Record](./production-2026-11-24-376.md) | 217 | `0ebdff38` / `33534cc6` |
+| 2026-11-24 | `0de804e2` (#378), OTA 7 | Performance: ranking opens at once; seasons not re-enriched; title reads leave with the row. [Record](./production-2026-11-25-overnight.md) | 217 | `bc33ed40` / `a1b10c70` |
+| 2026-11-24 | `32790c48` (#380, #381), OTA 8 | For You posters at `w342`; title scores and Where to Watch earlier; the first OTA source-map upload. [Record](./production-2026-11-25-overnight.md) | 217 | `c400a5a7` / `cec5a2d0` |
+| 2026-11-25 | `3245b91e` (#385, #386, #387, #388), OTA 9 | The performance sprint's combined release: P3 release cadence, P8 smaller Feed and Trending posters, P4 one refresh per ranking, and the person page (critical data first, an instant identity preview, a stable hard-edged hero). [Record](./production-2026-11-25-ota9.md) | 217 | `5f210e97` / `295e3e33` |
 
 Merged to `main` with no app release needed: #314 (Welcome canary workflow), #315
 (security register), #316 (recommendation benchmark, `eval/` only), #324 (Welcome email v2,
@@ -105,7 +124,7 @@ being prepared separately; until a new binary is public, this table stands.
   read policy hides a group's members from every client, and an old bundle reads a group as
   one single-title post.
 - **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) embed `9d9683a` and receive the
-  production OTA above (`1c24b5cd`, 2026-11-20).
+  production OTA above (OTA 9, `3245b91e`, 2026-11-25).
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return

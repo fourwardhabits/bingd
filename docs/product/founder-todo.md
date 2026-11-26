@@ -102,6 +102,12 @@ Each of these waits for user evidence. None is scheduled.
   shipped. Do it only after a fresh production measurement shows the cost (PR #206 has the
   diagnosis).
 - For You and comparison latency shipped in #206. Re-measure only if users report slowness.
+- **2026-11-25 performance sprint: closed (2026-11-26).** It shipped as OTA 9 (`3245b91e`):
+  P3 release cadence, P8 smaller Feed and Trending posters, P4 one refresh per ranking, and the
+  #388 person page. The founder's production smoke test passed
+  ([`production-2026-11-25-ota9.md`](../release/production-2026-11-25-ota9.md)). The audit's
+  remaining proposals, such as compute and pooling (P1/P2) and journey timings (P12), stay
+  proposals in draft PR #384, and none is scheduled.
 
 ## OPERATIONS / BACKUP
 
