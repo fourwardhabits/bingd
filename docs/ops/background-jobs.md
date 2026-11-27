@@ -309,7 +309,9 @@ the migration alone, every alert would be recorded as delivered and never arrive
 #### Known limits
 
 - **It is still a pull signal.** An alert is recorded, durably and with its time, but nobody
-  is told. The open alerts are in the one query above.
+  is told. The open alerts are in the one query above. Delivery by email, with an external
+  heartbeat, is proposed in `docs/ops/operator-alerts-proposal.md` (draft migration
+  `20261130000700`, job `bingd-ops-alert`, inert until the founder stores a ping key).
 - **A job rescheduled by a migration** gets a new `jobid`, and its old runs no longer count.
   It reads `late` until its first new run, at most one interval. An alert opened in that gap
   closes on the next tick after the run.
