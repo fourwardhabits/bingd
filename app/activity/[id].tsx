@@ -9,6 +9,8 @@ import { goalAchievement } from '@/features/goals/goals';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { FeedCard } from '@/features/feed/FeedCard';
+import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
+import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { groupCount, previewKey, useGroupPreviews } from '@/features/feed/use-group-previews';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
@@ -172,6 +174,8 @@ export default function ActivityScreen() {
   const [watchlistGroupFor, setWatchlistGroupFor] = useState<string | null>(null);
   /** A ranking group's or a session's list (20261130000900), the Feed's own sheet. */
   const [rankingBatchFor, setRankingBatchFor] = useState<string | null>(null);
+  /** A follow story's list of people, the Feed's own sheet (Workstream C). */
+  const [followListOpen, setFollowListOpen] = useState(false);
   const sentence = event
     ? activitySentence(event, {
         ranking: () => setRankingBatchFor(event.id),
@@ -291,6 +295,25 @@ export default function ActivityScreen() {
   // Nothing to draw and nothing to ask for until it is known who is asking.
   if (!viewerId) return <LoadingScreen />;
 
+  // The reaction control the compact header carries, for an award or goal row and a
+  // follow story alike (Workstream C).
+  const headerReaction = reactionsResolved
+    ? activityReaction({
+        summary,
+        viewerId,
+        onToggle: () => void toggleDefault(),
+        onOpenPicker: () => setPickerOpen(true),
+        onOpenDetail: () => setDetailOpen(true),
+        picker: pickerOpen ? (
+          <ReactionPill
+            current={summary?.mine ?? null}
+            onChoose={(kind) => void choose(kind)}
+            onDismiss={() => setPickerOpen(false)}
+          />
+        ) : null,
+      })
+    : undefined;
+
   return (
     /**
      * **No top edge** (founder QA, 2026-11-12), the Settings root's fix for the same reason
@@ -357,7 +380,25 @@ export default function ActivityScreen() {
            *
            * Awards and goals keep the compact row, exactly as the Feed draws them.
            */}
-          {takesFeedCard(event) ? (
+          {event.type === 'follow_added' ? (
+            /**
+             * **A follow story's conversation** (Workstream C, 2026-11-19). The Feed's
+             * compact row, with its heart: the thread is directly below, so no comment
+             * button, for the reason the title row has none. The names open profiles and an
+             * aggregated story opens its list, exactly as on the Feed.
+             */
+            <FollowStoryRow
+              event={event}
+              onPressActor={
+                event.actorId === viewerId || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
+              }
+              onPressPerson={(username) => router.push(`/u/${username}`)}
+              onOpenList={() => setFollowListOpen(true)}
+              reaction={headerReaction}
+            />
+          ) : takesFeedCard(event) ? (
             <FeedCard
               leading
               // The Like alone — the Feed's control, mutation and picker — and no Comment
@@ -503,24 +544,7 @@ export default function ActivityScreen() {
                * been — see the hook above for the founder's report and why this one is a
                * different kind of thing. Every value here comes from the shared summary.
                */
-              reaction={
-                reactionsResolved
-                  ? activityReaction({
-                      summary,
-                      viewerId,
-                      onToggle: () => void toggleDefault(),
-                      onOpenPicker: () => setPickerOpen(true),
-                      onOpenDetail: () => setDetailOpen(true),
-                      picker: pickerOpen ? (
-                        <ReactionPill
-                          current={summary?.mine ?? null}
-                          onChoose={(kind) => void choose(kind)}
-                          onDismiss={() => setPickerOpen(false)}
-                        />
-                      ) : null,
-                    })
-                  : undefined
-              }
+              reaction={headerReaction}
             />
           )}
 
@@ -551,6 +575,8 @@ export default function ActivityScreen() {
             // series. Masking is decided against this and nothing else.
             mediaItemId={event.mediaItemId}
             title={event.title}
+            // A follow story's composer has no "Contains spoilers" toggle (Workstream C).
+            allowSpoilers={event.type !== 'follow_added'}
             viewerId={viewerId}
             watched={watched.data}
             onPressPerson={(username) => router.push(`/u/${username}`)}
@@ -585,6 +611,18 @@ export default function ActivityScreen() {
                 router.push(`/title/${mediaItemId}`);
               }}
               onClose={() => setWatchlistGroupFor(null)}
+            />
+          ) : null}
+
+          {followListOpen && event.type === 'follow_added' ? (
+            <FollowStorySheet
+              event={event}
+              viewerId={viewerId}
+              onPressPerson={(username) => {
+                setFollowListOpen(false);
+                router.push(`/u/${username}`);
+              }}
+              onClose={() => setFollowListOpen(false)}
             />
           ) : null}
 

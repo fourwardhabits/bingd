@@ -1,7 +1,8 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { ActivityRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { followTail } from './activity';
@@ -308,5 +309,213 @@ describe('where the row ends', () => {
     expect(row.borderBottomColor).toBe(theme.border.hairline);
     expect(row.paddingHorizontal).toBe(theme.layout.gutter);
     expect(row.paddingVertical).toBe(theme.space[3]);
+  });
+});
+
+/**
+ * **Reactions and comments** (Workstream C, founder 2026-11-19), on the Feed's one labelled
+ * engagement row (`EngagementRow`), as every other post has them.
+ *
+ * Who may engage is the server's (`_follow_story_open_to`, asserted against real policies in
+ * `supabase/tests/follow-story-engagement.test.mjs`). What only the client can get wrong is
+ * here: the controls exist when asked for, are labelled, say whose activity they are about,
+ * are real 44pt targets, and pressing one never opens the list underneath it.
+ */
+describe('reacting and commenting', () => {
+  const reaction = (over: Record<string, unknown> = {}) => ({
+    count: 0,
+    mineGlyph: null,
+    onPress: jest.fn(),
+    onLongPress: jest.fn(),
+    onPressSummary: jest.fn(),
+    ...over,
+  });
+
+  it('draws no controls for a caller that asks for none', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow event={story([person('Ravi')])} onPressPerson={() => {}} onOpenList={() => {}} />,
+    );
+
+    expect(view.queryByTestId('follow-story-actions')).toBeNull();
+  });
+
+  it('draws the labelled Like and Comment, and no Save or Share', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+        onPressComments={() => {}}
+      />,
+    );
+
+    expect(view.getByText('Like')).toBeTruthy();
+    expect(view.getByText('Comment')).toBeTruthy();
+    expect(
+      view.getByLabelText("React to Abi's activity about following Ravi. Long press for more reactions."),
+    ).toBeTruthy();
+    expect(view.getByLabelText("Comment on Abi's activity about following Ravi")).toBeTruthy();
+    expect(view.queryByTestId('follow-story-save')).toBeNull();
+    expect(view.queryByTestId('follow-story-share')).toBeNull();
+  });
+
+  it('counts the conversation, and names the reader’s own reaction', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi'), person('Ben')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction({ count: 3, mineGlyph: '❤️', mineLabel: 'Liked' })}
+        onPressComments={() => {}}
+        commentCount={2}
+      />,
+    );
+
+    // The Feed's count grammar since #370: the word, then the count in parentheses.
+    expect(within(view.getByTestId('follow-story-like')).getByText('Liked (3)')).toBeTruthy();
+    expect(within(view.getByTestId('follow-story-comment')).getByText('Comment (2)')).toBeTruthy();
+    expect(view.getByLabelText('3 reactions. See who reacted.')).toBeTruthy();
+    expect(
+      view.getByLabelText("2 comments on Abi's activity about following Ravi and 1 other. Open them."),
+    ).toBeTruthy();
+  });
+
+  it('never opens the list from a control, on a story that has one', async () => {
+    const onOpenList = jest.fn();
+    const onPressComments = jest.fn();
+    const r = reaction();
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi'), person('Ben')])}
+        onPressPerson={() => {}}
+        onOpenList={onOpenList}
+        reaction={r}
+        onPressComments={onPressComments}
+      />,
+    );
+
+    await fireEvent.press(view.getByTestId('follow-story-like'));
+    await fireEvent(view.getByTestId('follow-story-like'), 'longPress');
+    await fireEvent.press(view.getByTestId('follow-story-comment'));
+
+    expect(r.onPress).toHaveBeenCalledTimes(1);
+    expect(r.onLongPress).toHaveBeenCalledTimes(1);
+    expect(onPressComments).toHaveBeenCalledTimes(1);
+    expect(onOpenList).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByLabelText('Abi followed Ravi and 1 other'));
+    expect(onOpenList).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives each control the shared 44pt column', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+        onPressComments={() => {}}
+      />,
+    );
+
+    for (const id of ['follow-story-like', 'follow-story-comment']) {
+      const node = view.getByTestId(id);
+      const style = StyleSheet.flatten(
+        typeof node.props.style === 'function' ? node.props.style({ pressed: false }) : node.props.style,
+      );
+      expect(style.minHeight).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      expect(style.minWidth ?? theme.layout.minTapTarget).toBeGreaterThanOrEqual(theme.layout.minTapTarget);
+      expect([style.flexGrow, style.flexBasis]).toEqual([1, 0]);
+    }
+  });
+
+  it('keeps the count and the way to who reacted, for a reader who may not react too', async () => {
+    const r = reaction({ count: 2, canReact: false });
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={r}
+        onPressComments={() => {}}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-like')).toBeNull();
+    await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
+    expect(r.onPressSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no count when nobody has reacted', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={reaction()}
+      />,
+    );
+
+    expect(view.queryByTestId('follow-story-reactions')).toBeNull();
+  });
+
+  /**
+   * **The same controls as every other supported Feed post** (founder, 2026-11-19): the
+   * follow row and an award row (`ActivityRow` `labelledActions`) draw the same summary
+   * sentence and the same labelled row, at the same edge, with the same columns.
+   */
+  it('matches an award row: summary sentence, labelled row, same edge and columns', async () => {
+    const shared = reaction({
+      count: 3,
+      summaryForms: ['Priya and 2 others like this', '3 reactions'],
+      summaryGlyphs: ['❤️'],
+    });
+    const follow = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+        reaction={shared}
+        onPressComments={() => {}}
+      />,
+    );
+    const award = await renderWithProviders(
+      <ActivityRow
+        actorName="Abi"
+        verb="earned"
+        title="Tourist"
+        tail="award"
+        year={null}
+        timeLabel="1h"
+        onPressTitle={() => {}}
+        labelledActions
+        reaction={shared}
+        onPressComments={() => {}}
+      />,
+    );
+
+    // The summary sentence, worded the same on both.
+    expect(follow.getByLabelText('Priya and 2 others like this. See who reacted.')).toBeTruthy();
+    expect(award.getByLabelText('Priya and 2 others like this. See who reacted.')).toBeTruthy();
+
+    const flat = (node: { props: { style?: unknown } }): ViewStyle =>
+      StyleSheet.flatten(
+        (typeof node.props.style === 'function'
+          ? (node.props.style as (s: { pressed: boolean }) => unknown)({ pressed: false })
+          : node.props.style) as StyleProp<ViewStyle>,
+      );
+    // The row sits at the same edge.
+    const followRow = flat(follow.getByTestId('follow-story-actions'));
+    const awardRow = flat(award.getByTestId('activity-actions'));
+    expect(followRow.marginHorizontal).toBe(awardRow.marginHorizontal);
+    // And every column is the same column.
+    expect(flat(follow.getByTestId('follow-story-like'))).toEqual(flat(award.getByTestId('activity-like')));
+    expect(flat(follow.getByTestId('follow-story-comment'))).toEqual(
+      flat(award.getByTestId('activity-comment')),
+    );
+    // The same words as the award row, counts included (#370's `Like (3)`).
+    expect(within(follow.getByTestId('follow-story-like')).getByText('Like (3)')).toBeTruthy();
+    expect(within(award.getByTestId('activity-like')).getByText('Like (3)')).toBeTruthy();
+    expect(within(follow.getByTestId('follow-story-comment')).getByText('Comment')).toBeTruthy();
   });
 });

@@ -55,6 +55,12 @@ export type CommentThreadProps = {
   mediaItemId: string | null;
   /** The full display title, for the reveal control's label. */
   title: string | null;
+  /**
+   * Whether the composer offers "Contains spoilers". False on a follow story (Workstream C,
+   * 2026-11-19): a post about who somebody followed has no title to spoil. Defaults to true,
+   * so every other thread is unchanged.
+   */
+  allowSpoilers?: boolean;
   viewerId: string;
   /** Which exact media items the viewer has watched — `useWatched`'s answer. */
   watched: Set<string> | undefined;
@@ -179,6 +185,7 @@ export function CommentThread({
   eventId,
   mediaItemId,
   title,
+  allowSpoilers = true,
   viewerId,
   watched,
   onPressPerson,
@@ -1151,26 +1158,28 @@ export function CommentThread({
 
         <View style={styles.composerActions}>
           {/* The author's claim about their own writing, set before it is posted. */}
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: spoilers }}
-            accessibilityLabel="Mark this comment as containing spoilers"
-            onPress={() => {
-              newIntent();
-              setSpoilers((value) => !value);
-            }}
-            hitSlop={theme.space[2]}
-            style={({ pressed }) => [styles.spoilerToggle, pressed && styles.pressed]}
-          >
-            <Ionicons
-              name={spoilers ? 'eye-off' : 'eye-off-outline'}
-              size={theme.layout.icon.sm}
-              color={spoilers ? theme.semantic.action : theme.text.secondary}
-            />
-            <Text variant="caption" tone={spoilers ? 'action' : 'secondary'}>
-              Contains spoilers
-            </Text>
-          </Pressable>
+          {allowSpoilers ? (
+            <Pressable
+              accessibilityRole="switch"
+              accessibilityState={{ checked: spoilers }}
+              accessibilityLabel="Mark this comment as containing spoilers"
+              onPress={() => {
+                newIntent();
+                setSpoilers((value) => !value);
+              }}
+              hitSlop={theme.space[2]}
+              style={({ pressed }) => [styles.spoilerToggle, pressed && styles.pressed]}
+            >
+              <Ionicons
+                name={spoilers ? 'eye-off' : 'eye-off-outline'}
+                size={theme.layout.icon.sm}
+                color={spoilers ? theme.semantic.action : theme.text.secondary}
+              />
+              <Text variant="caption" tone={spoilers ? 'action' : 'secondary'}>
+                Contains spoilers
+              </Text>
+            </Pressable>
+          ) : null}
 
           {/* Only once it is close enough to matter. A counter that is always there
               turns a remark into a form. */}

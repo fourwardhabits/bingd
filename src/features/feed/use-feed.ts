@@ -747,9 +747,10 @@ async function oneActivity(eventId: string, followed = false): Promise<FeedItem 
     .from('feed_events')
     .select(ACTIVITY_SELECT)
     .eq('id', eventId)
-    // The profile set, which is the right one here: this exists for the comment-thread
-    // page, and a follow story carries no comments to open one from.
-    .in('type', [...PROFILE_ACTIVITY_TYPES])
+    // The profile set plus follow stories, which carry a conversation since Workstream C
+    // (2026-11-19). `hydrate` drops a follow story with nobody the reader may see, so a
+    // story closed to them (20261201000100, Q3) is "no longer available" here too.
+    .in('type', [...PROFILE_ACTIVITY_TYPES, 'follow_added'])
     .limit(1);
   if (error) throw error;
 

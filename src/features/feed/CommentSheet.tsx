@@ -13,6 +13,8 @@ export type CommentSheetProps = {
   mediaItemId: string | null;
   /** The full display title, for the reveal control's label. */
   title: string | null;
+  /** See `CommentThreadProps.allowSpoilers`. */
+  allowSpoilers?: boolean;
   viewerId: string;
   /** Which exact media items the viewer has watched — `useWatched`'s answer. */
   watched: Set<string> | undefined;
@@ -39,6 +41,7 @@ export function CommentSheet({
   eventId,
   mediaItemId,
   title,
+  allowSpoilers,
   viewerId,
   watched,
   onClose,
@@ -85,6 +88,7 @@ export function CommentSheet({
         eventId={eventId}
         mediaItemId={mediaItemId}
         title={title}
+        allowSpoilers={allowSpoilers}
         viewerId={viewerId}
         watched={watched}
         onPressPerson={onPressPerson}
