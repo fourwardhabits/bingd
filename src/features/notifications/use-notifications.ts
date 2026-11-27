@@ -1087,6 +1087,38 @@ const activityNoun = (type: string | null): string =>
 export function sentenceFor(row: Notification, subject: string | null): InboxSentence {
   const noun = activityNoun(row.subjectActivityType);
 
+  /**
+   * **A follow story** (Workstream C, 2026-11-19). It has no title, so the activity is
+   * named instead: "reacted to your follow activity". `subjectActivityType` is the
+   * recipient's *own* activity's type and nobody else's (`my_notifications` joins the event
+   * only for its owner on these kinds), so this never describes somebody else's story as
+   * "yours". A reply is about the reader's comment, as it is everywhere else.
+   */
+  if (row.subjectActivityType === 'follow_added') {
+    if (row.kind === 'reaction') {
+      return { lead: 'reacted to your follow activity', subject: null, tail: null };
+    }
+    /**
+     * The same precedence as every other comment row below (#365, 2026-11-22): a reply in
+     * a thread on the reader's own story is a reply, never "commented on". A post author's
+     * follow-up never reaches here, because `subjectActivityType` is set only for the
+     * story's owner.
+     */
+    if (row.kind === 'comment') {
+      return {
+        lead: row.commentIsReply
+          ? 'replied to your comment'
+          : row.commentUnderMine
+            ? 'replied under your comment'
+            : row.commentInThread
+              ? 'replied to a comment on your follow activity'
+              : 'commented on your follow activity',
+        subject: null,
+        tail: null,
+      };
+    }
+  }
+
   if (subject) {
     switch (row.kind) {
       case 'comment':

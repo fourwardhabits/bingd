@@ -487,6 +487,11 @@ describe('the guard is wired in, not merely present', () => {
      * and returns a group id only when `can_view_profile` allows the group's actor.
      */
     'feed_event_presentation',
+    /**
+     * 20261201000100. The caller-relative follow-story engagement predicate the
+     * `reactions_read` and `comments_read` policies call: `stable`, writes nothing.
+     */
+    'follow_story_open_to_me',
     'can_i_view',
     'watch_tag_visible',
     'list_by_id',
