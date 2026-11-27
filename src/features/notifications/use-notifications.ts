@@ -1098,9 +1098,21 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
     if (row.kind === 'reaction') {
       return { lead: 'reacted to your follow activity', subject: null, tail: null };
     }
+    /**
+     * The same precedence as every other comment row below (#365, 2026-11-22): a reply in
+     * a thread on the reader's own story is a reply, never "commented on". A post author's
+     * follow-up never reaches here, because `subjectActivityType` is set only for the
+     * story's owner.
+     */
     if (row.kind === 'comment') {
       return {
-        lead: row.commentIsReply ? 'replied to your comment' : 'commented on your follow activity',
+        lead: row.commentIsReply
+          ? 'replied to your comment'
+          : row.commentUnderMine
+            ? 'replied under your comment'
+            : row.commentInThread
+              ? 'replied to a comment on your follow activity'
+              : 'commented on your follow activity',
         subject: null,
         tail: null,
       };

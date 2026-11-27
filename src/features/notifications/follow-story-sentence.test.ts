@@ -55,6 +55,15 @@ describe('a follow story notification', () => {
     ).toBe('replied to your comment');
   });
 
+  it('calls a reply in a thread on the story a reply, as every other post does', () => {
+    expect(
+      spokenSentence(sentenceFor(row({ kind: 'comment', commentUnderMine: true }), null)),
+    ).toBe('replied under your comment');
+    expect(
+      spokenSentence(sentenceFor(row({ kind: 'comment', commentInThread: true }), null)),
+    ).toBe('replied to a comment on your follow activity');
+  });
+
   it('leaves a mention as it always was', () => {
     expect(spokenSentence(sentenceFor(row({ kind: 'mention' }), null))).toBe(
       'mentioned you in a comment',
