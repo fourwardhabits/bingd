@@ -1,0 +1,28 @@
+{
+  "files": {
+    "apple-1206x2622/01-movies-tv.png": {
+      "sha256": "c13644dd1e5ff2888c8e1509bb2f9ad86933311717a97da8ef3e75bee86e6ddb",
+      "bytes": 3029117
+    },
+    "apple-1206x2622/02-head-to-head.png": {
+      "sha256": "6e0e37bb08b58090945f38ed05c6f2bef49e82aab1a38f813de02c0b72866830",
+      "bytes": 1855880
+    },
+    "apple-1206x2622/03-friends.png": {
+      "sha256": "2fac919d9f2fb9428e9ca8080021cf2f97f564183ca82fc4d51f3e2112e34fe7",
+      "bytes": 1476468
+    },
+    "apple-1206x2622/04-watchlist.png": {
+      "sha256": "00887a8a5ba1bc58a40ed5fa7da15d1ce1925325827a28dae5cae560689485b6",
+      "bytes": 2109805
+    },
+    "apple-1206x2622/05-your-year.png": {
+      "sha256": "e890d2fdabd8837009e75fd9123fd9860d9128d0807158db3d9db84b85db9cc7",
+      "bytes": 764461
+    },
+    "apple-1206x2622/06-for-you.png": {
+      "sha256": "a4aed43b9b206c077f1969f632f6e946148b413aeefaeb927d7aa7b32311319e",
+      "bytes": 3004985
+    }
+  }
+}
