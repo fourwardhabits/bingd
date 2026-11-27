@@ -89,5 +89,76 @@ export default function suite() {
       assert.equal(await visible(other), 1, 'still open to everybody else');
       assert.equal(await visible(author), 1, 'and to the author');
     });
+
+    /**
+     * FE2. Q1's freeze against a follow that races the first engagement (20261201000200,
+     * Codex on #390).
+     *
+     * The first reaction (and, in a second case, the first comment) is held open after it
+     * recorded the freeze. The author then follows somebody new. That follow must wait on the
+     * author's `follow_story:` key, the one `_post_follow_activity` takes before it looks for
+     * an open story, and once the engagement commits it must open a NEW story. Without the
+     * lock in the writers, the follow's lookup reads "not frozen" from its snapshot, waits
+     * only on the story row's key-share lock and then appends to the engaged story.
+     */
+    for (const [label, engage] of [
+      ['reaction', (story) => [`set_reaction($1, $2, 'love')`, story]],
+      ['comment', (story) => [`add_comment($1, $2, 'first', false, null, '{}'::uuid[])`, story]],
+    ]) {
+      it(`FE2: a follow racing the first ${label} opens a new story, and the engaged one keeps its people`, async () => {
+        const { db, fx } = ctx;
+        const author = await fx.createUser();
+        const member = await fx.createUser();
+        const late = await fx.createUser();
+        const fan = await fx.createUser();
+
+        const setup = await db.session('setup');
+        await setup.actAs(fan);
+        await call(setup, `follow($1, $2)`, [await newOp(db), author]);
+        await setup.actAs(author);
+        await call(setup, `follow($1, $2)`, [await newOp(db), member]);
+        await setup.end();
+        const [{ id: story }] = await db.rows(
+          `select id from feed_events where actor_id = $1 and type = 'follow_added'`,
+          [author],
+        );
+        const [{ k: storyKey }] = await db.rows(
+          `select hashtextextended('follow_story:' || $1::text, 0)::text as k`,
+          [author],
+        );
+
+        const engager = await db.session('engager');
+        const follower = await db.session('author');
+        try {
+          await engager.actAs(fan);
+          await engager.begin();
+          const [sql, id] = engage(story);
+          await call(engager, sql, [await newOp(db), id]);
+
+          await follower.actAs(author);
+          await follower.begin();
+          const following = fire(follower, `follow($1, $2)`, [await newOp(db), late]);
+          await follower.awaitBlocked({ on: 'advisory', advisoryKey: storyKey });
+
+          await engager.commit();
+          assert.equal((await following).rows[0].r.state, 'approved');
+          await follower.commit();
+        } finally {
+          await engager.end();
+          await follower.end();
+        }
+
+        const people = await db.rows(
+          `select ft.event_id, ft.followed_id from feed_follow_targets ft
+             join feed_events e on e.id = ft.event_id
+            where e.actor_id = $1 and e.type = 'follow_added'`,
+          [author],
+        );
+        const inEngaged = people.filter((p) => p.event_id === story).map((p) => p.followed_id);
+        assert.deepEqual(inEngaged, [member], 'the engaged story still names only who it named');
+        const lateStory = people.find((p) => p.followed_id === late)?.event_id;
+        assert.ok(lateStory && lateStory !== story, 'the new follow is a new story');
+      });
+    }
   });
 }
