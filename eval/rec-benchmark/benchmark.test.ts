@@ -24,6 +24,7 @@ import {
   stratifiedSplit,
   unitsOf,
   verdictFor,
+  type Suite,
   type Unit,
 } from './benchmark';
 
@@ -492,7 +493,7 @@ describe('end to end on a small synthetic export', () => {
     }
     const report = renderBenchmark(results, hybridReport(synthetic), 'synthetic (small)');
     expect(report).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
-    expect(report).toMatch(/NOT (MEASURABLE|REPLAYED)/);
+    expect(report).toMatch(/Neighbour availability/);
   });
 
   it('Suite B runs too', () => {
@@ -510,7 +511,17 @@ describe('end to end on a small synthetic export', () => {
  * 4,000-person world takes hours through five splits, four engines and three launch seeds, and
  * the real cohort is tens of people, so this size is the representative one.
  */
-const REFERENCE_WORLD = { ...DEFAULT_WORLD, titles: 1500, people: 300 };
+const REFERENCE_WORLD = {
+  ...DEFAULT_WORLD,
+  titles: 1500,
+  // REC_BENCHMARK_PEOPLE: a smaller synthetic cohort, e.g. 45 to mimic today's real cohort size.
+  people: Number(process.env.REC_BENCHMARK_PEOPLE ?? 300),
+};
+/** REC_BENCHMARK_SUITES: a comma list of A, B, C5, C10 (default all four). */
+const SUITES: Suite[] = String(process.env.REC_BENCHMARK_SUITES ?? 'A,B,C5,C10')
+  .split(',')
+  .map((x: string) => x.trim())
+  .filter((x): x is Suite => ['A', 'B', 'C5', 'C10'].includes(x));
 
 const RUNNER = process.env.REC_BENCHMARK === '1';
 (RUNNER ? describe : describe.skip)('REC_BENCHMARK_RUNNER', () => {
@@ -524,15 +535,48 @@ const RUNNER = process.env.REC_BENCHMARK === '1';
           })();
     const label =
       process.env.REC_BENCHMARK_SYNTHETIC === '1'
-        ? 'synthetic reference world (300 people, 1,500 titles)'
+        ? `synthetic reference world (${REFERENCE_WORLD.people} people, 1,500 titles)`
         : 'real export';
-    const results = [...benchmark(input, 'A'), ...benchmark(input, 'B')];
+    const results = SUITES.flatMap((suite) => benchmark(input, suite));
     const report = renderBenchmark(results, hybridReport(input), label);
     // eslint-disable-next-line no-console -- the runner's whole output
     console.log(report);
     if (process.env.REC_BENCHMARK_OUT) {
       mkdirSync(process.env.REC_BENCHMARK_OUT, { recursive: true });
       writeFileSync(join(process.env.REC_BENCHMARK_OUT, 'benchmark.md'), report);
+      // Aggregates only (means and intervals over people): the same numbers as the report.
+      writeFileSync(
+        join(process.env.REC_BENCHMARK_OUT, 'benchmark.json'),
+        JSON.stringify(
+          results.map(
+            ({
+              medium,
+              suite,
+              people,
+              lowEvidence,
+              cases,
+              table,
+              paired,
+              pairedMeta,
+              verdict,
+              hybridVerdict,
+              hybridCoverage,
+            }) => ({
+              medium,
+              suite,
+              people,
+              lowEvidence,
+              cases,
+              table,
+              paired,
+              pairedMeta,
+              verdict,
+              hybridVerdict,
+              hybridCoverage,
+            }),
+          ),
+        ),
+      );
     }
-  }, 3_600_000);
+  }, 14_400_000);
 });
