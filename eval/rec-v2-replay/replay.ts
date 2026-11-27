@@ -801,9 +801,9 @@ export function neighboursOf(account: Account, w: World): Neighbour[] {
   const index = raterIndex(w);
   const hits = new Map<number, number>();
   for (const id of probe) {
-    const raters = (index.byTitle.get(id) ?? []).filter((u) => u !== account.key);
-    for (const u of raters.slice(0, NEIGHBOUR.ratersPerTitle))
-      hits.set(u, (hits.get(u) ?? 0) + 1);
+    // As the SQL: the sample is capped first and the reader dropped from it afterwards.
+    const raters = (index.byTitle.get(id) ?? []).slice(0, NEIGHBOUR.ratersPerTitle);
+    for (const u of raters) if (u !== account.key) hits.set(u, (hits.get(u) ?? 0) + 1);
   }
   const shortlist = [...hits]
     .filter(([u]) => isPublic.has(u))

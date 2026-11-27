@@ -108,8 +108,8 @@ const POSITIVE: Bucket = 'loved';
  * - `v2_hybrid` (added 2026-11-27): V2 metadata plus taste-neighbour evidence, through a
  *   mirror of `_refresh_taste_neighbours` / `collaborative_candidates` computed from the
  *   reader's **training** rankings only (`collaborativeMirror`), scored with the shipped
- *   `v2_hybrid` weights. It is a verdict candidate only where it is measurable: see
- *   {@link hybridVerdictFor}. Below that it is reported as coverage, never as better or worse.
+ *   `v2_hybrid` weights. It has its own whole-engine call ({@link hybridVerdictFor}); where the
+ *   collaborative source rarely fires, no difference is attributed to it.
  */
 export type BenchEngine =
   'popularity' | 'v1' | 'v2_metadata' | 'v2_metadata_social' | 'v2_hybrid';
@@ -390,7 +390,17 @@ export function forwardSplit(
 
 /** Other people's rankings cut at `day`, for Suite B. The reader's own training rows are unchanged. */
 export function frozenWorld(doc: ReplayExport, day: number): World {
-  return worldOf({ ...doc, rankings: doc.rankings.filter((r) => r.day <= day) });
+  // Each account's surviving ladders are renumbered 1..n per pool, as the reader's own training
+  // is: a ladder cut at a day with its old positions kept would score every survivor against
+  // band sizes it no longer has (Codex P1 on #392: the hybrid's Match and opinions read them).
+  const byUser = new Map<number, ReplayRanking[]>();
+  for (const r of doc.rankings) {
+    if (r.day > day) continue;
+    const list = byUser.get(r.u);
+    if (list) list.push(r);
+    else byUser.set(r.u, [r]);
+  }
+  return worldOf({ ...doc, rankings: [...byUser.values()].flatMap((rows) => renumber(rows)) });
 }
 
 // ---------------------------------------------------------------------------
@@ -838,6 +848,8 @@ type PerPerson = {
   key: number;
   half: 'dev' | 'final';
   segment: string[];
+  /** Per evaluated split: whether the hybrid's collaborative source endorsed anything. */
+  collabFlags: boolean[];
   m1: Partial<Record<BenchEngine, Record<string, number | null>>>;
   m2: Partial<Record<BenchEngine, WallMetrics>>;
 };
@@ -862,10 +874,23 @@ export type MediumResult = {
   >;
   /** The pre-registered verdict (Suites A and B). Null for the descriptive cold-start suites. */
   verdict: Verdict | null;
-  /** V2 hybrid's own call under the same rule, gated on coverage ({@link hybridVerdictFor}). */
+  /** V2 hybrid's own whole-engine call under the same rule ({@link hybridVerdictFor}). */
   hybridVerdict: Verdict | null;
-  /** Final half: people with at least one endorsed collaborative row in this medium. */
-  hybridCoverage: { people: number; withRows: number };
+  hybridCoverage: HybridCoverage;
+};
+
+/**
+ * Final half, one medium: how often the hybrid's collaborative source had anything to add.
+ * Counted per evaluated (person, split) pair, because removing different titles can move a
+ * person's overlap across the five-unit threshold (Codex P2 on #392). `withRows` is the people
+ * with an endorsed row in **every** split, `withoutRows` in none.
+ */
+export type HybridCoverage = {
+  people: number;
+  withRows: number;
+  withoutRows: number;
+  personSplits: number;
+  personSplitsWithRows: number;
 };
 
 export type Suite = 'A' | 'B' | 'C5' | 'C10';
@@ -886,16 +911,27 @@ const mean = (xs: readonly (number | null | undefined)[]) => {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 };
 
+/** Whether the hybrid's collaborative source endorses anything for this split (training only). */
+const hasCollabRows = (split: Split, w: World) =>
+  [...collaborativeMirror(split.train, w, split.medium).rows.values()].some(
+    (e) => e.support > 0,
+  );
+
+/**
+ * The collaborative segment over **every** evaluated split, so a segment's metrics (averaged over
+ * the person's splits) are exactly the splits on which its condition holds: `with_collab_rows`
+ * has rows in all of them, `no_collab_rows` in none, `mixed_collab_rows` otherwise.
+ */
+const collabSegment = (flags: readonly boolean[]) =>
+  flags.every(Boolean)
+    ? 'with_collab_rows'
+    : flags.some(Boolean)
+      ? 'mixed_collab_rows'
+      : 'no_collab_rows';
+
 function segmentsOf(split: Split, w: World): string[] {
   const n = split.train.visible.length;
   const out = ['all', n <= 10 ? 'sparse' : n <= 30 ? 'medium' : 'heavy'];
-  // Whether the hybrid had anything to add for this person in this medium (training only).
-  const collab = collaborativeMirror(split.train, w, split.medium);
-  out.push(
-    [...collab.rows.values()].some((e) => e.support > 0)
-      ? 'with_collab_rows'
-      : 'no_collab_rows',
-  );
   const own = [...split.train.visible.map((r) => r.m)]
     .map((id) => w.media.get(id))
     .filter(Boolean) as ReplayMedia[];
@@ -995,31 +1031,38 @@ export function verdictFor(
   };
 }
 
-/** V2 hybrid is a verdict candidate only when at least this share of final-half people get a row. */
+/**
+ * Below this share of final-half (person, split) pairs with an endorsed row, a difference between
+ * the hybrid and V2 metadata cannot be attributed to the collaborative source.
+ */
 export const HYBRID_MEASURABLE_SHARE = 0.5;
 
+export const collaborativeMeasurable = (c: HybridCoverage) =>
+  c.personSplits > 0 && c.personSplitsWithRows / c.personSplits >= HYBRID_MEASURABLE_SHARE;
+
 /**
- * **V2 hybrid's own call** (added 2026-11-27, before any real export was read with it). The same
- * pre-registered rule as {@link verdictFor}, with V2 hybrid as the only candidate, and one gate
- * first: if fewer than {@link HYBRID_MEASURABLE_SHARE} of the final-half people have even one
- * endorsed collaborative row in the medium, the engine is the V2 metadata wall for most of
- * them, and the call is INSUFFICIENT_EVIDENCE (not measurable), never a win or a loss.
- * Kept apart from the original verdict so the original pre-registered call is unchanged.
+ * **V2 hybrid's own call** (added 2026-11-27, before any real export was read with it): the
+ * pre-registered rule of {@link verdictFor}, with V2 hybrid as the only candidate. It is the
+ * **whole-engine** call and is kept whatever the collaborative coverage (Codex P2 on #392: low
+ * coverage must not hide evidence that the shipped engine is worse). Coverage is reported beside
+ * it: below {@link HYBRID_MEASURABLE_SHARE} the reason says that no difference, either way, can be
+ * attributed to the collaborative source. Kept apart from the original verdict, which is unchanged.
  */
 export function hybridVerdictFor(
   result: Pick<MediumResult, 'paired' | 'table'>,
   people: number,
-  coverage: { people: number; withRows: number },
+  coverage: HybridCoverage,
 ): Verdict {
-  if (coverage.people === 0 || coverage.withRows / coverage.people < HYBRID_MEASURABLE_SHARE) {
-    return {
-      call: 'INSUFFICIENT_EVIDENCE',
-      engine: null,
-      reason: `not measurable: ${coverage.withRows}/${coverage.people} final-half people have any endorsed collaborative row; at least ${HYBRID_MEASURABLE_SHARE * 100}% are needed`,
-    };
-  }
   const v = verdictFor(result, people, ['v2_hybrid']);
-  return v.engine === 'v2_hybrid' ? { ...v, call: 'TRIAL_OTHER_TESTED_ENGINE' } : v;
+  const share = `${coverage.personSplitsWithRows}/${coverage.personSplits} final-half person-splits have an endorsed collaborative row`;
+  const note = collaborativeMeasurable(coverage)
+    ? `; ${share}`
+    : `; collaborative source not measurable: ${share} (at least ${HYBRID_MEASURABLE_SHARE * 100}% are needed to attribute any difference to it)`;
+  return {
+    ...v,
+    call: v.engine === 'v2_hybrid' ? 'TRIAL_OTHER_TESTED_ENGINE' : v.call,
+    reason: `${v.reason}${note}`,
+  };
 }
 
 /**
@@ -1088,10 +1131,12 @@ export function benchmark(input: unknown, suite: Suite = 'A'): MediumResult[] {
         lowEvidence += 1;
         continue;
       }
+      const collabFlags = splits.map(({ split, w }) => hasCollabRows(split, w));
       const person: PerPerson = {
         key,
         half: halfOf(key),
-        segment: segmentsOf(splits[0]!.split, splits[0]!.w),
+        segment: [...segmentsOf(splits[0]!.split, splits[0]!.w), collabSegment(collabFlags)],
+        collabFlags,
         m1: {},
         m2: {},
       };
@@ -1192,11 +1237,16 @@ export function benchmark(input: unknown, suite: Suite = 'A'): MediumResult[] {
     }
     const finalPeople = people.filter((p) => p.half === 'final').length;
     const partial = { table, paired };
-    const coverage = {
+    const finals = people.filter((p) => p.half === 'final');
+    const coverage: HybridCoverage = {
       people: finalPeople,
-      withRows: people.filter(
-        (p) => p.half === 'final' && p.segment.includes('with_collab_rows'),
-      ).length,
+      withRows: finals.filter((p) => p.collabFlags.every(Boolean)).length,
+      withoutRows: finals.filter((p) => !p.collabFlags.some(Boolean)).length,
+      personSplits: finals.reduce((n, p) => n + p.collabFlags.length, 0),
+      personSplitsWithRows: finals.reduce(
+        (n, p) => n + p.collabFlags.filter(Boolean).length,
+        0,
+      ),
     };
     const preRegistered = suite === 'A' || suite === 'B';
     results.push({
@@ -1361,7 +1411,7 @@ export function renderBenchmark(
       line(`| ${engine} | ${SECONDARY.map(([k]) => f(row[k], false, 2)).join(' | ')} |`);
     line();
     line(
-      `V2 hybrid coverage, final half: ${r.hybridCoverage.withRows}/${r.hybridCoverage.people} people have at least one endorsed collaborative row in this medium.`,
+      `V2 hybrid coverage, final half: ${r.hybridCoverage.personSplitsWithRows}/${r.hybridCoverage.personSplits} person-splits have an endorsed collaborative row in this medium (${r.hybridCoverage.withRows} people in every split, ${r.hybridCoverage.withoutRows} in none, of ${r.hybridCoverage.people}); ${collaborativeMeasurable(r.hybridCoverage) ? 'measurable' : 'not measurable'}.`,
     );
     line();
     line('### V2 variants against V2 metadata (paired, all people)');

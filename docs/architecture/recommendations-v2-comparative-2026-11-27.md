@@ -97,9 +97,13 @@ measurable), any cold-start slice, any interval on R2, any by-source attribution
 4. **New metrics:** already-met share of the wall, languages on the wall, pool recall via the
    collaborative source, neighbours and endorsed rows per person; paired differences against
    V2 Metadata for the two variants; a `with_collab_rows` segment.
-5. **The hybrid's own verdict**, under the pre-registered rule, gated on coverage: it is a
-   candidate only if at least half of the final-half people in a medium get one endorsed row.
-   The original verdict (V2 Metadata, V2 Metadata + Social) is unchanged.
+5. **The hybrid's own whole-engine verdict** under the pre-registered rule, with collaborative
+   coverage reported beside it: the share of final-half (person, split) pairs with an endorsed
+   row. Below 50% no difference, either way, is attributed to the collaborative source. The
+   original verdict (V2 Metadata, V2 Metadata + Social) is unchanged.
+7. **After review** (§11): other people's ladders are renumbered when Suite B freezes them at a
+   cutoff, and the collaborative segment is defined over every evaluated split
+   (`with_collab_rows` in all, `no_collab_rows` in none, `mixed_collab_rows` otherwise).
 6. **Scale benchmark:** follows loaded for the measured readers, so V1's `social_candidates` is
    timed beside the V2 calls, with its plan under `--plans`.
 
@@ -138,9 +142,12 @@ Pool recall by source (levels): V1 = anchors 0.178 + social 0.154 + trending 0.0
 Hybrid: collaborative 0.113 replaces most of social. Languages on wall: V1 1.39, Metadata 1.91,
 + Social 1.72, Hybrid 1.86.
 
-Final-half verdicts (pre-registered): Films **INSUFFICIENT_EVIDENCE** (Suites A and B), the
-hybrid's call **INSUFFICIENT_EVIDENCE** (A: R@50 lower bound −0.045 fails non-inferiority;
-B: not measurable, 32/145 with rows).
+Final-half verdicts (pre-registered): Films **INSUFFICIENT_EVIDENCE** (Suites A and B). The
+hybrid's whole-engine call is **INSUFFICIENT_EVIDENCE** in both (A: pairwise +0.033 [0.003, 0.062]
+but R@50 −0.009 [−0.045, 0.023] fails non-inferiority; B: R@50 −0.019 [−0.051, 0.014], and its
+collaborative source fires in only 34/145 person-splits). For Films readers with an endorsed row
+in every split (160 of 281), the hybrid's R@50 over V1 is +0.026 [0.006, 0.047]; for those with
+none (90), it is V2 Metadata exactly, −0.071 [−0.127, −0.014].
 
 ### 4.2 TV, Suite A, 179 people (series units)
 
@@ -154,8 +161,9 @@ V1's TV pool recall is 0.132 anchors + **0.318 social** + 0.038 trending. In thi
 TMDB list holds about five shows, so the follow graph is most of V1's TV retrieval; real TMDB show
 lists hold 20. **This is the assumption that decides the synthetic TV result**, and R2 points the
 other way (+0.106). Whole-show and season rankers move alike (R@50 −0.168 and −0.222 under V2
-Metadata; +0.109 and +0.078 under the hybrid). Verdict: TV **KEEP_V1** (A and B); hybrid
-INSUFFICIENT_EVIDENCE (A, final half R@50 +0.038 [−0.030, 0.100]) and not measurable in B.
+Metadata; +0.109 and +0.078 under the hybrid). Verdict: TV **KEEP_V1** (A and B). Hybrid:
+INSUFFICIENT_EVIDENCE in A (final half R@50 +0.038 [−0.030, 0.100]), **KEEP_V1** in B (R@50
+−0.204 [−0.365, −0.052], collaborative source in 14/42 person-splits).
 
 ### 4.3 Sparse, established and non-English readers (Films, Suite A)
 
@@ -189,18 +197,23 @@ V2 Metadata +0.250 over V1 (a smaller pool repeats), the prototype −0.016.
 | TV, V2 Metadata (= + Social, = Hybrid) | −0.292 | −0.298 [−0.425, −0.183] | −0.298 | +0.088 | |
 
 At 5 rankings V1's Films pool recall is 0.136 social of 0.212: a new reader's recall is mostly
-their followees. **V2 Hybrid has zero neighbours for every 5-ranking person, by construction**:
-a neighbour needs at least five shared series units *and* a Match above 55, so all five of the
-reader's rankings must be shared with the same person. 300-person results: §4.6.
+their followees. **V2 Hybrid found no neighbour for any 5-ranking person in these synthetic
+worlds.** That is observed, not structural (corrected after review): a neighbour needs at least
+five shared series units and a Match above 55, so all five of the reader's rankings must be shared
+with the same public account. Five identical judgements give a Match of 75, and a test now shows a
+5-ranking reader with two such neighbours getting an endorsed title. It is rare, not impossible;
+a real cohort whose new readers rank the same popular First Five titles could hit it more often.
+The 300-person results are in §4.6.
 
 ### 4.5 Collaborative neighbour availability
 
-| World | People with ≥ 2 neighbours (full histories) | Final-half people with an endorsed row, Films / TV | Hybrid call |
-|---|---|---|---|
-| 300 people, Suite A | — | 89/143, 78/98 | INSUFFICIENT_EVIDENCE (inconclusive) |
-| 300 people, Suite B (others frozen at the cutoff) | — | 32/145, 12/42 | not measurable |
-| 45 people (R2's size), Suite A | 17/45 | 6/21, 7/16 | not measurable |
-| any, 5 rankings | 0 | 0 | not measurable |
+| World | People with ≥ 2 neighbours (full histories) | Final-half person-splits with an endorsed row, Films / TV | Collaborative source measurable? | Hybrid whole-engine call, Films / TV |
+|---|---|---|---|---|
+| 300 people, Suite A | 202/300 | 440/715 (62%), 382/490 (78%) | yes / yes | INSUFFICIENT_EVIDENCE / INSUFFICIENT_EVIDENCE |
+| 300 people, Suite B (others frozen at the cutoff) | | 34/145, 14/42 | no / no | INSUFFICIENT_EVIDENCE / KEEP_V1 |
+| 45 people (R2's size), Suite A | 17/45 | 32/105, 35/80 | no / no | INSUFFICIENT_EVIDENCE / KEEP_V1 |
+| 45 people, Suite B | | 2/20, 1/10 | no / no | KEEP_V1 / too few people |
+| 45 and 300 people, 5 rankings (C5) | | 0/20, 0/19 and 0/143, 0/119 (observed) | no | descriptive only |
 
 Mean neighbours kept per person, Suite A: 9.8 (Films) and 15.8 (TV) at 300 people; 1.8 and 2.5
 at 45. In the 45-person world the hybrid's Films R@50 over V2 Metadata is +0.008 [−0.005, 0.023],
@@ -208,7 +221,18 @@ and over V1 −0.028 [−0.073, 0.009]. **At bingd's size the hybrid is V2 Metad
 
 ### 4.6 C5 and C10 at 300 people
 
-(filled below when the run completes)
+The reference world confirms the 45-person picture with tighter intervals.
+
+| Δ vs V1 | Films C5 (285) R@50 | Films C5 non-English | Films C10 (252) R@50 | TV C5 (221) R@50 | TV C10 (176) R@50 |
+|---|---|---|---|---|---|
+| V1 (level) | 0.215 | 0.041 | 0.218 | 0.390 | 0.435 |
+| V2 Metadata | **−0.092 [−0.113, −0.072]** | +0.091 | −0.063 [−0.085, −0.041] | −0.227 [−0.268, −0.187] | −0.243 [−0.297, −0.185] |
+| V2 Metadata + Social | +0.005 [0.001, 0.009] | +0.019 | +0.005 [−0.005, 0.017] | = V2 Metadata | = V2 Metadata |
+| V2 Hybrid | = V2 Metadata (0 neighbours) | +0.091 | −0.062 (0.28 neighbours per person) | = V2 Metadata | −0.238 |
+
+At 5 rankings V1's Films pool recall is 0.153 social of 0.233; repetition across launches rises
++0.244 under V2 Metadata and falls −0.029 under the prototype. Taste ordering (Mode 1) does not
+separate any engine at 5 or 10 rankings (all within ±0.016).
 
 ## 5. Performance and cost [local-bench]
 
@@ -247,9 +271,12 @@ rankers; worth a one-line rewrite (`auth.uid()` in the anti-join) before any sca
    Metadata's pool is V1's minus the titles only followees supplied. R2's −0.136 is consistent
    with that but was never attributed by source on real data, and was measured with the pre-fix
    mirror that inflated V1's social source.
-2. **Does Metadata + Social restore useful candidates?** Yes, on Films, in every synthetic suite:
-   R@50 +0.002 [−0.009, 0.013] (A), −0.006 [−0.026, 0.013] (B, final), −0.001 at 5 rankings, and
-   +0.146 over V2 Metadata for sparse readers. It keeps V2's taste ordering (Mode 1 identical).
+2. **Does Metadata + Social restore useful candidates?** On Films it restores the pool in every
+   synthetic suite (pool recall at or above V1's). On R@50 it is **non-inferior** (interval above
+   −0.02) in Suite A (+0.002 [−0.009, 0.013]), C5 (+0.005 [0.001, 0.009]) and C10 (+0.005
+   [−0.005, 0.017]) at 300 people, but **inconclusive** in Suite B (final half −0.006
+   [−0.026, 0.013]) and in the 45-person world (−0.007 [−0.022, 0.006]): an interval that contains
+   zero is not equivalence. Over V2 Metadata it adds +0.146 R@50 for sparse readers. It keeps V2's taste ordering (Mode 1 identical).
    It does nothing for TV, by design.
 3. **Do social candidates hurt multilingual discovery for sparse users?** Yes [synthetic]: they
    keep about a quarter of V2 Metadata's non-English gain for sparse readers (+0.018 of +0.076)
@@ -261,8 +288,8 @@ rankers; worth a one-line rewrite (`auth.uid()` in the anti-join) before any sca
    share. Neither is credible enough to decide TV.
 5. **Does Hybrid help at bingd's size?** It cannot be evaluated credibly. In a dense 300-person
    world it is the strongest TV engine (+0.089 R@50) and helps heavy Films readers (+0.031); at 45
-   people its coverage fails the gate in both media; at 5 rankings it has no neighbours at all.
-   No gain is claimed.
+   people its collaborative source fires too rarely to attribute anything to it; at 5 rankings no
+   synthetic reader had a neighbour. No gain is claimed.
 6. **Diversity vs relevance.** V2 Metadata's genre and language gains come with lower recall for
    sparse readers and more repetition across launches (+0.066 Films, +0.250 sparse); the prototype
    trades some diversity back for relevance. Nothing here optimises diversity.
@@ -270,8 +297,10 @@ rankers; worth a one-line rewrite (`auth.uid()` in the anti-join) before any sca
 ## 7. Decision
 
 **Recommended candidate for a future limited pilot: V2 Metadata + Social**, allowlist-only, and
-only after the real-history run in §8 passes. It is the only V2 variant that is non-inferior to V1
-on Films retrieval in every synthetic suite including the 5-ranking user, it keeps V2's taste
+only after the real-history run in §8 passes. **It is a hypothesis to test, not a proven
+winner.** It is the only V2 variant that restores V1's Films pool in every synthetic suite and is
+non-inferior on R@50 in Suites A, C5 and C10 (Suite B and the 45-person world are inconclusive,
+§6.2); it keeps V2's taste
 ordering and part of its language gain, the server already confines it to the allowlist, and its
 TV wall (V2 Metadata) is the one place real data (R2) points to a gain. **Nothing should be
 activated now:** no V2 variant has real evidence that clears the pre-registered rule, and R1 says
@@ -321,3 +350,18 @@ TV will probably read INSUFFICIENT_EVIDENCE; read directions and by-source table
 - **Rollback:** one `app_config` write, `v2_engine "v1"`; every client is back on V1 within one
   30-minute engine re-read (`use-engine.ts`), no release needed.
 - Any percentage rollout is a separate founder decision, after the real-history run.
+
+## 11. Independent review (Codex, PR #392)
+
+Review of `e543d867`. Five findings, all accepted; the affected suites were re-run.
+
+| # | Finding | Resolution |
+|---|---|---|
+| P1 | Suite B froze other people at the cutoff but kept their old ladder positions, so `scoresOf` scored survivors against band sizes they no longer had, corrupting the hybrid's Match and opinions | `frozenWorld` renumbers each account's surviving ladders per pool; test with a ladder ranked bottom-up. Suite B re-run: hybrid Films R@50 −0.020 → −0.019, coverage 32 → 34/145; V1, V2 Metadata and the prototype are unchanged (they never read others' positions) |
+| P2 | Low collaborative coverage suppressed the hybrid's whole-engine verdict, hiding evidence of harm | The whole-engine call is always reported; coverage is a separate statement about attribution. Suite B TV and the 45-person world now read KEEP_V1 for the hybrid |
+| P2 | The collaborative segment and coverage came from the first split only | Coverage counts every (person, split); segments are all / none / mixed over the evaluated splits |
+| P2 | "Zero neighbours at 5 rankings, by construction" is false (five identical judgements give a Match of 75) | Restated as observed in these worlds; a positive five-ranking test added |
+| P2 | Suite B Films interval for the prototype (−0.006 [−0.026, 0.013]) does not establish non-inferiority | §6.2 and §7 now say non-inferior in A, C5 and C10, inconclusive in B and at 45 people; the prototype is a hypothesis to test |
+
+Also aligned with the SQL: the hybrid mirror caps each probe title's rater sample before dropping
+the reader (no measurable change).

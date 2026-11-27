@@ -14,6 +14,7 @@ import {
   assertNoLeak,
   benchmark,
   coldSplit,
+  frozenWorld,
   hybridVerdictFor,
   modeOne,
   modeTwo,
@@ -223,33 +224,54 @@ describe('Suite C: cold start at exactly k rankings', () => {
   });
 });
 
-describe('V2 hybrid’s call is gated on coverage', () => {
+describe('V2 hybrid’s call: the whole engine, with coverage beside it', () => {
   const est = (mean: number, lo: number, hi: number, n = 30) => ({ mean, lo, hi, n });
-  const winning = {
+  const paired = (acc: ReturnType<typeof est>, rec: ReturnType<typeof est>) => ({
     table: {},
-    paired: {
-      final: {
-        all: {
-          v2_hybrid: {
-            'm1.accuracy': est(0.05, 0.01, 0.09),
-            'm2.recall50': est(0, -0.01, 0.01),
-          },
-        },
-      },
-    },
-  };
-  it('is not measurable below the coverage share, however good the numbers', () => {
-    const v = hybridVerdictFor(winning, 30, {
-      people: 30,
-      withRows: Math.floor(30 * HYBRID_MEASURABLE_SHARE) - 1,
-    });
-    expect(v.call).toBe('INSUFFICIENT_EVIDENCE');
-    expect(v.reason).toMatch(/not measurable/);
+    paired: { final: { all: { v2_hybrid: { 'm1.accuracy': acc, 'm2.recall50': rec } } } },
   });
-  it('applies the pre-registered rule once measurable', () => {
-    expect(hybridVerdictFor(winning, 30, { people: 30, withRows: 30 }).call).toBe(
-      'TRIAL_OTHER_TESTED_ENGINE',
-    );
+  const coverage = (withRows: number) => ({
+    people: 30,
+    withRows: 0,
+    withoutRows: 0,
+    personSplits: 30,
+    personSplitsWithRows: withRows,
+  });
+  const low = coverage(Math.floor(30 * HYBRID_MEASURABLE_SHARE) - 1);
+  it('keeps evidence of harm when the collaborative source rarely fires (Codex P2 on #392)', () => {
+    const v = hybridVerdictFor(paired(est(-0.1, -0.2, -0.05), est(-0.1, -0.2, -0.05)), 30, low);
+    expect(v.call).toBe('KEEP_V1');
+    expect(v.reason).toMatch(/collaborative source not measurable/);
+  });
+  it('applies the pre-registered rule, and says when a gain cannot be attributed to the source', () => {
+    const winning = paired(est(0.05, 0.01, 0.09), est(0, -0.01, 0.01));
+    expect(hybridVerdictFor(winning, 30, coverage(30)).call).toBe('TRIAL_OTHER_TESTED_ENGINE');
+    expect(hybridVerdictFor(winning, 30, coverage(30)).reason).not.toMatch(/not measurable/);
+    expect(hybridVerdictFor(winning, 30, low).reason).toMatch(/not measurable/);
+  });
+});
+
+describe('Suite B freezes other people at the cutoff with renumbered ladders (Codex P1 on #392)', () => {
+  it('scores a cut ladder 1..n, not at its old positions', () => {
+    // Person 2 ranked the ladder bottom-up: the top four positions came last and are cut away.
+    const late = {
+      ...doc,
+      rankings: doc.rankings.map((r) => (r.u === 2 ? { ...r, day: 300 - r.p } : r)),
+    };
+    const rows = frozenWorld(late, 295).rankingsBy.get(2)!;
+    expect(rows).toHaveLength(6);
+    expect(rows.map((r) => r.p).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe('a reader with exactly five rankings can have neighbours (Codex P2 on #392)', () => {
+  it('finds public accounts that share all five and endorses a sixth title', () => {
+    const firstFive = new Set([1, 2, 3, 4, 5].map(id));
+    const five = doc.rankings.filter((r) => r.u === 1 && firstFive.has(r.m));
+    expect(five).toHaveLength(5);
+    const read = collaborativeMirror(reader(five), w, 'movies');
+    expect(read.neighbours).toBeGreaterThanOrEqual(2);
+    expect(read.rows.get(id(9))?.support).toBeGreaterThan(0);
   });
 });
 
