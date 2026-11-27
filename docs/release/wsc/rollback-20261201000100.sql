@@ -7,6 +7,14 @@
 -- rules they are visible again under `can_i_view` alone (the pre-migration behaviour). Stories
 -- frozen by Q1 stay as they are; new follows after rollback append to an open story again.
 -- One transaction, so a failure leaves the migration fully in place.
+--
+-- ORDER: CLIENT FIRST, THEN THIS SCRIPT. The pre-migration set_reaction / add_comment accept
+-- a follow story with none of this migration's gates (the "no reactions, no comments" rule was
+-- only ever the client's). So the client that draws Like and Comment on follow stories must be
+-- gone first: republish the previous OTA (or Preview) groups and confirm the live manifest
+-- serves them, and only then run this file. Running it while that client is live re-opens
+-- engagement on every follow story with no eligibility check, no freeze and no Q3 hiding.
+-- (Codex review, #390.) The same order holds for a release: this migration before that client.
 begin;
 
 -- The policies first: they reference follow_story_open_to_me, which is dropped below.
