@@ -1068,6 +1068,25 @@ describe('the inbox’s two new behaviours', () => {
     expect(view.getByText('Parks and Recreation, S2')).toBeTruthy();
   });
 
+  // A whole show is recommendable since it became rankable on its own (20261114000200).
+  it('calls a recommended whole show a show, not "something"', async () => {
+    mockRpcResults.my_notifications = [
+      {
+        ...recommended,
+        subject_id: 'show-1',
+        media_item_id: 'show-1',
+        media_kind: 'series',
+        media_title: 'Severance',
+        series_title: null,
+      },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(' recommended a show')).toBeTruthy());
+    expect(view.getByText('Severance')).toBeTruthy();
+    expect(view.queryByText(' recommended something')).toBeNull();
+  });
+
   it('opens the exact title rather than the sender', async () => {
     mockRpcResults.my_notifications = [recommended];
     const view = await renderWithProviders(<NotificationsScreen />);

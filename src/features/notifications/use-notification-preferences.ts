@@ -115,7 +115,7 @@ export const SECTIONS: readonly NotificationSection[] = [
       {
         key: 'recommendations',
         label: 'Recommendations',
-        description: 'Somebody recommends you a film or a season.',
+        description: 'Somebody recommends you a film, a show or a season.',
       },
       {
         key: 'invites',

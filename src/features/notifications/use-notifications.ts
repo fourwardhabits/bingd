@@ -186,7 +186,7 @@ export type Notification = {
   /** The title the event was about, where there is one. */
   mediaItemId: string | null;
   mediaTitle: string | null;
-  /** A film or a season, which is what the sentence says out loud. */
+  /** A film, a whole show or a season, which is what the sentence says out loud. */
   mediaKind: 'movie' | 'series' | 'season' | null;
   /** The show a season belongs to. A season's own title is "Season 2". */
   seriesTitle: string | null;
@@ -850,9 +850,15 @@ export function verbFor(
      */
     case 'watch_tag':
       return 'watched something with you';
+    /**
+     * A whole show is recommendable since it became rankable on its own (20261114000200),
+     * and "a show" is the title page's own word for it ("this show"). "Something" is
+     * left for a row whose title has gone.
+     */
     case 'recommendation':
       if (mediaKind === 'season') return 'recommended a season';
       if (mediaKind === 'movie') return 'recommended a movie';
+      if (mediaKind === 'series') return 'recommended a show';
       return 'recommended something';
     /**
      * The spoken shape and the fallback shape. The row itself says "ranked
