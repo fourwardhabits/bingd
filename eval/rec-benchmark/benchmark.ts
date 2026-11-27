@@ -23,10 +23,12 @@ import {
   LAUNCH_SEEDS,
   TRENDING,
   candidateOf,
+  collaborativeMirror,
   entropy,
   hybridCoverage,
   metOf,
   renumber,
+  scoringEngine,
   wall,
   worldOf,
   type Account,
@@ -103,15 +105,20 @@ const POSITIVE: Bucket = 'loved';
  * - `v2_metadata`: as shipped, dark.
  * - `v2_metadata_social`: the allowlist-only prototype (V2 metadata plus the follow graph on
  *   the Films wall).
- * - `v2_hybrid`: **not measurable** at today's size. It is reported as coverage, never as a
- *   score (`hybridCoverage`).
+ * - `v2_hybrid` (added 2026-11-27): V2 metadata plus taste-neighbour evidence, through a
+ *   mirror of `_refresh_taste_neighbours` / `collaborative_candidates` computed from the
+ *   reader's **training** rankings only (`collaborativeMirror`), scored with the shipped
+ *   `v2_hybrid` weights. It is a verdict candidate only where it is measurable: see
+ *   {@link hybridVerdictFor}. Below that it is reported as coverage, never as better or worse.
  */
-export type BenchEngine = 'popularity' | 'v1' | 'v2_metadata' | 'v2_metadata_social';
+export type BenchEngine =
+  'popularity' | 'v1' | 'v2_metadata' | 'v2_metadata_social' | 'v2_hybrid';
 export const BENCH_ENGINES: BenchEngine[] = [
   'popularity',
   'v1',
   'v2_metadata',
   'v2_metadata_social',
+  'v2_hybrid',
 ];
 /**
  * The configurations a verdict may pick. **The popularity baseline is not one.** It is a
@@ -503,10 +510,19 @@ export function ndcg(
 /** Mode 1, one person: every engine scores exactly the held-out units. */
 export function modeOne(split: Split, w: World, engine: BenchEngine) {
   const kind = split.medium === 'movies' ? 'movie' : 'series';
+  // V2 hybrid: the neighbours' aggregate opinion of a held-out title is evidence the shipped
+  // scorer reads, wherever the title came from. It comes from other people's rankings and the
+  // reader's training rankings only (`collaborativeMirror` reads `split.train`).
+  const evidence =
+    engine === 'v2_hybrid' ? collaborativeMirror(split.train, w, split.medium).rows : null;
   const candidates: Candidate[] = split.test
     .map((u) => w.media.get(u.id))
     .filter((m): m is ReplayMedia => m != null && m.kind === kind)
-    .map((m) => candidateOf(m, w));
+    .map((m) => {
+      const c = candidateOf(m, w);
+      const e = evidence?.get(m.m);
+      return e ? { ...c, collaborative: e } : c;
+    });
   let scores: Map<string, number>;
   let anchors: string[] = [];
   if (engine === 'popularity') {
@@ -521,7 +537,7 @@ export function modeOne(split: Split, w: World, engine: BenchEngine) {
       anchors: built.anchors,
       taste: built.taste,
       exclude: new Set(),
-      engine: engine === 'v1' ? 'v1' : 'v2_metadata',
+      engine: scoringEngine(engine as ReplayEngine),
       profile: built.profile,
     });
     scores = new Map(scored.map((s) => [s.mediaItemId, s.explanation.total]));
@@ -582,6 +598,14 @@ export type WallMetrics = {
   poolViaSocial: number | null;
   poolViaTrending: number | null;
   poolViaCatalogue: number | null;
+  poolViaCollaborative: number | null;
+  /** Share of the first page the reader had already ranked or logged in training. Must be 0. */
+  seenShare: number;
+  /** Distinct original languages on the first page. */
+  languagesOnWall: number;
+  /** V2 hybrid: endorsed collaborative rows read, and taste neighbours kept. Null elsewhere. */
+  collabRows: number | null;
+  neighbours: number | null;
 };
 
 const top = <T>(xs: readonly T[], n: number) => {
@@ -640,6 +664,11 @@ export function modeTwo(split: Split, w: World, engine: BenchEngine): WallMetric
       const built = wall(split.train, w, split.medium, engine as ReplayEngine, seed);
       ({ scored, extended, wall: items, via } = built);
       anchors = built.anchors.map((a) => a.mediaItemId);
+      if (engine === 'v2_hybrid') {
+        const read = collaborativeMirror(split.train, w, split.medium);
+        add('collabRows', [...read.rows.values()].filter((e) => e.support > 0).length);
+        add('neighbours', read.neighbours);
+      }
     }
     add('ms', performance.now() - started);
     assertNoLeak(split, w, anchors);
@@ -658,7 +687,13 @@ export function modeTwo(split: Split, w: World, engine: BenchEngine): WallMetric
       const found = [...positives].filter((id) => pool.has(id));
       add('poolRecall', found.length / positives.size);
       if (via) {
-        for (const source of ['anchors', 'social', 'trending', 'catalogue'] as const) {
+        for (const source of [
+          'anchors',
+          'social',
+          'collaborative',
+          'trending',
+          'catalogue',
+        ] as const) {
           const key =
             `poolVia${source[0]!.toUpperCase()}${source.slice(1)}` as keyof WallMetrics;
           add(key, found.filter((id) => via!(id) === source).length / positives.size);
@@ -679,6 +714,9 @@ export function modeTwo(split: Split, w: World, engine: BenchEngine): WallMetric
       );
     const langs = items.map((s) => w.media.get(s.mediaItemId)?.lang ?? null);
     add('nonEnglishShare', langs.filter((l) => l && l !== 'en').length / n);
+    add('languagesOnWall', new Set(langs.filter(Boolean)).size);
+    const met = metOf(split.train, w);
+    add('seenShare', items.filter((s) => met.has(s.mediaItemId)).length / n);
     add('ownNonEnglish', ownNonEnglish);
     if (ownLangs.length)
       add(
@@ -743,6 +781,11 @@ export const WALL_KEYS: (keyof WallMetrics)[] = [
   'poolViaSocial',
   'poolViaTrending',
   'poolViaCatalogue',
+  'poolViaCollaborative',
+  'seenShare',
+  'languagesOnWall',
+  'collabRows',
+  'neighbours',
 ];
 export const MODE_ONE_KEYS = [
   'accuracy',
@@ -801,7 +844,8 @@ type PerPerson = {
 
 export type MediumResult = {
   medium: Medium;
-  suite: 'A' | 'B';
+  /** A stratified holdout, B forward replay, C5 / C10 cold start at exactly 5 / 10 rankings. */
+  suite: Suite;
   people: number;
   lowEvidence: number;
   cases: { held: number; positives: number; neutral: number; negatives: number; pairs: number };
@@ -809,13 +853,22 @@ export type MediumResult = {
   table: Record<string, Record<string, Record<string, Record<string, Estimate | null>>>>;
   /** half → segment → engine → metric → paired engine − v1 */
   paired: Record<string, Record<string, Record<string, Record<string, Estimate | null>>>>;
+  /** half → segment → engine → metric → paired engine − v2_metadata (the V2 variants only). */
+  pairedMeta: Record<string, Record<string, Record<string, Record<string, Estimate | null>>>>;
   /** Suite A: per split seed, the all-people mean of the primary metrics, per engine. */
   stability: Record<
     string,
     Record<string, { accuracy: number | null; recall50: number | null }>
   >;
-  verdict: Verdict;
+  /** The pre-registered verdict (Suites A and B). Null for the descriptive cold-start suites. */
+  verdict: Verdict | null;
+  /** V2 hybrid's own call under the same rule, gated on coverage ({@link hybridVerdictFor}). */
+  hybridVerdict: Verdict | null;
+  /** Final half: people with at least one endorsed collaborative row in this medium. */
+  hybridCoverage: { people: number; withRows: number };
 };
+
+export type Suite = 'A' | 'B' | 'C5' | 'C10';
 
 export type Verdict = {
   call:
@@ -836,6 +889,13 @@ const mean = (xs: readonly (number | null | undefined)[]) => {
 function segmentsOf(split: Split, w: World): string[] {
   const n = split.train.visible.length;
   const out = ['all', n <= 10 ? 'sparse' : n <= 30 ? 'medium' : 'heavy'];
+  // Whether the hybrid had anything to add for this person in this medium (training only).
+  const collab = collaborativeMirror(split.train, w, split.medium);
+  out.push(
+    [...collab.rows.values()].some((e) => e.support > 0)
+      ? 'with_collab_rows'
+      : 'no_collab_rows',
+  );
   const own = [...split.train.visible.map((r) => r.m)]
     .map((id) => w.media.get(id))
     .filter(Boolean) as ReplayMedia[];
@@ -868,6 +928,7 @@ function segmentsOf(split: Split, w: World): string[] {
 export function verdictFor(
   result: Pick<MediumResult, 'paired' | 'table'>,
   people: number,
+  candidates: readonly BenchEngine[] = CANDIDATES,
 ): Verdict {
   if (people < MIN_FINAL_USERS) {
     return {
@@ -883,7 +944,7 @@ export function verdictFor(
   // least MIN_FINAL_USERS people: a person with no held-out like has no recall, and one with no
   // ordered pair has no accuracy, so the nominal cohort can be far larger than the evidence.
   const thin: string[] = [];
-  for (const engine of CANDIDATES) {
+  for (const engine of candidates) {
     const acc = d[engine]?.['m1.accuracy'];
     const rec = d[engine]?.['m2.recall50'];
     if (!acc || !rec || acc.n < MIN_FINAL_USERS || rec.n < MIN_FINAL_USERS) {
@@ -897,7 +958,7 @@ export function verdictFor(
       reason: `too few people with both primary metrics in the final half: ${thin.join('; ')}; at least ${MIN_FINAL_USERS} each are needed`,
     };
   }
-  for (const engine of CANDIDATES) {
+  for (const engine of candidates) {
     const acc = d[engine]!['m1.accuracy']!;
     const rec = d[engine]!['m2.recall50']!;
     if ((acc.lo > 0 && rec.lo > -NON_INFERIORITY) || (rec.lo > 0 && acc.lo > -NON_INFERIORITY))
@@ -934,7 +995,65 @@ export function verdictFor(
   };
 }
 
-export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[] {
+/** V2 hybrid is a verdict candidate only when at least this share of final-half people get a row. */
+export const HYBRID_MEASURABLE_SHARE = 0.5;
+
+/**
+ * **V2 hybrid's own call** (added 2026-11-27, before any real export was read with it). The same
+ * pre-registered rule as {@link verdictFor}, with V2 hybrid as the only candidate, and one gate
+ * first: if fewer than {@link HYBRID_MEASURABLE_SHARE} of the final-half people have even one
+ * endorsed collaborative row in the medium, the engine is the V2 metadata wall for most of
+ * them, and the call is INSUFFICIENT_EVIDENCE (not measurable), never a win or a loss.
+ * Kept apart from the original verdict so the original pre-registered call is unchanged.
+ */
+export function hybridVerdictFor(
+  result: Pick<MediumResult, 'paired' | 'table'>,
+  people: number,
+  coverage: { people: number; withRows: number },
+): Verdict {
+  if (coverage.people === 0 || coverage.withRows / coverage.people < HYBRID_MEASURABLE_SHARE) {
+    return {
+      call: 'INSUFFICIENT_EVIDENCE',
+      engine: null,
+      reason: `not measurable: ${coverage.withRows}/${coverage.people} final-half people have any endorsed collaborative row; at least ${HYBRID_MEASURABLE_SHARE * 100}% are needed`,
+    };
+  }
+  const v = verdictFor(result, people, ['v2_hybrid']);
+  return v.engine === 'v2_hybrid' ? { ...v, call: 'TRIAL_OTHER_TESTED_ENGINE' } : v;
+}
+
+/**
+ * **Suite C, cold start** (added 2026-11-27, descriptive). A person as they were after exactly
+ * `k` rankings: training is their first `k` rankings in time order, in any pool (a new account's
+ * First Five is not always in the medium being tested), and no logged titles (logged rows carry
+ * no date, so none can be placed before the cutoff). The test is every unit of the medium that
+ * no training row reveals. Other people's rankings are whole: a new person joins a community
+ * that already has its history. No verdict is pre-registered for it.
+ */
+export function coldSplit(
+  key: number,
+  rows: readonly ReplayRanking[],
+  media: ReadonlyMap<string, ReplayMedia>,
+  medium: Medium,
+  k: number,
+): Split | null {
+  const ordered = [...rows].sort((a, b) => a.day - b.day || a.seq - b.seq);
+  if (ordered.length <= k) return null;
+  const before = ordered.slice(0, k);
+  const test = unitsOf(rows, media)
+    .filter((u) => u.medium === medium)
+    .filter((u) => !before.some((r) => revealsUnit(r.m, u.id, media)));
+  if (test.length < 2) return null;
+  return {
+    key,
+    medium,
+    train: trainingAccount(key, before, [], test, media),
+    test,
+    cutoffDay: null,
+  };
+}
+
+export function benchmark(input: unknown, suite: Suite = 'A'): MediumResult[] {
   const doc = validateExport(input);
   const base = worldOf(doc);
   const rowsBy = new Map<number, ReplayRanking[]>();
@@ -957,10 +1076,13 @@ export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[
           const split = stratifiedSplit(key, rows, logged, base.media, medium, seed);
           if (split) splits.push({ split, w: base, seed: String(seed) });
         }
-      } else {
+      } else if (suite === 'B') {
         const split = forwardSplit(key, rows, logged, base.media, medium);
         if (split)
           splits.push({ split, w: frozenWorld(doc, split.cutoffDay!), seed: 'forward' });
+      } else {
+        const split = coldSplit(key, rows, base.media, medium, suite === 'C5' ? 5 : 10);
+        if (split) splits.push({ split, w: base, seed: suite });
       }
       if (!splits.length) {
         lowEvidence += 1;
@@ -969,7 +1091,7 @@ export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[
       const person: PerPerson = {
         key,
         half: halfOf(key),
-        segment: segmentsOf(splits[0]!.split, base),
+        segment: segmentsOf(splits[0]!.split, splits[0]!.w),
         m1: {},
         m2: {},
       };
@@ -1030,15 +1152,18 @@ export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[
     });
     const table: MediumResult['table'] = {};
     const paired: MediumResult['paired'] = {};
+    const pairedMeta: MediumResult['pairedMeta'] = {};
     for (const half of ['all', 'dev', 'final']) {
       const inHalf = people.filter((p) => half === 'all' || p.half === half);
       const segments = [...new Set(inHalf.flatMap((p) => p.segment))];
       table[half] = {};
       paired[half] = {};
+      pairedMeta[half] = {};
       for (const segment of segments) {
         const group = inHalf.filter((p) => p.segment.includes(segment));
         table[half]![segment] = {};
         paired[half]![segment] = {};
+        pairedMeta[half]![segment] = {};
         for (const engine of BENCH_ENGINES) {
           const rows = group.map((p) => metricsOf(p, engine));
           const keys = Object.keys(rows[0] ?? {});
@@ -1046,22 +1171,34 @@ export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[
             keys.map((k) => [k, bootstrap(rows.map((r) => r[k] ?? null))]),
           );
           if (engine === 'v1') continue;
-          const base1 = group.map((p) => metricsOf(p, 'v1'));
-          paired[half]![segment]![engine] = Object.fromEntries(
-            keys.map((k) => [
-              k,
-              bootstrap(
-                rows.map((r, i) =>
-                  r[k] == null || base1[i]![k] == null ? null : r[k]! - base1[i]![k]!,
+          const pairedWith = (against: BenchEngine) => {
+            const base1 = group.map((p) => metricsOf(p, against));
+            return Object.fromEntries(
+              keys.map((k) => [
+                k,
+                bootstrap(
+                  rows.map((r, i) =>
+                    r[k] == null || base1[i]![k] == null ? null : r[k]! - base1[i]![k]!,
+                  ),
                 ),
-              ),
-            ]),
-          );
+              ]),
+            );
+          };
+          paired[half]![segment]![engine] = pairedWith('v1');
+          if (engine === 'v2_metadata_social' || engine === 'v2_hybrid')
+            pairedMeta[half]![segment]![engine] = pairedWith('v2_metadata');
         }
       }
     }
     const finalPeople = people.filter((p) => p.half === 'final').length;
     const partial = { table, paired };
+    const coverage = {
+      people: finalPeople,
+      withRows: people.filter(
+        (p) => p.half === 'final' && p.segment.includes('with_collab_rows'),
+      ).length,
+    };
+    const preRegistered = suite === 'A' || suite === 'B';
     results.push({
       medium,
       suite,
@@ -1070,8 +1207,11 @@ export function benchmark(input: unknown, suite: 'A' | 'B' = 'A'): MediumResult[
       cases,
       table,
       paired,
+      pairedMeta,
       stability,
-      verdict: verdictFor(partial, finalPeople),
+      verdict: preRegistered ? verdictFor(partial, finalPeople) : null,
+      hybridVerdict: preRegistered ? hybridVerdictFor(partial, finalPeople, coverage) : null,
+      hybridCoverage: coverage,
     });
   }
   return results;
@@ -1126,15 +1266,33 @@ const SECONDARY: [string, string][] = [
   ['m2.topGenreShare', 'Top-genre share'],
   ['m2.poolSize', 'Pool size'],
   ['m2.seedOverlap', 'Repeat across launches (Jaccard)'],
+  ['m2.languagesOnWall', 'Languages on wall'],
+  ['m2.seenShare', 'Already met on wall'],
   ['m2.ms', 'ms per wall'],
 ];
 const SOURCES_COLS: [string, string][] = [
   ['m2.poolRecall', 'Pool recall'],
   ['m2.poolViaAnchors', 'via anchors’ lists'],
   ['m2.poolViaSocial', 'via social'],
+  ['m2.poolViaCollaborative', 'via collaborative'],
   ['m2.poolViaTrending', 'via trending'],
   ['m2.poolViaCatalogue', 'via catalogue fill'],
 ];
+/** The V2 variants against V2 metadata: what the social source or the collaborative term adds. */
+const META_COLS: [string, string][] = [
+  ['m1.accuracy', 'M1 pairwise'],
+  ['m2.recall20', 'M2 R@20'],
+  ['m2.recall50', 'M2 R@50'],
+  ['m2.poolRecall', 'M2 pool recall'],
+  ['m2.nonEnglishShare', 'Non-English share'],
+  ['m2.languageCoverage', 'Own top-3 languages'],
+];
+const SUITE_NAME: Record<Suite, string> = {
+  A: 'Suite A (stratified holdout)',
+  B: 'Suite B (forward replay)',
+  C5: 'Suite C5 (cold start: exactly 5 rankings)',
+  C10: 'Suite C10 (cold start: exactly 10 rankings)',
+};
 
 export function renderBenchmark(
   results: readonly MediumResult[],
@@ -1151,16 +1309,22 @@ export function renderBenchmark(
   line();
   line('## Verdicts (final half only, pre-registered rule)');
   line();
-  line('| Suite | Medium | Verdict | Reason |');
-  line('|---|---|---|---|');
-  for (const r of results)
+  line(
+    'V2 metadata and V2 metadata + social are the pre-registered candidates. V2 hybrid has its own call under the same rule, gated on coverage. Cold-start suites are descriptive and carry no verdict.',
+  );
+  line();
+  line('| Suite | Medium | Verdict | Reason | V2 hybrid | Hybrid reason |');
+  line('|---|---|---|---|---|---|');
+  for (const r of results) {
+    if (!r.verdict) continue;
     line(
-      `| ${r.suite} | ${r.medium === 'movies' ? 'Movies' : 'TV'} | **${r.verdict.call}** | ${r.verdict.reason} |`,
+      `| ${r.suite} | ${r.medium === 'movies' ? 'Movies' : 'TV'} | **${r.verdict.call}** | ${r.verdict.reason} | ${r.hybridVerdict?.call ?? '—'} | ${r.hybridVerdict?.reason ?? '—'} |`,
     );
+  }
   line();
   for (const r of results) {
     const name = r.medium === 'movies' ? 'Movies' : 'TV (series units)';
-    line(`## Suite ${r.suite}, ${name}`);
+    line(`## ${SUITE_NAME[r.suite]}, ${name}`);
     line();
     line(
       `${r.people} people evaluated, ${r.lowEvidence} low-evidence (fewer than ${MIN_UNITS} units, or no usable split). Held-out cases over all splits: ${r.cases.held} (liked ${r.cases.positives}, fine ${r.cases.neutral}, not for me ${r.cases.negatives}); ${r.cases.pairs} ordered pairs. Final half: ${Object.values(r.table.final?.all ?? {})[0]?.['m2.poolSize']?.n ?? 0} people.`,
@@ -1196,6 +1360,28 @@ export function renderBenchmark(
     for (const [engine, row] of Object.entries(r.table.all?.all ?? {}))
       line(`| ${engine} | ${SECONDARY.map(([k]) => f(row[k], false, 2)).join(' | ')} |`);
     line();
+    line(
+      `V2 hybrid coverage, final half: ${r.hybridCoverage.withRows}/${r.hybridCoverage.people} people have at least one endorsed collaborative row in this medium.`,
+    );
+    line();
+    line('### V2 variants against V2 metadata (paired, all people)');
+    line();
+    line(`| Segment | Engine | n | ${META_COLS.map(([, l]) => l).join(' | ')} |`);
+    line(`|---|---|---|${META_COLS.map(() => '---').join('|')}|`);
+    for (const segment of [
+      'all',
+      'sparse',
+      'medium',
+      'heavy',
+      'non_english_taste',
+      'with_collab_rows',
+    ]) {
+      for (const [engine, row] of Object.entries(r.pairedMeta.all?.[segment] ?? {}))
+        line(
+          `| ${segment} | ${engine} − v2_metadata | ${row['m2.poolSize']?.n ?? 0} | ${META_COLS.map(([k]) => f(row[k], true)).join(' | ')} |`,
+        );
+    }
+    line();
     line('### Candidate retrieval: where held-out liked titles entered the pool, all people');
     line();
     line(`| Engine | ${SOURCES_COLS.map(([, l]) => l).join(' | ')} |`);
@@ -1204,6 +1390,11 @@ export function renderBenchmark(
       if (engine === 'popularity') continue;
       line(`| ${engine} | ${SOURCES_COLS.map(([k]) => f(row[k])).join(' | ')} |`);
     }
+    const h = r.table.all?.all?.v2_hybrid;
+    if (h)
+      line(
+        `\nV2 hybrid, per person and launch: ${f(h['m2.neighbours'], false, 2)} taste neighbours kept, ${f(h['m2.collabRows'], false, 2)} endorsed rows read.`,
+      );
     line();
     if (r.suite === 'A') {
       line('### Stability across splits (all people, mean)');
@@ -1222,9 +1413,13 @@ export function renderBenchmark(
   line();
   const measurable = hybrid.accounts > 0 && hybrid.withTwo / hybrid.accounts >= 0.5;
   line(
+    `Neighbour availability over full histories (exhaustive, no probe or rater cap): ${hybrid.withTwo}/${hybrid.accounts} people have two or more taste neighbours (Match > 55 on ≥ 5 shared units), ${hybrid.withOne}/${hybrid.accounts} one or more.`,
+  );
+  line();
+  line(
     measurable
-      ? `**NOT REPLAYED.** ${hybrid.withTwo}/${hybrid.accounts} people have the two taste neighbours a collaborative row needs, so it could be measured, but this benchmark does not mirror \`collaborative_candidates\`. It is neither better nor worse; it is not tested.`
-      : `**NOT MEASURABLE.** A collaborative row needs two taste neighbours: ${hybrid.withTwo}/${hybrid.accounts} people have two or more, ${hybrid.withOne}/${hybrid.accounts} one or more. It is neither better nor worse; it is not tested.`,
+      ? 'V2 hybrid is replayed above through a mirror of `_refresh_taste_neighbours` / `collaborative_candidates` computed from each person’s training rankings only. Its call (verdict table) is gated on per-medium coverage of endorsed rows in the final half.'
+      : '**NOT MEASURABLE** at this size: most people have fewer than the two taste neighbours a collaborative row needs. The hybrid rows above are the V2 metadata wall for most people; read them as coverage, never as better or worse.',
   );
   line();
   line('## Limitations printed with every run');

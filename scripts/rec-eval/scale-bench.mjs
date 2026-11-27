@@ -3,7 +3,7 @@
  * Scale benchmark for Recommendation Engine V2's server half (founder spec 2026-11-10, §7).
  *
  *   node scripts/rec-eval/scale-bench.mjs [--users 100000] [--titles 60000] [--out DIR]
- *                                         [--concurrency 8] [--plans]
+ *                                         [--concurrency 8] [--plans] [--follows 50]
  *
  * **Synthetic data on a throwaway local cluster.** It boots a private PostgreSQL 17
  * (`embedded-postgres`, the same native binaries `test:race` uses) on a free port, applies
@@ -20,8 +20,10 @@
  *
  * - **Accounts.** `--users` profiles. 55% have never ranked anything; 35% are casual (3–20
  *   rankings), 8.5% engaged (20–200), 1.5% power users (200–1,500). 85% public, 1% suspended,
- *   a sprinkling of blocks. Follows are not loaded: no function measured here reads them,
- *   which is itself the point of V2 (following has no effect).
+ *   a sprinkling of blocks. Follows are loaded for the measured readers only (`--follows`,
+ *   default 50 approved followees each, drawn from accounts that rank), so V1's
+ *   `social_candidates`, which V1 and the `v2_metadata_social` prototype read on every wall,
+ *   is timed beside the V2 calls (2026-11-27). No V2 function reads follows.
  * - **Titles.** `--titles` films plus a sixth as many series with two seasons each, in 14
  *   languages (English 55%), released 1930–2026 and skewed recent, TMDB-like popularity.
  *   Films, seasons and whole shows are all rankable (`movies`, `tv_seasons`, `tv_shows`); an
@@ -83,6 +85,7 @@ const USERS = Number(flag('users', 100_000));
 const TITLES = Number(flag('titles', 60_000));
 const CONCURRENCY = Number(flag('concurrency', 8));
 const PLANS = Boolean(flag('plans', false));
+const FOLLOWS = Number(flag('follows', 50));
 const OUT = String(flag('out', join(tmpdir(), `bingd-scale-bench-${process.pid}`)));
 const BATCH = 25_000;
 
@@ -139,7 +142,7 @@ const results = {
   synthetic: true,
   generated_at: new Date().toISOString(),
   machine: { cpus: cpus().length, cpu_model: cpus()[0]?.model ?? null, memory_gb: round(totalmem() / 2 ** 30) },
-  parameters: { users: USERS, titles: TITLES, concurrency: CONCURRENCY },
+  parameters: { users: USERS, titles: TITLES, concurrency: CONCURRENCY, follows: FOLLOWS },
 };
 
 try {
@@ -383,6 +386,22 @@ try {
      on conflict do nothing`,
     [readerIds],
   );
+  // V1's follow-graph source, for the measured readers only (2026-11-27): approved followees
+  // drawn from accounts that rank, so `social_candidates` has real Loved rows to count.
+  if (FOLLOWS > 0) {
+    await q(
+      `insert into follows (follower_id, followee_id, state, approved_at)
+       select r.id, f.id, 'approved', now()
+         from unnest($1::uuid[]) r(id)
+        cross join lateral (
+          select u.id from bench_users u
+           where u.n_rank > 0 and u.id <> r.id
+           order by md5(r.id::text || u.id::text) limit $2) f
+       on conflict do nothing`,
+      [readerIds, FOLLOWS],
+    );
+    await q(`analyze follows`);
+  }
   await q(`set session_replication_role = origin`);
   await q(`analyze user_media`);
   // Collections shaped like the client's profile asks: the reader's top languages, two decades.
@@ -425,6 +444,8 @@ try {
     await clearCache(r.id);
     await asReader(reader, r.id);
     const engine = await timed(reader, `select recommendation_engine() as e`);
+    // V1's (and the prototype's) follow-graph read, as the client asks for it.
+    const social = await timed(reader, `select count(*)::integer as n from social_candidates(40)`);
     const catalogue = await timed(
       reader,
       `select count(*)::integer as n from catalogue_candidates('movie', $1::text[], '{1990,2010}'::integer[], 20, 7)`,
@@ -455,6 +476,8 @@ try {
       ranked: Number(r.ranked),
       engine: engine.rows[0].e,
       engine_ms: round(engine.ms),
+      social_ms: round(social.ms),
+      social_rows: social.rows[0].n,
       catalogue_ms: round(catalogue.ms),
       catalogue_rows: catalogue.rows[0].n,
       collaborative_cold_ms: round(cold.ms),
@@ -486,6 +509,8 @@ try {
   results.by_tier = byTier;
   results.all_readers = {
     engine_ms: summary(per.map((p) => p.engine_ms)),
+    social_ms: summary(per.map((p) => p.social_ms)),
+    social_rows: summary(per.map((p) => p.social_rows)),
     catalogue_ms: summary(per.map((p) => p.catalogue_ms)),
     collaborative_cold_ms: summary(per.map((p) => p.collaborative_cold_ms)),
     collaborative_warm_ms: summary(per.map((p) => p.collaborative_warm_ms)),
@@ -591,6 +616,11 @@ try {
         [r.languages],
       );
       sections.push(`### catalogue_candidates, ${tier} reader\n\n${notices.join('\n\n')}`);
+      if (FOLLOWS > 0) {
+        notices.length = 0;
+        await planned.query(`select count(*) from social_candidates(40)`);
+        sections.push(`### social_candidates (V1), ${tier} reader\n\n${notices.join('\n\n')}`);
+      }
       await planned.query(`reset role`);
     }
     // The catalogue windows themselves, as the superuser: inside the function they finish
@@ -644,6 +674,8 @@ const md = [
   '| Call (ms), all readers | n | p50 | p95 | max |',
   '|---|---|---|---|---|',
   row('recommendation_engine()', results.all_readers.engine_ms),
+  row(`social_candidates(40) (V1; ${FOLLOWS} followees)`, results.all_readers.social_ms),
+  row('social_candidates rows (count, not ms)', results.all_readers.social_rows),
   row('catalogue_candidates', results.all_readers.catalogue_ms),
   row('collaborative_candidates, cold (includes the refresh)', results.all_readers.collaborative_cold_ms),
   row('collaborative_candidates, warm', results.all_readers.collaborative_warm_ms),

@@ -21,6 +21,8 @@ import {
   unitRandom,
   type Anchor,
   type Candidate,
+  type Collaborative,
+  type EngineId,
 } from '@/features/recommendations/rank';
 import { drawSlate } from '@/features/recommendations/selection';
 import {
@@ -85,7 +87,12 @@ export const SHRINK_PRIOR = 5;
  * Every V2 variant is scored exactly as V2 metadata.
  */
 export type Engine =
-  'v1' | 'v2_metadata' | 'v2_metadata_social' | 'v2_metadata+social' | 'v2_metadata+v1_anchors';
+  | 'v1'
+  | 'v2_metadata'
+  | 'v2_metadata_social'
+  | 'v2_hybrid'
+  | 'v2_metadata+social'
+  | 'v2_metadata+v1_anchors';
 export const ENGINES: Engine[] = [
   'v1',
   'v2_metadata',
@@ -93,9 +100,18 @@ export const ENGINES: Engine[] = [
   'v2_metadata+social',
   'v2_metadata+v1_anchors',
 ];
+/**
+ * The shipped engine id a replay engine scores with. The two diagnostics score exactly as V2
+ * metadata; every shipped engine scores as itself, so `v2_hybrid`'s collaborative term (and
+ * its × 0.85 weights) is the shipped one. Before 2026-11-27 every V2 variant was scored as
+ * `v2_metadata`, which was harmless only because no variant had other weights.
+ */
+export const scoringEngine = (engine: Engine): EngineId =>
+  engine === 'v2_metadata+social' || engine === 'v2_metadata+v1_anchors'
+    ? 'v2_metadata'
+    : engine;
 export const socialFor = (engine: Engine, medium: Medium) =>
-  engine === 'v2_metadata+social' ||
-  asksSocial(engine === 'v2_metadata+v1_anchors' ? 'v2_metadata' : engine, medium);
+  engine === 'v2_metadata+social' || asksSocial(scoringEngine(engine), medium);
 
 export type Metrics = {
   recall20: number | null;
@@ -116,6 +132,7 @@ export type Metrics = {
   poolViaSocial: number | null;
   poolViaTrending: number | null;
   poolViaCatalogue: number | null;
+  poolViaCollaborative: number | null;
 };
 const KEYS: (keyof Metrics)[] = [
   'recall20',
@@ -131,6 +148,7 @@ const KEYS: (keyof Metrics)[] = [
   'poolViaSocial',
   'poolViaTrending',
   'poolViaCatalogue',
+  'poolViaCollaborative',
 ];
 
 export type Account = {
@@ -401,6 +419,7 @@ export const TRENDING: Record<Medium, string[]> = {
 // ---------------------------------------------------------------------------
 
 export function wall(account: Account, w: World, medium: Medium, engine: Engine, seed: number) {
+  const engineId = scoringEngine(engine);
   const kind = medium === 'movies' ? 'movie' : 'series';
   const entries = account.visible
     .map((r) => rankedEntry(r, w))
@@ -428,7 +447,7 @@ export function wall(account: Account, w: World, medium: Medium, engine: Engine,
   const logged = account.logged
     .map((l) => loggedEntry(l, w))
     .filter((e): e is LoggedEntry => e != null);
-  const v2 = engine !== 'v1';
+  const v2 = engineId !== 'v1';
   const profile = v2
     ? profileFrom(profileEntriesFrom(pools.movies, pools.tv_seasons, logged, pools.tv_shows))
     : undefined;
@@ -458,7 +477,15 @@ export function wall(account: Account, w: World, medium: Medium, engine: Engine,
   const anchored = anchors.filter((a) => a.similarIds.length > 0).length;
   const lists = medium === 'tv' && anchored > 0 ? TRENDING.tv.slice(0, 1) : TRENDING[medium];
   const trending = [...new Set(lists.flatMap((key) => w.trending.get(key) ?? []))];
-  const ids = candidateIdsFrom(anchors, social, trending);
+  // V2 hybrid: the collaborative rows, endorsed ids in the slot social had (`use-for-you.ts`).
+  const collaborative =
+    engineId === 'v2_hybrid'
+      ? collaborativeMirror(account, w, medium).rows
+      : new Map<string, Collaborative>();
+  const collaborativeIds = [...collaborative]
+    .filter(([, evidence]) => evidence.support > 0)
+    .map(([id]) => id);
+  const ids = candidateIdsFrom(anchors, [...social, ...collaborativeIds], trending);
   const listed = ids
     .map((id) => w.media.get(id))
     .filter((m): m is ReplayMedia => m != null && m.tile && m.kind === kind)
@@ -478,12 +505,21 @@ export function wall(account: Account, w: World, medium: Medium, engine: Engine,
       new Set([...met, ...anchors.map((a) => a.mediaItemId)]),
     );
   }
+  // Every candidate the neighbours have an opinion on carries it, whichever source brought it.
+  const merged = [...listed, ...filled];
+  const candidates =
+    collaborative.size > 0
+      ? merged.map((c) => {
+          const evidence = collaborative.get(c.mediaItemId);
+          return evidence ? { ...c, collaborative: evidence } : c;
+        })
+      : merged;
   const scored = scoreSlate({
-    candidates: [...listed, ...filled],
+    candidates,
     anchors,
     taste,
     exclude: new Set(met),
-    engine: v2 ? 'v2_metadata' : 'v1',
+    engine: engineId,
     profile,
   });
   const drawn = drawSlate(scored, {
@@ -493,19 +529,22 @@ export function wall(account: Account, w: World, medium: Medium, engine: Engine,
     now: 0,
   });
   // Which source put each scored title in the pool, in `candidateIdsFrom`'s precedence (the
-  // anchors' lists, then social, then trending), then the catalogue fill: so the parts of pool
-  // recall below sum to pool recall.
+  // anchors' lists, then social, then the hybrid's endorsed ids, then trending), then the
+  // catalogue fill: so the parts of pool recall below sum to pool recall.
   const anchoredSet = new Set(anchors.flatMap((a) => a.similarIds));
   const socialSet = new Set(social);
+  const collaborativeSet = new Set(collaborativeIds);
   const trendingSet = new Set(trending);
   const via = (id: string): Source =>
     anchoredSet.has(id)
       ? 'anchors'
       : socialSet.has(id)
         ? 'social'
-        : trendingSet.has(id)
-          ? 'trending'
-          : 'catalogue';
+        : collaborativeSet.has(id)
+          ? 'collaborative'
+          : trendingSet.has(id)
+            ? 'trending'
+            : 'catalogue';
   return {
     scored,
     extended: drawn.slice(0, EXTENDED),
@@ -516,11 +555,13 @@ export function wall(account: Account, w: World, medium: Medium, engine: Engine,
     anchors,
     taste,
     profile,
+    /** V2 hybrid only: the collaborative rows this wall read (endorsed and disputed). */
+    collaborative,
   };
 }
 
-export type Source = 'anchors' | 'social' | 'trending' | 'catalogue';
-const SOURCES: Source[] = ['anchors', 'social', 'trending', 'catalogue'];
+export type Source = 'anchors' | 'social' | 'collaborative' | 'trending' | 'catalogue';
+const SOURCES: Source[] = ['anchors', 'social', 'collaborative', 'trending', 'catalogue'];
 const viaKey = (source: Source) =>
   `poolVia${source[0]!.toUpperCase()}${source.slice(1)}` as `poolVia${Capitalize<Source>}`;
 
@@ -672,6 +713,201 @@ export function hybridCoverage(accounts: readonly Account[], w: World) {
     if (neighbours >= 2) two += 1;
   }
   return { accounts: accounts.length, withOne: one, withTwo: two, neighbourCounts };
+}
+
+// ---------------------------------------------------------------------------
+// V2 hybrid: `_refresh_taste_neighbours` and `collaborative_candidates`, mirrored
+// ---------------------------------------------------------------------------
+
+/** The shipped defaults (`20261122000200`): the `recommendations.neighbour_*` seeds. */
+export const NEIGHBOUR = {
+  probeTitles: 40,
+  ratersPerTitle: 50,
+  shortlist: 200,
+  limit: 40,
+  minMatch: MIN_MATCH,
+  /** `collaborative_candidates(kind, 40)`, what `use-for-you.ts` asks for. */
+  rows: 40,
+} as const;
+
+export type Neighbour = { key: number; match: number; common: number; weight: number };
+
+/** `_taste_neighbour_weight`: lift above the floor, times a reliability term, in 0–1. */
+export const neighbourWeight = (
+  match: number,
+  common: number,
+  floor: number = NEIGHBOUR.minMatch,
+) => (Math.max(0, match - floor) / Math.max(1, 100 - floor)) * (common / (common + 10));
+
+type RaterIndex = { byTitle: Map<string, number[]>; scores: Map<number, Map<string, number>> };
+const raterIndexes = new WeakMap<World, RaterIndex>();
+function raterIndex(w: World): RaterIndex {
+  let index = raterIndexes.get(w);
+  if (!index) {
+    const byTitle = new Map<string, number[]>();
+    for (const [u, rows] of w.rankingsBy) {
+      for (const r of rows) {
+        const list = byTitle.get(r.m);
+        if (list) list.push(u);
+        else byTitle.set(r.m, [u]);
+      }
+    }
+    for (const list of byTitle.values()) list.sort((a, b) => a - b);
+    index = { byTitle, scores: new Map() };
+    raterIndexes.set(w, index);
+  }
+  return index;
+}
+const scoresFor = (u: number, w: World) => {
+  const index = raterIndex(w);
+  let s = index.scores.get(u);
+  if (!s) {
+    s = scoresOf(w.rankingsBy.get(u) ?? []);
+    index.scores.set(u, s);
+  }
+  return s;
+};
+
+/**
+ * `_refresh_taste_neighbours`, mirrored over the export, **from the reader's training rankings
+ * only** (`account.visible`): probe the reader's 40 strongest opinions (`|score − 5|`, less
+ * popular first among equals), sample at most 50 raters per probe title, shortlist the 200
+ * most frequent public co-raters, score them with the WS5 Match ({@link tasteMatch}) and keep
+ * the best 40 with weight > 0.
+ *
+ * Approximations, all small at bingd's size: the SQL rotates the rater sample daily from an
+ * `md5(reader ‖ day)` pivot, this takes raters in key order (the cap binds only above 50 raters
+ * of one title); `can_discover_profile` (blocks) is not in the export, so a blocked pair could
+ * be counted; suspended accounts are not in the export at all.
+ */
+export function neighboursOf(account: Account, w: World): Neighbour[] {
+  const mine = scoresOf(account.visible);
+  if (mine.size === 0) return [];
+  const pop = (id: string) => w.media.get(id)?.popularity ?? null;
+  const probe = [...mine]
+    .sort((a, b) => {
+      const d = Math.abs(b[1] - 5) - Math.abs(a[1] - 5);
+      if (d !== 0) return d;
+      const pa = pop(a[0]);
+      const pb = pop(b[0]);
+      if (pa !== pb) return pa == null ? -1 : pb == null ? 1 : pa - pb;
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+    })
+    .slice(0, NEIGHBOUR.probeTitles)
+    .map(([id]) => id);
+  const isPublic = new Set(
+    w.doc.users.filter((u) => u.visibility === 'public').map((u) => u.u),
+  );
+  const index = raterIndex(w);
+  const hits = new Map<number, number>();
+  for (const id of probe) {
+    const raters = (index.byTitle.get(id) ?? []).filter((u) => u !== account.key);
+    for (const u of raters.slice(0, NEIGHBOUR.ratersPerTitle))
+      hits.set(u, (hits.get(u) ?? 0) + 1);
+  }
+  const shortlist = [...hits]
+    .filter(([u]) => isPublic.has(u))
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, NEIGHBOUR.shortlist)
+    .map(([u]) => u);
+  const unitOf = (id: string) => {
+    const m = w.media.get(id);
+    return m?.kind === 'season' && m.parent ? m.parent : id;
+  };
+  const out: Neighbour[] = [];
+  for (const u of shortlist) {
+    const { score, units } = tasteMatch(mine, scoresFor(u, w), unitOf);
+    if (score == null) continue;
+    const weight = neighbourWeight(score, units);
+    if (weight > 0) out.push({ key: u, match: score, common: units, weight });
+  }
+  return out.sort((a, b) => b.weight - a.weight || a.key - b.key).slice(0, NEIGHBOUR.limit);
+}
+
+export type CollaborativeRead = {
+  /** As `collaborative_candidates` returns them: endorsed (support > 0) and disputed (< 0). */
+  rows: Map<string, Collaborative>;
+  /** How many taste neighbours the refresh kept (weight > 0). */
+  neighbours: number;
+};
+
+const collaborativeCache = new WeakMap<
+  World,
+  WeakMap<Account, Partial<Record<Medium, CollaborativeRead>>>
+>();
+
+/**
+ * `collaborative_candidates(kind, 40)`, mirrored. One opinion per neighbour per title; on TV
+ * per **series unit**: the neighbour's whole-show ranking where they made one, else their best
+ * season, each scored against its own pool's bands. `support` = Σ weight × (score − 5)/5 ÷
+ * (Σ weight + 1). Endorsed rows need two neighbours at 7+, disputed rows two at ≤ 3.4; the
+ * reader's met titles (and on TV a show with a met season) are excluded. Up to 40 endorsed,
+ * strongest first, and 20 disputed, most disliked first. Ids and aggregates only.
+ */
+export function collaborativeMirror(
+  account: Account,
+  w: World,
+  medium: Medium,
+): CollaborativeRead {
+  let byAccount = collaborativeCache.get(w);
+  if (!byAccount) {
+    byAccount = new WeakMap();
+    collaborativeCache.set(w, byAccount);
+  }
+  const cached = byAccount.get(account)?.[medium];
+  if (cached) return cached;
+  const neighbours = neighboursOf(account, w);
+  const met = metOf(account, w);
+  const agg = new Map<string, { pull: number; mass: number; lovers: number; haters: number }>();
+  for (const n of neighbours) {
+    const scores = scoresFor(n.key, w);
+    const opinion = new Map<string, { show: number | null; best: number }>();
+    for (const r of w.rankingsBy.get(n.key) ?? []) {
+      if (medium === 'movies' ? r.c !== 'movies' : r.c === 'movies') continue;
+      const m = w.media.get(r.m);
+      if (!m) continue;
+      if (medium === 'movies' ? m.kind !== 'movie' : m.kind !== 'season' && m.kind !== 'series')
+        continue;
+      const item = medium === 'tv' ? (m.parent ?? m.m) : m.m;
+      const score = scores.get(r.m)!;
+      const o = opinion.get(item) ?? { show: null, best: -Infinity };
+      if (m.kind === 'series') o.show = Math.max(o.show ?? -Infinity, score);
+      o.best = Math.max(o.best, score);
+      opinion.set(item, o);
+    }
+    for (const [item, o] of opinion) {
+      const score = o.show ?? o.best;
+      const a = agg.get(item) ?? { pull: 0, mass: 0, lovers: 0, haters: 0 };
+      a.pull += n.weight * ((score - 5) / 5);
+      a.mass += n.weight;
+      if (score >= 7) a.lovers += 1;
+      if (score <= 3.4) a.haters += 1;
+      agg.set(item, a);
+    }
+  }
+  const open = [...agg]
+    .filter(
+      ([item, a]) =>
+        ((a.lovers >= 2 && a.pull > 0) || (a.haters >= 2 && a.pull < 0)) && !met.has(item),
+    )
+    .map(([item, a]) => ({ item, cohort: a.pull / (a.mass + 1), lovers: a.lovers }));
+  const byId = (a: { item: string }, b: { item: string }) =>
+    a.item < b.item ? -1 : a.item > b.item ? 1 : 0;
+  const endorsed = open
+    .filter((o) => o.cohort > 0)
+    .sort((a, b) => b.cohort - a.cohort || byId(a, b))
+    .slice(0, NEIGHBOUR.rows);
+  const disputed = open
+    .filter((o) => o.cohort < 0)
+    .sort((a, b) => a.cohort - b.cohort || byId(a, b))
+    .slice(0, Math.max(1, Math.floor(NEIGHBOUR.rows / 2)));
+  const rows = new Map<string, Collaborative>();
+  // The SQL returns `real`.
+  for (const o of [...endorsed, ...disputed])
+    rows.set(o.item, { support: Math.fround(o.cohort), endorsers: o.lovers });
+  const read = { rows, neighbours: neighbours.length };
+  byAccount.set(account, { ...byAccount.get(account), [medium]: read });
+  return read;
 }
 
 // ---------------------------------------------------------------------------
